@@ -50,6 +50,7 @@
 //! byte-identical to before this resolver existed.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 use object::FileKind;
@@ -116,10 +117,11 @@ pub struct ChainedFixups {
     /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
     /// `slot_vma → import symbol name` for every **bind** fixup whose ordinal
-    /// names an entry of the imports table (`_OBJC_CLASS_$_NSObject`, `_malloc`).
-    /// The run-time address is unknown statically, so a bind slot is never in
+    /// names an entry of the imports table (`_OBJC_CLASS_$_NSObject`, `_malloc`),
+    /// the name shared by every slot bound to the same import. The run-time
+    /// address is unknown statically, so a bind slot is never in
     /// [`Self::rebases`]; this is what a consumer can still say about it.
-    binds: HashMap<u64, String>,
+    binds: HashMap<u64, Rc<str>>,
     /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
     readonly_segments: Vec<(u64, u64)>,
 }
@@ -157,7 +159,7 @@ impl ChainedFixups {
     /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
     /// slot with a resolvable ordinal.
     pub fn bind_name(&self, va: u64) -> Option<&str> {
-        self.binds.get(&va).map(String::as_str)
+        self.binds.get(&va).map(|n| &**n)
     }
 
     /// Whether `va` lies in a segment dyld maps read-only after fixups
@@ -268,7 +270,7 @@ where
 /// names in the uncompressed symbol pool at `symbols_offset`). Empty for a
 /// compressed symbol pool (`symbols_format != 0`) or an unknown record format,
 /// which leaves every bind slot unnamed (the inert path).
-fn read_imports(blob: &[u8]) -> Vec<String> {
+fn read_imports(blob: &[u8]) -> Vec<Rc<str>> {
     let (Some(imports_offset), Some(symbols_offset), Some(count), Some(format), Some(symbols_format)) =
         (rd_u32(blob, 8), rd_u32(blob, 12), rd_u32(blob, 16), rd_u32(blob, 20), rd_u32(blob, 24))
     else {
@@ -285,7 +287,8 @@ fn read_imports(blob: &[u8]) -> Vec<String> {
     };
     let count = (count as usize).min(blob.len() / record);
     let mut names = Vec::with_capacity(count);
-    let mut by_offset: HashMap<usize, String> = HashMap::new();
+    let mut by_offset: HashMap<usize, Rc<str>> = HashMap::new();
+    let empty: Rc<str> = Rc::from("");
     for i in 0..count {
         let at = imports_offset as usize + i * record;
         let name_offset = if record == 16 {
@@ -294,19 +297,16 @@ fn read_imports(blob: &[u8]) -> Vec<String> {
             rd_u32(blob, at).map(|v| (v >> 9) as usize)
         };
         let Some(off) = name_offset else {
-            names.push(String::new());
+            names.push(Rc::clone(&empty));
             continue;
         };
-        let name = by_offset
-            .entry(off)
-            .or_insert_with(|| {
-                blob.get(symbols_offset as usize + off..)
-                    .and_then(|tail| tail.split(|&b| b == 0).next())
-                    .map(|s| String::from_utf8_lossy(s).into_owned())
-                    .unwrap_or_default()
-            })
-            .clone();
-        names.push(name);
+        let name = by_offset.entry(off).or_insert_with(|| {
+            blob.get(symbols_offset as usize + off..)
+                .and_then(|tail| tail.split(|&b| b == 0).next())
+                .map(|s| Rc::from(String::from_utf8_lossy(s).as_ref()))
+                .unwrap_or_else(|| Rc::clone(&empty))
+        });
+        names.push(Rc::clone(name));
     }
     names
 }
@@ -318,7 +318,7 @@ fn walk_fixups(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[String],
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
@@ -346,7 +346,7 @@ fn walk_segment(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[String],
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     // struct dyld_chained_starts_in_segment {
@@ -413,7 +413,7 @@ fn walk_chain(
     stride: u64,
     pointer_format: u16,
     imagebase: u64,
-    imports: &[String],
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     let mut va = first_va;
@@ -428,7 +428,7 @@ fn walk_chain(
         } else if let Some(name) =
             bind_ordinal(raw, pointer_format).and_then(|ord| imports.get(ord)).filter(|n| !n.is_empty())
         {
-            out.binds.insert(va, name.clone());
+            out.binds.insert(va, Rc::clone(name));
         }
         if next == 0 {
             return;
@@ -698,7 +698,9 @@ mod tests {
         blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes()); // name_offset 0, lib 2
         blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
         blob.extend_from_slice(b"_ab\0_OBJC_CLASS_$_X\0");
-        assert_eq!(read_imports(&blob), vec!["_ab".to_string(), "_OBJC_CLASS_$_X".to_string()]);
+        let imports = read_imports(&blob);
+        let names: Vec<&str> = imports.iter().map(|n| &**n).collect();
+        assert_eq!(names, ["_ab", "_OBJC_CLASS_$_X"]);
         blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
         assert!(read_imports(&blob).is_empty());
     }
