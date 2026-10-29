@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3237,
-    3237
+    3241,
+    3241
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2373,6 +2373,10 @@
     "data:elemptr #7: with the option on a .data table of ints is read by subscript",
     "data:elemptr #8: a record walked by a stride keeps its integer form in both passes",
     "data:elemptr #9: a pointer read at two widths is not an array in either pass",
+    "data:elfgotimports off: AArch64 reads the import through its GOT slot",
+    "data:elfgotimports off: x86-64 reads the import through its GOT slot",
+    "data:elfgotimports on: both architectures render the import",
+    "data:elfgotimports: a defined symbol's GOT read is the object in every pass",
     "data:enabled retains declared array",
     "data:enabled short load retains base",
     "data:enabled short store retains base",

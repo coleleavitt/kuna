@@ -2115,7 +2115,8 @@ mod tests {
         // and kuna-ppc64-ldarx-encoding / generic PowerPC ldx and ldarx decode at their own opcodes
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-importdata / a data read through an import slot renders as the import
-        assert_eq!(count, 593, "corpus file count drifted");
+        // and kuna-elfgotimports / an ELF GOT data import renders as the import
+        assert_eq!(count, 594, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
