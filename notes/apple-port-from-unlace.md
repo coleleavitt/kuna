@@ -112,10 +112,16 @@ Review PRs in the fork (github.com/coleleavitt/kuna):
 | #2 | apple/swift-demangle | main | 3: full Swift demangler (pure Rust) |
 | #3 | apple/objc-metadata | apple/objc-selrefs | 2: categories, protocols, ivars (typed `self`), classic bind opcodes |
 | #4 | apple/swift-metadata | apple/swift-demangle | 4: Swift runtime metadata names |
+| #5 | apple/img4-kernelcache | main | 8: IMG4/IM4P, LZFSE/LZSS, MH_FILESET entry selection (option `kernelcache`) |
+| #6 | apple/arm64e-pac | apple/objc-selrefs | 7: `ptrauthtrap`, `authptrcall`, bind addends |
+| #7 | apple/compact-unwind | main | 9: `__unwind_info` function starts (option `unwindstarts`, off) |
+| #8 | apple/cfstring | main | 6: `__cfstring` literals (option `cfstrings`) |
+| #9 | apple/dyld-cache | main | 5: dyld shared cache (options `dyldimage`, `dyldcrossrefs`; `kuna unpack`) |
+| #10 | apple/macho-loader | main | 6: data reads through import slots (option `importdata`) |
 
-In progress: apple/dyld-cache (5), apple/macho-loader + apple/cfstring (6), apple/arm64e-pac (7, on #1), apple/img4-kernelcache (8), apple/compact-unwind (9).
+All nine items have review PRs. The Mach-O audit found kuna already covers function starts, stubs/GOT naming, exports trie, LC_MAIN and fat slices; classic bind opcodes landed in #3.
 
-Open decision: #1 applies chained rebases under the default-on `dynrelocs` option.
+Open decisions: #1 applies chained rebases under the default-on `dynrelocs` option; `[AUTOMATED]` tag on commits; `CFSTR(...)` vs plain literal (#8); AArch64 `brk` as no-return (#6).
 
 ### Rebase #4 onto #1
 
