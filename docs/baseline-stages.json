@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3253,
-    3253
+    3256,
+    3256
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -119,6 +119,9 @@
     "data:ARRAYSUBFIELD #7: honest about what is NOT fixed: the whole-container shift is upstream-faithful and still not valid C",
     "data:ARRAYSUBFIELD #8: opt-in C reads preserve the low eight bytes",
     "data:ARRAYSUBFIELD #9: opt-in C reads preserve the high eight bytes",
+    "data:AUTHPTRCALL #1: off calls through the anonymous __auth_ptr slot",
+    "data:AUTHPTRCALL #2: on names the import the slot binds",
+    "data:AUTHPTRCALL #3: the authenticated rebase resolves the blraa target in both passes",
     "data:Address-only local #1: both passes declare the four-byte object",
     "data:Address-only local #2: the saved pointer reaches that object",
     "data:Address-only local #3: the address width is never the object width",
@@ -973,7 +976,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 342 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 343 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",

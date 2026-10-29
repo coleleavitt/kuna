@@ -3003,6 +3003,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (kuna) PE/Mach-O import-slot call binding — typed-slot `externref`
         // paint plus PE-only Win32 no-return names, committed only when enabled.
         "peimportcall" => arch.analysis_peimportcall,
+        "authptrcall" => arch.analysis_authptrcall,
         "libproto" => arch.analysis_libproto,
         // (kuna) The measured libc signature extension — the ~200 prototypes the
         // 27-entry base table does not carry, seeded onto IMPORTED names only. The

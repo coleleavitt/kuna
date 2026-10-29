@@ -2116,7 +2116,8 @@ mod tests {
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-objcrefs / ObjC selector, class and super reference slots and `__objc_stubs` named and folded
         // and kuna-ptrauthtrap / arm64e pointer-auth failure checks dropped
-        assert_eq!(count, 594, "corpus file count drifted");
+        // and kuna-authptrcall / arm64e calls through __auth_ptr named
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
