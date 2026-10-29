@@ -15,7 +15,8 @@
 //! `__objc_classlist` on such a binary reads **garbage** — this is the
 //! prerequisite the design (§3.2 LOSS) flagged for arm64 ObjC.
 //!
-//! This module parses `LC_DYLD_CHAINED_FIXUPS`, follows every fixup chain, and
+//! This module parses `LC_DYLD_CHAINED_FIXUPS`, follows every fixup chain (a
+//! page with several chains lists its starts through `DYLD_CHAINED_PTR_START_MULTI`), and
 //! produces a flat **VMA → resolved-pointer** overlay so a downstream consumer
 //! (the ObjC walk; any future Swift/PDB-on-Mach-O reader) can read the *real*
 //! address at a slot via [`ChainedFixups::resolved_ptr`].
@@ -85,6 +86,13 @@ mod import_format {
     /// reserved:15, name_offset:32 }` followed by a `u64` addend.
     pub const IMPORT_ADDEND64: u32 = 3;
 }
+
+/// `page_start[]` markers (`fixup-chains.h`): a page with no fixups, a page whose
+/// entry indexes an overflow list of several chain starts, and the flag on the
+/// last entry of such a list.
+const PTR_START_NONE: u16 = 0xFFFF;
+const PTR_START_MULTI: u16 = 0x8000;
+const PTR_START_LAST: u16 = 0x8000;
 
 /// `SG_READ_ONLY` (`mach-o/loader.h`): dyld maps the segment read-only once its
 /// fixups are applied. The modern linker sets it on `__DATA_CONST`, which makes
@@ -266,6 +274,7 @@ fn read_imports(blob: &[u8]) -> Vec<String> {
     };
     let count = (count as usize).min(blob.len() / record);
     let mut names = Vec::with_capacity(count);
+    let mut by_offset: HashMap<usize, String> = HashMap::new();
     for i in 0..count {
         let at = imports_offset as usize + i * record;
         let name_offset = if record == 16 {
@@ -273,11 +282,19 @@ fn read_imports(blob: &[u8]) -> Vec<String> {
         } else {
             rd_u32(blob, at).map(|v| (v >> 9) as usize)
         };
-        let name = name_offset
-            .and_then(|off| blob.get(symbols_offset as usize + off..))
-            .and_then(|tail| tail.split(|&b| b == 0).next())
-            .map(|s| String::from_utf8_lossy(s).into_owned())
-            .unwrap_or_default();
+        let Some(off) = name_offset else {
+            names.push(String::new());
+            continue;
+        };
+        let name = by_offset
+            .entry(off)
+            .or_insert_with(|| {
+                blob.get(symbols_offset as usize + off..)
+                    .and_then(|tail| tail.split(|&b| b == 0).next())
+                    .map(|s| String::from_utf8_lossy(s).into_owned())
+                    .unwrap_or_default()
+            })
+            .clone();
         names.push(name);
     }
     names
@@ -349,17 +366,29 @@ fn walk_segment(
     // VMA is `imagebase + segment_offset + page + start`. (lld writes
     // `segment_offset` as the segment's own `vmaddr - imagebase`, i.e. its
     // fileoff, so the chain head lands at the segment's first fixup byte.)
+    let page_starts = p + 22;
     for pi in 0..page_count as usize {
-        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else { continue };
-        // 0xFFFF (DYLD_CHAINED_PTR_START_NONE) = no fixups on this page.
-        if page_start == 0xFFFF {
+        let Some(page_start) = rd_u16(blob, page_starts + 2 * pi) else { continue };
+        if page_start == PTR_START_NONE {
             continue;
         }
-        let first_va = imagebase
-            + segment_offset
-            + (pi as u64) * (page_size as u64)
-            + page_start as u64;
-        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, imports, out);
+        let page_va = imagebase + segment_offset + (pi as u64) * (page_size as u64);
+        if page_start & PTR_START_MULTI == 0 {
+            walk_chain(file, segs, page_va + page_start as u64, stride, pointer_format, imagebase, imports, out);
+            continue;
+        }
+        // Several chains on one page: the low bits index the overflow list
+        // that follows `page_start[]`, its last entry flagged PTR_START_LAST.
+        let mut j = (page_start & !PTR_START_MULTI) as usize;
+        for _ in 0..0x8000u32 {
+            let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
+            let offset = (start & !PTR_START_LAST) as u64;
+            walk_chain(file, segs, page_va + offset, stride, pointer_format, imagebase, imports, out);
+            if start & PTR_START_LAST != 0 {
+                break;
+            }
+            j += 1;
+        }
     }
 }
 
@@ -588,6 +617,49 @@ mod tests {
         assert_eq!((next, target), (0, None));
     }
 
+    /// A page flagged `DYLD_CHAINED_PTR_START_MULTI` names an overflow list of
+    /// chain starts; every listed chain is walked, the `START_LAST` entry ends the
+    /// list, and a `START_NONE` page is still skipped.
+    #[test]
+    fn walk_segment_follows_multi_start_pages() {
+        // One 0x1000-byte segment mapped at the image base, file offset 0, holding
+        // two single-entry chains at page offsets 0x100 and 0x200 (PTR_64, next=0).
+        let imagebase = 0x1_0000_0000u64;
+        let mut file = vec![0u8; 0x2000];
+        file[0x100..0x108].copy_from_slice(&0x0000_0001_0000_0100u64.to_le_bytes());
+        file[0x200..0x208].copy_from_slice(&0x0000_0001_0000_0200u64.to_le_bytes());
+        file[0x1050..0x1058].copy_from_slice(&0x0000_0001_0000_0300u64.to_le_bytes());
+        let segs = [SegInfo { vmaddr: imagebase, fileoff: 0, filesize: 0x2000 }];
+
+        // dyld_chained_starts_in_segment: size, page_size 0x1000, format PTR_64,
+        // segment_offset 0, max_valid_pointer, page_count 2, page_start[2] =
+        // [MULTI | 2, 0x50], then the overflow list [0x100, 0x200 | LAST].
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&0x1000u16.to_le_bytes());
+        blob.extend_from_slice(&ptr_format::PTR_64.to_le_bytes());
+        blob.extend_from_slice(&0u64.to_le_bytes());
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&2u16.to_le_bytes());
+        blob.extend_from_slice(&(PTR_START_MULTI | 2).to_le_bytes());
+        blob.extend_from_slice(&0x50u16.to_le_bytes());
+        blob.extend_from_slice(&0x100u16.to_le_bytes());
+        blob.extend_from_slice(&(0x200u16 | PTR_START_LAST).to_le_bytes());
+
+        let mut out = ChainedFixups::default();
+        walk_segment(&blob, 0, &segs, imagebase, &file, &[], &mut out);
+        assert_eq!(out.resolved_ptr(imagebase + 0x100), Some(0x1_0000_0100));
+        assert_eq!(out.resolved_ptr(imagebase + 0x200), Some(0x1_0000_0200));
+        assert_eq!(out.resolved_ptr(imagebase + 0x1050), Some(0x1_0000_0300));
+        assert_eq!(out.rebases.len(), 3);
+
+        // The same segment with page 0 marked START_NONE walks only page 1.
+        blob[22..24].copy_from_slice(&PTR_START_NONE.to_le_bytes());
+        let mut out = ChainedFixups::default();
+        walk_segment(&blob, 0, &segs, imagebase, &file, &[], &mut out);
+        assert_eq!(out.rebases.len(), 1);
+    }
+
     /// The bind ordinal is the low bits of a bind word, at the width of each
     /// pointer format; a rebase word has none.
     #[test]
@@ -614,7 +686,7 @@ mod tests {
         blob[20..24].copy_from_slice(&import_format::IMPORT.to_le_bytes());
         blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes()); // name_offset 0, lib 2
         blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
-        blob.extend_from_slice(b"_ab _OBJC_CLASS_$_X ");
+        blob.extend_from_slice(b"_ab\0_OBJC_CLASS_$_X\0");
         assert_eq!(read_imports(&blob), vec!["_ab".to_string(), "_OBJC_CLASS_$_X".to_string()]);
         blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
         assert!(read_imports(&blob).is_empty());
