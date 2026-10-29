@@ -108,6 +108,11 @@ const SG_READ_ONLY: u32 = 0x10;
 /// exactly as before).
 #[derive(Default, Debug, Clone)]
 pub struct ChainedFixups {
+    /// Whether the image carries `LC_DYLD_CHAINED_FIXUPS` at all. A chained
+    /// image's pointer slots are packed entries even when every one of them is
+    /// a bind, so this — not the rebase count — says whether a raw slot word may
+    /// be read as a pointer.
+    chained: bool,
     /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
     /// `slot_vma → import symbol name` for every **bind** fixup whose ordinal
@@ -120,10 +125,16 @@ pub struct ChainedFixups {
 }
 
 impl ChainedFixups {
-    /// Whether this image carried any chained-fixup rebases (a quick "is this a
-    /// chained-fixup binary" probe; `false` ⇒ the resolver is a no-op).
+    /// Whether this image carried any chained-fixup rebases (`false` ⇒ the
+    /// pointer overlay is a no-op; see [`Self::is_chained`] for the format probe).
     pub fn is_empty(&self) -> bool {
         self.rebases.is_empty()
+    }
+
+    /// Whether the image carries `LC_DYLD_CHAINED_FIXUPS`, bind-only images
+    /// included.
+    pub fn is_chained(&self) -> bool {
+        self.chained
     }
 
     /// The resolved pointer at slot `va`, if `va` was a rebase fixup. `None` for a
@@ -246,7 +257,7 @@ where
         return empty;
     };
 
-    let mut out = ChainedFixups { readonly_segments, ..ChainedFixups::default() };
+    let mut out = ChainedFixups { chained: true, readonly_segments, ..ChainedFixups::default() };
     let imports = read_imports(blob);
     walk_fixups(blob, &segs, imagebase, bytes, &imports, &mut out);
     out
@@ -706,6 +717,25 @@ mod tests {
         assert_eq!(fixups.bind_name(0x100004000), Some("_objc_msgSend"));
         assert!(fixups.in_readonly_segment(0x100004000), "__DATA_CONST is SG_READ_ONLY");
         assert!(!fixups.in_readonly_segment(0x100008228), "__DATA is writable");
+    }
+
+    /// `macho_bind_only_arm64` has `LC_DYLD_CHAINED_FIXUPS` with a single bind
+    /// and no rebase: the overlay is empty, but the image is still chained, so a
+    /// consumer must not read the packed bind word as a pointer.
+    #[test]
+    fn bind_only_image_is_chained() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_bind_only_arm64");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert!(fixups.is_chained());
+        assert!(fixups.is_empty(), "no rebase in the image");
+        assert_eq!(fixups.bind_name(0x100004000), Some("_ext"));
+        assert_eq!(fixups.resolved_ptr(0x100004000), None);
+
+        let classic = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_objc")).unwrap();
+        let classic_file = object::File::parse(classic.as_slice()).unwrap();
+        assert!(!resolve_chained_fixups(&classic_file, &classic).is_chained());
     }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
