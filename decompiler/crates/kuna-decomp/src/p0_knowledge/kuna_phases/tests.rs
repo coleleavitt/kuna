@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_348() {
-    assert_eq!(kuna_num_settables(), 348);
-    assert_eq!(SETTABLE_TABLE.len(), 348);
+fn settable_count_is_349() {
+    assert_eq!(kuna_num_settables(), 349);
+    assert_eq!(SETTABLE_TABLE.len(), 349);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_93_analysis() {
+fn tier_counts_are_121_core_134_transform_94_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_93_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 93));
+    assert_eq!((core, transform, analysis), (121, 134, 94));
 }
 
 #[test]
@@ -509,6 +509,10 @@ fn option_values_live_value_present_for_156() {
         "swiftmetadata",
         // (kuna) The Swift type-layout arm's gate, read inside that pass.
         "swifttypes",
+        // (kuna) Mach-O __cfstring constant-string recovery — an analysis-pass gate
+        // with no codegen live reader (read console-side via kuna_live_value), like
+        // the gates around it. Default-off, Mach-O-only.
+        "cfstrings",
         // (kuna) PE PDB metadata recovery — an analysis-pass gate with no codegen
         // live reader (read console-side via kuna_live_value), like the gates around
         // it. Default-on (DIV-129), PE-only, `.pdb`-sidecar-gated.
@@ -1136,7 +1140,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `swiftmetadata`; its P1 row sits beside `objc`.
     // +1 for `swifttypes`, beside it.
     // +1 for `importdata`.
-    assert_eq!(json.matches("},\n").count(), 347);
+    // +1 for `cfstrings`.
+    assert_eq!(json.matches("},\n").count(), 348);
 }
 
 #[test]

@@ -2124,7 +2124,8 @@ mod tests {
         // and kuna-swiftmetadata / stripped Swift functions named from the swift5_* metadata
         // and kuna-importdata / a data read through an import slot renders as the import
         // and kuna-elfgotimports / an ELF GOT data import renders as the import
-        assert_eq!(count, 603, "corpus file count drifted");
+        // and kuna-cfstrings / a Mach-O __cfstring reference renders its string literal
+        assert_eq!(count, 604, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

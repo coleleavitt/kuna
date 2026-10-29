@@ -2553,6 +2553,10 @@ pub struct Architecture {
     /// shape of a console `map param`. The decompile drive seeds a
     /// function's own decompile with them ahead of the console's.
     pub loader_param_locks: std::collections::BTreeMap<Address, Vec<(int4, String, crate::fspec::ParameterPieces)>>,
+    /// (kuna) Gate the Mach-O `__cfstring` constant-string recovery pass
+    /// (`cfstrings`); default **off** (output-changing: renders CFString constants
+    /// as string literals + adds `char[N]` symbols). Mach-O-only pass.
+    pub analysis_cfstrings: bool,
     /// (kuna) Gate the PE PDB metadata recovery pass (`pdb`); default **off**. The
     /// kuna analog of Ghidra's `PdbUniversalAnalyzer` (the pure-Java PDB analyzer;
     /// the MS-DIA `PdbAnalyzer` is Windows-native and out of scope) — the
@@ -3313,6 +3317,7 @@ impl Architecture {
             analysis_swiftmetadata: false,
             analysis_swifttypes: true,
             loader_param_locks: std::collections::BTreeMap::new(),
+            analysis_cfstrings: false,
             analysis_pdb: true,
             macho_arm64e: false,
 
@@ -3769,6 +3774,7 @@ impl Architecture {
         self.analysis_objcivars = true; // (kuna) ObjC instance structs + typed self + ivar offset fold; inert unless objc is on
         self.analysis_swiftmetadata = false; // Swift runtime-metadata recovery default-off (inert without swift5_* sections)
         self.analysis_swifttypes = true; // Swift type layouts default-on, inert unless swiftmetadata is on
+        self.analysis_cfstrings = false; // Mach-O __cfstring constant-string recovery default-off (Mach-O-only pass)
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
         self.macho_arm64e = false; // arm64e Apple-Silicon spec selection default-off (opt-in)
     }

@@ -1286,6 +1286,7 @@ kuna_options! { self, p1;
     },
     "swiftmetadata" => on_off!(analysis_swiftmetadata, "Swift runtime-metadata recovery pass"),
     "swifttypes" => on_off!(analysis_swifttypes, "Swift type layouts from static metadata"),
+    "cfstrings" => on_off!(analysis_cfstrings, "Mach-O __cfstring constant-string recovery pass"),
     "pdb" => on_off!(analysis_pdb, "PE PDB metadata recovery pass"),
     "relocobjects" => {
         let val = on_or_off(p1)?;
