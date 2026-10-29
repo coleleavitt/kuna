@@ -76,6 +76,9 @@ mod ptr_format {
     pub const PTR_64_KERNEL_CACHE: u16 = 8;
     /// `DYLD_CHAINED_PTR_X86_64_KERNEL_CACHE` — the same layout, 1-byte stride.
     pub const X86_64_KERNEL_CACHE: u16 = 11;
+    /// `DYLD_CHAINED_PTR_ARM64E_FIRMWARE` — the arm64e layout with a 4-byte
+    /// stride; a non-auth target is a full vmaddr, as in `ARM64E`.
+    pub const ARM64E_FIRMWARE: u16 = 10;
 }
 
 /// A resolved chained-fixup overlay: the real pointer value at each rebased VMA
@@ -262,6 +265,7 @@ fn walk_segment(
         ptr_format::PTR_64
         | ptr_format::PTR_64_OFFSET
         | ptr_format::ARM64E_KERNEL
+        | ptr_format::ARM64E_FIRMWARE
         | ptr_format::PTR_64_KERNEL_CACHE => 4,
         ptr_format::X86_64_KERNEL_CACHE => 1,
         // An unhandled format: leave its chains unresolved (the inert path).
@@ -359,7 +363,8 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         ptr_format::ARM64E
         | ptr_format::ARM64E_USERLAND
         | ptr_format::ARM64E_USERLAND24
-        | ptr_format::ARM64E_KERNEL => {
+        | ptr_format::ARM64E_KERNEL
+        | ptr_format::ARM64E_FIRMWARE => {
             let auth = (raw >> 63) & 1;
             let bind = (raw >> 62) & 1;
             let next = (raw >> 51) & 0x7FF; // 11 bits
@@ -380,7 +385,7 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
                 let high8 = (raw >> 43) & 0xFF;
                 let unpacked = target | (high8 << 56);
                 let resolved = match pointer_format {
-                    ptr_format::ARM64E => unpacked,
+                    ptr_format::ARM64E | ptr_format::ARM64E_FIRMWARE => unpacked,
                     _ => imagebase.wrapping_add(unpacked),
                 };
                 (next, Some(resolved))
@@ -504,6 +509,17 @@ mod tests {
         assert_eq!(decode_ptr(other_level, ptr_format::PTR_64_KERNEL_CACHE, base), (0, None));
         let plain = (2u64 << 51) | 0x8000;
         assert_eq!(decode_ptr(plain, ptr_format::ARM64E_KERNEL, base), (2, Some(base + 0x8000)));
+    }
+
+    /// `ARM64E_FIRMWARE` keeps a non-auth target as a full vmaddr and rebases an
+    /// auth target from the image base.
+    #[test]
+    fn decode_arm64e_firmware() {
+        let base = 0x1_0000_0000;
+        let plain = (3u64 << 51) | 0x1_0000_4020;
+        assert_eq!(decode_ptr(plain, ptr_format::ARM64E_FIRMWARE, base), (3, Some(0x1_0000_4020)));
+        let auth = (1u64 << 63) | (1u64 << 51) | (0x77u64 << 32) | 0x4020;
+        assert_eq!(decode_ptr(auth, ptr_format::ARM64E_FIRMWARE, base), (1, Some(base + 0x4020)));
     }
 
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
