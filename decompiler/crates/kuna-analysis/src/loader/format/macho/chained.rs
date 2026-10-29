@@ -30,10 +30,11 @@
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
 //!   pointer is just `imagebase + target`.)
-//! - **Bind / import-ordinal chains — OUT OF SCOPE** (design §3.2). A bind entry
-//!   names an *external* symbol whose runtime address is unknown statically, so it
-//!   is simply **not entered** into the overlay (a consumer reading that slot
-//!   misses and falls back, never reads a wrong address).
+//! - **Bind / import-ordinal chains** name an *external* symbol whose runtime
+//!   address is unknown statically, so the slot gets no pointer (a consumer
+//!   reading it misses and falls back, never reads a wrong address); the import
+//!   name the ordinal selects is recorded instead (`bound_name`), which is how
+//!   the Swift metadata pass names a conformance to another image's protocol.
 //!
 //! ## Faithfulness / no-op guarantee
 //!
@@ -46,8 +47,8 @@
 
 use std::collections::HashMap;
 
-use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 use object::FileKind;
+use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 
 /// Pointer-format ids from Apple's `mach-o/fixup-chains.h` (`DYLD_CHAINED_PTR_*`).
 /// Only the formats kuna resolves are named; any other format leaves its chain
@@ -79,9 +80,12 @@ mod ptr_format {
 /// exactly as before).
 #[derive(Default, Debug, Clone)]
 pub struct ChainedFixups {
-    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup. Bind
-    /// fixups (external imports) are intentionally absent (out of scope).
+    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
+    /// `slot_vma → import name` for every **bind** fixup whose ordinal names an
+    /// entry of the imports table (the symbol another image supplies at run
+    /// time; the leading `_` of the C ABI is kept as the table spells it).
+    binds: HashMap<u64, String>,
 }
 
 impl ChainedFixups {
@@ -102,6 +106,24 @@ impl ChainedFixups {
     pub fn targets(&self) -> impl Iterator<Item = u64> + '_ {
         self.rebases.values().copied()
     }
+
+    /// The import the bind fixup at slot `va` names, if `va` is a bind slot.
+    pub fn bound_name(&self, va: u64) -> Option<&str> {
+        self.binds.get(&va).map(String::as_str)
+    }
+
+    /// Every bind slot with its import name.
+    pub fn binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
+        self.binds.iter().map(|(va, n)| (*va, n.as_str()))
+    }
+}
+
+/// One decoded chained-pointer word.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Fixup {
+    Rebase(u64),
+    Bind(u32),
+    Unknown,
 }
 
 /// A segment's `(vmaddr, fileoff, filesize)` — the address arithmetic the chained
@@ -124,12 +146,8 @@ pub fn resolve_chained_fixups(file: &object::File, bytes: &[u8]) -> ChainedFixup
         return ChainedFixups::default();
     }
     match FileKind::parse(bytes) {
-        Ok(FileKind::MachO64) => {
-            collect::<object::macho::MachHeader64<object::Endianness>>(bytes)
-        }
-        Ok(FileKind::MachO32) => {
-            collect::<object::macho::MachHeader32<object::Endianness>>(bytes)
-        }
+        Ok(FileKind::MachO64) => collect::<object::macho::MachHeader64<object::Endianness>>(bytes),
+        Ok(FileKind::MachO32) => collect::<object::macho::MachHeader32<object::Endianness>>(bytes),
         // Fat input is peeled to a thin slice before this runs (the engine
         // dispatch); a leftover fat / non-Mach-O here yields the empty no-op.
         _ => ChainedFixups::default(),
@@ -143,9 +161,15 @@ where
     Mach: MachHeader<Endian = object::Endianness>,
 {
     let empty = ChainedFixups::default();
-    let Ok(header) = Mach::parse(bytes, 0) else { return empty };
-    let Ok(endian) = header.endian() else { return empty };
-    let Ok(mut commands) = header.load_commands(endian, bytes, 0) else { return empty };
+    let Ok(header) = Mach::parse(bytes, 0) else {
+        return empty;
+    };
+    let Ok(endian) = header.endian() else {
+        return empty;
+    };
+    let Ok(mut commands) = header.load_commands(endian, bytes, 0) else {
+        return empty;
+    };
 
     // The chained-fixups blob's file range (LC_DYLD_CHAINED_FIXUPS is a
     // LinkeditDataCommand: dataoff/datasize into the file) + the segment table
@@ -164,7 +188,11 @@ where
             let fileoff = segment.fileoff(endian).into();
             let filesize = segment.filesize(endian).into();
             if filesize > 0 {
-                segs.push(SegInfo { vmaddr, fileoff, filesize });
+                segs.push(SegInfo {
+                    vmaddr,
+                    fileoff,
+                    filesize,
+                });
                 imagebase = imagebase.min(vmaddr);
             }
             continue;
@@ -181,7 +209,9 @@ where
         }
     }
 
-    let Some((blob_off, blob_size)) = fixups_range else { return empty };
+    let Some((blob_off, blob_size)) = fixups_range else {
+        return empty;
+    };
     if imagebase == u64::MAX {
         return empty;
     }
@@ -206,19 +236,90 @@ fn walk_fixups(
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
     //                              symbols_offset, imports_count, imports_format,
     //                              symbols_format } — 7 u32 (28 bytes).
-    let Some(starts_offset) = rd_u32(blob, 4) else { return };
+    let Some(starts_offset) = rd_u32(blob, 4) else {
+        return;
+    };
     let sio = starts_offset as usize;
+    let imports = import_names(blob);
 
     // dyld_chained_starts_in_image { uint32 seg_count; uint32 seg_info_offset[]; }
-    let Some(seg_count) = rd_u32(blob, sio) else { return };
+    let Some(seg_count) = rd_u32(blob, sio) else {
+        return;
+    };
     for i in 0..seg_count as usize {
-        let Some(seg_info_off) = rd_u32(blob, sio + 4 + 4 * i) else { continue };
+        let Some(seg_info_off) = rd_u32(blob, sio + 4 + 4 * i) else {
+            continue;
+        };
         if seg_info_off == 0 {
             // 0 = this segment has no fixups.
             continue;
         }
-        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, out);
+        walk_segment(
+            blob,
+            sio + seg_info_off as usize,
+            segs,
+            imagebase,
+            file,
+            out,
+            &imports,
+        );
     }
+}
+
+/// The imports table of the chained-fixups blob: `imports_format` 1
+/// (`dyld_chained_import`, 4 bytes: lib_ordinal:8, weak:1, name_offset:23),
+/// 2 (`_addend`, 4 + 4 bytes) or 3 (`_addend64`, 8 + 8 bytes: lib_ordinal:16,
+/// weak:1, reserved:15, name_offset:32), each name an offset into the symbols
+/// string table.
+fn import_names(blob: &[u8]) -> Vec<String> {
+    let Some(imports_offset) = rd_u32(blob, 8) else {
+        return Vec::new();
+    };
+    let Some(symbols_offset) = rd_u32(blob, 12) else {
+        return Vec::new();
+    };
+    let Some(imports_count) = rd_u32(blob, 16) else {
+        return Vec::new();
+    };
+    let Some(imports_format) = rd_u32(blob, 20) else {
+        return Vec::new();
+    };
+    // `symbols_format` 1 is a zlib-compressed pool, which is not inflated
+    // here: no name is better than bytes of the stream read as one.
+    if rd_u32(blob, 24) != Some(0) {
+        return Vec::new();
+    }
+    let (entry_size, name_bits64) = match imports_format {
+        1 => (4usize, false),
+        2 => (8, false),
+        3 => (16, true),
+        _ => return Vec::new(),
+    };
+    let count = (imports_count as usize).min(1 << 20);
+    let mut names = Vec::with_capacity(count);
+    for i in 0..count {
+        let at = imports_offset as usize + i * entry_size;
+        let name_offset = if name_bits64 {
+            match rd_u64(blob, at) {
+                Some(w) => (w >> 32) as usize,
+                None => break,
+            }
+        } else {
+            match rd_u32(blob, at) {
+                Some(w) => (w >> 9) as usize,
+                None => break,
+            }
+        };
+        let start = symbols_offset as usize + name_offset;
+        let name = blob
+            .get(start..)
+            .and_then(|tail| tail.iter().position(|&b| b == 0).map(|end| &tail[..end]))
+            .and_then(|s| std::str::from_utf8(s).ok())
+            .unwrap_or("")
+            .to_string();
+        names.push(name);
+    }
+    names
 }
 
 /// `dyld_chained_starts_in_segment` at `p` within `blob`: walk every page's chain.
@@ -229,15 +330,24 @@ fn walk_segment(
     imagebase: u64,
     file: &[u8],
     out: &mut ChainedFixups,
+    imports: &[String],
 ) {
     // struct dyld_chained_starts_in_segment {
     //   uint32 size; uint16 page_size; uint16 pointer_format;
     //   uint64 segment_offset; uint32 max_valid_pointer;
     //   uint16 page_count; uint16 page_start[page_count]; ... }
-    let Some(page_size) = rd_u16(blob, p + 4) else { return };
-    let Some(pointer_format) = rd_u16(blob, p + 6) else { return };
-    let Some(segment_offset) = rd_u64(blob, p + 8) else { return };
-    let Some(page_count) = rd_u16(blob, p + 20) else { return };
+    let Some(page_size) = rd_u16(blob, p + 4) else {
+        return;
+    };
+    let Some(pointer_format) = rd_u16(blob, p + 6) else {
+        return;
+    };
+    let Some(segment_offset) = rd_u64(blob, p + 8) else {
+        return;
+    };
+    let Some(page_count) = rd_u16(blob, p + 20) else {
+        return;
+    };
     if page_size == 0 {
         return;
     }
@@ -259,16 +369,25 @@ fn walk_segment(
     // `segment_offset` as the segment's own `vmaddr - imagebase`, i.e. its
     // fileoff, so the chain head lands at the segment's first fixup byte.)
     for pi in 0..page_count as usize {
-        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else { continue };
+        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else {
+            continue;
+        };
         // 0xFFFF (DYLD_CHAINED_PTR_START_NONE) = no fixups on this page.
         if page_start == 0xFFFF {
             continue;
         }
-        let first_va = imagebase
-            + segment_offset
-            + (pi as u64) * (page_size as u64)
-            + page_start as u64;
-        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, out);
+        let first_va =
+            imagebase + segment_offset + (pi as u64) * (page_size as u64) + page_start as u64;
+        walk_chain(
+            file,
+            segs,
+            first_va,
+            stride,
+            pointer_format,
+            imagebase,
+            out,
+            imports,
+        );
     }
 }
 
@@ -283,16 +402,29 @@ fn walk_chain(
     pointer_format: u16,
     imagebase: u64,
     out: &mut ChainedFixups,
+    imports: &[String],
 ) {
     let mut va = first_va;
     // A defensive cap: no real page chain is longer than page_size/stride; this
     // just bounds a hostile/corrupt header (the inert/no-op contract).
     for _ in 0..0x10000u32 {
-        let Some(fo) = va_to_fileoff(segs, va) else { return };
-        let Some(raw) = rd_u64(file, fo as usize) else { return };
+        let Some(fo) = va_to_fileoff(segs, va) else {
+            return;
+        };
+        let Some(raw) = rd_u64(file, fo as usize) else {
+            return;
+        };
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
-        if let Some(target) = decoded {
-            out.rebases.insert(va, target);
+        match decoded {
+            Fixup::Rebase(target) => {
+                out.rebases.insert(va, target);
+            }
+            Fixup::Bind(ordinal) => {
+                if let Some(name) = imports.get(ordinal as usize).filter(|n| !n.is_empty()) {
+                    out.binds.insert(va, name.clone());
+                }
+            }
+            Fixup::Unknown => {}
         }
         if next == 0 {
             return;
@@ -301,10 +433,10 @@ fn walk_chain(
     }
 }
 
-/// Decode one chained-pointer word: returns `(next, resolved_rebase_target)`.
-/// `resolved_rebase_target` is `None` for a **bind** entry (out of scope — left
-/// unresolved) or an unhandled format. `next` is the chain hop (in stride units).
-fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64>) {
+/// Decode one chained-pointer word: returns `(next, fixup)` — the resolved
+/// rebase target, the bind's import ordinal, or `Unknown` for an unhandled
+/// format. `next` is the chain hop (in stride units).
+fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Fixup) {
     match pointer_format {
         // --- DYLD_CHAINED_PTR_64 / _64_OFFSET (generic 64-bit) ---
         // bit 63 = bind; bits 62..51 = next (12); on rebase the low 36 bits are the
@@ -314,7 +446,8 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
             let bind = (raw >> 63) & 1;
             let next = (raw >> 51) & 0xFFF;
             if bind == 1 {
-                return (next, None); // import/bind — out of scope.
+                // dyld_chained_ptr_64_bind: ordinal in the low 24 bits.
+                return (next, Fixup::Bind((raw & 0xFF_FFFF) as u32));
             }
             let target = raw & 0xF_FFFF_FFFF; // 36 bits
             let high8 = (raw >> 36) & 0xFF;
@@ -324,7 +457,7 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
             } else {
                 unpacked
             };
-            (next, Some(resolved))
+            (next, Fixup::Rebase(resolved))
         }
         // --- DYLD_CHAINED_PTR_ARM64E and the USERLAND variants ---
         // bit 63 = auth; bit 62 = bind; the `next` field width differs by variant
@@ -337,14 +470,21 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
             let bind = (raw >> 62) & 1;
             let next = (raw >> 51) & 0x7FF; // 11 bits
             if bind == 1 {
-                return (next, None); // import/bind — out of scope.
+                // dyld_chained_ptr_arm64e_bind / auth_bind: a 16-bit ordinal;
+                // the USERLAND24 variant widens it to 24 bits.
+                let ordinal = if pointer_format == ptr_format::ARM64E_USERLAND24 {
+                    raw & 0xFF_FFFF
+                } else {
+                    raw & 0xFFFF
+                };
+                return (next, Fixup::Bind(ordinal as u32));
             }
             if auth == 1 {
                 // dyld_chained_ptr_arm64e_auth_rebase: target is the low 32 bits, an
                 // offset from the image base (diversity/addrDiv/key in 32..50 are
                 // the PAC signing context — stripped statically).
                 let target = raw & 0xFFFF_FFFF;
-                (next, Some(imagebase.wrapping_add(target)))
+                (next, Fixup::Rebase(imagebase.wrapping_add(target)))
             } else {
                 // dyld_chained_ptr_arm64e_rebase: target is 43 bits, high8 in
                 // 43..50. For the plain ARM64E format the target is a full vmaddr;
@@ -356,11 +496,11 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
                     ptr_format::ARM64E => unpacked,
                     _ => imagebase.wrapping_add(unpacked),
                 };
-                (next, Some(resolved))
+                (next, Fixup::Rebase(resolved))
             }
         }
         // An unhandled format leaves the slot unresolved and stops the chain.
-        _ => (0, None),
+        _ => (0, Fixup::Unknown),
     }
 }
 
@@ -378,13 +518,16 @@ fn va_to_fileoff(segs: &[SegInfo], va: u64) -> Option<u64> {
 // --- little-endian scalar readers over a byte slice (bounds-checked) ---
 
 fn rd_u16(b: &[u8], off: usize) -> Option<u16> {
-    b.get(off..off + 2).map(|s| u16::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 2)
+        .map(|s| u16::from_le_bytes(s.try_into().unwrap()))
 }
 fn rd_u32(b: &[u8], off: usize) -> Option<u32> {
-    b.get(off..off + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 4)
+        .map(|s| u32::from_le_bytes(s.try_into().unwrap()))
 }
 fn rd_u64(b: &[u8], off: usize) -> Option<u64> {
-    b.get(off..off + 8).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 8)
+        .map(|s| u64::from_le_bytes(s.try_into().unwrap()))
 }
 
 #[cfg(test)]
@@ -399,23 +542,54 @@ mod tests {
     #[test]
     fn decode_ptr64_rebase_strips_next() {
         let (next, target) = decode_ptr(0x0020_0001_0000_8028, ptr_format::PTR_64, 0x1_0000_0000);
-        assert_eq!(next, 4, "next field is bits 62..51 (×4-byte stride ⇒ +0x10 hop)");
-        assert_eq!(target, Some(0x1_0000_8028), "rebase target is the low-36-bit vmaddr");
+        assert_eq!(
+            next, 4,
+            "next field is bits 62..51 (×4-byte stride ⇒ +0x10 hop)"
+        );
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8028),
+            "rebase target is the low-36-bit vmaddr"
+        );
 
         // A next=0 chain terminator with a clean target.
         let (next, target) = decode_ptr(0x0000_0001_0000_8000, ptr_format::PTR_64, 0x1_0000_0000);
         assert_eq!(next, 0);
-        assert_eq!(target, Some(0x1_0000_8000));
+        assert_eq!(target, Fixup::Rebase(0x1_0000_8000));
     }
 
-    /// `DYLD_CHAINED_PTR_64` bind entry (bit 63 set) is out of scope: the decoder
-    /// returns the `next` hop but `None` for the target, so it is never entered
-    /// into the overlay.
+    /// The imports table: `DYLD_CHAINED_IMPORT` records (23-bit name offsets)
+    /// read in ordinal order from an uncompressed pool; a compressed pool
+    /// (`symbols_format` 1) names nothing.
     #[test]
-    fn decode_ptr64_bind_is_out_of_scope() {
-        let (next, target) = decode_ptr(0x8020_0000_0000_0000, ptr_format::PTR_64, 0x1_0000_0000);
+    fn import_names_read_the_uncompressed_pool_only() {
+        let mut blob = vec![0u8; 28];
+        blob[8..12].copy_from_slice(&28u32.to_le_bytes()); // imports_offset
+        blob[12..16].copy_from_slice(&36u32.to_le_bytes()); // symbols_offset
+        blob[16..20].copy_from_slice(&2u32.to_le_bytes()); // imports_count
+        blob[20..24].copy_from_slice(&1u32.to_le_bytes()); // DYLD_CHAINED_IMPORT
+        blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes());
+        blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes());
+        blob.extend_from_slice(b"_ab\0_$sSHMp\0");
+        assert_eq!(
+            import_names(&blob),
+            vec!["_ab".to_string(), "_$sSHMp".to_string()]
+        );
+        blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // symbols_format: zlib
+        assert!(import_names(&blob).is_empty());
+    }
+
+    /// `DYLD_CHAINED_PTR_64` bind entry (bit 63 set): the decoder returns the
+    /// `next` hop and the import ordinal, never a target for the overlay.
+    #[test]
+    fn decode_ptr64_bind_carries_its_ordinal() {
+        let (next, target) = decode_ptr(0x8020_0000_0000_0007, ptr_format::PTR_64, 0x1_0000_0000);
         assert_eq!(next, 4, "the bind entry still carries a next hop");
-        assert_eq!(target, None, "bind/import chains are out of scope — not resolved");
+        assert_eq!(
+            target,
+            Fixup::Bind(7),
+            "a bind entry names its import ordinal (low 24 bits)"
+        );
     }
 
     /// `DYLD_CHAINED_PTR_64_OFFSET` adds the image base to the target (offset form),
@@ -425,7 +599,11 @@ mod tests {
         let imagebase = 0x1_0000_0000;
         // target = 0x8028 (offset), next = 0.
         let (_n, target) = decode_ptr(0x0000_0000_0000_8028, ptr_format::PTR_64_OFFSET, imagebase);
-        assert_eq!(target, Some(0x1_0000_8028), "OFFSET form rebases imagebase + target");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8028),
+            "OFFSET form rebases imagebase + target"
+        );
     }
 
     /// arm64e **auth-rebase**: the PAC/diversity/key bits (32..62) are stripped and
@@ -440,7 +618,7 @@ mod tests {
         assert_eq!(next, 3, "arm64e next is the 11-bit field at 61..51");
         assert_eq!(
             target,
-            Some(0x1_0000_8028),
+            Fixup::Rebase(0x1_0000_8028),
             "auth-rebase strips PAC and rebases imagebase + 32-bit target"
         );
     }
@@ -454,7 +632,11 @@ mod tests {
         let raw = (5u64 << 51) | 0x1_0000_8050;
         let (next, target) = decode_ptr(raw, ptr_format::ARM64E, imagebase);
         assert_eq!(next, 5);
-        assert_eq!(target, Some(0x1_0000_8050), "plain ARM64E target is a full vmaddr");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8050),
+            "plain ARM64E target is a full vmaddr"
+        );
     }
 
     /// arm64e USERLAND (offset) rebase adds the image base to the 43-bit target.
@@ -463,7 +645,11 @@ mod tests {
         let imagebase = 0x1_0000_0000;
         let raw = (2u64 << 51) | 0x8050; // target offset 0x8050, next=2
         let (_n, target) = decode_ptr(raw, ptr_format::ARM64E_USERLAND, imagebase);
-        assert_eq!(target, Some(0x1_0000_8050), "USERLAND form rebases imagebase + offset");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8050),
+            "USERLAND form rebases imagebase + offset"
+        );
     }
 
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
@@ -471,7 +657,7 @@ mod tests {
     #[test]
     fn decode_unknown_format_is_inert() {
         let (next, target) = decode_ptr(0xDEAD_BEEF_0000_0000, 999, 0);
-        assert_eq!((next, target), (0, None));
+        assert_eq!((next, target), (0, Fixup::Unknown));
     }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
@@ -483,6 +669,9 @@ mod tests {
         // real parse; use a parseable tiny ELF check by constructing through the
         // public entry, which returns empty for any non-Mach-O File. Here we only
         // assert the FileKind arm: a non-Mach-O FileKind yields empty.
-        assert!(matches!(FileKind::parse(bytes.as_slice()), Ok(FileKind::Elf64) | Err(_)));
+        assert!(matches!(
+            FileKind::parse(bytes.as_slice()),
+            Ok(FileKind::Elf64) | Err(_)
+        ));
     }
 }
