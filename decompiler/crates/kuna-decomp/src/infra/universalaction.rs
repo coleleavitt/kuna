@@ -567,6 +567,7 @@ pub fn universal_sched(
             act!(crate::p2_lift::kuna_cleanupcode::ActionRemoveCleanupCode::boxed("deadcode")),
             act!(crate::p2_lift::kuna_gomorestack::ActionGoMorestack::boxed("deadcode")),
             act!(crate::p2_lift::kuna_gowritebarrier::ActionGoWriteBarrier::boxed("deadcode")),
+            act!(crate::p2_lift::kuna_ptrauthtrap::ActionPtrAuthTrap::boxed("deadcode")),
             // (kuna) outline (option `outline`, default-OFF - destructive, and inert
             // with no region supplied).  Excise a SUPPLIED single-entry region and
             // emit a call to a synthesized pseudofunction in its place.

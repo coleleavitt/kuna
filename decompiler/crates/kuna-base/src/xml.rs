@@ -2118,7 +2118,9 @@ mod tests {
         // and kuna-objcmeta / ObjC categories, protocols and ivar structs (option objcivars)
         // and kuna-objcsdk / ObjC method signatures read from SDK headers (option objcsdk)
         // and kuna-objctypes / ObjC getters, setters and ivars typed by the class their property names
-        assert_eq!(count, 596, "corpus file count drifted");
+        // and kuna-ptrauthtrap / arm64e pointer-auth failure checks dropped
+        // and kuna-authptrcall / arm64e calls through __auth_ptr named
+        assert_eq!(count, 598, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
