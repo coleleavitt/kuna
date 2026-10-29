@@ -118,6 +118,10 @@ Review PRs in the fork (github.com/coleleavitt/kuna):
 | #8 | apple/cfstring | main | 6: `__cfstring` literals (option `cfstrings`) |
 | #9 | apple/dyld-cache | main | 5: dyld shared cache (options `dyldimage`, `dyldcrossrefs`; `kuna unpack`) |
 | #10 | apple/macho-loader | main | 6: data reads through import slots (option `importdata`) |
+| #11 | apple/objc-sdk-signatures | apple/objc-metadata | follow-up: ObjC signatures from SDK headers (option `objcsdk`, runtime input only) |
+| #12 | apple/elf-gotdata | apple/macho-loader | follow-up: ELF `GLOB_DAT` GOT data imports |
+| #13 | apple/objc-types | apple/objc-sdk-signatures | follow-up: properties/ivars/messages typed by declared class |
+| #14 | apple/swift-types | apple/swift-metadata | follow-up: Swift struct/class layouts (option `swifttypes`) |
 
 All nine items have review PRs. The Mach-O audit found kuna already covers function starts, stubs/GOT naming, exports trie, LC_MAIN and fat slices; classic bind opcodes landed in #3.
 
