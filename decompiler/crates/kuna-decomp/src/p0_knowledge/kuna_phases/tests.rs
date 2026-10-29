@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_342() {
-    assert_eq!(kuna_num_settables(), 342);
-    assert_eq!(SETTABLE_TABLE.len(), 342);
+fn settable_count_is_343() {
+    assert_eq!(kuna_num_settables(), 343);
+    assert_eq!(SETTABLE_TABLE.len(), 343);
 }
 
 #[test]
-fn tier_counts_are_120_core_132_transform_90_analysis() {
+fn tier_counts_are_120_core_132_transform_91_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_120_core_132_transform_90_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (120, 132, 90));
+    assert_eq!((core, transform, analysis), (120, 132, 91));
 }
 
 #[test]
@@ -502,6 +502,9 @@ fn option_values_live_value_present_for_154() {
         "objcrefconst",
         // (kuna) Objective-C instance layouts — same commit-side gate as `objcrefconst`.
         "objcivars",
+        // (kuna) The Objective-C SDK header directory — a load-time env bridge
+        // (`KUNA_OBJCSDK`, the sourcelang pattern); no codegen live reader.
+        "objcsdk",
         // (kuna) PE PDB metadata recovery — an analysis-pass gate with no codegen
         // live reader (read console-side via kuna_live_value), like the gates around
         // it. Default-on (DIV-129), PE-only, `.pdb`-sidecar-gated.
@@ -1120,7 +1123,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `swiftdemangle`; its P1 row sits beside `sourcelang`.
     // +1 for `objcrefconst`; its P1 row sits beside `objc`.
     // +1 for `objcivars`; its P1 row sits beside `objcrefconst`.
-    assert_eq!(json.matches("},\n").count(), 341);
+    // +1 for `objcsdk`; its P1 row sits beside `objcivars`.
+    assert_eq!(json.matches("},\n").count(), 342);
 }
 
 #[test]

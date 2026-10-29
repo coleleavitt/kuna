@@ -2116,7 +2116,8 @@ mod tests {
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-objcrefs / ObjC selector, class and super reference slots and `__objc_stubs` named and folded
         // and kuna-objcmeta / ObjC categories, protocols and ivar structs (option objcivars)
-        assert_eq!(count, 594, "corpus file count drifted");
+        // and kuna-objcsdk / ObjC method signatures read from SDK headers (option objcsdk)
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
