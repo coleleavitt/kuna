@@ -1042,6 +1042,27 @@ covered by the resolver's synthetic-bit-pattern unit tests
 (`decode_arm64e_auth_rebase_strips_pac` et al.) since the in-container linker does
 not emit an arm64e auth-fixup slice.
 
+### `macho_cfstring` — a Core Foundation constant string (`cfstrings`)
+
+`macho_cfstring` (arm64, ~50 KB) is a self-contained Mach-O carrying one
+`__builtin_CFString` constant in `__DATA_CONST,__cfstring`, for the `cfstrings`
+pass (`kuna-console/tests/verify_cfstring.rs`). Source `macho_cfstring.c`
+hand-builds the struct `{ ___CFConstantStringClassReference, 0x7c8 (8-bit),
+"cfstring hello", 14 }` and a function `_get_greeting` that returns its address.
+It builds with the container's `zig cc` (a bundled `ld64.lld`), no macOS SDK:
+
+```
+zig cc -target aarch64-macos -O0 -Wl,-undefined,dynamic_lookup \
+       -o macho_cfstring macho_cfstring.c
+```
+
+`zig cc` links a classic `LC_DYLD_INFO` image, so the entry's `char *`
+(`0x1000004f4`, into `__TEXT,__cstring`) is a raw word (the chained path is
+covered on Toyota and the a13 binaries). **Pinned VMAs:** `_get_greeting`@`0x100000538`,
+the `__cfstring` entry@`0x100004008` (`flags`=`0x7c8`, `str`=`0x1000004f4`,
+`length`=14). With `--option cfstrings on`, `_get_greeting` returns
+`"cfstring hello"`; off, it returns the bare entry address `0x100004008`.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate
