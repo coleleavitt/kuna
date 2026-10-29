@@ -26,7 +26,7 @@
 //! - **Plain rebase** — handled for every common pointer format:
 //!   `DYLD_CHAINED_PTR_64` (2), `DYLD_CHAINED_PTR_64_OFFSET` (6),
 //!   `DYLD_CHAINED_PTR_ARM64E` (1) non-auth + `DYLD_CHAINED_PTR_ARM64E_USERLAND`
-//!   (12) / `_USERLAND24` (22).
+//!   (9) / `_USERLAND24` (12).
 //! - **arm64e auth-rebase** — handled: the PAC/diversity/key/auth bits are
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
@@ -34,8 +34,9 @@
 //! - **Bind / import-ordinal chains** — a bind entry names an *external* symbol
 //!   whose runtime address is unknown statically, so it is never entered into
 //!   the pointer overlay (a consumer reading that slot misses and falls back,
-//!   never reads a wrong address). Its import **name** is kept instead
-//!   ([`ChainedFixups::bind_name`]), resolved through the blob's imports table.
+//!   never reads a wrong address). Its import **name** and **addend** are kept
+//!   instead ([`ChainedFixups::bind`]), resolved through the blob's imports
+//!   table; the addend is the import record's plus the entry's own.
 //! - **`SG_READ_ONLY` segments** are recorded ([`ChainedFixups::in_readonly_segment`])
 //!   so a loader can treat the rebased slots dyld freezes as constant, the
 //!   Mach-O twin of the ELF `PT_GNU_RELRO` rule in `kuna_dynrelocs`.
@@ -116,12 +117,12 @@ pub struct ChainedFixups {
     chained: bool,
     /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
-    /// `slot_vma → import symbol name` for every **bind** fixup whose ordinal
-    /// names an entry of the imports table (`_OBJC_CLASS_$_NSObject`, `_malloc`),
-    /// the name shared by every slot bound to the same import. The run-time
-    /// address is unknown statically, so a bind slot is never in
+    /// `slot_vma → (import symbol name, addend)` for every **bind** fixup whose
+    /// ordinal names an entry of the imports table (`_OBJC_CLASS_$_NSObject`,
+    /// `_malloc`), the name shared by every slot bound to the same import. The
+    /// run-time address is unknown statically, so a bind slot is never in
     /// [`Self::rebases`]; this is what a consumer can still say about it.
-    binds: HashMap<u64, Rc<str>>,
+    binds: HashMap<u64, (Rc<str>, i64)>,
     /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
     readonly_segments: Vec<(u64, u64)>,
 }
@@ -159,7 +160,18 @@ impl ChainedFixups {
     /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
     /// slot with a resolvable ordinal.
     pub fn bind_name(&self, va: u64) -> Option<&str> {
-        self.binds.get(&va).map(|n| &**n)
+        self.bind(va).map(|(name, _)| name)
+    }
+
+    /// The import symbol and addend of the bind fixup at slot `va`: the slot
+    /// holds `&symbol + addend` at run time.
+    pub fn bind(&self, va: u64) -> Option<(&str, i64)> {
+        self.binds.get(&va).map(|(name, addend)| (&**name, *addend))
+    }
+
+    /// Every `(slot_vma, import name)` bind, in no particular order.
+    pub fn binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
+        self.binds.iter().map(|(&va, (name, _))| (va, &**name))
     }
 
     /// Whether `va` lies in a segment dyld maps read-only after fixups
@@ -265,12 +277,12 @@ where
     out
 }
 
-/// The imports table of the chained-fixups blob: one symbol name per ordinal
-/// (`dyld_chained_fixups_header.imports_offset/imports_count/imports_format`,
+/// The imports table of the chained-fixups blob: one `(symbol name, addend)` per
+/// ordinal (`dyld_chained_fixups_header.imports_offset/imports_count/imports_format`,
 /// names in the uncompressed symbol pool at `symbols_offset`). Empty for a
 /// compressed symbol pool (`symbols_format != 0`) or an unknown record format,
 /// which leaves every bind slot unnamed (the inert path).
-fn read_imports(blob: &[u8]) -> Vec<Rc<str>> {
+fn read_imports(blob: &[u8]) -> Vec<(Rc<str>, i64)> {
     let (Some(imports_offset), Some(symbols_offset), Some(count), Some(format), Some(symbols_format)) =
         (rd_u32(blob, 8), rd_u32(blob, 12), rd_u32(blob, 16), rd_u32(blob, 20), rd_u32(blob, 24))
     else {
@@ -286,18 +298,18 @@ fn read_imports(blob: &[u8]) -> Vec<Rc<str>> {
         _ => return Vec::new(),
     };
     let count = (count as usize).min(blob.len() / record);
-    let mut names = Vec::with_capacity(count);
+    let mut imports = Vec::with_capacity(count);
     let mut by_offset: HashMap<usize, Rc<str>> = HashMap::new();
     let empty: Rc<str> = Rc::from("");
     for i in 0..count {
         let at = imports_offset as usize + i * record;
-        let name_offset = if record == 16 {
-            rd_u64(blob, at).map(|v| (v >> 32) as usize)
-        } else {
-            rd_u32(blob, at).map(|v| (v >> 9) as usize)
+        let (name_offset, addend) = match record {
+            4 => (rd_u32(blob, at).map(|v| (v >> 9) as usize), Some(0)),
+            8 => (rd_u32(blob, at).map(|v| (v >> 9) as usize), rd_u32(blob, at + 4).map(|a| a as i32 as i64)),
+            _ => (rd_u64(blob, at).map(|v| (v >> 32) as usize), rd_u64(blob, at + 8).map(|a| a as i64)),
         };
-        let Some(off) = name_offset else {
-            names.push(Rc::clone(&empty));
+        let (Some(off), Some(addend)) = (name_offset, addend) else {
+            imports.push((Rc::clone(&empty), 0));
             continue;
         };
         let name = by_offset.entry(off).or_insert_with(|| {
@@ -306,9 +318,9 @@ fn read_imports(blob: &[u8]) -> Vec<Rc<str>> {
                 .map(|s| Rc::from(String::from_utf8_lossy(s).as_ref()))
                 .unwrap_or_else(|| Rc::clone(&empty))
         });
-        names.push(Rc::clone(name));
+        imports.push((Rc::clone(name), addend));
     }
-    names
+    imports
 }
 
 /// `dyld_chained_fixups_header` (fixup-chains.h): the only fields the rebase walk
@@ -318,7 +330,7 @@ fn walk_fixups(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[Rc<str>],
+    imports: &[(Rc<str>, i64)],
     out: &mut ChainedFixups,
 ) {
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
@@ -346,7 +358,7 @@ fn walk_segment(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[Rc<str>],
+    imports: &[(Rc<str>, i64)],
     out: &mut ChainedFixups,
 ) {
     // struct dyld_chained_starts_in_segment {
@@ -413,7 +425,7 @@ fn walk_chain(
     stride: u64,
     pointer_format: u16,
     imagebase: u64,
-    imports: &[Rc<str>],
+    imports: &[(Rc<str>, i64)],
     out: &mut ChainedFixups,
 ) {
     let mut va = first_va;
@@ -425,10 +437,10 @@ fn walk_chain(
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
         if let Some(target) = decoded {
             out.rebases.insert(va, target);
-        } else if let Some(name) =
-            bind_ordinal(raw, pointer_format).and_then(|ord| imports.get(ord)).filter(|n| !n.is_empty())
-        {
-            out.binds.insert(va, Rc::clone(name));
+        } else if let Some((ordinal, addend)) = bind_entry(raw, pointer_format) {
+            if let Some((name, import_addend)) = imports.get(ordinal).filter(|(n, _)| !n.is_empty()) {
+                out.binds.insert(va, (Rc::clone(name), import_addend.wrapping_add(addend)));
+            }
         }
         if next == 0 {
             return;
@@ -500,19 +512,23 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
     }
 }
 
-/// The import ordinal of a **bind** word, or `None` for a rebase. The ordinal
-/// width is the one place the arm64e variants differ: 16 bits for the plain
-/// `ARM64E`/`_USERLAND` forms, 24 for `_USERLAND24` and the generic 64-bit forms.
-fn bind_ordinal(raw: u64, pointer_format: u16) -> Option<usize> {
+/// The import ordinal and inline addend of a **bind** word, or `None` for a
+/// rebase. The arm64e variants differ in the ordinal width (16 bits, 24 for
+/// `_USERLAND24`); an authenticated bind carries its PAC context where the plain
+/// bind carries a 19-bit signed addend. `DYLD_CHAINED_PTR_64` packs an 8-bit
+/// addend above its 24-bit ordinal.
+fn bind_entry(raw: u64, pointer_format: u16) -> Option<(usize, i64)> {
     match pointer_format {
         ptr_format::PTR_64 | ptr_format::PTR_64_OFFSET => {
-            ((raw >> 63) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+            ((raw >> 63) & 1 == 1).then_some(((raw & 0xFF_FFFF) as usize, ((raw >> 24) & 0xFF) as i64))
         }
-        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND => {
-            ((raw >> 62) & 1 == 1).then_some((raw & 0xFFFF) as usize)
-        }
-        ptr_format::ARM64E_USERLAND24 => {
-            ((raw >> 62) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24 => {
+            if (raw >> 62) & 1 == 0 {
+                return None;
+            }
+            let ordinal_mask = if pointer_format == ptr_format::ARM64E_USERLAND24 { 0xFF_FFFF } else { 0xFFFF };
+            let addend = if (raw >> 63) & 1 == 1 { 0 } else { ((((raw >> 32) & 0x7_FFFF) << 45) as i64) >> 45 };
+            Some(((raw & ordinal_mask) as usize, addend))
         }
         _ => None,
     }
@@ -672,18 +688,23 @@ mod tests {
     }
 
     /// The bind ordinal is the low bits of a bind word, at the width of each
-    /// pointer format; a rebase word has none.
+    /// pointer format; a rebase word has none. A plain arm64e bind carries a
+    /// signed 19-bit addend, an authenticated one none.
     #[test]
-    fn bind_ordinal_widths() {
-        let bind64 = (1u64 << 63) | (3u64 << 51) | 0x12_3456;
-        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64), Some(0x12_3456));
-        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64_OFFSET), Some(0x12_3456));
-        assert_eq!(bind_ordinal(0x0000_0001_0000_8000, ptr_format::PTR_64), None);
-        let bind_e = (1u64 << 62) | (5u64 << 51) | 0xAB_CDEF;
-        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E), Some(0xCDEF));
-        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND), Some(0xCDEF));
-        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND24), Some(0xAB_CDEF));
-        assert_eq!(bind_ordinal((1u64 << 63) | 0x8028, ptr_format::ARM64E), None);
+    fn bind_entry_widths_and_addends() {
+        let bind64 = (1u64 << 63) | (3u64 << 51) | (0x10 << 24) | 0x12_3456;
+        assert_eq!(bind_entry(bind64, ptr_format::PTR_64), Some((0x12_3456, 0x10)));
+        assert_eq!(bind_entry(bind64, ptr_format::PTR_64_OFFSET), Some((0x12_3456, 0x10)));
+        assert_eq!(bind_entry(0x0000_0001_0000_8000, ptr_format::PTR_64), None);
+        let bind_e = (1u64 << 62) | (5u64 << 51) | (8u64 << 32) | 0xAB_CDEF;
+        assert_eq!(bind_entry(bind_e, ptr_format::ARM64E), Some((0xCDEF, 8)));
+        assert_eq!(bind_entry(bind_e, ptr_format::ARM64E_USERLAND), Some((0xCDEF, 8)));
+        assert_eq!(bind_entry(bind_e, ptr_format::ARM64E_USERLAND24), Some((0xAB_CDEF, 8)));
+        let negative = (1u64 << 62) | (0x7_FFF0u64 << 32) | 2;
+        assert_eq!(bind_entry(negative, ptr_format::ARM64E_USERLAND24), Some((2, -16)));
+        let auth_bind = (1u64 << 63) | (1u64 << 62) | (0x1234u64 << 32) | 7;
+        assert_eq!(bind_entry(auth_bind, ptr_format::ARM64E_USERLAND24), Some((7, 0)));
+        assert_eq!(bind_entry((1u64 << 63) | 0x8028, ptr_format::ARM64E), None);
     }
 
     /// A `DYLD_CHAINED_IMPORT` table: 23-bit name offsets into the uncompressed
@@ -699,10 +720,47 @@ mod tests {
         blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
         blob.extend_from_slice(b"_ab\0_OBJC_CLASS_$_X\0");
         let imports = read_imports(&blob);
-        let names: Vec<&str> = imports.iter().map(|n| &**n).collect();
-        assert_eq!(names, ["_ab", "_OBJC_CLASS_$_X"]);
+        let entries: Vec<(&str, i64)> = imports.iter().map(|(n, a)| (&**n, *a)).collect();
+        assert_eq!(entries, [("_ab", 0), ("_OBJC_CLASS_$_X", 0)]);
         blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
         assert!(read_imports(&blob).is_empty());
+    }
+
+    /// `DYLD_CHAINED_IMPORT_ADDEND` records carry a signed 32-bit addend after
+    /// the `dyld_chained_import` word.
+    #[test]
+    fn read_imports_with_addends() {
+        let mut blob = vec![0u8; 28];
+        blob[8..12].copy_from_slice(&28u32.to_le_bytes());
+        blob[12..16].copy_from_slice(&44u32.to_le_bytes());
+        blob[16..20].copy_from_slice(&2u32.to_le_bytes());
+        blob[20..24].copy_from_slice(&import_format::IMPORT_ADDEND.to_le_bytes());
+        blob.extend_from_slice(&1u32.to_le_bytes());
+        blob.extend_from_slice(&16i32.to_le_bytes());
+        blob.extend_from_slice(&((3u32 << 9) | 1).to_le_bytes());
+        blob.extend_from_slice(&(-8i32).to_le_bytes());
+        blob.extend_from_slice(b"_a\0_b\0");
+        let imports = read_imports(&blob);
+        let entries: Vec<(&str, i64)> = imports.iter().map(|(n, a)| (&**n, *a)).collect();
+        assert_eq!(entries, [("_a", 16), ("_b", -8)]);
+    }
+
+    /// `macho_arm64e_auth` is an arm64e `DYLD_CHAINED_PTR_ARM64E_USERLAND24` image
+    /// (see the fixtures README): the authenticated rebase in `__const` resolves
+    /// to `_helper` with its PAC context dropped, the authenticated binds keep
+    /// their import name, and the plain bind keeps its addend.
+    #[test]
+    fn fixture_arm64e_auth_entries() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_arm64e_auth");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert_eq!(fixups.resolved_ptr(0x100004000), Some(0x100000410));
+        assert_eq!(fixups.bind(0x100004008), Some(("_ext_func", 0)));
+        assert_eq!(fixups.bind(0x100004010), Some(("_ext_data", 16)));
+        assert_eq!(fixups.bind(0x100004018), Some(("_ext_func", 0)));
+        assert_eq!(fixups.resolved_ptr(0x100008000), Some(0x100000418));
+        assert!(fixups.in_readonly_segment(0x100004018));
     }
 
     /// The `macho_objc_refs_arm64` fixture: `__objc_classrefs[1]` is a bind of the
@@ -739,6 +797,8 @@ mod tests {
         let classic_file = object::File::parse(classic.as_slice()).unwrap();
         assert!(!resolve_chained_fixups(&classic_file, &classic).is_chained());
     }
+
+
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
     #[test]
