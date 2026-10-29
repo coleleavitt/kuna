@@ -39,8 +39,8 @@ fn surface_count_is_120() {
 
 #[test]
 fn settable_count_is_340() {
-    assert_eq!(kuna_num_settables(), 340);
-    assert_eq!(SETTABLE_TABLE.len(), 340);
+    assert_eq!(kuna_num_settables(), 341);
+    assert_eq!(SETTABLE_TABLE.len(), 341);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn tier_counts_are_120_core_130_transform_90_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (120, 130, 90));
+    assert_eq!((core, transform, analysis), (121, 130, 90));
 }
 
 #[test]
@@ -902,7 +902,7 @@ fn option_values_live_value_present_for_154() {
     // 151 -> 152: +1 for `regsigned` (live_field = narrow_signed).
     // 152 -> 153: +1 for `callwide` (live_field = call_wide).
     // 153 -> 154: +1 for `pairrefine` (live_field = pair_refine).
-    assert_eq!(with_live, 154);
+    assert_eq!(with_live, 155);
 }
 
 #[test]
@@ -1112,7 +1112,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
         // +1 for `goreg`; its P1 row sits beside `goabi`.
     // +1 for `gobool`; its P4 row sits beside `sourcelang`.
     // +1 for `swiftdemangle`; its P1 row sits beside `sourcelang`.
-    assert_eq!(json.matches("},\n").count(), 339);
+    assert_eq!(json.matches("},\n").count(), 340);
 }
 
 #[test]
