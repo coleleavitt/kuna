@@ -47,8 +47,8 @@
 
 use std::collections::HashMap;
 
-use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 use object::FileKind;
+use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 
 /// Pointer-format ids from Apple's `mach-o/fixup-chains.h` (`DYLD_CHAINED_PTR_*`).
 /// Only the formats kuna resolves are named; any other format leaves its chain
@@ -146,12 +146,8 @@ pub fn resolve_chained_fixups(file: &object::File, bytes: &[u8]) -> ChainedFixup
         return ChainedFixups::default();
     }
     match FileKind::parse(bytes) {
-        Ok(FileKind::MachO64) => {
-            collect::<object::macho::MachHeader64<object::Endianness>>(bytes)
-        }
-        Ok(FileKind::MachO32) => {
-            collect::<object::macho::MachHeader32<object::Endianness>>(bytes)
-        }
+        Ok(FileKind::MachO64) => collect::<object::macho::MachHeader64<object::Endianness>>(bytes),
+        Ok(FileKind::MachO32) => collect::<object::macho::MachHeader32<object::Endianness>>(bytes),
         // Fat input is peeled to a thin slice before this runs (the engine
         // dispatch); a leftover fat / non-Mach-O here yields the empty no-op.
         _ => ChainedFixups::default(),
@@ -165,9 +161,15 @@ where
     Mach: MachHeader<Endian = object::Endianness>,
 {
     let empty = ChainedFixups::default();
-    let Ok(header) = Mach::parse(bytes, 0) else { return empty };
-    let Ok(endian) = header.endian() else { return empty };
-    let Ok(mut commands) = header.load_commands(endian, bytes, 0) else { return empty };
+    let Ok(header) = Mach::parse(bytes, 0) else {
+        return empty;
+    };
+    let Ok(endian) = header.endian() else {
+        return empty;
+    };
+    let Ok(mut commands) = header.load_commands(endian, bytes, 0) else {
+        return empty;
+    };
 
     // The chained-fixups blob's file range (LC_DYLD_CHAINED_FIXUPS is a
     // LinkeditDataCommand: dataoff/datasize into the file) + the segment table
@@ -186,7 +188,11 @@ where
             let fileoff = segment.fileoff(endian).into();
             let filesize = segment.filesize(endian).into();
             if filesize > 0 {
-                segs.push(SegInfo { vmaddr, fileoff, filesize });
+                segs.push(SegInfo {
+                    vmaddr,
+                    fileoff,
+                    filesize,
+                });
                 imagebase = imagebase.min(vmaddr);
             }
             continue;
@@ -203,7 +209,9 @@ where
         }
     }
 
-    let Some((blob_off, blob_size)) = fixups_range else { return empty };
+    let Some((blob_off, blob_size)) = fixups_range else {
+        return empty;
+    };
     if imagebase == u64::MAX {
         return empty;
     }
@@ -228,19 +236,33 @@ fn walk_fixups(
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
     //                              symbols_offset, imports_count, imports_format,
     //                              symbols_format } — 7 u32 (28 bytes).
-    let Some(starts_offset) = rd_u32(blob, 4) else { return };
+    let Some(starts_offset) = rd_u32(blob, 4) else {
+        return;
+    };
     let sio = starts_offset as usize;
     let imports = import_names(blob);
 
     // dyld_chained_starts_in_image { uint32 seg_count; uint32 seg_info_offset[]; }
-    let Some(seg_count) = rd_u32(blob, sio) else { return };
+    let Some(seg_count) = rd_u32(blob, sio) else {
+        return;
+    };
     for i in 0..seg_count as usize {
-        let Some(seg_info_off) = rd_u32(blob, sio + 4 + 4 * i) else { continue };
+        let Some(seg_info_off) = rd_u32(blob, sio + 4 + 4 * i) else {
+            continue;
+        };
         if seg_info_off == 0 {
             // 0 = this segment has no fixups.
             continue;
         }
-        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, out, &imports);
+        walk_segment(
+            blob,
+            sio + seg_info_off as usize,
+            segs,
+            imagebase,
+            file,
+            out,
+            &imports,
+        );
     }
 }
 
@@ -250,10 +272,23 @@ fn walk_fixups(
 /// weak:1, reserved:15, name_offset:32), each name an offset into the symbols
 /// string table.
 fn import_names(blob: &[u8]) -> Vec<String> {
-    let Some(imports_offset) = rd_u32(blob, 8) else { return Vec::new() };
-    let Some(symbols_offset) = rd_u32(blob, 12) else { return Vec::new() };
-    let Some(imports_count) = rd_u32(blob, 16) else { return Vec::new() };
-    let Some(imports_format) = rd_u32(blob, 20) else { return Vec::new() };
+    let Some(imports_offset) = rd_u32(blob, 8) else {
+        return Vec::new();
+    };
+    let Some(symbols_offset) = rd_u32(blob, 12) else {
+        return Vec::new();
+    };
+    let Some(imports_count) = rd_u32(blob, 16) else {
+        return Vec::new();
+    };
+    let Some(imports_format) = rd_u32(blob, 20) else {
+        return Vec::new();
+    };
+    // `symbols_format` 1 is a zlib-compressed pool, which is not inflated
+    // here: no name is better than bytes of the stream read as one.
+    if rd_u32(blob, 24) != Some(0) {
+        return Vec::new();
+    }
     let (entry_size, name_bits64) = match imports_format {
         1 => (4usize, false),
         2 => (8, false),
@@ -301,10 +336,18 @@ fn walk_segment(
     //   uint32 size; uint16 page_size; uint16 pointer_format;
     //   uint64 segment_offset; uint32 max_valid_pointer;
     //   uint16 page_count; uint16 page_start[page_count]; ... }
-    let Some(page_size) = rd_u16(blob, p + 4) else { return };
-    let Some(pointer_format) = rd_u16(blob, p + 6) else { return };
-    let Some(segment_offset) = rd_u64(blob, p + 8) else { return };
-    let Some(page_count) = rd_u16(blob, p + 20) else { return };
+    let Some(page_size) = rd_u16(blob, p + 4) else {
+        return;
+    };
+    let Some(pointer_format) = rd_u16(blob, p + 6) else {
+        return;
+    };
+    let Some(segment_offset) = rd_u64(blob, p + 8) else {
+        return;
+    };
+    let Some(page_count) = rd_u16(blob, p + 20) else {
+        return;
+    };
     if page_size == 0 {
         return;
     }
@@ -326,16 +369,25 @@ fn walk_segment(
     // `segment_offset` as the segment's own `vmaddr - imagebase`, i.e. its
     // fileoff, so the chain head lands at the segment's first fixup byte.)
     for pi in 0..page_count as usize {
-        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else { continue };
+        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else {
+            continue;
+        };
         // 0xFFFF (DYLD_CHAINED_PTR_START_NONE) = no fixups on this page.
         if page_start == 0xFFFF {
             continue;
         }
-        let first_va = imagebase
-            + segment_offset
-            + (pi as u64) * (page_size as u64)
-            + page_start as u64;
-        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, out, imports);
+        let first_va =
+            imagebase + segment_offset + (pi as u64) * (page_size as u64) + page_start as u64;
+        walk_chain(
+            file,
+            segs,
+            first_va,
+            stride,
+            pointer_format,
+            imagebase,
+            out,
+            imports,
+        );
     }
 }
 
@@ -356,8 +408,12 @@ fn walk_chain(
     // A defensive cap: no real page chain is longer than page_size/stride; this
     // just bounds a hostile/corrupt header (the inert/no-op contract).
     for _ in 0..0x10000u32 {
-        let Some(fo) = va_to_fileoff(segs, va) else { return };
-        let Some(raw) = rd_u64(file, fo as usize) else { return };
+        let Some(fo) = va_to_fileoff(segs, va) else {
+            return;
+        };
+        let Some(raw) = rd_u64(file, fo as usize) else {
+            return;
+        };
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
         match decoded {
             Fixup::Rebase(target) => {
@@ -462,13 +518,16 @@ fn va_to_fileoff(segs: &[SegInfo], va: u64) -> Option<u64> {
 // --- little-endian scalar readers over a byte slice (bounds-checked) ---
 
 fn rd_u16(b: &[u8], off: usize) -> Option<u16> {
-    b.get(off..off + 2).map(|s| u16::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 2)
+        .map(|s| u16::from_le_bytes(s.try_into().unwrap()))
 }
 fn rd_u32(b: &[u8], off: usize) -> Option<u32> {
-    b.get(off..off + 4).map(|s| u32::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 4)
+        .map(|s| u32::from_le_bytes(s.try_into().unwrap()))
 }
 fn rd_u64(b: &[u8], off: usize) -> Option<u64> {
-    b.get(off..off + 8).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
+    b.get(off..off + 8)
+        .map(|s| u64::from_le_bytes(s.try_into().unwrap()))
 }
 
 #[cfg(test)]
@@ -483,8 +542,15 @@ mod tests {
     #[test]
     fn decode_ptr64_rebase_strips_next() {
         let (next, target) = decode_ptr(0x0020_0001_0000_8028, ptr_format::PTR_64, 0x1_0000_0000);
-        assert_eq!(next, 4, "next field is bits 62..51 (×4-byte stride ⇒ +0x10 hop)");
-        assert_eq!(target, Fixup::Rebase(0x1_0000_8028), "rebase target is the low-36-bit vmaddr");
+        assert_eq!(
+            next, 4,
+            "next field is bits 62..51 (×4-byte stride ⇒ +0x10 hop)"
+        );
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8028),
+            "rebase target is the low-36-bit vmaddr"
+        );
 
         // A next=0 chain terminator with a clean target.
         let (next, target) = decode_ptr(0x0000_0001_0000_8000, ptr_format::PTR_64, 0x1_0000_0000);
@@ -492,14 +558,38 @@ mod tests {
         assert_eq!(target, Fixup::Rebase(0x1_0000_8000));
     }
 
-    /// `DYLD_CHAINED_PTR_64` bind entry (bit 63 set) is out of scope: the decoder
-    /// returns the `next` hop but `None` for the target, so it is never entered
-    /// into the overlay.
+    /// The imports table: `DYLD_CHAINED_IMPORT` records (23-bit name offsets)
+    /// read in ordinal order from an uncompressed pool; a compressed pool
+    /// (`symbols_format` 1) names nothing.
+    #[test]
+    fn import_names_read_the_uncompressed_pool_only() {
+        let mut blob = vec![0u8; 28];
+        blob[8..12].copy_from_slice(&28u32.to_le_bytes()); // imports_offset
+        blob[12..16].copy_from_slice(&36u32.to_le_bytes()); // symbols_offset
+        blob[16..20].copy_from_slice(&2u32.to_le_bytes()); // imports_count
+        blob[20..24].copy_from_slice(&1u32.to_le_bytes()); // DYLD_CHAINED_IMPORT
+        blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes());
+        blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes());
+        blob.extend_from_slice(b"_ab\0_$sSHMp\0");
+        assert_eq!(
+            import_names(&blob),
+            vec!["_ab".to_string(), "_$sSHMp".to_string()]
+        );
+        blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // symbols_format: zlib
+        assert!(import_names(&blob).is_empty());
+    }
+
+    /// `DYLD_CHAINED_PTR_64` bind entry (bit 63 set): the decoder returns the
+    /// `next` hop and the import ordinal, never a target for the overlay.
     #[test]
     fn decode_ptr64_bind_carries_its_ordinal() {
         let (next, target) = decode_ptr(0x8020_0000_0000_0007, ptr_format::PTR_64, 0x1_0000_0000);
         assert_eq!(next, 4, "the bind entry still carries a next hop");
-        assert_eq!(target, Fixup::Bind(7), "a bind entry names its import ordinal (low 24 bits)");
+        assert_eq!(
+            target,
+            Fixup::Bind(7),
+            "a bind entry names its import ordinal (low 24 bits)"
+        );
     }
 
     /// `DYLD_CHAINED_PTR_64_OFFSET` adds the image base to the target (offset form),
@@ -509,7 +599,11 @@ mod tests {
         let imagebase = 0x1_0000_0000;
         // target = 0x8028 (offset), next = 0.
         let (_n, target) = decode_ptr(0x0000_0000_0000_8028, ptr_format::PTR_64_OFFSET, imagebase);
-        assert_eq!(target, Fixup::Rebase(0x1_0000_8028), "OFFSET form rebases imagebase + target");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8028),
+            "OFFSET form rebases imagebase + target"
+        );
     }
 
     /// arm64e **auth-rebase**: the PAC/diversity/key bits (32..62) are stripped and
@@ -538,7 +632,11 @@ mod tests {
         let raw = (5u64 << 51) | 0x1_0000_8050;
         let (next, target) = decode_ptr(raw, ptr_format::ARM64E, imagebase);
         assert_eq!(next, 5);
-        assert_eq!(target, Fixup::Rebase(0x1_0000_8050), "plain ARM64E target is a full vmaddr");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8050),
+            "plain ARM64E target is a full vmaddr"
+        );
     }
 
     /// arm64e USERLAND (offset) rebase adds the image base to the 43-bit target.
@@ -547,7 +645,11 @@ mod tests {
         let imagebase = 0x1_0000_0000;
         let raw = (2u64 << 51) | 0x8050; // target offset 0x8050, next=2
         let (_n, target) = decode_ptr(raw, ptr_format::ARM64E_USERLAND, imagebase);
-        assert_eq!(target, Fixup::Rebase(0x1_0000_8050), "USERLAND form rebases imagebase + offset");
+        assert_eq!(
+            target,
+            Fixup::Rebase(0x1_0000_8050),
+            "USERLAND form rebases imagebase + offset"
+        );
     }
 
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
@@ -567,6 +669,9 @@ mod tests {
         // real parse; use a parseable tiny ELF check by constructing through the
         // public entry, which returns empty for any non-Mach-O File. Here we only
         // assert the FileKind arm: a non-Mach-O FileKind yields empty.
-        assert!(matches!(FileKind::parse(bytes.as_slice()), Ok(FileKind::Elf64) | Err(_)));
+        assert!(matches!(
+            FileKind::parse(bytes.as_slice()),
+            Ok(FileKind::Elf64) | Err(_)
+        ));
     }
 }
