@@ -33,11 +33,13 @@ fn gate_off_is_inert_and_default_on_applies() {
         vec![(0x3d78u64, 0x3d7fu64), (0x3d80, 0x3d87)],
         "only the RELRO-covered slots"
     );
+    gate_covers_macho_chained_fixups();
 }
 
 /// The Mach-O arm obeys the same gate: `off` leaves every chained slot packed,
-/// on unpacks the rebases and declares the `__DATA_CONST` ones constant.
-#[test]
+/// on unpacks the rebases and declares the `__DATA_CONST` ones constant. Run
+/// from the ELF test above, not as its own `#[test]`: the gate is one
+/// process-global variable and two tests flipping it in parallel race.
 fn gate_covers_macho_chained_fixups() {
     let path = format!("{}/tests/fixtures/macho_objc_refs_arm64", env!("CARGO_MANIFEST_DIR"));
     let bytes = std::fs::read(&path).expect("Mach-O fixture");
