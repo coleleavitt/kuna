@@ -1042,6 +1042,25 @@ covered by the resolver's synthetic-bit-pattern unit tests
 (`decode_arm64e_auth_rebase_strips_pac` et al.) since the in-container linker does
 not emit an arm64e auth-fixup slice.
 
+### `macho_gotdata` — data imports read through `__got` (`importdata`)
+
+`macho_gotdata` (arm64, ~50 KB) reads two imported **data** symbols through
+`__DATA_CONST,__got`, for the `importdata` option
+(`kuna-console/tests/verify_importdata.rs`). Source `macho_gotdata.c` declares
+`extern int imported_counter;` and `extern const char *imported_name;`; at `-O1`
+both readers inline into `_main`. It builds with the container's `zig cc`:
+
+```
+zig cc -target aarch64-macos -O1 -Wl,-undefined,dynamic_lookup \
+       -o macho_gotdata macho_gotdata.c
+```
+
+Each read is `adrp/ldr` of the `__got` slot (the slot holds the import's address)
+followed by `ldr` through it. **Pinned VMAs:** `_main`@`0x100000448`, the `__got`
+slots `imported_counter`@`0x100004000` and `imported_name`@`0x100004008`. With
+`--option importdata on`, `_main` reads `imported_counter` / `imported_name`; off,
+it reads `*dat_100004000` / `*dat_100004008`.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate
