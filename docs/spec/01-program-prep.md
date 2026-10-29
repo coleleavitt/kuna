@@ -807,8 +807,16 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   Modern Mach-O pointer slots are chained-fixup entries, not pointers;
   `decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (ChainedFixups)`
   parses `LC_DYLD_CHAINED_FIXUPS` into a VMA→resolved-pointer overlay (rebase and
-  arm64e auth-rebase handled; bind entries deliberately absent, so a consumer
-  misses and falls back rather than reading a wrong address).
+  arm64e auth-rebase handled). A bind entry names an import whose address is
+  unknown statically, so it is absent from the pointer overlay — a consumer
+  misses and falls back rather than reading a wrong address — but its ordinal is
+  resolved through the blob's imports table to the symbol it names
+  (`decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (bind_name)`),
+  which is what lets a `__objc_classrefs` slot bound to `_OBJC_CLASS_$_UIView`
+  be named without an address. The resolver also records which segments the
+  linker flagged `SG_READ_ONLY`, the Mach-O statement that dyld maps the segment
+  read-only once its fixups are in (`__DATA_CONST`); `dynrelocs` (§1.3) reads
+  it as the `PT_GNU_RELRO` of a Mach-O.
 
 An explicit target changes only language selection: the parsed container still
 owns section mapping, image base, symbols, and imports. Container header class is
@@ -1200,6 +1208,26 @@ funcsym stream:
   This is a different path from `relocobjects`/`relocrebase` above, which own the
   *pre-link* `ET_REL` object; a relocatable object's relocations are applied by
   the layout pass and this walk does not run for it.
+
+  A Mach-O has the same two halves in Apple's format, and takes them under the
+  same gate through
+  `decompiler/crates/kuna-analysis/src/loader/kuna_machorelocs.rs (resolve)`. A
+  chained-fixup image stores no pointer in a fixed-up slot at all: the word is a
+  packed `dyld_chained_ptr_*` entry whose high bits carry the chain's next hop,
+  so `__objc_selrefs[0]` reads `0x001000010000090c` in the file where the running
+  program holds `0x10000090c`, and anything that folds such a load without
+  unpacking it folds to garbage. dyld unpacks every chain at load; the loader
+  does the same on its own segment copies, writing each rebase the §1.2 resolver
+  decoded (bind slots, being imports, are left as the linker wrote them, exactly
+  as an undefined ELF symbol is). The constancy warrant is the segment flag
+  `SG_READ_ONLY`, which the linker sets on `__DATA_CONST` to tell dyld to remap
+  the segment read-only once the fixups are applied — the same promise
+  `PT_GNU_RELRO` makes — so the rebased slots of such a segment join
+  `dynreloc_const` and fold, while a rebase in writable `__DATA` is written but
+  not declared constant. A classic `LC_DYLD_INFO` image already holds its unslid
+  pointers in the file; the resolver yields nothing for it and the image is
+  untouched. The Objective-C reference slots live in `__DATA`, outside this
+  warrant; their constancy comes from the metadata instead (§1.4, `objc`).
 - **In-code literal pools** (kuna, `litpoolconst`, default-on, DIV-136,
   `decompiler/crates/kuna-decomp/src/p1_partition/kuna_litpoolconst.rs`): the
   third user of the same "constant by construction, not by policy" exception, and
@@ -3336,6 +3364,62 @@ every other binary's pass list is byte-identical to before the pass existed):
   small/relative forms), reading pointer slots through the chained-fixup overlay
   (§1.2) on arm64, and rename each IMP `-[Class sel]`/`+[Class sel]` behind the
   placeholder label gate.
+
+  Code never touches a selector string or a `class_t` directly, so naming those
+  alone leaves every send unreadable: `objc_msgSend(obj, sel)` loads `sel` from a
+  `__objc_selrefs` slot, a class-method receiver comes from a `__objc_classrefs`
+  slot, `[super init]` fills `objc_super.class` from a `__objc_superrefs` slot,
+  and a modern link (`-objc_stubs_fast`, the default since Xcode 14) routes most
+  sends through a `__objc_stubs` entry — `adrp/ldr x1` of the selref, then a
+  jump to `objc_msgSend` through `__got` — so the send is a call to an anonymous
+  32-byte function. On an 84 MB arm64 iOS app, 274 of the 1,622 calls in a
+  500-function sample were such `sub_<addr>(obj)` calls and every direct send
+  read `objc_msgSendSuper2(&super, dat_1045b76f0)`.
+  `decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcrefs.rs (emit)`
+  names all four (kuna; the names follow IDA's `selRef_`/`classRef_` convention,
+  Ghidra labels the same slots by their pointer type only):
+
+  - each `__objc_selrefs` slot is the pointer-sized data object `selRef_<sel>`,
+    colons sanitized to underscores as in the `sel_<sel>` symbol the method walk
+    already puts on the selector string (a sent-only selector such as `alloc`
+    gets its `sel_` symbol here, since no local method names it);
+  - each `__objc_classrefs` / `__objc_superrefs` slot is `classRef_<Class>` /
+    `superRef_<Class>`: a rebase slot's class is read off the `class_t` it points
+    at, a chained **bind** slot's from the import it names with `_OBJC_CLASS_$_`
+    stripped (§1.2), so `classRef_UIView` is named although no address exists for
+    it. A classic `LC_DYLD_INFO` image stores a bind slot as zero and leaves it
+    unnamed (its bind opcodes are not parsed);
+  - each `__objc_stubs` entry is the function `objc_msgSend$<sel>`, the name the
+    linker gives the symbol it synthesized the stub for. The entry is found by
+    its own first two instructions (arm64 `adrp x1; ldr x1, [x1, #off]`, x86-64
+    `mov rsi, [rip+off]`) at every 4-byte offset, so the 32-byte fast and the
+    12-byte small layouts need no stride. When this image's own methods agree on
+    one type encoding for the selector, the stub gets that method's prototype
+    with `_cmd` removed and every remaining parameter pinned to the register the
+    full `(self, _cmd, …)` call places it in (`x0`, then `x2`…, floats in
+    `d0`…), which is what keeps a caller from printing the dead `x1` it never
+    wrote as an argument: `objc_msgSend$greet:(obj, 5)`. A selector no local
+    method defines, or whose arguments would need the stack, keeps the untyped
+    call-site inference.
+
+  The rebase slots of the three ref sections are also reported constant
+  (`AnalysisOutput::const_ranges`). dyld fills them once before any code runs
+  and nothing rewrites them — Ghidra's `ObjectiveC2_ClassAnalyzer` marks the same
+  blocks read-only for that reason — but they live in writable `__DATA`, outside
+  the `SG_READ_ONLY` warrant of `dynrelocs` (§1.3), so the claim is the
+  metadata's, and it rides its own option, **`objcrefconst`** (kuna, default-on,
+  inert unless `objc` is on). The commit paints the ranges `Varnode::readonly`
+  and adds them to `dynreloc_const` **before** the slots' own symbols are mapped
+  (a `SymbolEntry` copies the range property as it is created), so
+  `ActionVarnodeProps` folds a load through a selref to the selector string and
+  through a classref to the class: `objc_msgSend(obj, sel_init)`,
+  `objc_msgSendSuper2(&super, sel_init)` with `super.class = _OBJC_CLASS_$_Derived`,
+  `objc_msgSend$tag(_OBJC_CLASS_$_Derived)`. A bind slot has no static value and
+  is never folded, so `objc_msgSend(classRef_Remote, sel_tag)` keeps the name.
+  Off, every load through a slot stays a load of the named global
+  (`objc_msgSend(obj, selRef_init)`), the shape to read when the slot itself is
+  the question. The fold is what the chained-fixup unpacking in §1.3 exists for
+  here: without it a selref slot folds to its packed chain word.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the
