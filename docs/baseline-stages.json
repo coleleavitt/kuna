@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3268,
-    3268
+    3276,
+    3276
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1406,6 +1406,14 @@
     "data:OBJCSDK #7: a CGRect argument is spread over its members",
     "data:OBJCSDK #8: a two-argument method keeps both",
     "data:OBJCSDK #9: the stub itself returns the struct",
+    "data:OBJCTYPES #1: off reads the inner object's field through casts",
+    "data:OBJCTYPES #2: the property's class types the getter's return, in both arms",
+    "data:OBJCTYPES #3: the stub of a property getter returns the class, in both arms",
+    "data:OBJCTYPES #4: objcivars off keeps self untyped",
+    "data:OBJCTYPES #5: objcivars reads a field through the class-typed ivar",
+    "data:OBJCTYPES #6: the getter returns the typed ivar",
+    "data:OBJCTYPES #7: the setter takes the class",
+    "data:OBJCTYPES #8: a send to the typed ivar",
     "data:OVERLAPBRANCH #1: the branch target wins, so the real add-chain stream is recovered in the default pass only",
     "data:OVERLAPBRANCH #2: the out-of-image call the swallowed decode invents survives only in the overlapbranch-off pass",
     "data:OVERLAPBRANCH #3: the bogus global the swallowed decode invents survives only in the overlapbranch-off pass",
