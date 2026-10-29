@@ -68,6 +68,7 @@ pub(crate) mod le;
 // .rel.dyn / .rela.plt) so a GOT slot holds the value the run-time loader
 // would write, and report the PT_GNU_RELRO-frozen slots as constant.
 pub mod kuna_dynrelocs;
+pub mod kuna_elfgotimports;
 // (kuna) `msvcfpconst`: recover an MSVC `__real@` floating-point constant COMDAT
 // from its mangled symbol name -- materialise the undefined half's bytes at its
 // synthetic extern slot, and mark both halves foldable.
