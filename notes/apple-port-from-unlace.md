@@ -100,3 +100,33 @@ Each item: what unlace has, kuna's gap with evidence, where it goes in kuna.
 - unlace fixture `fixtures/ios_kcm.arm64.macho`.
 - Head-to-head scratch outputs (session-local, may be gone):
   `/home/cole/.prime/agent/session-artifacts/01a1805c-4687-71ec-b216-7b64cf8f26dc/scratchpad/h2h`.
+
+
+## Status (2026-10-29)
+
+Review PRs in the fork (github.com/coleleavitt/kuna):
+
+| PR | Branch | Base | Item |
+|---|---|---|---|
+| #1 | apple/objc-selrefs | main | 1: selector/class/super refs, `objc_msgSend$` stubs, chained binds + rebases at load |
+| #2 | apple/swift-demangle | main | 3: full Swift demangler (pure Rust) |
+| #3 | apple/objc-metadata | apple/objc-selrefs | 2: categories, protocols, ivars (typed `self`), classic bind opcodes |
+| #4 | apple/swift-metadata | apple/swift-demangle | 4: Swift runtime metadata names |
+
+In progress: apple/dyld-cache (5), apple/macho-loader + apple/cfstring (6), apple/arm64e-pac (7, on #1), apple/img4-kernelcache (8), apple/compact-unwind (9).
+
+Open decision: #1 applies chained rebases under the default-on `dynrelocs` option.
+
+### Rebase #4 onto #1
+
+Both add the chained-fixup imports table and a `binds` map to `chained.rs`. Take #1's `chained.rs`
+(it also has the `ARM64E_USERLAND`/`USERLAND24` id fix, START_MULTI pages and the compressed-pool
+guard), then add the one API the Swift pass uses:
+
+```rust
+pub fn binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
+    self.binds.iter().map(|(va, n)| (*va, n.as_str()))
+}
+```
+
+`analyzers/swift` needs no change. Catalog and stage counts need +1 on top of whichever lands first.
