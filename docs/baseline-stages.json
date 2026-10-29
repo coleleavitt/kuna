@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3233,
-    3233
+    3240,
+    3240
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2053,6 +2053,7 @@
     "data:boolbyte #8: the callfill control keeps its shape in both passes",
     "data:boolbyte #9: and so is a byte parameter copied into a slot the callee is handed the address of",
     "data:both interior formals initialize the shared extent",
+    "data:both passes discover the LC_MAIN entry",
     "data:both passes retain the indirect write",
     "data:both uses of unchanged contents retained",
     "data:branch alternatives are defined",
@@ -3140,6 +3141,12 @@
     "data:unused parameter name is reserved for pointer alias",
     "data:unused volatile pointee survives",
     "data:unused volatile reads remain",
+    "data:unwindstarts on: a recovered start decompiles as a function",
+    "data:unwindstarts on: the first unwind-only start joins the inventory (default pass: absent)",
+    "data:unwindstarts on: the fourth unwind-only start joins the inventory (default pass: absent)",
+    "data:unwindstarts on: the recovered body keeps its 320-byte buffer",
+    "data:unwindstarts on: the second unwind-only start joins the inventory (default pass: absent)",
+    "data:unwindstarts on: the third unwind-only start joins the inventory (default pass: absent)",
     "data:value-first interning preserves pointer contract",
     "data:value-first interning preserves value contract",
     "data:varargstackargs #1: option off drops the stack-passed variadic argument (bug reproduced)",
