@@ -2115,7 +2115,9 @@ mod tests {
         // and kuna-ppc64-ldarx-encoding / generic PowerPC ldx and ldarx decode at their own opcodes
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-objcrefs / ObjC selector, class and super reference slots and `__objc_stubs` named and folded
-        assert_eq!(count, 593, "corpus file count drifted");
+        // and kuna-ptrauthtrap / arm64e pointer-auth failure checks dropped
+        // and kuna-authptrcall / arm64e calls through __auth_ptr named
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
