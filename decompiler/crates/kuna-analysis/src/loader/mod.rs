@@ -68,6 +68,9 @@ pub(crate) mod le;
 // .rel.dyn / .rela.plt) so a GOT slot holds the value the run-time loader
 // would write, and report the PT_GNU_RELRO-frozen slots as constant.
 pub mod kuna_dynrelocs;
+// (kuna) `dynrelocs`, the Mach-O arm: unpack a chained-fixup image's rebase
+// slots and report the SG_READ_ONLY (`__DATA_CONST`) ones as constant.
+pub mod kuna_machorelocs;
 // (kuna) `msvcfpconst`: recover an MSVC `__real@` floating-point constant COMDAT
 // from its mangled symbol name -- materialise the undefined half's bytes at its
 // synthetic extern slot, and mark both halves foldable.

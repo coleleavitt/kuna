@@ -30,10 +30,14 @@
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
 //!   pointer is just `imagebase + target`.)
-//! - **Bind / import-ordinal chains — OUT OF SCOPE** (design §3.2). A bind entry
-//!   names an *external* symbol whose runtime address is unknown statically, so it
-//!   is simply **not entered** into the overlay (a consumer reading that slot
-//!   misses and falls back, never reads a wrong address).
+//! - **Bind / import-ordinal chains** — a bind entry names an *external* symbol
+//!   whose runtime address is unknown statically, so it is never entered into
+//!   the pointer overlay (a consumer reading that slot misses and falls back,
+//!   never reads a wrong address). Its import **name** is kept instead
+//!   ([`ChainedFixups::bind_name`]), resolved through the blob's imports table.
+//! - **`SG_READ_ONLY` segments** are recorded ([`ChainedFixups::in_readonly_segment`])
+//!   so a loader can treat the rebased slots dyld freezes as constant, the
+//!   Mach-O twin of the ELF `PT_GNU_RELRO` rule in `kuna_dynrelocs`.
 //!
 //! ## Faithfulness / no-op guarantee
 //!
@@ -64,11 +68,28 @@ mod ptr_format {
     pub const PTR_64_OFFSET: u16 = 6;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND` — arm64e, 8-byte stride, 32-bit
     /// image-base-relative target (offset form).
-    pub const ARM64E_USERLAND: u16 = 12;
+    pub const ARM64E_USERLAND: u16 = 9;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND24` — `_USERLAND` with a 24-bit ordinal
     /// (bind only differs; rebase decode is identical to `_USERLAND`).
-    pub const ARM64E_USERLAND24: u16 = 15;
+    pub const ARM64E_USERLAND24: u16 = 12;
 }
+
+/// Import-table formats from `fixup-chains.h` (`DYLD_CHAINED_IMPORT*`): the
+/// record width and where the symbol-name offset sits in it.
+mod import_format {
+    /// `dyld_chained_import` — `u32 { lib_ordinal:8, weak_import:1, name_offset:23 }`.
+    pub const IMPORT: u32 = 1;
+    /// `dyld_chained_import_addend` — the same `u32` followed by an `i32` addend.
+    pub const IMPORT_ADDEND: u32 = 2;
+    /// `dyld_chained_import_addend64` — `u64 { lib_ordinal:16, weak_import:1,
+    /// reserved:15, name_offset:32 }` followed by a `u64` addend.
+    pub const IMPORT_ADDEND64: u32 = 3;
+}
+
+/// `SG_READ_ONLY` (`mach-o/loader.h`): dyld maps the segment read-only once its
+/// fixups are applied. The modern linker sets it on `__DATA_CONST`, which makes
+/// it the Mach-O analog of ELF's `PT_GNU_RELRO`.
+const SG_READ_ONLY: u32 = 0x10;
 
 /// A resolved chained-fixup overlay: the real pointer value at each rebased VMA
 /// slot. Built once per Mach-O load by [`resolve_chained_fixups`]; consulted by
@@ -79,9 +100,15 @@ mod ptr_format {
 /// exactly as before).
 #[derive(Default, Debug, Clone)]
 pub struct ChainedFixups {
-    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup. Bind
-    /// fixups (external imports) are intentionally absent (out of scope).
+    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
+    /// `slot_vma → import symbol name` for every **bind** fixup whose ordinal
+    /// names an entry of the imports table (`_OBJC_CLASS_$_NSObject`, `_malloc`).
+    /// The run-time address is unknown statically, so a bind slot is never in
+    /// [`Self::rebases`]; this is what a consumer can still say about it.
+    binds: HashMap<u64, String>,
+    /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
+    readonly_segments: Vec<(u64, u64)>,
 }
 
 impl ChainedFixups {
@@ -101,6 +128,23 @@ impl ChainedFixups {
     /// Every resolved rebase target, in no particular order.
     pub fn targets(&self) -> impl Iterator<Item = u64> + '_ {
         self.rebases.values().copied()
+    }
+
+    /// Every `(slot_vma, resolved_pointer)` rebase, in no particular order.
+    pub fn rebases(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.rebases.iter().map(|(&va, &target)| (va, target))
+    }
+
+    /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
+    /// slot with a resolvable ordinal.
+    pub fn bind_name(&self, va: u64) -> Option<&str> {
+        self.binds.get(&va).map(String::as_str)
+    }
+
+    /// Whether `va` lies in a segment dyld maps read-only after fixups
+    /// (`SG_READ_ONLY`, the `__DATA_CONST` convention).
+    pub fn in_readonly_segment(&self, va: u64) -> bool {
+        self.readonly_segments.iter().any(|&(lo, hi)| va >= lo && va < hi)
     }
 }
 
@@ -152,6 +196,7 @@ where
     // (for VMA↔fileoff arithmetic), harvested in one load-command pass.
     let mut fixups_range: Option<(u64, u64)> = None;
     let mut segs: Vec<SegInfo> = Vec::new();
+    let mut readonly_segments: Vec<(u64, u64)> = Vec::new();
     // The lowest segment vmaddr that maps file content is the image preferred
     // base (the imagebase the OFFSET formats add). __PAGEZERO (filesize 0) is
     // skipped so it does not win as the minimum.
@@ -166,6 +211,10 @@ where
             if filesize > 0 {
                 segs.push(SegInfo { vmaddr, fileoff, filesize });
                 imagebase = imagebase.min(vmaddr);
+            }
+            if segment.flags(endian) & SG_READ_ONLY != 0 {
+                let vmsize: u64 = segment.vmsize(endian).into();
+                readonly_segments.push((vmaddr, vmaddr.wrapping_add(vmsize)));
             }
             continue;
         }
@@ -189,9 +238,49 @@ where
         return empty;
     };
 
-    let mut out = ChainedFixups::default();
-    walk_fixups(blob, &segs, imagebase, bytes, &mut out);
+    let mut out = ChainedFixups { readonly_segments, ..ChainedFixups::default() };
+    let imports = read_imports(blob);
+    walk_fixups(blob, &segs, imagebase, bytes, &imports, &mut out);
     out
+}
+
+/// The imports table of the chained-fixups blob: one symbol name per ordinal
+/// (`dyld_chained_fixups_header.imports_offset/imports_count/imports_format`,
+/// names in the uncompressed symbol pool at `symbols_offset`). Empty for a
+/// compressed symbol pool (`symbols_format != 0`) or an unknown record format,
+/// which leaves every bind slot unnamed (the inert path).
+fn read_imports(blob: &[u8]) -> Vec<String> {
+    let (Some(imports_offset), Some(symbols_offset), Some(count), Some(format), Some(symbols_format)) =
+        (rd_u32(blob, 8), rd_u32(blob, 12), rd_u32(blob, 16), rd_u32(blob, 20), rd_u32(blob, 24))
+    else {
+        return Vec::new();
+    };
+    if symbols_format != 0 {
+        return Vec::new();
+    }
+    let record = match format {
+        import_format::IMPORT => 4,
+        import_format::IMPORT_ADDEND => 8,
+        import_format::IMPORT_ADDEND64 => 16,
+        _ => return Vec::new(),
+    };
+    let count = (count as usize).min(blob.len() / record);
+    let mut names = Vec::with_capacity(count);
+    for i in 0..count {
+        let at = imports_offset as usize + i * record;
+        let name_offset = if record == 16 {
+            rd_u64(blob, at).map(|v| (v >> 32) as usize)
+        } else {
+            rd_u32(blob, at).map(|v| (v >> 9) as usize)
+        };
+        let name = name_offset
+            .and_then(|off| blob.get(symbols_offset as usize + off..))
+            .and_then(|tail| tail.split(|&b| b == 0).next())
+            .map(|s| String::from_utf8_lossy(s).into_owned())
+            .unwrap_or_default();
+        names.push(name);
+    }
+    names
 }
 
 /// `dyld_chained_fixups_header` (fixup-chains.h): the only fields the rebase walk
@@ -201,6 +290,7 @@ fn walk_fixups(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
+    imports: &[String],
     out: &mut ChainedFixups,
 ) {
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
@@ -217,7 +307,7 @@ fn walk_fixups(
             // 0 = this segment has no fixups.
             continue;
         }
-        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, out);
+        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, imports, out);
     }
 }
 
@@ -228,6 +318,7 @@ fn walk_segment(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
+    imports: &[String],
     out: &mut ChainedFixups,
 ) {
     // struct dyld_chained_starts_in_segment {
@@ -268,7 +359,7 @@ fn walk_segment(
             + segment_offset
             + (pi as u64) * (page_size as u64)
             + page_start as u64;
-        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, out);
+        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, imports, out);
     }
 }
 
@@ -282,6 +373,7 @@ fn walk_chain(
     stride: u64,
     pointer_format: u16,
     imagebase: u64,
+    imports: &[String],
     out: &mut ChainedFixups,
 ) {
     let mut va = first_va;
@@ -293,6 +385,10 @@ fn walk_chain(
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
         if let Some(target) = decoded {
             out.rebases.insert(va, target);
+        } else if let Some(name) =
+            bind_ordinal(raw, pointer_format).and_then(|ord| imports.get(ord)).filter(|n| !n.is_empty())
+        {
+            out.binds.insert(va, name.clone());
         }
         if next == 0 {
             return;
@@ -361,6 +457,24 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         }
         // An unhandled format leaves the slot unresolved and stops the chain.
         _ => (0, None),
+    }
+}
+
+/// The import ordinal of a **bind** word, or `None` for a rebase. The ordinal
+/// width is the one place the arm64e variants differ: 16 bits for the plain
+/// `ARM64E`/`_USERLAND` forms, 24 for `_USERLAND24` and the generic 64-bit forms.
+fn bind_ordinal(raw: u64, pointer_format: u16) -> Option<usize> {
+    match pointer_format {
+        ptr_format::PTR_64 | ptr_format::PTR_64_OFFSET => {
+            ((raw >> 63) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+        }
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND => {
+            ((raw >> 62) & 1 == 1).then_some((raw & 0xFFFF) as usize)
+        }
+        ptr_format::ARM64E_USERLAND24 => {
+            ((raw >> 62) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+        }
+        _ => None,
     }
 }
 
@@ -472,6 +586,54 @@ mod tests {
     fn decode_unknown_format_is_inert() {
         let (next, target) = decode_ptr(0xDEAD_BEEF_0000_0000, 999, 0);
         assert_eq!((next, target), (0, None));
+    }
+
+    /// The bind ordinal is the low bits of a bind word, at the width of each
+    /// pointer format; a rebase word has none.
+    #[test]
+    fn bind_ordinal_widths() {
+        let bind64 = (1u64 << 63) | (3u64 << 51) | 0x12_3456;
+        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64), Some(0x12_3456));
+        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64_OFFSET), Some(0x12_3456));
+        assert_eq!(bind_ordinal(0x0000_0001_0000_8000, ptr_format::PTR_64), None);
+        let bind_e = (1u64 << 62) | (5u64 << 51) | 0xAB_CDEF;
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E), Some(0xCDEF));
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND), Some(0xCDEF));
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND24), Some(0xAB_CDEF));
+        assert_eq!(bind_ordinal((1u64 << 63) | 0x8028, ptr_format::ARM64E), None);
+    }
+
+    /// A `DYLD_CHAINED_IMPORT` table: 23-bit name offsets into the uncompressed
+    /// symbol pool, read in ordinal order.
+    #[test]
+    fn read_imports_dyld_chained_import() {
+        let mut blob = vec![0u8; 28];
+        blob[8..12].copy_from_slice(&28u32.to_le_bytes()); // imports_offset
+        blob[12..16].copy_from_slice(&36u32.to_le_bytes()); // symbols_offset
+        blob[16..20].copy_from_slice(&2u32.to_le_bytes()); // imports_count
+        blob[20..24].copy_from_slice(&import_format::IMPORT.to_le_bytes());
+        blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes()); // name_offset 0, lib 2
+        blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
+        blob.extend_from_slice(b"_ab _OBJC_CLASS_$_X ");
+        assert_eq!(read_imports(&blob), vec!["_ab".to_string(), "_OBJC_CLASS_$_X".to_string()]);
+        blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
+        assert!(read_imports(&blob).is_empty());
+    }
+
+    /// The `macho_objc_refs_arm64` fixture: `__objc_classrefs[1]` is a bind of the
+    /// undefined `_OBJC_CLASS_$_Remote`, and `__DATA_CONST` is `SG_READ_ONLY`.
+    #[test]
+    fn fixture_bind_names_and_readonly_segments() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_objc_refs_arm64");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert_eq!(fixups.bind_name(0x100008230), Some("_OBJC_CLASS_$_Remote"));
+        assert_eq!(fixups.resolved_ptr(0x100008230), None);
+        assert_eq!(fixups.resolved_ptr(0x100008228), Some(0x100008050));
+        assert_eq!(fixups.bind_name(0x100004000), Some("_objc_msgSend"));
+        assert!(fixups.in_readonly_segment(0x100004000), "__DATA_CONST is SG_READ_ONLY");
+        assert!(!fixups.in_readonly_segment(0x100008228), "__DATA is writable");
     }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
