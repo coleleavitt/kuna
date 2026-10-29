@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_347() {
-    assert_eq!(kuna_num_settables(), 347);
-    assert_eq!(SETTABLE_TABLE.len(), 347);
+fn settable_count_is_348() {
+    assert_eq!(kuna_num_settables(), 348);
+    assert_eq!(SETTABLE_TABLE.len(), 348);
 }
 
 #[test]
-fn tier_counts_are_120_core_134_transform_93_analysis() {
+fn tier_counts_are_121_core_134_transform_93_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_120_core_134_transform_93_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (120, 134, 93));
+    assert_eq!((core, transform, analysis), (121, 134, 93));
 }
 
 #[test]
@@ -917,7 +917,8 @@ fn option_values_live_value_present_for_156() {
     // 153 -> 154: +1 for `pairrefine` (live_field = pair_refine).
     // 154 -> 155: +1 for `ptrauthtrap` (live_field = ptrauth_trap).
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
-    assert_eq!(with_live, 156);
+    // 156 -> 157: +1 for `importdata`.
+    assert_eq!(with_live, 157);
 }
 
 #[test]
@@ -1134,7 +1135,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `authptrcall`; its P1 row sits beside `peimportcall`.
     // +1 for `swiftmetadata`; its P1 row sits beside `objc`.
     // +1 for `swifttypes`, beside it.
-    assert_eq!(json.matches("},\n").count(), 346);
+    // +1 for `importdata`.
+    assert_eq!(json.matches("},\n").count(), 347);
 }
 
 #[test]

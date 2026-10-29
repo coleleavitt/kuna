@@ -1262,6 +1262,49 @@ The `Square: Shape` (local protocol) witness table is a relocated pointer table,
 which an ELF file carries as `R_X86_64_RELATIVE` addends; the pass reads those
 like a Mach-O's chained-fixup rebases, so its slots are named too.
 
+### `macho_gotdata` — data imports read through `__got` (`importdata`)
+
+`macho_gotdata` (arm64, ~50 KB) reads two imported **data** symbols through
+`__DATA_CONST,__got`, for the `importdata` option
+(`kuna-console/tests/verify_importdata.rs`). Source `macho_gotdata.c` declares
+`extern int imported_counter;` and `extern const char *imported_name;`; at `-O1`
+both readers inline into `_main`. It builds with the container's `zig cc`:
+
+```
+zig cc -target aarch64-macos -O1 -Wl,-undefined,dynamic_lookup \
+       -o macho_gotdata macho_gotdata.c
+```
+
+Each read is `adrp/ldr` of the `__got` slot (the slot holds the import's address)
+followed by `ldr` through it. **Pinned VMAs:** `_main`@`0x100000448`, the `__got`
+slots `imported_counter`@`0x100004000` and `imported_name`@`0x100004008`. With
+`--option importdata on`, `_main` reads `imported_counter` / `imported_name`; off,
+it reads `*dat_100004000` / `*dat_100004008`.
+
+### `elf_gotdata_x86_64.so` / `elf_gotdata_aarch64.so` — ELF GOT data imports
+
+Two `-fPIC` shared objects (~3.5 KB each) built from `elf_gotdata.c`, for the ELF
+half of `importdata` (pass `elfgotimports`; `kuna-console/tests/verify_elfgotimports.rs`,
+`tests/stages/kuna-elfgotimports.xml`). Each reads `imported_counter`, `environ` and
+`stdout` through `R_*_GLOB_DAT` slots it leaves undefined, and `exported_value`,
+which it defines (a `GLOB_DAT` to a defined, preemptible symbol). Built with the
+container's clang + lld, no libc:
+
+```
+clang --target=x86_64-linux-gnu  -O1 -fPIC -shared -fuse-ld=lld -nostdlib \
+      -Wl,--build-id=none -o elf_gotdata_x86_64.so  elf_gotdata.c
+clang --target=aarch64-linux-gnu -O1 -fPIC -shared -fuse-ld=lld -nostdlib \
+      -Wl,--build-id=none -o elf_gotdata_aarch64.so elf_gotdata.c
+```
+
+**Pinned VMAs.** x86-64: `get_counter`@`0x1580`, `get_env`@`0x1590`,
+`get_out`@`0x15a0`, `get_exported`@`0x15b0`, `addr_exported`@`0x15c0`; GOT slots
+`imported_counter`@`0x2680`, `environ`@`0x2688`, `stdout`@`0x2690`. AArch64:
+`get_counter`@`0x104e4` … `addr_exported`@`0x10524` (stride 0x10); GOT slots
+`0x205c0`/`0x205c8`/`0x205d0`. With `--option importdata on` the three reads are
+`imported_counter` / `environ` / `stdout`; off they are `*dat_<slot>`.
+`exported_value` / `&exported_value` read the same either way.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate

@@ -71,6 +71,7 @@ pub mod kuna_dynrelocs;
 // (kuna) `dynrelocs`, the Mach-O arm: unpack a chained-fixup image's rebase
 // slots and report the SG_READ_ONLY (`__DATA_CONST`) ones as constant.
 pub mod kuna_machorelocs;
+pub mod kuna_elfgotimports;
 // (kuna) `msvcfpconst`: recover an MSVC `__real@` floating-point constant COMDAT
 // from its mangled symbol name -- materialise the undefined half's bytes at its
 // synthetic extern slot, and mark both halves foldable.
