@@ -2950,33 +2950,80 @@ moves.
   member is brought to `msvc_demangler`'s (`dtor` is `destructor`) so a member
   reads the same whichever crate demangled it.
 
-  **(kuna, docs/multilang.md) Swift names demangle through a ported, bounded
-  name-only subset** (`decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_swift.rs
-  (demangle_swift_name)`), because no crate exists at the maturity of the three
-  above: the Vector35 `swift-demangler` builds the real C++ demangler through
-  cmake (a native-toolchain dependency this workspace does not carry, floor
-  rustc above this repo's), and the pure-Rust alternatives are unvetted 0.x
-  crates — for symbol RENAMING a wrong answer is strictly worse than none. The
-  subset parses context chains (`module.Type.member`, `V`/`C`/`O` nominal
-  kinds, the stdlib `s` contraction), functions with argument labels rendered
-  Swift-style (`Swift.print(_:separator:terminator:)`), property accessors
-  (`.getter`/`.setter`), `init`/`deinit`, and the common global markers
-  (`type metadata`, nominal descriptor, metadata accessor, full metadata,
-  metaclass, value witness table) as dotted suffixes; everything else —
-  punycode identifiers, witnesses/thunks, specializations, generic machinery —
-  **passes through unchanged** (parse-or-passthrough: the label-less function
-  arm additionally refuses any signature carrying digits, since a digit there
-  could open an un-labeled custom parameter type whose path components are
-  indistinguishable from labels). The arm is shape-gated on
-  `sourcelang::is_swift_mangled` — prefixes no other scheme owns — and
-  option-gated by `swiftdemangle` (default on) through the `KUNA_SWIFTDEMANGLE`
-  loadtime env bridge, the `rexthunk` pattern, because names are demangled
-  inside `load file` upstream of every option line. The test corpus is
-  hand-derived from the mangling grammar (each case cites its production), so
-  no third-party fixture text is vendored; the end-to-end gate synthesizes an
-  ELF whose symbol table carries the mangled names, since no Swift toolchain
-  exists on this host or CI — a real-swiftc fixture is the Swift pack's own
-  follow-up.
+  **(kuna, docs/multilang.md) Swift names demangle through a pure-Rust
+  demangler written for kuna** (`decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_swift.rs
+  (demangle_swift_name)`, with the parser in `kuna_swift/parse.rs`, the
+  `_Tt` runtime-name parser in `kuna_swift/oldparse.rs`, the full-form
+  printer in `kuna_swift/print.rs` and the name-only printer in
+  `kuna_swift/name.rs`). Every Swift demangler crate (`swift-demangler`,
+  `symbolic-demangle`, `macho-demangle`, `razgad`, `swift-demangle`) builds
+  Apple's C++ demangler, a build-time C++ toolchain `kuna-wasm` cannot carry,
+  so kuna owns the port: the stable `$s`/`$S` grammar of
+  `swift/docs/ABI/Mangling.rst` as the postfix stack machine Apple's reference
+  implementation uses (each operator pops its operands from a node stack and
+  pushes one node; substitutions `A…` and the stdlib shortcuts `S…` re-reference
+  earlier nodes; word substitutions `0…` and punycode `00…` identifiers decode),
+  plus the Swift 3 `_Tt` type mangling the Objective-C runtime still uses for
+  Swift class and protocol names (`_TtC6Toyota3Foo`, nested `_TtCC…`, private
+  `P33_<hash>`, generic `_TtGC…_`, protocol `_TtP…_`). The parser covers
+  entities (functions with labels, variables and every accessor, subscripts,
+  constructors and destructors, closures, default arguments, initializers),
+  contexts (modules, nominal types, extensions, private and local names), the
+  type grammar (bound generics with sugar, tuples, function types with their
+  effects, metatypes, existentials, generic parameters and dependent members,
+  generic signatures with requirements, builtins, SIL impl function types),
+  the runtime artifacts (type metadata and its accessors and caches, nominal
+  and protocol descriptors, conformance descriptors, witness tables and
+  witnesses, value witnesses, field offsets, enum cases, opaque type
+  descriptors, reflection descriptors), and the function attributes
+  (dispatch thunks, method descriptors, merged functions, `@objc` thunks,
+  partial-apply forwarders, outlined copies, async function pointers and
+  resume functions, generic and function-signature specializations,
+  reabstraction thunks, key path thunks, once-functions). The autodiff
+  family (`TJ…`) is not read. The full-form printer (`demangle_raw`) renders
+  the tree the way `swift-demangle` does, and is verified byte for byte
+  against it on 131,000 symbols — the Swift 6.3 stdlib and Foundation plus
+  the symbol tables and ObjC class names of seven iOS apps — and on 550,000
+  randomly mutated symbols (where both demangle, they agree; where
+  `swift-demangle` refuses, so does kuna). The one deliberate difference: a
+  constructor carrying a file discriminator without a name prints
+  `Foo.(in _HASH).init()` where `swift-demangle` prints its parameter type as
+  the name. The name-only printer (`demangle_name`, what the loader installs)
+  is a projection of the same tree: space-free Swift reference syntax for
+  members (`Toyota.Foo.init(x:y:)`, `Foo.bar(_:)`, `Foo.baz()`, `Foo.x.getter`,
+  `Foo.subscript(_:).getter`, `Foo.__allocating_init(x:)` on a class), dotted
+  tags for runtime artifacts (`Foo.type_metadata`, `.nominal_type_descriptor`,
+  `.dispatch_thunk`, `.method_descriptor`, `.merged`, `.objc`, `.closure#1`,
+  `.outlined_copy`, `.generic_specialization<Swift.Int>`,
+  `.function_signature_specialization`, `.partial_apply`), and `<Type:Protocol>`
+  for conformances (`<Toyota.Foo:Swift.Hashable>.hash(into:)` is the protocol
+  witness, `<…>.protocol_witness_table` and `<…>.protocol_conformance_descriptor`
+  the tables). Private discriminators, local-name counters, generic
+  signatures, extension modules and parameter types are dropped from the name;
+  where a name is meaningless without types (conformances, specializations,
+  reabstraction thunks, key path helpers) a compact spelling appears
+  (`[Swift.String:Any]`, `(Swift.Int)->Swift.Bool`, `A?`). The contract is
+  parse-or-passthrough: an unknown operator, a malformed count, a stack that
+  does not reduce, or a node kind without a rendering fails the whole name and
+  the symbol keeps its mangled spelling — a wrong path is never printed. The
+  Objective-C metadata pass (`analyzers/objc/mod.rs`) renders a class whose
+  `class_ro_t.name` is a `_Tt` name through the same demangler, so a Swift
+  class's method labels read `-[Toyota.Foo viewDidLoad]` while the
+  `_OBJC_CLASS_$_…` data symbol keeps the linker's spelling. The arm is
+  shape-gated on `sourcelang::is_swift_mangled` — prefixes no other scheme
+  owns — and option-gated by `swiftdemangle` (default on) through the
+  `KUNA_SWIFTDEMANGLE` loadtime env bridge, the `rexthunk` pattern, because
+  names are demangled inside `load file` upstream of every option line. On the
+  Toyota iOS app (314,038 functions, 7,382 of them under Swift symbols) the
+  option takes every Swift symbol from mangled to demangled where the earlier
+  name-only subset reached 26%, at no measurable cost (demangling the whole
+  symbol table takes under 10 ms). The unit-test corpus is real symbols
+  pinned with the `swift-demangle` output; the stage test
+  `tests/stages/kuna-swiftdemangle.xml` loads `macho_swift_names_arm64`, a
+  clang-built arm64 Mach-O whose root class carries the runtime name
+  `_TtC4main7Greeter` through `objc_runtime_name` and whose exported function
+  carries the symbol `_$s4main10countWords2ofS2i_tF` through an `asm` label,
+  and proves both spellings off and on.
 
   **(kuna, DIV-83) Which crate is asked first is decided by a marker, not by
   which one answers.** Rust's *legacy* scheme reuses the Itanium `_ZN…E`
@@ -3587,6 +3634,116 @@ every other binary's pass list is byte-identical to before the pass existed):
   every type it holds; with thousands of class structs interned that scan is no
   longer cheap, so the decoder caches the named opaque pointer types it hands out
   (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (TypeCtx)`).
+- **Swift metadata** (`swiftmetadata`, Mach-O and ELF, Swift images only,
+  default-off; `decompiler/crates/kuna-analysis/src/analyzers/swift/mod.rs`, the
+  record layouts in `decompiler/crates/kuna-analysis/src/analyzers/swift/descriptors.rs`):
+  a stripped Swift binary keeps its reflection sections, and they name much of
+  its code. The pass reads `__swift5_types` / `swift5_type_metadata` (the nominal
+  type context descriptors: kind, parent chain, name, metadata accessor, field
+  descriptor, and for a class the trailing vtable and override table),
+  `__swift5_protos` (protocol descriptors with their requirement rows),
+  `__swift5_proto` (conformance descriptors: protocol, conforming type, witness
+  table pattern, resilient witnesses) and `__swift5_fieldmd` (field descriptors),
+  per the ABI's `Metadata.h`. Everything there is a 32-bit self-relative pointer,
+  so no fixup resolution is needed; an *indirectable* pointer (low bit set)
+  names a pointer-sized slot, which is a rebase (resolved through the
+  chained-fixup overlay, §1.2) or a bind to another image — and the overlay now
+  records each bind slot's import name (`ChainedFixups::bind_name`), which is
+  how a conformance to `Swift.Hashable` or an override of a UIKit initializer
+  learns the other image's descriptor name. Names follow the demangler's
+  name-only conventions so they read like symbol-table names and agree with the
+  real symbol where one survives (the fixture's unstripped build is the oracle):
+  `Module.Type.type_metadata_accessor`; `Module.Class.vtable#3.getter` for a
+  vtable slot's implementation by position and kind (a slot carries no selector;
+  the optimizer leaves a removed method's slot null, which is skipped);
+  `Module.Sub.init(coder:rootView:)` for an override whose overridden method
+  descriptor is an import (`…Tq`), the real member name; `Module.Sub.vtable#3.init`
+  for an override of a local base; `<Module.Type:Swift.Hashable>.hash(into:)`
+  for a resilient witness whose requirement descriptor is an import,
+  `<T:P>.requirement#2` for a local protocol's witness (the witness-table words,
+  read through the chained-fixup overlay on a Mach-O and the `R_*_RELATIVE`
+  addends on an ELF), `Module.P.requirement#2.default` for a default
+  implementation; and the records: `….nominal_type_descriptor`,
+  `….protocol_descriptor`, `….module_descriptor`,
+  `<T:P>.protocol_conformance_descriptor`, `<T:P>.protocol_witness_table`,
+  `….reflection_field_descriptor`. A type path follows the parent chain
+  (`Module.Outer.Inner`; an anonymous context is transparent, an extension
+  context demangles its extended type, a parent in another image is named
+  through its module-descriptor import). Only a code address is ever named as a
+  function (a base-protocol or associated-type witness row points at data), and
+  function names use the FID-precedent placeholder gate. On the Toyota iOS app
+  (314,038 functions, 304,309 of them `sub_<addr>`) the pass names 57,147
+  stripped functions — 14,615 metadata accessors, 15,204 vtable slots, 27,322
+  witnesses, 6 overrides — every one at an address function discovery already
+  found, in about 0.3 s and 135 MB over the baseline decompile. The pass is
+  registered only for `Compiler::Swift` (§1.3's detector) in Mach-O or ELF, so
+  every other image's pass set is unchanged; the stage test
+  `tests/stages/kuna-swiftmetadata.xml` runs the fully stripped swiftc-built
+  `swift_metadata_elf` off and on.
+- **Swift type layouts** (`swifttypes`, the type-layout arm of the pass above,
+  default-on and inert unless `swiftmetadata` is on;
+  `decompiler/crates/kuna-analysis/src/analyzers/swift/kuna_swifttypes.rs`): a
+  non-generic type whose metadata needs no runtime initialization (the
+  descriptor's `MetadataInitialization` is none: no resilient superclass, no
+  foreign or singleton initialization) has that metadata laid out statically,
+  and its accessor is the one-line function that returns the address — `adrp
+  x0, …; add x0, x0, …; mov x1, #0; ret` on arm64, `lea rax, [rip + …]; xor
+  edx, edx; ret` on x86-64, a class with Objective-C heritage tail-calling the
+  runtime with the same address — which the pass decodes and checks: the
+  metadata's descriptor word must point back at the descriptor (through the
+  chained-fixup overlay on a Mach-O; through the `R_*_RELATIVE` addends on an
+  ELF, which the pass now also feeds the reader, so an ELF's local witness
+  tables are named too). From a struct's metadata: its size and alignment (the
+  value witness table before the address point, or the builtin table an import
+  names — `$sBi64_WV` is 8 bytes, `$sytWV` empty) and its field offset vector
+  (32-bit entries at the descriptor's offset); from a class's: the instance
+  size and alignment and the pointer-sized field offset vector (an
+  Objective-C-heritage class's static offsets are the compile-time layout, the
+  same values its `__objc_ivar` offset variables hold). From the reflection
+  field descriptor, which the first arm already parsed: each stored property's
+  name and mangled type, whose symbolic references (`\x01` a direct, `\x02` an
+  indirect context descriptor reference, with a 4-byte payload) the demangler
+  resolves through a hook (`demangle_swift_type`, §1.3) that the pass answers
+  from its descriptor table or the import an indirect slot binds. The result
+  is one kuna struct per type under its dotted name — `metafix.Point { long x;
+  long y; }`, a class as its object layout with a local superclass embedded as
+  `super` at 0 and otherwise the `isa` word (and a Swift-native root's
+  reference counts) — with field types mapped from the Swift type: the sized
+  integers, `Double`/`Float`/`Bool`, `Swift.String` as its two words, a class
+  reference as a pointer to that class's struct (a shell for one without a
+  static layout, so the name is still right), a nested struct inline, a
+  collection as its storage word under the instantiation's name, a closure as
+  its two words; an optional keeps its payload's type when nil is the zero
+  word (a reference, a string, a collection, a closure). Any other type — an
+  enum, an imported value type (`Foundation.Date`), a generic instantiation
+  without a known layout, a tuple, an existential — is `undefined<n>` over the
+  bytes up to the next field, so the layout is always right and the names are
+  always real; only the field's own type is withheld. A layout is refused
+  whole when the field count disagrees with the descriptor, an offset
+  overlaps, a type exceeds its slot, or the type's dotted path is one two
+  descriptors share (private types of the same name), so nothing is ever
+  read through the wrong name. What then binds: the metadata records as typed
+  data (`….type_metadata` as `swift.type_metadata`, `….class_metadata`,
+  `….value_witness_table`); the accessor prototypes
+  (`swift.type_metadata *Module.Type.type_metadata_accessor(long request)`, so
+  `return &Module.Type.type_metadata;`); and the `self` of every class vtable
+  getter and of every local protocol's witness getter (the `IsInstance` flag
+  read, so a static property's metatype `self` is left alone). Swift passes
+  `self` in the `swiftself` register (x20 on arm64, r13 on x86-64), which no
+  calling-convention model describes and which a locked prototype cannot name
+  without also fixing the arity; a getter's arity is known, so the pass pins
+  the parameter on the function — the analysis-tier form of the console's
+  `map param` (`AnalysisOutput::swift_types.param_locks` →
+  `Architecture::loader_param_locks` → the decompile drive's `mapped_params`),
+  the rest of the signature recovered as usual — and a witness getter also
+  names its two leading arguments, the `Self` metadata and the witness table.
+  On the Toyota iOS app the pass locates 12,809 static metadata records (4,790
+  structs, 4,811 enums, 3,208 classes; the 859 classes and 351 structs whose
+  accessors look up a runtime cache are skipped), lays out 4,585 structs and
+  3,205 classes with 30,997 fields (22,794 typed), and pins the `self` of 5,739
+  vtable getters and 2,821 witness getters, for about 0.1 s and 3 MB over the
+  naming arm. The stage test `tests/stages/kuna-swifttypes.xml` runs the
+  stripped swiftc-built `swift_types_elf` with the arm off and on.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the

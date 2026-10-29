@@ -1283,6 +1283,8 @@ kuna_options! { self, p1;
             None => "Objective-C SDK headers off".to_string(),
         })
     },
+    "swiftmetadata" => on_off!(analysis_swiftmetadata, "Swift runtime-metadata recovery pass"),
+    "swifttypes" => on_off!(analysis_swifttypes, "Swift type layouts from static metadata"),
     "pdb" => on_off!(analysis_pdb, "PE PDB metadata recovery pass"),
     "relocobjects" => {
         let val = on_or_off(p1)?;

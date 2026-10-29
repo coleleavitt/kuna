@@ -128,6 +128,12 @@ pub struct ChainedFixups {
 }
 
 impl ChainedFixups {
+    /// An overlay from another loader's resolved pointer slots (an ELF's
+    /// `R_*_RELATIVE` addends), so a reader works the same on both formats.
+    pub fn from_rebases(rebases: HashMap<u64, u64>) -> ChainedFixups {
+        ChainedFixups { rebases, ..ChainedFixups::default() }
+    }
+
     /// Whether this image carried any chained-fixup rebases (`false` ⇒ the
     /// pointer overlay is a no-op; see [`Self::is_chained`] for the format probe).
     pub fn is_empty(&self) -> bool {

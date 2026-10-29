@@ -2120,7 +2120,9 @@ mod tests {
         // and kuna-objctypes / ObjC getters, setters and ivars typed by the class their property names
         // and kuna-ptrauthtrap / arm64e pointer-auth failure checks dropped
         // and kuna-authptrcall / arm64e calls through __auth_ptr named
-        assert_eq!(count, 598, "corpus file count drifted");
+        // and kuna-swiftdemangle / Swift symbols and ObjC runtime class names demangle
+        // and kuna-swiftmetadata / stripped Swift functions named from the swift5_* metadata
+        assert_eq!(count, 601, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

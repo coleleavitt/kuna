@@ -262,14 +262,16 @@ impl ObjcMetadataPass {
         selectors: &mut kuna_objcrefs::Selectors,
         out: &mut AnalysisOutput,
     ) {
+        let owner = class.split('(').next().unwrap_or(class);
+        let shown = format!("{}{}", display_class_name(owner), &class[owner.len()..]);
         for m in methods::walk_method_list(img, list_va, architecture) {
             selectors.record(&m.selector, m.types.as_deref());
             if m.imp == 0 {
                 continue;
             }
             // `-[Greeter greet:]` / `+[Greeter classMethod]` — the ObjC method name
-            // the printer renders. Selectors are ASCII, so no demangling.
-            let label = format!("{kind}[{class} {sel}]", sel = m.selector);
+            // the printer renders, a Swift class under its demangled name.
+            let label = format!("{kind}[{shown} {sel}]", sel = m.selector);
 
             // The IMP must exist as a function for the rename to bind, even when it
             // is reachable ONLY through the metadata (no call edge / no
@@ -295,7 +297,6 @@ impl ObjcMetadataPass {
             // The spelling the class's own property gives the selector, else the
             // agreed one (a property of another class naming the class), else the
             // method's own.
-            let owner = class.split('(').next().unwrap_or(class);
             let enc = selectors.encoding_for_class(owner, &m.selector).map(str::to_string).or_else(|| m.types.clone());
             if let Some(enc) = enc.as_deref() {
                 if let Some(pieces) = encoding::decode_method(&label, enc, tctx, None) {
@@ -323,7 +324,7 @@ fn emit_ivars(ivars: &[classt::Ivar], class: &str, objcivars: bool, out: &mut An
     for iv in ivars {
         out.data_objects.push(DataObjectFact {
             addr: iv.offset_va,
-            name: format!("{class}::{}", iv.name),
+            name: format!("{}::{}", display_class_name(class), iv.name),
             size: 4,
         });
         if objcivars {
@@ -334,6 +335,18 @@ fn emit_ivars(ivars: &[classt::Ivar], class: &str, objcivars: bool, out: &mut An
             });
         }
     }
+}
+
+/// The class name the labels render: the Swift demangling of an ObjC runtime
+/// name (`_TtC6Toyota3Foo` → `Toyota.Foo`) when `swiftdemangle` is on and the
+/// name is in the demangler's coverage, else the runtime spelling as is.
+fn display_class_name(runtime_name: &str) -> String {
+    if runtime_name.starts_with("_Tt") && kuna_decomp::kuna_swiftdemangle::swiftdemangle_enabled() {
+        if let Some(d) = crate::demangle::kuna_swift::demangle_swift_name(runtime_name) {
+            return d;
+        }
+    }
+    runtime_name.to_string()
 }
 
 /// Turn a selector (`greet:`, `setFoo:bar:`) into a symbol-name-safe token for a
@@ -354,6 +367,15 @@ mod tests {
         let p = ObjcMetadataPass;
         assert_eq!(p.id(), "objc");
         assert_eq!(p.phase(), Phase::P1);
+    }
+
+    #[test]
+    fn swift_runtime_class_names_demangle_for_labels() {
+        assert_eq!(display_class_name("Greeter"), "Greeter");
+        assert_eq!(display_class_name("_TtC6Toyota24AddMileageViewController"), "Toyota.AddMileageViewController");
+        assert_eq!(display_class_name("_TtCC6Toyota5Outer5Inner"), "Toyota.Outer.Inner");
+        // Outside the demangler's coverage the runtime spelling stays.
+        assert_eq!(display_class_name("_TtC1"), "_TtC1");
     }
 
     #[test]
