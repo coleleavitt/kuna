@@ -2116,7 +2116,7 @@ mod tests {
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-swiftdemangle / Swift symbols and ObjC runtime class names demangle
         // and kuna-swiftmetadata / stripped Swift functions named from the swift5_* metadata
-        assert_eq!(count, 594, "corpus file count drifted");
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
