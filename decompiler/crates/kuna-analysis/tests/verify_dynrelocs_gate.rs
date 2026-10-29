@@ -33,4 +33,25 @@ fn gate_off_is_inert_and_default_on_applies() {
         vec![(0x3d78u64, 0x3d7fu64), (0x3d80, 0x3d87)],
         "only the RELRO-covered slots"
     );
+    gate_covers_macho_chained_fixups();
+}
+
+/// The Mach-O arm obeys the same gate: `off` leaves every chained slot packed,
+/// on unpacks the rebases and declares the `__DATA_CONST` ones constant. Run
+/// from the ELF test above, not as its own `#[test]`: the gate is one
+/// process-global variable and two tests flipping it in parallel race.
+fn gate_covers_macho_chained_fixups() {
+    let path = format!("{}/tests/fixtures/macho_objc_refs_arm64", env!("CARGO_MANIFEST_DIR"));
+    let bytes = std::fs::read(&path).expect("Mach-O fixture");
+    let file = object::File::parse(&bytes[..]).expect("parse");
+
+    std::env::set_var(DYNRELOCS_ENV, "off");
+    let off = resolve(&file, &bytes);
+    std::env::remove_var(DYNRELOCS_ENV);
+    assert!(off.writes.is_empty() && off.const_ranges.is_empty(), "off must apply nothing");
+
+    let on = resolve(&file, &bytes);
+    assert!(on.writes.iter().any(|w| w.vma == 0x1000081f8 && w.value == 0x100000948), "the first selref unpacked");
+    assert!(on.const_ranges.contains(&(0x100004010, 0x100004017)), "__objc_classlist[0] in __DATA_CONST");
+    assert!(!on.const_ranges.iter().any(|&(lo, _)| lo == 0x1000081f8), "a __DATA selref is not RELRO");
 }

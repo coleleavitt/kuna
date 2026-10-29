@@ -15,7 +15,8 @@
 //! `__objc_classlist` on such a binary reads **garbage** — this is the
 //! prerequisite the design (§3.2 LOSS) flagged for arm64 ObjC.
 //!
-//! This module parses `LC_DYLD_CHAINED_FIXUPS`, follows every fixup chain, and
+//! This module parses `LC_DYLD_CHAINED_FIXUPS`, follows every fixup chain (a
+//! page with several chains lists its starts through `DYLD_CHAINED_PTR_START_MULTI`), and
 //! produces a flat **VMA → resolved-pointer** overlay so a downstream consumer
 //! (the ObjC walk; any future Swift/PDB-on-Mach-O reader) can read the *real*
 //! address at a slot via [`ChainedFixups::resolved_ptr`].
@@ -30,10 +31,14 @@
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
 //!   pointer is just `imagebase + target`.)
-//! - **Bind / import-ordinal chains — OUT OF SCOPE** (design §3.2). A bind entry
-//!   names an *external* symbol whose runtime address is unknown statically, so it
-//!   is simply **not entered** into the overlay (a consumer reading that slot
-//!   misses and falls back, never reads a wrong address).
+//! - **Bind / import-ordinal chains** — a bind entry names an *external* symbol
+//!   whose runtime address is unknown statically, so it is never entered into
+//!   the pointer overlay (a consumer reading that slot misses and falls back,
+//!   never reads a wrong address). Its import **name** is kept instead
+//!   ([`ChainedFixups::bind_name`]), resolved through the blob's imports table.
+//! - **`SG_READ_ONLY` segments** are recorded ([`ChainedFixups::in_readonly_segment`])
+//!   so a loader can treat the rebased slots dyld freezes as constant, the
+//!   Mach-O twin of the ELF `PT_GNU_RELRO` rule in `kuna_dynrelocs`.
 //!
 //! ## Faithfulness / no-op guarantee
 //!
@@ -45,6 +50,7 @@
 //! byte-identical to before this resolver existed.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 use object::FileKind;
@@ -64,11 +70,35 @@ mod ptr_format {
     pub const PTR_64_OFFSET: u16 = 6;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND` — arm64e, 8-byte stride, 32-bit
     /// image-base-relative target (offset form).
-    pub const ARM64E_USERLAND: u16 = 12;
+    pub const ARM64E_USERLAND: u16 = 9;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND24` — `_USERLAND` with a 24-bit ordinal
     /// (bind only differs; rebase decode is identical to `_USERLAND`).
-    pub const ARM64E_USERLAND24: u16 = 15;
+    pub const ARM64E_USERLAND24: u16 = 12;
 }
+
+/// Import-table formats from `fixup-chains.h` (`DYLD_CHAINED_IMPORT*`): the
+/// record width and where the symbol-name offset sits in it.
+mod import_format {
+    /// `dyld_chained_import` — `u32 { lib_ordinal:8, weak_import:1, name_offset:23 }`.
+    pub const IMPORT: u32 = 1;
+    /// `dyld_chained_import_addend` — the same `u32` followed by an `i32` addend.
+    pub const IMPORT_ADDEND: u32 = 2;
+    /// `dyld_chained_import_addend64` — `u64 { lib_ordinal:16, weak_import:1,
+    /// reserved:15, name_offset:32 }` followed by a `u64` addend.
+    pub const IMPORT_ADDEND64: u32 = 3;
+}
+
+/// `page_start[]` markers (`fixup-chains.h`): a page with no fixups, a page whose
+/// entry indexes an overflow list of several chain starts, and the flag on the
+/// last entry of such a list.
+const PTR_START_NONE: u16 = 0xFFFF;
+const PTR_START_MULTI: u16 = 0x8000;
+const PTR_START_LAST: u16 = 0x8000;
+
+/// `SG_READ_ONLY` (`mach-o/loader.h`): dyld maps the segment read-only once its
+/// fixups are applied. The modern linker sets it on `__DATA_CONST`, which makes
+/// it the Mach-O analog of ELF's `PT_GNU_RELRO`.
+const SG_READ_ONLY: u32 = 0x10;
 
 /// A resolved chained-fixup overlay: the real pointer value at each rebased VMA
 /// slot. Built once per Mach-O load by [`resolve_chained_fixups`]; consulted by
@@ -79,16 +109,34 @@ mod ptr_format {
 /// exactly as before).
 #[derive(Default, Debug, Clone)]
 pub struct ChainedFixups {
-    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup. Bind
-    /// fixups (external imports) are intentionally absent (out of scope).
+    /// Whether the image carries `LC_DYLD_CHAINED_FIXUPS` at all. A chained
+    /// image's pointer slots are packed entries even when every one of them is
+    /// a bind, so this — not the rebase count — says whether a raw slot word may
+    /// be read as a pointer.
+    chained: bool,
+    /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
     rebases: HashMap<u64, u64>,
+    /// `slot_vma → import symbol name` for every **bind** fixup whose ordinal
+    /// names an entry of the imports table (`_OBJC_CLASS_$_NSObject`, `_malloc`),
+    /// the name shared by every slot bound to the same import. The run-time
+    /// address is unknown statically, so a bind slot is never in
+    /// [`Self::rebases`]; this is what a consumer can still say about it.
+    binds: HashMap<u64, Rc<str>>,
+    /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
+    readonly_segments: Vec<(u64, u64)>,
 }
 
 impl ChainedFixups {
-    /// Whether this image carried any chained-fixup rebases (a quick "is this a
-    /// chained-fixup binary" probe; `false` ⇒ the resolver is a no-op).
+    /// Whether this image carried any chained-fixup rebases (`false` ⇒ the
+    /// pointer overlay is a no-op; see [`Self::is_chained`] for the format probe).
     pub fn is_empty(&self) -> bool {
         self.rebases.is_empty()
+    }
+
+    /// Whether the image carries `LC_DYLD_CHAINED_FIXUPS`, bind-only images
+    /// included.
+    pub fn is_chained(&self) -> bool {
+        self.chained
     }
 
     /// The resolved pointer at slot `va`, if `va` was a rebase fixup. `None` for a
@@ -101,6 +149,23 @@ impl ChainedFixups {
     /// Every resolved rebase target, in no particular order.
     pub fn targets(&self) -> impl Iterator<Item = u64> + '_ {
         self.rebases.values().copied()
+    }
+
+    /// Every `(slot_vma, resolved_pointer)` rebase, in no particular order.
+    pub fn rebases(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
+        self.rebases.iter().map(|(&va, &target)| (va, target))
+    }
+
+    /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
+    /// slot with a resolvable ordinal.
+    pub fn bind_name(&self, va: u64) -> Option<&str> {
+        self.binds.get(&va).map(|n| &**n)
+    }
+
+    /// Whether `va` lies in a segment dyld maps read-only after fixups
+    /// (`SG_READ_ONLY`, the `__DATA_CONST` convention).
+    pub fn in_readonly_segment(&self, va: u64) -> bool {
+        self.readonly_segments.iter().any(|&(lo, hi)| va >= lo && va < hi)
     }
 }
 
@@ -152,6 +217,7 @@ where
     // (for VMA↔fileoff arithmetic), harvested in one load-command pass.
     let mut fixups_range: Option<(u64, u64)> = None;
     let mut segs: Vec<SegInfo> = Vec::new();
+    let mut readonly_segments: Vec<(u64, u64)> = Vec::new();
     // The lowest segment vmaddr that maps file content is the image preferred
     // base (the imagebase the OFFSET formats add). __PAGEZERO (filesize 0) is
     // skipped so it does not win as the minimum.
@@ -166,6 +232,10 @@ where
             if filesize > 0 {
                 segs.push(SegInfo { vmaddr, fileoff, filesize });
                 imagebase = imagebase.min(vmaddr);
+            }
+            if segment.flags(endian) & SG_READ_ONLY != 0 {
+                let vmsize: u64 = segment.vmsize(endian).into();
+                readonly_segments.push((vmaddr, vmaddr.wrapping_add(vmsize)));
             }
             continue;
         }
@@ -189,9 +259,56 @@ where
         return empty;
     };
 
-    let mut out = ChainedFixups::default();
-    walk_fixups(blob, &segs, imagebase, bytes, &mut out);
+    let mut out = ChainedFixups { chained: true, readonly_segments, ..ChainedFixups::default() };
+    let imports = read_imports(blob);
+    walk_fixups(blob, &segs, imagebase, bytes, &imports, &mut out);
     out
+}
+
+/// The imports table of the chained-fixups blob: one symbol name per ordinal
+/// (`dyld_chained_fixups_header.imports_offset/imports_count/imports_format`,
+/// names in the uncompressed symbol pool at `symbols_offset`). Empty for a
+/// compressed symbol pool (`symbols_format != 0`) or an unknown record format,
+/// which leaves every bind slot unnamed (the inert path).
+fn read_imports(blob: &[u8]) -> Vec<Rc<str>> {
+    let (Some(imports_offset), Some(symbols_offset), Some(count), Some(format), Some(symbols_format)) =
+        (rd_u32(blob, 8), rd_u32(blob, 12), rd_u32(blob, 16), rd_u32(blob, 20), rd_u32(blob, 24))
+    else {
+        return Vec::new();
+    };
+    if symbols_format != 0 {
+        return Vec::new();
+    }
+    let record = match format {
+        import_format::IMPORT => 4,
+        import_format::IMPORT_ADDEND => 8,
+        import_format::IMPORT_ADDEND64 => 16,
+        _ => return Vec::new(),
+    };
+    let count = (count as usize).min(blob.len() / record);
+    let mut names = Vec::with_capacity(count);
+    let mut by_offset: HashMap<usize, Rc<str>> = HashMap::new();
+    let empty: Rc<str> = Rc::from("");
+    for i in 0..count {
+        let at = imports_offset as usize + i * record;
+        let name_offset = if record == 16 {
+            rd_u64(blob, at).map(|v| (v >> 32) as usize)
+        } else {
+            rd_u32(blob, at).map(|v| (v >> 9) as usize)
+        };
+        let Some(off) = name_offset else {
+            names.push(Rc::clone(&empty));
+            continue;
+        };
+        let name = by_offset.entry(off).or_insert_with(|| {
+            blob.get(symbols_offset as usize + off..)
+                .and_then(|tail| tail.split(|&b| b == 0).next())
+                .map(|s| Rc::from(String::from_utf8_lossy(s).as_ref()))
+                .unwrap_or_else(|| Rc::clone(&empty))
+        });
+        names.push(Rc::clone(name));
+    }
+    names
 }
 
 /// `dyld_chained_fixups_header` (fixup-chains.h): the only fields the rebase walk
@@ -201,6 +318,7 @@ fn walk_fixups(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
@@ -217,7 +335,7 @@ fn walk_fixups(
             // 0 = this segment has no fixups.
             continue;
         }
-        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, out);
+        walk_segment(blob, sio + seg_info_off as usize, segs, imagebase, file, imports, out);
     }
 }
 
@@ -228,6 +346,7 @@ fn walk_segment(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     // struct dyld_chained_starts_in_segment {
@@ -258,17 +377,29 @@ fn walk_segment(
     // VMA is `imagebase + segment_offset + page + start`. (lld writes
     // `segment_offset` as the segment's own `vmaddr - imagebase`, i.e. its
     // fileoff, so the chain head lands at the segment's first fixup byte.)
+    let page_starts = p + 22;
     for pi in 0..page_count as usize {
-        let Some(page_start) = rd_u16(blob, p + 22 + 2 * pi) else { continue };
-        // 0xFFFF (DYLD_CHAINED_PTR_START_NONE) = no fixups on this page.
-        if page_start == 0xFFFF {
+        let Some(page_start) = rd_u16(blob, page_starts + 2 * pi) else { continue };
+        if page_start == PTR_START_NONE {
             continue;
         }
-        let first_va = imagebase
-            + segment_offset
-            + (pi as u64) * (page_size as u64)
-            + page_start as u64;
-        walk_chain(file, segs, first_va, stride, pointer_format, imagebase, out);
+        let page_va = imagebase + segment_offset + (pi as u64) * (page_size as u64);
+        if page_start & PTR_START_MULTI == 0 {
+            walk_chain(file, segs, page_va + page_start as u64, stride, pointer_format, imagebase, imports, out);
+            continue;
+        }
+        // Several chains on one page: the low bits index the overflow list
+        // that follows `page_start[]`, its last entry flagged PTR_START_LAST.
+        let mut j = (page_start & !PTR_START_MULTI) as usize;
+        for _ in 0..0x8000u32 {
+            let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
+            let offset = (start & !PTR_START_LAST) as u64;
+            walk_chain(file, segs, page_va + offset, stride, pointer_format, imagebase, imports, out);
+            if start & PTR_START_LAST != 0 {
+                break;
+            }
+            j += 1;
+        }
     }
 }
 
@@ -282,6 +413,7 @@ fn walk_chain(
     stride: u64,
     pointer_format: u16,
     imagebase: u64,
+    imports: &[Rc<str>],
     out: &mut ChainedFixups,
 ) {
     let mut va = first_va;
@@ -293,6 +425,10 @@ fn walk_chain(
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
         if let Some(target) = decoded {
             out.rebases.insert(va, target);
+        } else if let Some(name) =
+            bind_ordinal(raw, pointer_format).and_then(|ord| imports.get(ord)).filter(|n| !n.is_empty())
+        {
+            out.binds.insert(va, Rc::clone(name));
         }
         if next == 0 {
             return;
@@ -361,6 +497,24 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         }
         // An unhandled format leaves the slot unresolved and stops the chain.
         _ => (0, None),
+    }
+}
+
+/// The import ordinal of a **bind** word, or `None` for a rebase. The ordinal
+/// width is the one place the arm64e variants differ: 16 bits for the plain
+/// `ARM64E`/`_USERLAND` forms, 24 for `_USERLAND24` and the generic 64-bit forms.
+fn bind_ordinal(raw: u64, pointer_format: u16) -> Option<usize> {
+    match pointer_format {
+        ptr_format::PTR_64 | ptr_format::PTR_64_OFFSET => {
+            ((raw >> 63) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+        }
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND => {
+            ((raw >> 62) & 1 == 1).then_some((raw & 0xFFFF) as usize)
+        }
+        ptr_format::ARM64E_USERLAND24 => {
+            ((raw >> 62) & 1 == 1).then_some((raw & 0xFF_FFFF) as usize)
+        }
+        _ => None,
     }
 }
 
@@ -472,6 +626,118 @@ mod tests {
     fn decode_unknown_format_is_inert() {
         let (next, target) = decode_ptr(0xDEAD_BEEF_0000_0000, 999, 0);
         assert_eq!((next, target), (0, None));
+    }
+
+    /// A page flagged `DYLD_CHAINED_PTR_START_MULTI` names an overflow list of
+    /// chain starts; every listed chain is walked, the `START_LAST` entry ends the
+    /// list, and a `START_NONE` page is still skipped.
+    #[test]
+    fn walk_segment_follows_multi_start_pages() {
+        // One 0x1000-byte segment mapped at the image base, file offset 0, holding
+        // two single-entry chains at page offsets 0x100 and 0x200 (PTR_64, next=0).
+        let imagebase = 0x1_0000_0000u64;
+        let mut file = vec![0u8; 0x2000];
+        file[0x100..0x108].copy_from_slice(&0x0000_0001_0000_0100u64.to_le_bytes());
+        file[0x200..0x208].copy_from_slice(&0x0000_0001_0000_0200u64.to_le_bytes());
+        file[0x1050..0x1058].copy_from_slice(&0x0000_0001_0000_0300u64.to_le_bytes());
+        let segs = [SegInfo { vmaddr: imagebase, fileoff: 0, filesize: 0x2000 }];
+
+        // dyld_chained_starts_in_segment: size, page_size 0x1000, format PTR_64,
+        // segment_offset 0, max_valid_pointer, page_count 2, page_start[2] =
+        // [MULTI | 2, 0x50], then the overflow list [0x100, 0x200 | LAST].
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&0x1000u16.to_le_bytes());
+        blob.extend_from_slice(&ptr_format::PTR_64.to_le_bytes());
+        blob.extend_from_slice(&0u64.to_le_bytes());
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&2u16.to_le_bytes());
+        blob.extend_from_slice(&(PTR_START_MULTI | 2).to_le_bytes());
+        blob.extend_from_slice(&0x50u16.to_le_bytes());
+        blob.extend_from_slice(&0x100u16.to_le_bytes());
+        blob.extend_from_slice(&(0x200u16 | PTR_START_LAST).to_le_bytes());
+
+        let mut out = ChainedFixups::default();
+        walk_segment(&blob, 0, &segs, imagebase, &file, &[], &mut out);
+        assert_eq!(out.resolved_ptr(imagebase + 0x100), Some(0x1_0000_0100));
+        assert_eq!(out.resolved_ptr(imagebase + 0x200), Some(0x1_0000_0200));
+        assert_eq!(out.resolved_ptr(imagebase + 0x1050), Some(0x1_0000_0300));
+        assert_eq!(out.rebases.len(), 3);
+
+        // The same segment with page 0 marked START_NONE walks only page 1.
+        blob[22..24].copy_from_slice(&PTR_START_NONE.to_le_bytes());
+        let mut out = ChainedFixups::default();
+        walk_segment(&blob, 0, &segs, imagebase, &file, &[], &mut out);
+        assert_eq!(out.rebases.len(), 1);
+    }
+
+    /// The bind ordinal is the low bits of a bind word, at the width of each
+    /// pointer format; a rebase word has none.
+    #[test]
+    fn bind_ordinal_widths() {
+        let bind64 = (1u64 << 63) | (3u64 << 51) | 0x12_3456;
+        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64), Some(0x12_3456));
+        assert_eq!(bind_ordinal(bind64, ptr_format::PTR_64_OFFSET), Some(0x12_3456));
+        assert_eq!(bind_ordinal(0x0000_0001_0000_8000, ptr_format::PTR_64), None);
+        let bind_e = (1u64 << 62) | (5u64 << 51) | 0xAB_CDEF;
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E), Some(0xCDEF));
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND), Some(0xCDEF));
+        assert_eq!(bind_ordinal(bind_e, ptr_format::ARM64E_USERLAND24), Some(0xAB_CDEF));
+        assert_eq!(bind_ordinal((1u64 << 63) | 0x8028, ptr_format::ARM64E), None);
+    }
+
+    /// A `DYLD_CHAINED_IMPORT` table: 23-bit name offsets into the uncompressed
+    /// symbol pool, read in ordinal order.
+    #[test]
+    fn read_imports_dyld_chained_import() {
+        let mut blob = vec![0u8; 28];
+        blob[8..12].copy_from_slice(&28u32.to_le_bytes()); // imports_offset
+        blob[12..16].copy_from_slice(&36u32.to_le_bytes()); // symbols_offset
+        blob[16..20].copy_from_slice(&2u32.to_le_bytes()); // imports_count
+        blob[20..24].copy_from_slice(&import_format::IMPORT.to_le_bytes());
+        blob.extend_from_slice(&((0u32 << 9) | 2).to_le_bytes()); // name_offset 0, lib 2
+        blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
+        blob.extend_from_slice(b"_ab\0_OBJC_CLASS_$_X\0");
+        let imports = read_imports(&blob);
+        let names: Vec<&str> = imports.iter().map(|n| &**n).collect();
+        assert_eq!(names, ["_ab", "_OBJC_CLASS_$_X"]);
+        blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
+        assert!(read_imports(&blob).is_empty());
+    }
+
+    /// The `macho_objc_refs_arm64` fixture: `__objc_classrefs[1]` is a bind of the
+    /// undefined `_OBJC_CLASS_$_Remote`, and `__DATA_CONST` is `SG_READ_ONLY`.
+    #[test]
+    fn fixture_bind_names_and_readonly_segments() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_objc_refs_arm64");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert_eq!(fixups.bind_name(0x100008230), Some("_OBJC_CLASS_$_Remote"));
+        assert_eq!(fixups.resolved_ptr(0x100008230), None);
+        assert_eq!(fixups.resolved_ptr(0x100008228), Some(0x100008050));
+        assert_eq!(fixups.bind_name(0x100004000), Some("_objc_msgSend"));
+        assert!(fixups.in_readonly_segment(0x100004000), "__DATA_CONST is SG_READ_ONLY");
+        assert!(!fixups.in_readonly_segment(0x100008228), "__DATA is writable");
+    }
+
+    /// `macho_bind_only_arm64` has `LC_DYLD_CHAINED_FIXUPS` with a single bind
+    /// and no rebase: the overlay is empty, but the image is still chained, so a
+    /// consumer must not read the packed bind word as a pointer.
+    #[test]
+    fn bind_only_image_is_chained() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_bind_only_arm64");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert!(fixups.is_chained());
+        assert!(fixups.is_empty(), "no rebase in the image");
+        assert_eq!(fixups.bind_name(0x100004000), Some("_ext"));
+        assert_eq!(fixups.resolved_ptr(0x100004000), None);
+
+        let classic = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_objc")).unwrap();
+        let classic_file = object::File::parse(classic.as_slice()).unwrap();
+        assert!(!resolve_chained_fixups(&classic_file, &classic).is_chained());
     }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
