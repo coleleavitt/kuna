@@ -1042,6 +1042,139 @@ covered by the resolver's synthetic-bit-pattern unit tests
 (`decode_arm64e_auth_rebase_strips_pac` et al.) since the in-container linker does
 not emit an arm64e auth-fixup slice.
 
+### `macho_objc_refs_arm64` — selector, class and super references + `__objc_stubs`
+
+`macho_objc_refs_arm64` (arm64, ~50 KB) is the fixture for the ObjC reference-slot
+naming (`analyzers/objc/kuna_objcrefs.rs`, stage test `tests/stages/kuna-objcrefs.xml`).
+Source `macho_objc_refs.m`: two root classes (`Base` with `+tag`, `-greet:`,
+`-count`; `Derived : Base` whose `-greet:` calls `[super greet:n]`), an `@interface
+Remote` with **no implementation** (so its `_OBJC_CLASS_$_Remote` is an undefined
+symbol resolved by dynamic lookup — a chained **bind** slot in `__objc_classrefs`),
+and four plain functions: `use` (a selref send + a stub send), `tag` (a classref
+receiver through a stub), `use2` (a stub send with an argument), `remote` (the bind
+classref). The committed `macho_objc_refs_arm64.s` is `clang -S` output with three
+sends hand-routed through linker stubs — the open-source clang has no
+`-fobjc-msgsend-selector-stubs`, so the `adrp/ldr x1` selref load is deleted and the
+`bl _objc_msgSend` replaced by `bl "_objc_msgSend$count"` (likewise `$tag`,
+`$greet:`); `ld64.lld -objc_stubs_fast` then synthesizes the `__objc_stubs` section
+and the selrefs the stubs load:
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_refs.m -o macho_objc_refs_arm64.s
+# edit: route the `count`, `tag` and second `greet:` sends through `_objc_msgSend$<sel>`
+clang -target arm64-apple-macos11 -c macho_objc_refs_arm64.s -o refs.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_refs_arm64 refs.o
+```
+
+ImageBase `0x100000000`, `DYLD_CHAINED_PTR_64` chained fixups, `SG_READ_ONLY` on
+`__DATA_CONST`. **Pinned VMAs:** `__objc_stubs`@`0x1000008c0` (three 32-byte
+entries: `objc_msgSend$count`@`0x1000008c0`, `$greet:`@`0x1000008e0`,
+`$tag`@`0x100000900`), `__objc_methname`@`0x100000942` (`count`, `tag`, `greet:`,
+`isa`), `__objc_superrefs`@`0x1000081f0` (one slot → `class_t Derived`@`0x100008050`),
+`__objc_selrefs`@`0x1000081f8` (six slots), `__objc_classrefs`@`0x100008228` (slot 0 a
+rebase → `Derived`, slot 1 `0x100008230` a bind → `_OBJC_CLASS_$_Remote`),
+`-[Derived greet:]` IMP@`0x1000007ec`. With `objc on` the super send reads
+`objc_msgSendSuper2(&v1, sel_greet_, arg1)` with `_OBJC_CLASS_$_Derived` in the super
+struct, `_use` calls `objc_msgSend$count(a0)`, `_use2` calls
+`objc_msgSend$greet:(a0, 5)` and `_remote` sends to `classRef_Remote`; off, the slots
+are `dat_1000081f8`/`dat_1000081f0`/`dat_100008230` and the stub is `sub_1000008c0`.
+
+### `macho_bind_only_arm64` — a chained-fixup image with no rebase
+
+`macho_bind_only_arm64` (arm64, ~33 KB) carries `LC_DYLD_CHAINED_FIXUPS` whose only
+fixup is a **bind**: `macho_bind_only.c` is `extern int ext; void *p = &ext;` plus an
+empty `main`, so the `__data` slot `p`@`0x100004000` binds `_ext` by dynamic lookup
+and nothing else in the image holds a pointer. It pins that a bind-only image is
+still *chained* (its slot words are packed entries, never pointers) even though the
+rebase overlay is empty. Build: `clang -target arm64-apple-macos11 -O1 -c
+macho_bind_only.c -o bo.o` then the `macho_objc_refs_arm64` link line without
+`-objc_stubs_fast`.
+
+### `macho_objc_meta_arm64` — categories, a protocol, ivars
+
+`macho_objc_meta_arm64` (arm64, ~51 KB) is the fixture for the ObjC category /
+protocol / instance-layout recovery (`analyzers/objc/kuna_objccats.rs`,
+`kuna_objcprotos.rs`, `kuna_objcivars.rs`; stage test `tests/stages/kuna-objcmeta.xml`).
+Source `macho_objc_meta.m`: root class `Base { Class isa; int count; double ratio;
+id name; }` with `-count`/`-setCount:`/`-ratio`; protocol `Greeter` (`-greet:`
+required, `-wave` optional); category `Base(Extra) <Greeter>` (`-greet:`,
+`+extraTag`); `@interface Remote` with **no implementation** and its category
+`Remote(Extra)` (`-remoteGreet:`, `+remoteTag`), so the category's class is an
+imported (bind) class; `Sub : Remote { int x; id tag; }` whose `-[Sub x]` reads
+`x` through the `__objc_ivar` offset variable (non-fragile, the superclass being
+external) while `Base`'s own methods use direct offsets; `use` sends `wave` through
+a linker stub. The committed `.s` is `clang -S` output with that one send routed
+through `_objc_msgSend$wave` and the `.globl` dropped from the `_OBJC_IVAR_$_`
+symbols so `-x` strips them as a shipped app does:
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_meta.m -o macho_objc_meta_arm64.s
+# edit: route the `wave` send through `_objc_msgSend$wave`; delete the `.globl _OBJC_IVAR_$_*` lines
+clang -target arm64-apple-macos11 -c macho_objc_meta_arm64.s -o meta.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_meta_arm64 meta.o
+```
+
+**Pinned VMAs:** `-[Base ratio]`@`0x100000830`, `-[Base(Extra) greet:]`@`0x10000083c`,
+`-[Sub x]`@`0x100000860` (reads the offset variable `Sub::x`@`0x100008388`),
+`objc_msgSend$wave`@`0x1000008e0`, `__objc_catlist`@`0x100004020` (two entries),
+`__objc_protolist`@`0x100004008` (`Greeter`), `__objc_ivar`@`0x100008378` (six
+offset variables). With `objc on` the categories render `-[Base(Extra) greet:]` /
+`+[Remote(Extra) remoteTag]`, `self` is `Base *` / `Sub *` and the ivars read
+`self->ratio`, `self->x`; with `objcivars off` `self` stays `objc_object *` and
+`-[Sub x]` reads `(int8)self + (int8)Sub::x`; with `objc off` the category methods
+are `sub_10000083c`… and the ivar load is `dat_100008388`.
+
+### `macho_objc_sdk_arm64` + `objc_sdk/Widget.h` — signatures from headers
+
+`macho_objc_sdk_arm64` (arm64, ~50 KB) is the fixture for the `objcsdk` header
+reader (`analyzers/objc/kuna_objcsdk.rs`, stage test `tests/stages/kuna-objcsdk.xml`).
+Source `macho_objc_sdk.m`: a root class `Widget` **declared and never implemented**
+(`setAlpha:`, `setFrame:`, `setTag:`, `isHidden`, `frame`, `insertSubview:atIndex:`)
+and one function `style` that sends all six, every send routed through a linker stub
+(the `.s` is `clang -S` output with each `adrp/ldr x1` selref load dropped and the
+`bl _objc_msgSend` replaced by `bl "_objc_msgSend$<sel>"`), so nothing in the image
+types the selectors. `objc_sdk/Widget.h` is a **hand-written** stand-in for an SDK
+header (no Apple text): `typedef`s (`CGFloat`, `NSInteger`, `NS_ENUM`, an
+`NSString *` typed enum, an opaque struct), a protocol with an `@optional` section,
+and an `@interface` with an ivar block, properties with `getter=` / `readonly` /
+`API_AVAILABLE(...)` trailers, a block parameter and by-value `CGRect`s. The
+`CGRect` in the `.m` is a local four-double struct standing in for CoreGraphics'.
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_sdk.m -o macho_objc_sdk_arm64.s
+# edit: route every send through `_objc_msgSend$<sel>` (drop the selref loads)
+clang -target arm64-apple-macos11 -c macho_objc_sdk_arm64.s -o sdk.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_sdk_arm64 sdk.o
+```
+
+**Pinned VMAs:** `_style`@`0x100000500`, `__objc_stubs`@`0x1000005a0` (six 32-byte
+entries, `objc_msgSend$frame` first), `__objc_selrefs`@`0x100008000`. With `objc on`
+alone `style` reads `objc_msgSend$setAlpha:();`; with `option objcsdk
+decompiler/crates/kuna-analysis/tests/fixtures/objc_sdk` it reads
+`objc_msgSend$setAlpha:(a1,a0);`, `v1 = objc_msgSend$frame(a1);` as a `CGRect` and
+`objc_msgSend$setFrame:(a1,v1.x,v1.y,v1.width + 10.0,v1.height);`.
+
+### `macho_objc_types_arm64` — declarations typed by class
+
+`macho_objc_types_arm64` (arm64, ~50 KB) is the fixture for class-typed
+declarations (`analyzers/objc/kuna_objcprops.rs`, stage test
+`tests/stages/kuna-objctypes.xml`). Source `macho_objc_types.m`: `Base { Class
+isa; int count; }` with a synthesized `count` property (attributes `Ti,N,Vcount`),
+`Holder : Base { Base *inner; }` with a synthesized `inner` property
+(`T@"Base",N,Vinner`), and `-[Holder innerCount]` reading `inner->count`,
+`[inner count]` and `[[self inner] count]`; the `.s` routes the `inner` send
+through `_objc_msgSend$inner` (same recipe as `macho_objc_meta_arm64`, `-x`
+link). **Pinned VMAs:** `-[Holder innerCount]`@`0x100000740`, `-[Holder
+inner]`@`0x100000798`, `-[Holder setInner:]`@`0x1000007a0`, `objc_msgSend$inner`@
+`0x1000007c0`. With `objc on` the body reads `v1 = self->inner->count;`, the
+getter is `Base * -[Holder inner](Holder *self, …)` and the setter takes `Base
+*arg1`; with `objcivars off` the getter keeps its `Base *` return (the property
+declares it) but `self` is untyped; with `objc off` everything is
+`sub_<addr>(void *a0)`.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate

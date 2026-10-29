@@ -295,6 +295,23 @@ pub struct FidMatch {
     pub name: String,
 }
 
+/// Which option decides whether a [`ConstRange`] is committed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConstGate {
+    /// `objcrefconst`: the ObjC selector/class/super/protocol reference slots.
+    ObjcRefs,
+    /// `objcivars`: the ObjC ivar offset variables in `__objc_ivar`.
+    ObjcIvars,
+}
+
+/// A `[first, last_open)` byte range whose contents the engine may fold.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ConstRange {
+    pub first: u64,
+    pub last_open: u64,
+    pub gate: ConstGate,
+}
+
 /// The facts one analysis contributes. Every field is additive and may be empty;
 /// merging two outputs is concatenation (the driver dedups by address).
 #[derive(Default, Debug)]
@@ -368,6 +385,15 @@ pub struct AnalysisOutput {
     pub call_returns: Vec<(u64, u64)>,
     /// Extra read-only address ranges (e.g. `.got` after relocation).
     pub readonly: Vec<(u64, u64)>,
+    /// (kuna) Ranges whose loaded contents are constant by construction, each
+    /// behind the option its [`ConstGate`] names. Committed like the `dynrelocs`
+    /// RELRO slots: painted read-only *and* foldable without the program-wide
+    /// `option readonly`. Produced only by the `objc` pass; empty otherwise.
+    pub const_ranges: Vec<ConstRange>,
+    /// (kuna `objcivars`) `(method label, Class *)`: the typed `self` of an
+    /// Objective-C method whose class got an instance struct. Applied to the
+    /// matching entry of [`Self::prototypes`] at the commit when the gate is on.
+    pub objc_self_types: Vec<(String, std::rc::Rc<kuna_decomp::dtype::Datatype>)>,
     /// (kuna) Address ranges holding an **external reference** — an import slot
     /// whose contents the dynamic loader fills in with the address of a function
     /// living in another image (a PE IAT entry or a typed Mach-O lazy/non-lazy
@@ -662,6 +688,8 @@ impl AnalysisOutput {
         self.no_fallthru_calls.extend(other.no_fallthru_calls);
         self.call_returns.extend(other.call_returns);
         self.readonly.extend(other.readonly);
+        self.const_ranges.extend(other.const_ranges);
+        self.objc_self_types.extend(other.objc_self_types);
         self.externref.extend(other.externref);
         self.strings.extend(other.strings);
         self.bounded_strings.extend(other.bounded_strings);

@@ -39,7 +39,9 @@
 //! ## Scope
 //!
 //! Linked images only (`ET_EXEC`/`ET_DYN`); an `ET_REL` `.o` takes the separate
-//! `relocobjects` layout path, which applies its own relocations. Architectures:
+//! `relocobjects` layout path, which applies its own relocations. A Mach-O's
+//! chained fixups are the same fact stream in Apple's format; they take the
+//! [`super::kuna_machorelocs`] arm under the same gate. Architectures:
 //! x86-64, AArch64, i386 and ARM — the four whose `RELATIVE`/`GLOB_DAT`/
 //! `JUMP_SLOT` triple is all that is needed. Both `RELA` (explicit addend) and
 //! `REL` (addend in the slot) tables are handled. Relocation kinds outside the
@@ -181,14 +183,18 @@ fn implicit_addend(file: &object::File, vma: u64, width: usize, le: bool) -> Opt
 /// knowable writes plus the RELRO-frozen subset of their slots.
 ///
 /// Returns an empty result — the byte-identical pre-fix behaviour — whenever
-/// `--option dynrelocs off` (env `KUNA_DYNRELOCS`), the file is not an ELF, the
-/// file is an `ET_REL` object (the `relocobjects` path owns those), or the
-/// machine is not one of the four handled. Never errors: a malformed entry is
-/// skipped, never applied on a guess.
+/// `--option dynrelocs off` (env `KUNA_DYNRELOCS`), the file is neither an ELF
+/// nor a Mach-O, the file is an `ET_REL` object (the `relocobjects` path owns
+/// those), or the machine is not one of the four handled. A Mach-O takes the
+/// chained-fixup arm in [`super::kuna_machorelocs`]. Never errors: a malformed
+/// entry is skipped, never applied on a guess.
 pub fn resolve(file: &object::File, bytes: &[u8]) -> DynRelocs {
     let mut out = DynRelocs::default();
     if !kuna_decomp::kuna_dynrelocs::dynrelocs_enabled() {
         return out;
+    }
+    if file.format() == object::BinaryFormat::MachO {
+        return super::kuna_machorelocs::resolve(file, bytes);
     }
     if file.format() != object::BinaryFormat::Elf {
         return out;
