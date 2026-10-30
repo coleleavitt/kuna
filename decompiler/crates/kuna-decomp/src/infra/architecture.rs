@@ -2587,6 +2587,14 @@ pub struct Architecture {
     /// (kuna) Apply compiler-spec prototype entry/return p-code (option
     /// `callmechanisms`).  See [`crate::kuna_callmechanisms`].
     pub call_mechanism_effects: bool,
+    /// (kuna `jumpassist`) The compiled `<jumpassist>` scripts.
+    jump_assists: Rc<crate::kuna_jumpassist::JumpAssists>,
+    /// (kuna) Recover switches from a jump-assist user-op (option `jumpassist`).
+    pub jump_assist: bool,
+    /// (kuna `dexmodel`) The loaded DEX file, when the image is one.
+    pub dex: Option<Rc<crate::kuna_dex::DexModel>>,
+    /// (kuna) Hand [`Self::dex`] to the engine (option `dexmodel`).
+    pub dex_model: bool,
     /// Comments for this architecture (C++ `commentdb`).  // STUB(comment.cc)
     pub commentdb: CommentDatabase,
 
@@ -3280,6 +3288,10 @@ impl Architecture {
             pcodeinjectlib: PcodeInjectLibrarySleigh::new(inject_tempbase),
             call_mechanisms: Rc::default(),
             call_mechanism_effects: false,
+            jump_assists: Rc::default(),
+            jump_assist: true,
+            dex: None,
+            dex_model: true,
             commentdb: CommentDatabase::new(),
             // C++ ctor leaves types/print/defaultfp null; init() fills them.
             types: Rc::new(TypeFactoryImpl::new()),
@@ -3420,6 +3432,8 @@ impl Architecture {
         self.cast_object = true; // (kuna) option castobject default-on: a stack local whose address only fills declared int * parameters, whose readers agree, is declared int; evidence in docs/features/castobject/default-on-evaluation.md
         self.end_ptr_bound = true; // (kuna) DIV-177 default-on: a pointer walk's end bound renders on its own buffer (0/675 ablation)
         self.cookie_scramble = true; // (kuna) DIV-126 default-on: an `xor rax,rsp` cookie mix no longer collapses the local-alias boundary to the bottom of the frame (0/675 ablation)
+        self.jump_assist = true; // (kuna) option jumpassist default-on: only the Dalvik and JVM specs declare a <jumpassist>, and no datatest uses either
+        self.dex_model = true; // (kuna) option dexmodel default-on: only a DEX image carries a model, so no other input changes
         self.call_mechanism_effects = false; // (kuna) option callmechanisms default-off: ppc_64_le.cspec's uponreturn stores r2Save at the ELFv1 TOC slot 0x28(r1), an ordinary frame slot under ELFv2
         self.callee_proto_stack = true; // (kuna) default-on (0/675 ablation): a locked callee prototype states how much it pops and how much of the caller's stack it can reach
         self.callee_pop = true; // (kuna) default-on (0/675 ablation): an unknown extrapop is read off the caller's push run instead of guessed as "pops nothing" (0/675 ablation)
@@ -4020,6 +4034,17 @@ impl Architecture {
             .ok_or_else(|| KunaError::recov(format!("Unknown function name: {name}")))
     }
 
+    /// (kuna `dexmodel`) The DEX model the engine may consult.
+    pub fn dex_model(&self) -> Option<&Rc<crate::kuna_dex::DexModel>> {
+        self.dex.as_ref().filter(|_| self.dex_model)
+    }
+
+    /// (kuna `dexmodel`) The constant-pool record for `refs` (C++
+    /// `glb->cpool->getRecord`).  Only a DEX image has a pool.
+    pub fn cpool_record(&self, refs: &[u64]) -> Option<Rc<crate::cpool::CPoolRecord>> {
+        self.dex_model()?.record(refs, self.types())
+    }
+
     /// Park a source-declared prototype on the named global FunctionSymbol (C++
     /// `Architecture::setPrototype`: `queryFunction(name)->getFuncProto()` is locked
     /// from the parsed declaration).  A caller's `ActionDefaultParams::apply` later
@@ -4097,6 +4122,10 @@ impl Architecture {
         let mut ctx = ArchContext::new_shared(manage);
         ctx.call_mechanisms = Rc::clone(&self.call_mechanisms);
         ctx.call_mechanism_effects = self.call_mechanism_effects; // callmechanisms
+        ctx.dex = self.dex_model().cloned(); // dexmodel
+        if self.jump_assist {
+            ctx.jump_assists = Rc::clone(&self.jump_assists); // jumpassist
+        }
         ctx.min_laned_register_size = self.get_minimum_laned_register_size();
         // Carry the laned-register table so the per-function Funcdata reaches
         // `glb->getLanedRegister` (C++ `Architecture::lanerecords`); cheap clones
@@ -4274,6 +4303,7 @@ impl Architecture {
         ctx.ptrdepthcap = self.ptrdepthcap; // (kuna) ptrdepthcap
         ctx.call_target_type = self.call_target_type && self.ctypes; // (kuna) calltargettype: only C's own spelling needs it
         ctx.call_target_c = ctx.call_target_type && self.print.out_lang() == crate::kuna_lang::OutLang::C; // (kuna) calltargettype
+        ctx.java_casts = self.print.out_lang() == crate::kuna_lang::OutLang::Java;
         if self.float_globals {
             ctx.float_globals = self.kuna_float_globals.clone(); // (kuna) floatglobals
             ctx.float_globals_pending = self.kuna_float_globals.is_none() && self.kuna_float_scan.is_some();
@@ -5219,6 +5249,30 @@ impl Architecture {
             }
             Ok(())
         })();
+        let fixup_res = fixup_res.and_then(|()| {
+            // C++ `parseProcessorConfig`'s ELEM_JUMPASSIST branch
+            // (`userops.decodeJumpAssist`): the Dalvik and JVM switch scripts.
+            let Some(xml) = self.pspec_xml.clone() else {
+                return Ok(());
+            };
+            let mut store = DocumentStorage::new();
+            let root = store.parse_document(&xml)?.get_root().clone();
+            let assists: Vec<Rc<kuna_base::xml::Element>> = root
+                .get_children()
+                .iter()
+                .filter(|c| c.get_name() == "jumpassist")
+                .cloned()
+                .collect();
+            let manager = self.translate.manager_rc();
+            let mut registry = IdRegistry::with_base_ids();
+            crate::pcodeinject::register_ids(&mut registry);
+            crate::userop::register_ids(&mut registry);
+            for assist in assists.iter() {
+                let mut decoder = XmlDecode::new_with_root(&manager, &registry, assist, 0);
+                userops.decode_jump_assist(&mut decoder, self)?;
+            }
+            Ok(())
+        });
         self.userops = userops;
         fixup_res?;
 
@@ -5254,6 +5308,7 @@ impl Architecture {
         };
         if parse_res.is_ok() {
             self.call_mechanisms = Rc::new(crate::kuna_callmechanisms::Mechanisms::from_library(&lib));
+            self.jump_assists = Rc::new(crate::kuna_jumpassist::JumpAssists::from_library(&self.userops, &lib));
         }
         self.pcodeinjectlib = lib;
         parse_res

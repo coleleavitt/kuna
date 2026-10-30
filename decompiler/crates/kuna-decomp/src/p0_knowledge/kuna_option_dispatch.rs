@@ -822,6 +822,8 @@ kuna_options! { self, p1;
     "reglocals" => on_off!(reg_locals, "register-local reporting"),
     "slotreport" => on_off!(slot_report, "frame-slot local reporting"),
     "callmechanisms" => on_off!(call_mechanism_effects, "compiler prototype call mechanisms"),
+    "dexmodel" => on_off!(dex_model, "DEX constant pool and register payloads"),
+    "jumpassist" => on_off!(jump_assist, "jump-assist switch recovery"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
     "castimplied" => on_off!(cast_implied, "C-implied cast elision"),

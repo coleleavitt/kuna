@@ -112,7 +112,7 @@ pub const CAPABILITY_IS_DEFAULT: bool = true;
 // in source order; keeping them positional makes the `tokens::*` table a
 // line-for-line transcription of the printc.cc table.
 #[allow(clippy::too_many_arguments)]
-const fn op_token(
+pub(crate) const fn op_token(
     print1: &'static str,
     print2: &'static str,
     stage: int4,
@@ -2941,7 +2941,14 @@ impl PrintC {
         arch: &Architecture,
         markup: &MarkupRef,
     ) {
-        let display = fd.get_display_name().to_string();
+        let mut display = fd.get_display_name().to_string();
+        // (kuna java) `PrintJava::docFunction` prints in the scope of the class, so
+        // the method name stands alone.
+        if self.out_lang == crate::kuna_lang::OutLang::Java {
+            if let Some((_, base)) = display.rsplit_once("::") {
+                display = base.to_string();
+            }
+        }
         // Return type from the recovered proto output (C++ `getFuncProto().
         // getOutputType()`), defaulting to "void".  The output storage/type is
         // recovered by `ActionOutputPrototype` (the stand-alone `ProtoStoreInternal`
@@ -3091,8 +3098,11 @@ impl PrintC {
             return;
         }
         let sz = proto.num_params();
+        let java = self.out_lang == crate::kuna_lang::OutLang::Java;
         if sz == 0 {
-            self.emit.tag_type("void", SyntaxHighlight::TypeColor, markup);
+            if !java {
+                self.emit.tag_type("void", SyntaxHighlight::TypeColor, markup);
+            }
         } else {
             let mut print_comma = false;
             for i in 0..sz {
@@ -3100,6 +3110,11 @@ impl PrintC {
                     Some(p) => p,
                     None => continue,
                 };
+                // (kuna java) `PrintJava` sets `hide_thisparam`.
+                if java && param.is_this_pointer() {
+                    self.signature_param_names.insert(i, param.get_name().to_string());
+                    continue;
+                }
                 // hide_thisparam + isThisPointer: the `this`-pointer hiding is the
                 // C++ option/class-method surface (no `this` on the recovery path).
                 // C++ `emit->print(COMMA)` with `COMMA = ","` — no trailing space.
@@ -6170,6 +6185,8 @@ impl PrintC {
             // `name(arg,...)` for a black-box op, `display_string` for the
             // internal-string builtin, or the no-operator/annotation forms.
             OpCode::CPUI_CALLOTHER => self.op_callother_ir(fd, arch, op),
+            OpCode::CPUI_CPOOLREF => self.op_cpoolref_ir(fd, arch, op),
+            OpCode::CPUI_NEW => self.op_new_ir(fd, arch, op),
             // FLOAT_INT2FLOAT (printc.cc:850 opFloatInt2Float): the int->float
             // conversion renders as a `(floatN)input` cast (NOT a functional
             // `FLOAT_INT2FLOAT(input)`), absorbing an implied INT_ZEXT on its
@@ -7862,6 +7879,10 @@ impl PrintC {
         let nin = fd.obank().get(op).map(|o| o.num_input()).unwrap_or(0);
         let proto = fd.get_call_specs_index(op).map(|index| fd.get_call_specs(index).proto());
         self.push_word_result_open(fd, arch, op);
+        if opc == OpCode::CPUI_CALLIND && self.out_lang == crate::kuna_lang::OutLang::Java {
+            self.java_callind_ir(fd, arch, op);
+            return;
+        }
         self.push_op(&tokens::FUNCTION_CALL, Some(op_key(op)));
 
         if opc == OpCode::CPUI_CALLIND {
@@ -8268,6 +8289,10 @@ impl PrintC {
     /// as an explicit `*ptr`.  A statement LOAD through the byte-copy helper copies
     /// straight into its printed destination member's scalar type.
     fn op_load_ir(&mut self, fd: &Funcdata, arch: &Architecture, op: OpId) {
+        if self.out_lang == crate::kuna_lang::OutLang::Java {
+            self.java_load_ir(fd, arch, op);
+            return;
+        }
         if self.out_lang == crate::kuna_lang::OutLang::C {
             if let Some(mut access) = crate::kuna_stackmem::access(fd, op) {
                 if self.stmt_op == Some(op) {
@@ -8321,6 +8346,10 @@ impl PrintC {
     /// notation absorbing the deref).  A byte-copy helper's compound initializer
     /// takes the rendered source member's scalar type, so it copies those bits.
     fn op_store_ir(&mut self, fd: &Funcdata, arch: &Architecture, op: OpId) {
+        if self.out_lang == crate::kuna_lang::OutLang::Java {
+            self.java_store_ir(fd, arch, op);
+            return;
+        }
         if self.out_lang == crate::kuna_lang::OutLang::C {
             if let Some(mut access) = crate::kuna_stackmem::access(fd, op) {
                 if let Some(target) = access.value.and_then(|value| self.partial_piece_type(fd, arch, value, op, 2))
@@ -11459,6 +11488,15 @@ impl PrintC {
     /// optional `L` wide prefix, then the escaped contents between quotes (with the
     /// truncation marker when the literal was clipped).  Returns `false` when no
     /// string data is available.
+    /// One codepoint of a string literal, escaped for the output language.
+    fn push_escaped_codepoint(&self, s: &mut String, codepoint: int4) {
+        match self.lang().forms.string_escape {
+            crate::kuna_lang::StringEscape::CEscapes => print_unicode(s, codepoint),
+            crate::kuna_lang::StringEscape::RustEscapes => print_unicode_rust(s, codepoint),
+            crate::kuna_lang::StringEscape::JavaEscapes => crate::kuna_langjava::print_unicode_java(s, codepoint),
+        }
+    }
+
     fn print_character_constant(
         &self,
         arch: &Architecture,
@@ -11501,10 +11539,7 @@ impl PrintC {
             if codepoint == 0 || codepoint == -1 {
                 break;
             }
-            match self.lang().forms.string_escape {
-                crate::kuna_lang::StringEscape::CEscapes => print_unicode(s, codepoint),
-                crate::kuna_lang::StringEscape::RustEscapes => print_unicode_rust(s, codepoint),
-            }
+            self.push_escaped_codepoint(s, codepoint);
             *chars_emitted += 1;
             i += skip;
         }
@@ -12511,7 +12546,8 @@ impl IntegerLiteral {
 fn cast_strategy_for(arch: &Architecture) -> Option<CastStrategyC> {
     let tlst = arch.types_rc() as std::rc::Rc<dyn crate::dtype::TypeFactory>;
     let c = arch.call_target_type && arch.ctypes && arch.print().out_lang() == crate::kuna_lang::OutLang::C;
-    Some(CastStrategyC::new(tlst).with_record_identity(c))
+    let java = arch.print().out_lang() == crate::kuna_lang::OutLang::Java;
+    Some(CastStrategyC::new(tlst).with_record_identity(c).with_java(java))
 }
 
 struct PointerView<'a> {
@@ -12899,6 +12935,8 @@ fn to_emit_hl(hl: crate::printlanguage::SyntaxHighlight) -> SyntaxHighlight {
         Pl::special_color => SyntaxHighlight::SpecialColor,
     }
 }
+
+mod kuna_cpoolprint;
 
 #[cfg(test)]
 mod tests;
