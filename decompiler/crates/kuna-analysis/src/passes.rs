@@ -498,6 +498,7 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     if format == object::BinaryFormat::MachO {
         passes.push(Box::new(crate::iokit::IokitClassesPass));
         passes.push(Box::new(crate::iokit::XnuTablesPass));
+        passes.push(Box::new(crate::iokit::OsClassInfoPass));
     }
 
     // S1 Mach-O Objective-C metadata recovery (ObjcMetadataPass): when the binary
@@ -1894,7 +1895,7 @@ mod tests {
         let macho_neutral: Vec<&str> = macho
             .iter()
             .copied()
-            .filter(|&p| !matches!(p, "peimportcall" | "authptrcall" | "cfstrings" | "iokitclasses" | "xnutables" | "objc"))
+            .filter(|&p| !matches!(p, "peimportcall" | "authptrcall" | "cfstrings" | "iokitclasses" | "xnutables" | "osclassinfo" | "objc"))
             .collect();
         assert!(!elf_neutral.contains(&"itaniumrtti"));
         assert_eq!(

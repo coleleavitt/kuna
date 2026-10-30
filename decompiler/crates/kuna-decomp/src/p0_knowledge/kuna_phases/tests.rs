@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_356() {
-    assert_eq!(kuna_num_settables(), 356);
-    assert_eq!(SETTABLE_TABLE.len(), 356);
+fn settable_count_is_357() {
+    assert_eq!(kuna_num_settables(), 357);
+    assert_eq!(SETTABLE_TABLE.len(), 357);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_101_analysis() {
+fn tier_counts_are_121_core_134_transform_102_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_101_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 101));
+    assert_eq!((core, transform, analysis), (121, 134, 102));
 }
 
 #[test]
@@ -526,6 +526,8 @@ fn option_values_live_value_present_for_156() {
         "iokitclasses",
         // (kuna) XNU data tables -- the same kind of gate. Default-on.
         "xnutables",
+        // (kuna) DriverKit __osclassinfo records -- the same kind of gate. Default-on.
+        "osclassinfo",
         // (kuna) The Swift calling-convention arm's gate, read inside that pass.
         "swiftcall",
         // (kuna) PE PDB metadata recovery — an analysis-pass gate with no codegen
@@ -1165,7 +1167,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `swiftcall`, beside `swifttypes`.
     // +1 for `iokitclasses`, beside `cfstrings`.
     // +1 for `xnutables`, beside `iokitclasses`.
-    assert_eq!(json.matches("},\n").count(), 355);
+    // +1 for `osclassinfo`, beside `xnutables`.
+    assert_eq!(json.matches("},\n").count(), 356);
 }
 
 #[test]

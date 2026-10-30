@@ -111,3 +111,25 @@ fn names_kalloc_views_and_dispatch_tables() {
     let names: Vec<&str> = out.fid_names.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Derived::externalMethod_0", "Derived::externalMethod_1", "Derived::externalMethod_2", "Derived::externalMethod_3"]);
 }
+
+#[test]
+fn reads_driverkit_class_records() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/kernelcache/dext_osclassinfo.macho");
+    let bytes = std::fs::read(path).unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let img = MachoImage::with_fixups(&file, resolve_chained_fixups(&file, &bytes));
+    let b = 0x1_0000_0000u64;
+    assert_eq!(
+        osclassinfo::classes(&file, &img),
+        [osclassinfo::DextClass {
+            name: "MyDriver".into(),
+            super_name: "IOService".into(),
+            load_info: b + 0x4000,
+            description: b + 0x2000,
+            description_size: 0x138,
+            meta_pointer: b + 0x8000,
+            instance_size: 0x40,
+            new: b + 0x1000,
+        }]
+    );
+}

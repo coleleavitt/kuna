@@ -352,3 +352,7 @@ the merged image names the kernel object the kext points at.
 
 `kuna-xnutables.xml` decompiles the same synthetic kext with `xnutables` off and
 on: a `kalloc_type` view and an `IOExternalMethodDispatch` handler gain names.
+
+`kuna-osclassinfo.xml` decompiles a synthetic DriverKit executable
+(`gen_dext.py`) with `osclassinfo` off and on: its metaclass global and `New`
+function take their class's name.

@@ -1302,6 +1302,7 @@ kuna_options! { self, p1;
     "cfstrings" => on_off!(analysis_cfstrings, "Mach-O __cfstring constant-string recovery pass"),
     "iokitclasses" => on_off!(analysis_iokitclasses, "IOKit class and vtable recovery"),
     "xnutables" => on_off!(analysis_xnutables, "XNU kalloc_type / external-method / pointer-slot naming"),
+    "osclassinfo" => on_off!(analysis_osclassinfo, "DriverKit __osclassinfo class records"),
     "swiftcall" => on_off!(analysis_swiftcall, "Swift calling convention on methods and witnesses"),
     "pdb" => on_off!(analysis_pdb, "PE PDB metadata recovery pass"),
     "relocobjects" => {

@@ -7894,6 +7894,26 @@ symptoms = "a user client's external methods are sub_<addr> with no selector num
 
 
 [[settable]]
+option = "osclassinfo"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-osclassinfo"
+summary = "Read a DriverKit extension's class records. A Mach-O with an __osclassinfo section lists every class it defines there: an array of pointers to OSClassLoadInformation records (0xa0 bytes: description, metaPointer, version, instanceSize, eight reserved words, New, eight more), each pointing at an OSClassDescription (descriptionSize, name[96], superName[96], then the method-option, queue-name and method-name tables). A record is used when it and its description are mapped, descriptionSize is at least the fixed 0x138 bytes, and the name is a C identifier. Emits sized data objects <Name>_Class (the load-information record), <Name>_ClassDescription and g<Name>MetaClass (the global metaPointer points at), and names the New function <Name>_New, adding it as a function entry. The names are the class's own, so no code is read."
+use_when = "On (default): a dext's class records, metaclass globals and New functions carry their class names even when stripped. Flip off to see only what the symbol table names."
+example = "option osclassinfo off"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 dku.so __osclassinfo pass (OSClassLoadInformation / OSClassDescription, %s_Class, g%sMetaClass, %s_New)"
+change_kind = "new-analysis"
+tier = "analysis"
+symptoms = "a DriverKit dext's metaclass globals render as dat_<addr>|a dext's class New functions are sub_<addr>|__osclassinfo records are unnamed data"
+
+
+[[settable]]
 option = "pdb"
 values = "on|off"
 default = "on"

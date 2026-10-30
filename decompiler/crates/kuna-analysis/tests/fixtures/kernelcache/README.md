@@ -20,3 +20,10 @@ registers `Base` and `Derived` through an unnamed constructor and stores their
 metaclass vtables; each class has a vtable with its `getMetaClass()`; `Derived`
 overrides `Base::m2` and adds one method. Only `meta_of_derived`, `Base::m1` and
 `Base::m2` have symbols, and pointers are plain absolute words.
+
+`dext_osclassinfo.macho` (written by `gen_dext.py`) is a stripped arm64
+DriverKit-style executable for the `osclassinfo` pass: one `__osclassinfo`
+pointer to an `OSClassLoadInformation` record for `MyDriver` (superclass
+`IOService`, 0x40 bytes) with its `OSClassDescription`, metaclass global and
+`New` function. No DriverKit binary was available on this machine, so the layout
+follows DriverKit's `OSMetaClass.h` record declarations.

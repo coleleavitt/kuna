@@ -868,6 +868,9 @@ Three tiers:
 | an IOExternalMethodDispatch table renders as dat_<addr> | [`xnutables`](#xnutables) |
 | a kalloc_type_impl call passes dat_<addr> instead of a named view | [`xnutables`](#xnutables) |
 | a got slot in a stripped kext has no name | [`xnutables`](#xnutables) |
+| a DriverKit dext's metaclass globals render as dat_<addr> | [`osclassinfo`](#osclassinfo) |
+| a dext's class New functions are sub_<addr> | [`osclassinfo`](#osclassinfo) |
+| __osclassinfo records are unnamed data | [`osclassinfo`](#osclassinfo) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
 | pdb symbol names not applied to a pe | [`pdb`](#pdb) |
 | a .pdb beside the exe is ignored | [`pdb`](#pdb) |
@@ -3223,6 +3226,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default): a user client's selector table and its handlers carry selector numbers even when stripped, and allocation sites name their kalloc_type views. Flip off to see only what the symbol table names.
 - **Where / provenance:** P1/external-refinement · ida · new-analysis · kuna-xnutables
 - **Example:** `option xnutables off`
+
+### `osclassinfo` -- on | off, default `on`
+
+- **Symptoms:** a DriverKit dext's metaclass globals render as dat_<addr>; a dext's class New functions are sub_<addr>; __osclassinfo records are unnamed data.
+- **What it does:** Read a DriverKit extension's class records. A Mach-O with an __osclassinfo section lists every class it defines there: an array of pointers to OSClassLoadInformation records (0xa0 bytes: description, metaPointer, version, instanceSize, eight reserved words, New, eight more), each pointing at an OSClassDescription (descriptionSize, name[96], superName[96], then the method-option, queue-name and method-name tables). A record is used when it and its description are mapped, descriptionSize is at least the fixed 0x138 bytes, and the name is a C identifier. Emits sized data objects <Name>_Class (the load-information record), <Name>_ClassDescription and g<Name>MetaClass (the global metaPointer points at), and names the New function <Name>_New, adding it as a function entry. The names are the class's own, so no code is read.
+- **When to flip:** On (default): a dext's class records, metaclass globals and New functions carry their class names even when stripped. Flip off to see only what the symbol table names.
+- **Where / provenance:** P1/external-refinement · ida · new-analysis · kuna-osclassinfo
+- **Example:** `option osclassinfo off`
 
 ### `pdb` -- on | off, default `on`
 

@@ -2134,7 +2134,8 @@ mod tests {
         // and kuna-iokitclasses / IOKit class and vtable recovery
         // and kuna-kernelcache-merge / several kernel-collection entries in one image
         // and kuna-xnutables / kalloc_type views and external-method tables
-        assert_eq!(count, 614, "corpus file count drifted");
+        // and kuna-osclassinfo / DriverKit class records
+        assert_eq!(count, 615, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

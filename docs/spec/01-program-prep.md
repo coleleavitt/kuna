@@ -4088,6 +4088,20 @@ every other binary's pass list is byte-identical to before the pass existed):
   views, 1,687 var views and 56 dispatch tables (901 records); in IOSurface,
   `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
   `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)`.
+- **DriverKit class records** (kuna, `osclassinfo`, Mach-O with an
+  `__osclassinfo` section, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/iokit/osclassinfo.rs (classes)`):
+  a DriverKit extension lists every class it defines as pointers to
+  `OSClassLoadInformation` records (0xa0 bytes: `description`, `metaPointer`,
+  `version`, `instanceSize`, eight reserved words, `New`, eight more), each
+  pointing at an `OSClassDescription` (`descriptionSize`, `name[96]`,
+  `superName[96]`, then the size/offset pairs of the method-option,
+  queue-name and method-name tables, 0x138 bytes before the tables). A record
+  is used when it and its description are mapped, `descriptionSize` is at
+  least 0x138 and the name is a C identifier. It yields sized data objects
+  `<Name>_Class`, `<Name>_ClassDescription` and `g<Name>MetaClass` (the global
+  `metaPointer` points at), and names `New` `<Name>_New`, adding it as an
+  entry. The names come from the records, so nothing is inferred from code.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the
