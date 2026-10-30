@@ -8630,3 +8630,22 @@ inspiration = "IDA 9.5 uefi.so load-time half (entry prototype, shipped-table si
 change_kind = "analysis-enablement"
 tier = "analysis"
 symptoms = "an EFI driver entry point takes two undefined8 parameters|a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...)|a protocol GUID in .data is an unnamed 16-byte blob|a DXE core's static boot-services table is raw words"
+
+[[settable]]
+option = "storetype"
+values = "off|uefi|all"
+default = "uefi"
+destructive = false
+phase = "P5"
+subphase = "type-propagation"
+strength = "HINT"
+rewind = "P5"
+issue = "ida95-54"
+summary = "Type a global from the values the program stores into it, across a whole-program batch (decompile-all, decompile-project). The function that stores `gBS = SystemTable->BootServices` is the only one that knows the global is an EFI_BOOT_SERVICES *; every function that reads it sees an untyped word and renders each service call as an offset off it. After each decompile of the batch a ledger records the type every written global took in that function and which functions refer to each global. After the batch, a global every store types alike as a pointer to a named, complete structure is committed with that type (typelock), keeping a name a symbol already gives it, and the functions that refer to it are decompiled again; a second round covers a value read through a global typed in the first. An EFI service-table pointer gets its EDK2 name (gBS, gST, gRT, gDS) when it had none. `uefi` admits only pointers to EFI_* structures, which only the `uefi` pass builds, so it acts on UEFI modules alone; `all` admits any named, complete structure or union except synthesized struct_N and anon_ records. A single-function decompile has no batch and is unchanged."
+use_when = "Default `uefi`: a UEFI driver's gBS/gST/gRT read in every helper as typed tables (gBS->AllocatePool(...)) instead of (**(code **)(dat_1a70 + 0x40))(...). Flip to `all` to type other globals the same way (a FILE * a program caches, a context pointer) on any binary; flip `off` to compare."
+example = "option storetype all"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 uefi.so global resolution (sub_45580/sub_49dc0/sub_48a80, the 'stored into' commit sub_23840) and Kuna's elemptr record-decide-redo ledger"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "a global holding a service table is an untyped dat_ word in every function but the one that stores it|a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool|the same global prints typed in one function and untyped in the next"

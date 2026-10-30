@@ -890,6 +890,9 @@ Three tiers:
 | a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...) | [`uefi`](#uefi) |
 | a protocol GUID in .data is an unnamed 16-byte blob | [`uefi`](#uefi) |
 | a DXE core's static boot-services table is raw words | [`uefi`](#uefi) |
+| a global holding a service table is an untyped dat_ word in every function but the one that stores it | [`storetype`](#storetype) |
+| a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool | [`storetype`](#storetype) |
+| the same global prints typed in one function and untyped in the next | [`storetype`](#storetype) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3267,6 +3270,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default; it only acts on EFI-subsystem PE images, so every other input is byte-identical. Flip off to see the module without the EFI types: the entry then takes two untyped words and every service call is an indirect call through an offset.
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-53
 - **Example:** `option uefi off`
+
+### `storetype` -- off | uefi | all, default `uefi`
+
+- **Symptoms:** a global holding a service table is an untyped dat_ word in every function but the one that stores it; a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool; the same global prints typed in one function and untyped in the next.
+- **What it does:** Type a global from the values the program stores into it, across a whole-program batch (decompile-all, decompile-project). The function that stores `gBS = SystemTable->BootServices` is the only one that knows the global is an EFI_BOOT_SERVICES *; every function that reads it sees an untyped word and renders each service call as an offset off it. After each decompile of the batch a ledger records the type every written global took in that function and which functions refer to each global. After the batch, a global every store types alike as a pointer to a named, complete structure is committed with that type (typelock), keeping a name a symbol already gives it, and the functions that refer to it are decompiled again; a second round covers a value read through a global typed in the first. An EFI service-table pointer gets its EDK2 name (gBS, gST, gRT, gDS) when it had none. `uefi` admits only pointers to EFI_* structures, which only the `uefi` pass builds, so it acts on UEFI modules alone; `all` admits any named, complete structure or union except synthesized struct_N and anon_ records. A single-function decompile has no batch and is unchanged.
+- **When to flip:** Default `uefi`: a UEFI driver's gBS/gST/gRT read in every helper as typed tables (gBS->AllocatePool(...)) instead of (**(code **)(dat_1a70 + 0x40))(...). Flip to `all` to type other globals the same way (a FILE * a program caches, a context pointer) on any binary; flip `off` to compare.
+- **Where / provenance:** P5/type-propagation · ida · analysis-enablement · ida95-54
+- **Example:** `option storetype all`
 
 ## Core rendering defaults
 

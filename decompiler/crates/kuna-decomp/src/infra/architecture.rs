@@ -1650,6 +1650,10 @@ pub struct Architecture {
     /// (kuna `elemptr`) What each function of a batch said about each global,
     /// and the globals each must not type because another disagrees.
     pub kuna_elemptr: crate::kuna_elemptr::Ledger,
+    /// (kuna `storetype`) The globals a batch stored typed values into.
+    pub kuna_storetype: crate::kuna_storetype::Ledger,
+    /// (kuna `storetype`) Which stored types may type a global.
+    pub storetype: crate::kuna_storetype::StoreTypeMode,
     /// (ghidra-mode, Phase 4) Name recommendations staged for the NEXT
     /// decompile drive — `(name, storage addr, usepoint, size)`, taken (and
     /// cleared) by `decompile_func_full_with_override_dyn` and seeded into the
@@ -3226,6 +3230,8 @@ impl Architecture {
             kuna_callret_refused: std::collections::HashSet::new(),
             kuna_voidret: Default::default(),
             kuna_elemptr: crate::kuna_elemptr::Ledger::default(),
+            kuna_storetype: crate::kuna_storetype::Ledger::default(),
+            storetype: crate::kuna_storetype::StoreTypeMode::Off,
             kuna_pending_name_recs: Vec::new(), // (ghidra Phase 4) staged per drive
             kuna_pending_dyn_recs: Vec::new(),  // (ghidra Phase 4) staged per drive
             kuna_pending_proto_model: None,     // (ghidra Phase 4) staged per drive
@@ -3682,6 +3688,7 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
         self.analysis_uefi = true;
         // (kuna) DIV-139 declared-name libc prototype lookup -- default-ON.
         self.analysis_declaredlibcproto = true;
