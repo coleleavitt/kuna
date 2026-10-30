@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3701,
-    3701
+    3705,
+    3705
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 414 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 415 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -3416,6 +3416,10 @@
     "data:storealias #7: load, a value read before the pointer store prints as a read after it",
     "data:storealias #8: default, the value read before the store keeps its own variable",
     "data:storealias #9: load, three reads around two pointer stores collapse into one",
+    "data:strcodelen #1: off leaves keep's pointer as an address",
+    "data:strcodelen #2: on prints keep's pointer as its own literal",
+    "data:strcodelen #3: no literal is glued to the next",
+    "data:strcodelen #4: greet's pairs print their literals in both passes",
     "data:strlenscan #10: nine lines read a length in the default pass, none with the option off",
     "data:strlenscan #11: a scan for another byte keeps its loop in both passes",
     "data:strlenscan #12: as does a scan whose raw count is returned, once by default and with every length loop when off",

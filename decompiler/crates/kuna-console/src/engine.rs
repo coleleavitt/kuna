@@ -3108,6 +3108,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // option mode the engine's (ptr,len) literal rule reads, so one option
         // governs both recognizers; `off` (0) drops the bounded facts here.
         "fatstrrecords" => arch.fat_str != 0,
+        "strcodelen" => arch.fat_str != 0 && arch.analysis_strcodelen,
         "panicloc" => arch.analysis_panicloc,
         "entry_disc" => arch.analysis_entry_disc,
         // (kuna) `.eh_frame` LSDA landing-pad discovery (GccExceptionAnalyzer) — a

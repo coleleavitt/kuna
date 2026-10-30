@@ -6994,6 +6994,7 @@ impl PrintC {
                                     &addr,
                                     &subct,
                                     &mut chars_emitted,
+                                    false,
                                 ) {
                                     ok = true;
                                 }
@@ -11768,7 +11769,11 @@ impl PrintC {
         }
         let mut s = String::new();
         let mut chars_emitted: int4 = 0;
-        if !self.print_character_constant(arch, &mut s, &stringaddr, subct, &mut chars_emitted) {
+        let printed = match bounded_char_array(arch, &stringaddr, subct) {
+            Some(bytes) => self.print_bounded_literal(&mut s, &bytes, &mut chars_emitted),
+            None => self.print_character_constant(arch, &mut s, &stringaddr, subct, &mut chars_emitted, true),
+        };
+        if !printed {
             return false;
         }
         // (kuna `elemptr`) `indexed` is `Some(bound)` for the base of an access
@@ -11828,6 +11833,17 @@ impl PrintC {
         }
     }
 
+    /// A bounded literal's exact bytes as a quoted string literal.
+    fn print_bounded_literal(&self, s: &mut String, bytes: &str, chars_emitted: &mut int4) -> bool {
+        s.push('"');
+        for c in bytes.chars() {
+            self.push_escaped_codepoint(s, c as int4);
+            *chars_emitted += 1;
+        }
+        s.push('"');
+        true
+    }
+
     fn print_character_constant(
         &self,
         arch: &Architecture,
@@ -11835,6 +11851,7 @@ impl PrintC {
         addr: &Address,
         char_type: &std::rc::Rc<crate::dtype::Datatype>,
         chars_emitted: &mut int4,
+        cut_at_bounded: bool,
     ) -> bool {
         use crate::stringmanage::StringManager;
         // Pull UTF-8 string data through the architecture's persistent
@@ -11863,7 +11880,13 @@ impl PrintC {
         // the buffer is already UTF-8 (charsize 1); walk codepoints and re-escape.
         let bigend = arch.translate().is_big_endian();
         let mut i: int4 = 0;
-        let count = buffer.len() as int4;
+        let mut count = buffer.len() as int4;
+        if cut_at_bounded && char_type.get_size() == 1 {
+            if let Some(cut) = (1..buffer.len()).find(|&k| addr.get_space().is_some_and(|spc| bounded_char_array(arch, &Address::new(std::rc::Rc::clone(spc), addr.get_offset() + k as uintb), char_type).is_some())) {
+                count = cut as int4;
+                is_trunc = false;
+            }
+        }
         while i < count {
             let mut skip: int4 = 1;
             let codepoint = StringManager::get_codepoint(&buffer[i as usize..], 1, bigend, &mut skip);
@@ -11881,6 +11904,29 @@ impl PrintC {
         }
         true
     }
+}
+
+/// (kuna `fatstr`) The text of a NUL-free `char[N]` data symbol starting at
+/// `addr`: a length-bounded `(ptr, len)` literal, which runs straight into the
+/// next one, so reading to a NUL would glue them (and a NUL-terminated read
+/// that reaches one ends there).
+fn bounded_char_array(arch: &Architecture, addr: &Address, char_type: &crate::dtype::Datatype) -> Option<String> {
+    if char_type.get_size() != 1 {
+        return None;
+    }
+    let global = arch.symboltab.get_global_scope()?;
+    let eref = arch.symboltab.find_addr(global, addr, &Address::new_invalid())?;
+    let sym = arch.symboltab.entry(global, eref).symbol;
+    let ct = arch.symboltab.symbol(sym).dtype.clone()?;
+    if ct.get_metatype() != crate::dtype::type_metatype::TYPE_ARRAY || !ct.get_array_base()?.is_char_print() {
+        return None;
+    }
+    let mut buf = vec![0u8; usize::try_from(ct.get_size()).ok()?];
+    arch.translate().loader_rc().borrow_mut().load_fill(&mut buf, addr).ok()?;
+    if buf.contains(&0) {
+        return None;
+    }
+    String::from_utf8(buf).ok()
 }
 
 /// The import a `LOAD` reads through when its pointer is a loader-marked

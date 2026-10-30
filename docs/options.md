@@ -613,6 +613,9 @@ Three tiers:
 | a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc) |
 | panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc) |
 | rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc) |
+| a rust string literal prints glued to the next literal | [`strcodelen`](#strcodelen) |
+| a &str pointer alone shows several literals run together | [`strcodelen`](#strcodelen) |
+| rust string symbol names concatenate two messages | [`strcodelen`](#strcodelen) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -2918,6 +2921,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default for Rust binaries: panic and bounds-check calls show the source position they report. Turn it off to see the raw record addresses.
 - **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
 - **Example:** `--option panicloc off`
+
+### `strcodelen` -- on | off, default `on`
+
+- **Symptoms:** a rust string literal prints glued to the next literal; a &str pointer alone shows several literals run together; rust string symbol names concatenate two messages.
+- **What it does:** Bound Rust `&str` literals by the length the code loads beside them. A literal that only code references has no static `(ptr, len)` record, so the NUL-run scan glued it to the next literal (`hello theregeneral kenobi`) wherever the pointer appears alone. The pass scans executable sections the way IDA 9.5's rust plugin does: an x86-64 `lea r64, [rip+d]` (or non-PIE `mov r32, imm32`) of read-only text into a SysV argument register and a `mov r32, imm32` into the next argument register within 32 bytes, or an AArch64 `adrp`+`add` into x(N) and a `movz w(N+1)` within eight instructions. A hit with 2 <= len <= 4096 bytes of valid UTF-8 becomes a bounded string, which retires the glued row at its start. Registered for rustc-detected images under `fatstr`.
+- **When to flip:** On by default for Rust binaries: a literal pointer that appears without its length still prints only its own text. Turn it off to see the NUL-scan strings.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
+- **Example:** `--option strcodelen off`
 
 ### `unwindstarts` -- on | off, default `off`
 

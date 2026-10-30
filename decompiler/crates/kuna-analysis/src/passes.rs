@@ -476,6 +476,8 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // off` drops the facts at the read-symbols boundary.
     if compiler.is_rust() {
         passes.push(Box::new(crate::strings::kuna_strrecords::StrRecordPass::rust()));
+        // (kuna `fatstr`) The code-side (ptr, len) literal finder.
+        passes.push(Box::new(crate::strings::kuna_strcodelen::StrCodeLenPass));
         // (kuna `panicloc`) The panic `Location` records, typed and named.
         passes.push(Box::new(crate::strings::kuna_panicloc::PanicLocationPass));
     }

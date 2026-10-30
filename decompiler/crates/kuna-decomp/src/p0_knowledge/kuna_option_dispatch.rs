@@ -893,6 +893,7 @@ kuna_options! { self, p1;
         Ok(format!("Per-lane vector p-code re-fused into one intrinsic turned {}", if all { "all" } else if on { "on" } else { "off" }))
     },
     "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
+    "strcodelen" => on_off!(analysis_strcodelen, "code-side Rust &str lengths"),
     "mba" => on_off!(mba, "Linear MBA simplification"),
     "avxintrinsics" => on_off!(avx_intrinsics, "Intel intrinsic names for AVX user-ops"),
     "x87depth" => on_off!(x87_depth, "x87 stack depth at returns"),

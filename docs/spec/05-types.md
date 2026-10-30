@@ -3702,6 +3702,12 @@ literal spans exactly the literal. Chapter [01](01-program-prep.md) carries
 the pass's place in the string family; the guards are the engine rule's own
 (read-only backing, `1..=4096`, UTF-8 text, and for the no-relocation direct
 arm the NUL scan's minimum of four bytes).
+A third recognizer, `strcodelen` (chapter [01](01-program-prep.md)), reads
+the length the code loads beside a literal, for literals no record covers.
+The rule runs in the `constsequence` pool, after the last dead-code pass, so
+when it replaces an argument that was a `PTRSUB(0, addr)` naming the old
+pointer, it destroys that `PTRSUB` once nothing else reads it; otherwise the
+dead reference printed as a stray `v1 = "...";` temporary.
 
 **Bitfields** (`decompiler/crates/kuna-decomp/src/p5_types/bitfield.rs`).
 Pattern: a struct with sub-byte fields is accessed through shift/mask soup on
