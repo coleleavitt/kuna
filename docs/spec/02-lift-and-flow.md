@@ -709,8 +709,10 @@ into a table whose every entry names the same address
 the address is another known function's entry and one of two things holds
 (`kuna_tailcalljump.rs (kuna_is_tail_call_table)`):
 
-- the address lies outside the function's declared extent, where following
-  it can only end in `halt_missing()`; or
+- following the address can only end in `halt_missing()`: it lies outside
+  the function's declared extent, or the image has no bytes there (the
+  synthetic extern slot a relocatable object's `tail ext` or `jr` through a
+  GOT reaches); or
 - no explicit caller extent is supplied and the call states everything the callee's body would
   (`kuna_tailcalljump.rs (tail_call_states_the_body)`). The callee's prototype
   is stated: input-locked on its symbol, or parked as pieces by a

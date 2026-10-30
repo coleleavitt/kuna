@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3383,
-    3383
+    3384,
+    3384
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2948,6 +2948,7 @@
     "data:regsigned #4: by default (option off) each load carries a widening cast",
     "data:regsigned #5: a web with an input that is no sign extension keeps the register width in both passes",
     "data:regsigned #6: a value stored to a 4-byte frame slot keeps the register width in both passes",
+    "data:relocs #10: RISC-V auipc+jr to an extern slot is a tail call",
     "data:relocs #1: AArch64 ADR, literal load and MOVW reach the extern data",
     "data:relocs #2: AArch64 CBZ/TBNZ/B.cond reach their global labels",
     "data:relocs #3: RISC-V HI20/LO12 resolve the global",
