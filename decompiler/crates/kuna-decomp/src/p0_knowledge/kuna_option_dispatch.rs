@@ -848,6 +848,7 @@ kuna_options! { self, p1;
     "floatglobals" => on_off!(float_globals, "float typing of globals moved only through float registers"),
     "callerreads" => on_off!(caller_reads, "return recovery from what the callers read"),
     "itaniumeh" => on_off!(itanium_eh, "Itanium exception edges to landing pads"),
+    "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
     "codescalar" => on_off!(codescalar, "code-pointee scalar-value guard"),
     "boolbyte" => on_off!(bool_byte, "truth-valued byte typing"),
     "floatbits" => on_off!(float_bits, "float typing of helpers that work on a float's bits"),

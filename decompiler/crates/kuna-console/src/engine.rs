@@ -3030,6 +3030,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // option mode the engine's (ptr,len) literal rule reads, so one option
         // governs both recognizers; `off` (0) drops the bounded facts here.
         "fatstrrecords" => arch.fat_str != 0,
+        "panicloc" => arch.analysis_panicloc,
         "entry_disc" => arch.analysis_entry_disc,
         // (kuna) `.eh_frame` LSDA landing-pad discovery (GccExceptionAnalyzer) — a
         // standalone stashed pass whose facts (the exception landing pads) are
@@ -5067,13 +5068,35 @@ fn commit_analysis_output(
     //    The shared `len / char_size` element count stays exact for both: a
     //    terminated fact's len includes its NUL slot, a bounded fact's len IS
     //    the element count (char_size 1, no terminator byte to add).
+    //    A bounded literal that starts inside a NUL-scan row ends the row there:
+    //    rustc packs literals back to back, so the row glues the literal before
+    //    it to this one (IDA 9.5 rust.so splits at every referenced byte the
+    //    same way).
+    let narrow: Vec<kuna_analysis::pass::StringFact> = if prog.arch().fat_str != 0 {
+        let mut starts: Vec<u64> = out.bounded_strings.iter().map(|f| f.addr).collect();
+        starts.sort_unstable();
+        out.strings
+            .iter()
+            .map(|f| {
+                let i = starts.partition_point(|&s| s <= f.addr);
+                match starts.get(i) {
+                    Some(&s) if s < f.addr + u64::from(f.len) => {
+                        kuna_analysis::pass::StringFact { addr: f.addr, len: (s - f.addr) as u32 }
+                    }
+                    _ => *f,
+                }
+            })
+            .collect()
+    } else {
+        out.strings.clone()
+    };
     for (fact, char_size) in out
         .bounded_strings
         .iter()
         .map(|f| (f, 1u32))
         .chain(wide32.iter().map(|f| (f, 4u32)))
         .chain(wide.iter().map(|f| (f, 2u32)))
-        .chain(out.strings.iter().map(|f| (f, 1u32)))
+        .chain(narrow.iter().map(|f| (f, 1u32)))
     {
         let addr = Address::new(Rc::clone(code_space), fact.addr);
         // Conservative guard: skip an address that already carries a symbol (an

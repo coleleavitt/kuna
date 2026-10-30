@@ -262,6 +262,33 @@ next functab entry, so the `int3` padding between functions is outside it
 first function, `internal/cpu.Initialize`, ends at `+0x5e` rather than at the
 next entry's `+0x60`.
 
+(kuna) **Rust panic `Location` records are typed and named**
+(`decompiler/crates/kuna-analysis/src/analyzers/strings/kuna_panicloc.rs
+(PanicLocationPass)`, option `panicloc on|off`, default on, registered for
+rustc-detected images only). Every Rust panic site passes
+`&'static core::panic::Location { file: &str, line: u32, col: u32 }`, so a
+bounds check read `panic_bounds_check(a2,a1,0x51150)`. The pass scans
+read-only data (and `.data.rel.ro`) at pointer alignment for the record's
+shape, the test IDA 9.5's rust plugin uses (rust.so 0x70a0): the `file`
+pointer reaches read-only text of `1..=0x1000` bytes that ends in `.rs`,
+`1 <= line <= 0xffffff` and `col <= 0xfff`. On a PIE the pointer word is an
+`R_*_RELATIVE` slot, so its value is the relocation addend. Each record
+becomes a `TypedDataFact` typed `core::panic::Location` (built once: a
+`&str { data_ptr, length }` field, then `line` and `col`) and named from the
+last two path components and the position (`panic_loc_src_main_rs_10_5`).
+The file name becomes a bounded string of exact length. A rustc 1.101 `-O`
+build of a three-function program has 196 such records. Pinned by
+`tests/stages/kuna-panicloc.xml`.
+
+(kuna) **A bounded literal ends the NUL-scan row it starts inside**
+(`decompiler/crates/kuna-console/src/engine.rs (commit_analysis_output)`,
+under the `fatstr` gate). rustc packs literals back to back without
+terminators, so the NUL scan glues a literal to the next one. When a bounded
+fact (a `&str` record or a `Location` file name) starts strictly inside a
+NUL-scan row, the row is cut at that start before the strings are planted.
+IDA's rust plugin splits at every referenced byte (rust.so 0x6e60); kuna
+splits at the starts it has evidence for.
+
 (kuna) **With the golang cspec active, the goroutine register becomes the
 named, typed global `g`** (option `goreg on|off`, default on, carried as the
 `KUNA_GOREG` loadtime environment gate;

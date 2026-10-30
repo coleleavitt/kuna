@@ -551,6 +551,9 @@ Three tiers:
 | __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh) |
 | _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh) |
 | a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh) |
+| a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc) |
+| panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc) |
+| rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -2564,6 +2567,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default) shows only the normal path, as upstream Ghidra and IDA do for Itanium code. Turn it on to see what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows.
 - **Where / provenance:** P2/flow-classification · kuna · new-analysis · ida95-44
 - **Example:** `--option itaniumeh on`
+
+### `panicloc` -- on | off, default `on`
+
+- **Symptoms:** a rust panic call passes a bare address as its last argument; panic_bounds_check shows a hex constant instead of a source location; rust unwrap_failed or expect_failed location argument is an unnamed address.
+- **What it does:** Type and name Rust panic `Location` records. Every panic site passes `&'static core::panic::Location { file: &str, line: u32, col: u32 }`, which rustc emits in read-only data, so a bounds check read `panic_bounds_check(a2,a1,0x51150)`. A record is recognized by shape, as IDA 9.5's rust plugin does: the file pointer (the R_*_RELATIVE addend on a PIE) reaches read-only text of 1..=0x1000 bytes ending in `.rs`, 1 <= line <= 0xffffff and col <= 0xfff. Each record becomes a data symbol typed `core::panic::Location` (the `&str` file field included) and named after its position (`panic_loc_src_main_rs_10_5`), and the file name becomes a bounded string of exact length. Registered for rustc-detected images only.
+- **When to flip:** On by default for Rust binaries: panic and bounds-check calls show the source position they report. Turn it off to see the raw record addresses.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
+- **Example:** `--option panicloc off`
 
 ### `unwindstarts` -- on | off, default `off`
 

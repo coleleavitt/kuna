@@ -2158,6 +2158,8 @@ pub struct Architecture {
     /// (`stderr`, `optind`) renders by name instead of `dat_<addr>`. Off drops
     /// the stream at the commit and restores the previous rendering exactly.
     pub analysis_datasyms: bool,
+    /// (kuna `panicloc`) Type and name Rust panic `Location` records.
+    pub analysis_panicloc: bool,
     /// (kuna) Gate the DWARF `.debug_line` source-line comment pass (`dwarf_lines`);
     /// default **off** — it changes the decompiled output (adds `/* file:line */`
     /// comments). The kuna analog of Ghidra's `DWARFLineInfoCommentScript`.
@@ -3306,6 +3308,7 @@ impl Architecture {
             analysis_mips_isa: false,
             analysis_dwarf: false,
             analysis_datasyms: false,
+            analysis_panicloc: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
             analysis_typedepth: false,
@@ -3768,6 +3771,7 @@ impl Architecture {
         self.analysis_msvcfpconst = true; // (kuna) DIV-96 MSVC `__real@` FP-constant recovery default-ON (the mangled name IS the datum)
         self.analysis_mips_isa = true;
         self.analysis_dwarf = true;
+        self.analysis_panicloc = true; // (kuna) Rust-only; inert on the datatest corpus, which loads no ELF
         self.analysis_datasyms = true; // (kuna) DIV-76 ELF data-symbol naming default-ON (the DIV-26 arm, now gated)
         self.analysis_dwarf_lines = false; // (kuna) source-line comments default-OFF (output-changing, opt-in)
         self.analysis_typedepth = true; // (kuna) DIV: full-depth DWARF type resolution default-ON (the depth budget truncated ordinary C declarations to void; real-ELF DWARF path only, so every parity gate is byte-identical)
