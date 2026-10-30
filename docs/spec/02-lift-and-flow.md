@@ -2851,4 +2851,5 @@ A `try` region kind in `p8_structure` would be the next step. The edges and
 helpers are what it would read. **Limits.** SjLj and ARM EHABI tables are not
 read. Pinned by
 `tests/stages/kuna-itaniumeh.xml` (two passes over the `itaniumeh/eh_x86_64.elf`
-fixture) and `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build).
+fixture), `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build) and
+`tests/stages/kuna-itaniumeh-a64.xml` (AArch64, x0/x1).

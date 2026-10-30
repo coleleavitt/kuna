@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3396,
-    3396
+    3400,
+    3400
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2693,6 +2693,10 @@
     "data:itaniumeh #6: on names the catch clauses by selector",
     "data:itaniumeh #7: on resumes unwinding from the cleanup pads",
     "data:itaniumeh #8: the destructor keeps its one argument on both paths (one off, two on)",
+    "data:itaniumeh a64 #1: off has no catch code (the one match is the on pass)",
+    "data:itaniumeh a64 #2: on gives the call an exceptional edge",
+    "data:itaniumeh a64 #3: on passes x0 to __cxa_begin_catch",
+    "data:itaniumeh a64 #4: on names the catch type and selector",
     "data:itaniumeh cold #1: off shows catcher as the normal path only",
     "data:itaniumeh cold #2: on follows the pad stub into the cold code",
     "data:itaniumeh cold #3: on tests the selector",
