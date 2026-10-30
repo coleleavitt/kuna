@@ -3901,11 +3901,19 @@ every other binary's pass list is byte-identical to before the pass existed):
   static layout, so the name is still right), a nested struct inline, a
   collection as its storage word under the instantiation's name, a closure as
   its two words; an optional keeps its payload's type when nil is the zero
-  word (a reference, a string, a collection, a closure). Any other type — an
-  enum, an imported value type (`Foundation.Date`), a generic instantiation
-  without a known layout, a tuple, an existential — is `undefined<n>` over the
-  bytes up to the next field, so the layout is always right and the names are
-  always real; only the field's own type is withheld. A layout is refused
+  word (a reference, a string, a collection, a closure). A payload-less enum
+  with a static layout is a C enum of its cases in declaration order (the
+  values the runtime gives them, 0, 1, …) at the width its value witness
+  table states, so a field or a return of that type prints its case by name;
+  an optional of an integer, a float or a struct (a payload with no spare
+  bit) is a two-field struct named after the instantiation, the payload then
+  a one-byte `is_nil` tag; a Clang-imported type (`__C.CGSize`, `__C.NSString`)
+  is the C type of that name when the image has one (DWARF, the Objective-C
+  pass), inline for a struct and through a pointer for a class. Any other type
+  — an enum with payloads, an imported value type (`Foundation.Date`), a
+  generic instantiation without a known layout, a tuple, an existential — is
+  `undefined<n>` over the bytes up to the next field, so the layout is always
+  right and the names are always real; only the field's own type is withheld. A layout is refused
   whole when the field count disagrees with the descriptor, an offset
   overlaps, a type exceeds its slot, or the type's dotted path is one two
   descriptors share (private types of the same name), so nothing is ever
@@ -3957,9 +3965,23 @@ every other binary's pass list is byte-identical to before the pass existed):
   and — in an image that kept its symbols — every method, accessor,
   initializer and deinitializer the demangler places in a class, struct or
   enum, directly or through an extension, the throwing ones (a `throws` on the
-  function type) to `__swiftcall_throws`. A static member of a struct or enum
-  binds nothing: its metatype is thin and passed nowhere. Specializations,
-  thunks and closures are left alone. Each binding carries a `self` hint
+  function type) to `__swiftcall_throws`, the `async` ones (an `async` on the
+  function type, or an await/suspend resume partial of one) to
+  `__swiftasynccall` / `__swiftasynccall_throws`, which also take the task's
+  context in the `swiftasync` register (x22 / r14; hinted as
+  `swift.AsyncContext *async_context`). A payload-less enum
+  with a static layout is a C enum of its cases in declaration order (the
+  values the runtime gives them, 0, 1, …) at the width its value witness
+  table states, so a field or a return of that type prints its case by name;
+  an optional of an integer, a float or a struct (a payload with no spare
+  bit) is a two-field struct named after the instantiation, the payload then
+  a one-byte `is_nil` tag; a Clang-imported type (`__C.CGSize`, `__C.NSString`)
+  is the C type of that name when the image has one (DWARF, the Objective-C
+  pass), inline for a struct and through a pointer for a class. Any other type
+  — an enum with payloads, an imported value type (`Foundation.Date`), a
+  generic instantiation without a known layout, a tuple, an existential — is
+  `undefined<n>` over the bytes up to the next field, so the layout is always
+  right and the names are always real; only the field's own type is withheld. Each binding carries a `self` hint
   (`AnalysisOutput::swift_types.models` / `input_hints` → the decompile
   drive): the name always, and the type where the layout arm has one — `Class
   *` for an instance member of a class, `swift.class_metadata *` for a class
@@ -3982,6 +4004,27 @@ every other binary's pass list is byte-identical to before the pass existed):
   stage test `tests/stages/kuna-swiftcall.xml` runs the stripped
   `swift_call_elf` with the arm off and on, and its unstripped twin
   `swift_call_syms_elf` on.
+- **Swift runtime prototypes** (`swiftruntime`, Swift-detected Mach-O and
+  ELF, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/swift/kuna_swiftruntime.rs`):
+  the runtime's entry points carry the signatures its public headers give
+  them (`swift/Runtime/HeapObject.h`, `Metadata.h`, `Casting.h`,
+  `Exclusivity.h`), bound by name so an import stub, a GOT slot and an
+  unstripped runtime all take them — about 180 rows: allocation and
+  refcounting (the native, unknown-object, bridge-object, unowned and error
+  families with their `_n` counts), boxes and errors (`swift.BoxPair`),
+  metadata accessors and instantiation (`swift.MetadataResponse`, the
+  metadata and its state, two words, so a caller's `x0` read is `.metadata`),
+  casting (`swift_dynamicCast` is a `bool`), exclusivity, weak and unowned
+  references, enum tags, array bulk operations, class/struct/enum metadata
+  initialization and the task allocator. The runtime is C under the platform
+  convention, so these are plain prototypes; the `swiftcc` entry points
+  whose arguments ride in the Swift registers (`swift_task_switch`, the
+  key-path accessors) are left to recovery. An object reference is a
+  `void *`: its type is the metadata's, which the call site knows, and a
+  `swift.HeapObject *` would hide the first stored property behind
+  `obj[1].isa`. The stage test `tests/stages/kuna-swiftruntime.xml` runs the
+  stripped `swift_types_elf` off and on.
 - **Core Foundation constant strings** (`cfstrings`, Mach-O-only, default-off;
   `decompiler/crates/kuna-analysis/src/analyzers/cfstring/mod.rs`): a `CFSTR("x")`
   compiles to a four-word `CFString` struct in `__cfstring` (`isa`, `flags`, a
