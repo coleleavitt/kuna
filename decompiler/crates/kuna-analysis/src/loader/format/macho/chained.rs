@@ -25,7 +25,7 @@
 //! - **Plain rebase** — handled for every common pointer format:
 //!   `DYLD_CHAINED_PTR_64` (2), `DYLD_CHAINED_PTR_64_OFFSET` (6),
 //!   `DYLD_CHAINED_PTR_ARM64E` (1) non-auth + `DYLD_CHAINED_PTR_ARM64E_USERLAND`
-//!   (12) / `_USERLAND24` (22).
+//!   (9) / `_USERLAND24` (12).
 //! - **arm64e auth-rebase** — handled: the PAC/diversity/key/auth bits are
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
@@ -64,10 +64,10 @@ mod ptr_format {
     pub const PTR_64_OFFSET: u16 = 6;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND` — arm64e, 8-byte stride, 32-bit
     /// image-base-relative target (offset form).
-    pub const ARM64E_USERLAND: u16 = 12;
+    pub const ARM64E_USERLAND: u16 = 9;
     /// `DYLD_CHAINED_PTR_ARM64E_USERLAND24` — `_USERLAND` with a 24-bit ordinal
     /// (bind only differs; rebase decode is identical to `_USERLAND`).
-    pub const ARM64E_USERLAND24: u16 = 15;
+    pub const ARM64E_USERLAND24: u16 = 12;
 }
 
 /// A resolved chained-fixup overlay: the real pointer value at each rebased VMA
@@ -464,6 +464,19 @@ mod tests {
         let raw = (2u64 << 51) | 0x8050; // target offset 0x8050, next=2
         let (_n, target) = decode_ptr(raw, ptr_format::ARM64E_USERLAND, imagebase);
         assert_eq!(target, Some(0x1_0000_8050), "USERLAND form rebases imagebase + offset");
+    }
+
+    /// The pointer-format ids are the ones `mach-o/fixup-chains.h` assigns: an
+    /// arm64e USERLAND24 segment (12, what ld64 emits for arm64e) and a USERLAND
+    /// one (9) both rebase, and 15 is no format at all.
+    #[test]
+    fn userland_format_ids_match_fixup_chains_h() {
+        let imagebase = 0x1_0000_0000;
+        let raw = 0x8050;
+        for format in [9, 12] {
+            assert_eq!(decode_ptr(raw, format, imagebase), (0, Some(0x1_0000_8050)), "{format}");
+        }
+        assert_eq!(decode_ptr(raw, 15, imagebase), (0, None));
     }
 
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
