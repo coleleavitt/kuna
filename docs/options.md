@@ -45,6 +45,9 @@ Three tiers:
 | __ftol() / __ftol2() called with no arguments | [`msvcftol`](#msvcftol) |
 | the float computation feeding a float-to-int conversion is missing from an MSVC x86-32 binary | [`msvcftol`](#msvcftol) |
 | a __thiscall method lost its `this` pointer and reads its fields off a stack argument instead | [`msvcftol`](#msvcftol) |
+| an Objective-C method is mostly objc_retain/objc_release lines | [`objcarc`](#objcarc) |
+| objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long | [`objcarc`](#objcarc) |
+| objc_storeStrong(&self->field, x) where an assignment is meant | [`objcarc`](#objcarc) |
 | an `if (isCurrentModePrivileged())` block wraps every interrupt-mask or special-register access in Cortex-M firmware | [`cortexmpriv`](#cortexmpriv) |
 | `isCurrentModePrivileged()` appears in the emitted C at all | [`cortexmpriv`](#cortexmpriv) |
 | a Cortex-M function has more basic blocks and branches than its source | [`cortexmpriv`](#cortexmpriv) |
@@ -1459,6 +1462,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** An x86-32 MSVC binary shows bare `__ftol()` / `__ftol2()` calls with no arguments and the floating-point computation that fed them is missing (often together with a lost `this` pointer). On by default; flip OFF to restore the un-fixed call rendering.
 - **Where / provenance:** P2/flow-classification · ida · correctness-fix · kuna-msvcftol
 - **Example:** `option msvcftol off`
+
+### `objcarc` -- on | off, default `on`
+
+- **Symptoms:** an Objective-C method is mostly objc_retain/objc_release lines; objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long; objc_storeStrong(&self->field, x) where an assignment is meant.
+- **What it does:** Hide Objective-C ARC bookkeeping. An ARC-compiled method is strewn with `objc_retain(x)`, `objc_release(x)`, `v = objc_retainAutoreleasedReturnValue(v)` and `objc_storeStrong(&slot, x)`; with the runtime entry points untyped the value they hand on is also lost (`v2 = objc_retainAutoreleasedReturnValue();` with no argument). Synthesized `<callfixup>` payloads (`p2_lift/kuna_objcarc.rs`, the msvcftol mechanism) replace each call with what it stands for in p-code: a pass-through (`objc_retain`, `objc_autorelease*`, `objc_retainAutoreleasedReturnValue`, `objc_claimAutoreleasedReturnValue`, `objc_retainBlock`, …) is an incidental copy so its result keeps the argument's variable, `objc_release` has no effect, `objc_storeStrong(slot, value)` is the store `*slot = value`, and clang's outlined arm64 `objc_retain_x<N>`/`objc_release_x<N>` (the object in and out of `x<N>`) are the same per register. The payloads are registered for arm64 and x86-64 (the x86-64 bodies pop the CALL's pushed return address); the install is by name on the image's import stubs and local symbols. Off, every ARC call is shown as the call it is. Inert on an image that names no ARC entry point (0/675 datatests).
+- **When to flip:** An Objective-C method reads as retain/release traffic around the few lines that do the work, or an ARC helper call shows no argument and the value it returned is missing. On by default; flip OFF to audit the reference counting itself.
+- **Where / provenance:** P2/flow-classification · ida · readability · kuna-objcarc
+- **Example:** `option objcarc off`
 
 ### `cortexmpriv` -- on | off, default `off`
 

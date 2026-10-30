@@ -5579,9 +5579,23 @@ fn commit_analysis_output(
             if injectid < 0 {
                 continue;
             }
-            // function name → FunctionSymbol id; skip if it no longer resolves.
-            let Ok(sid) = prog.arch().query_global_function(&fact.func_name) else {
-                continue;
+            // The FunctionSymbol: at the fact's address when it names one (a
+            // Mach-O import stub keeps its `sub_` name under an alias), else by
+            // name; skip if it no longer resolves.
+            let sid = match fact.addr {
+                Some(addr) => {
+                    let a = Address::new(Rc::clone(code_space), addr);
+                    let arch = prog.arch();
+                    let Some(scope) = arch.symboltab.get_global_scope() else { continue };
+                    match arch.symboltab.find_function(scope, &a) {
+                        Some(sid) => sid,
+                        None => continue,
+                    }
+                }
+                None => match prog.arch().query_global_function(&fact.func_name) {
+                    Ok(sid) => sid,
+                    Err(_) => continue,
+                },
             };
             // getCallFixup()==null guard: only auto-apply when no fixup is set.
             if prog.arch().symboltab.function_inject_id_for_symbol(sid) >= 0 {

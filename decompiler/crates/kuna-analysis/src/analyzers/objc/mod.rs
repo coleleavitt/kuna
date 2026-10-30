@@ -55,6 +55,7 @@ pub mod classt;
 pub mod encoding;
 pub mod kuna_objccats;
 pub mod kuna_objcivars;
+mod kuna_objcruntime;
 mod kuna_swiftclassnames;
 use kuna_swiftclassnames::display_class_name;
 pub mod kuna_objcprops;
@@ -121,6 +122,7 @@ impl AnalysisPass for ObjcMetadataPass {
             None => HashMap::new(),
         };
         let mut selectors = kuna_objcrefs::Selectors::with_sdk(sdk);
+        out.prototypes_at.extend(kuna_objcruntime::prototypes(ctx.file, ctx.bytes, ctx.arch, &tctx));
 
         // Walk `__objc_classlist`: an array of `class_t*` (stride = ptr size). The
         // classes are read first so every instance layout is known before any

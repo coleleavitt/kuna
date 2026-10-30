@@ -596,6 +596,37 @@ recovered switch table.
   The user-visible gate is on the *install* instead (`option msvcftol`, default
   on), where the analysis-tier call-fixup installer drops this one payload's
   targets from its match map.
+- **Objective-C ARC bookkeeping** (`decompiler/crates/kuna-decomp/src/p2_lift/kuna_objcarc.rs`,
+  option **`objcarc`**, default on): the second kuna-owned call-fixup family,
+  registered next to the one above. An ARC-compiled method is strewn with
+  `objc_retain(x)`, `objc_release(x)`, `v = objc_retainAutoreleasedReturnValue(v)`
+  and `objc_storeStrong(&slot, x)`, and with the runtime stubs untyped the value
+  a helper hands on is lost (`v2 = objc_retainAutoreleasedReturnValue();`). The
+  payloads replace each call with what it stands for: a pass-through helper
+  (`objc_retain`, `objc_autorelease*`, `objc_retainAutoreleasedReturnValue`,
+  `objc_claimAutoreleasedReturnValue`, `objc_retainBlock`, …) is `x0 = x0` marked
+  an incidental copy, so its result keeps the argument's variable; `objc_release`
+  has no effect; `objc_storeStrong(slot, value)` is the store `*slot = value`;
+  clang's outlined arm64 `objc_retain_x<N>` / `objc_release_x<N>` — the object in
+  and out of `x<N>`, outside every calling convention — are the same copy per
+  register, `x0` through `x28`. Registration is guarded by language (arm64 when
+  `x0`..`x30` resolve at an 8-byte code space, x86-64 when `RAX`/`RDI`/`RSI`/`RSP`
+  do; the x86-64 bodies pop the `CALL`'s pushed return address as above). The
+  install is where the gate lives: the analysis-tier call-fixup installer drops
+  every `kuna_objcarc_` payload from its map under `option objcarc off`, and —
+  because a Mach-O import is a `__stubs` entry whose FunctionSymbol keeps its
+  `sub_` name under a display alias — it tags the stubs by *address* from the
+  `LC_DYSYMTAB` indirect-symbol walk (`analyzers/callfixup`, `CallFixupFact::addr`)
+  rather than by name. A hidden call writes no `replaced with injection` header
+  line. With the calls shown, every imported runtime entry point still carries
+  its header prototype (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcruntime.rs`,
+  by stub and slot address: `id objc_retain(id)`, `void objc_storeStrong(id *, id)`,
+  `id objc_alloc_init(Class)`, …, and `id objc_retain_x19(id obj @ x19)` returning
+  in `x19`), so `obj = objc_retainAutoreleasedReturnValue((objc_object *)objc_msgSend(arg1,sel_inner))`
+  reads with its argument. The stage test `tests/stages/kuna-objcarc.xml` runs
+  `macho_objc_arc_arm64` (clang `-fobjc-arc -O2`) both ways: default,
+  `-[Holder total:]` is `v1 = objc_msgSend(arg1,sel_count); v2 = objc_msgSend(arg1,sel_inner); return objc_msgSend(v2,sel_count) + v1;`
+  with no release left; off, the five ARC calls are shown typed.
 - **kuna-owned callother fixups.** The same freedom applies to the user-op side.
   `decompiler/crates/kuna-decomp/src/p2_lift/kuna_cortexmpriv.rs` supplies a
   `<callotherfixup>` body for the ARM user op `isCurrentModePrivileged`, which
