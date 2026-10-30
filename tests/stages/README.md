@@ -5,6 +5,11 @@ four-byte OFF result against the proved eight-byte result and high-piece callers
 Its CLI companion executes the original bytes and untouched emitted C/header
 under MIPS QEMU at O0/O2, including selected exports, workers and streaming.
 
+`kuna-condexe-heritage.xml` checks that conditional execution removes a re-test
+whose block holds unread flag writes once the register space has had a heritage
+pass (`deadcode delay register 50` keeps those writes alive). Before the fix the
+second `if (x)` stayed.
+
 `kuna-stack-byte-copy.xml` checks pushed scratch bytes, partial reads and a
 saved snapshot with `stackstoreguard` off and on. Its CLI companion compiles
 and executes the exact C at O2 in default, stackviews and stackalias modes, and checks
