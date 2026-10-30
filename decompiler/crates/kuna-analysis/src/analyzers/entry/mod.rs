@@ -339,18 +339,26 @@ pub fn full_pattern_starts(file: &object::File) -> Vec<u64> {
 /// [`full_pattern_starts`], with the `TMode` value the matching ARM pattern
 /// pair sets (`<setcontext name="TMode">`), so a Thumb start decodes as Thumb.
 pub fn full_pattern_starts_with_mode(file: &object::File) -> Vec<(u64, Option<u32>)> {
-    let Some(set) =
-        patterns::for_arch(file.architecture(), file.is_little_endian())
-    else {
+    let Some(set) = patterns::for_object(file) else {
         return Vec::new();
     };
     let execs = executable_sections(file);
     let funcsyms = existing_function_addrs_for_file(file);
+    // A `<possiblefuncstart/>` start is taken only on an ELF and only outside
+    // every FDE body: there the unwind table describes the functions it covers,
+    // and a Mach-O or PE image's own function tables (LC_FUNCTION_STARTS,
+    // .pdata) already list what such a weak hint could add.
+    let weak_ok = set.only_weak() && matches!(file.format(), object::BinaryFormat::Elf);
+    let bodies = if weak_ok { kuna_fdeinterior::scan_fde_bodies(file) } else { Vec::new() };
 
-    // Sweep every executable section with the full pattern set.
     let mut cand: Vec<(u64, Option<u32>)> = Vec::new();
     for (addr, _hi, data) in &execs {
-        cand.extend(set.scan_with_mode(*addr, data));
+        for hit in set.scan_hits(*addr, data) {
+            if hit.weak && (!weak_ok || kuna_fdeinterior::is_interior(&bodies, hit.vma)) {
+                continue;
+            }
+            cand.push((hit.vma, hit.mode));
+        }
     }
 
     let mut out: Vec<(u64, Option<u32>)> = cand

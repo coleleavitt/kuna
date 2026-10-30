@@ -421,4 +421,13 @@ fn raw_image_takes_pattern_starts_when_the_option_is_on() {
         counts.push((program.find_entry_at(0x401015).is_some(), program.find_entry_at(0x401043).is_some()));
     }
     assert_eq!(counts, vec![(false, false), (true, true)]);
+
+    // No seed at all: the pattern sweep alone finds the functions.
+    let mut program = bootstrap_from_raw(&path, "x86:LE:64:default", 0x401000, &[], None, &specs())
+        .expect("a raw image needs no --entry");
+    program.arch_mut().set_kuna_option("funcstart_patterns", "on").unwrap();
+    program.commit_pending_analysis().unwrap();
+    for start in [0x401015, 0x401043, 0x401055] {
+        assert!(program.find_entry_at(start).is_some(), "0x{start:x} is a pattern start");
+    }
 }

@@ -1563,6 +1563,15 @@ pub(crate) fn driver_default_options(
         })
         .unwrap_or(false);
 
+    // A headerless image (no object view, not a TE): IDA's own default case for
+    // pattern discovery. The raw path sweeps its bytes with the target's
+    // language patterns, so it takes the pattern default too.
+    let raw = kuna_analysis::loader::elf_shdr::read_image(binary)
+        .ok()
+        .is_some_and(|bytes| {
+            !kuna_analysis::loadimage_te::is_te_image(&bytes) && kuna_analysis::loadimage_object::parse_object(&bytes).is_err()
+        });
+
     let mut injected = Vec::new();
     // (kuna DIV-120) A function past the instruction budget reports the body kuna
     // DID decode, not nothing.  Upstream's default makes the overrun fatal, so a
@@ -1578,7 +1587,7 @@ pub(crate) fn driver_default_options(
     if wants_listing && (decompiles || non_x86_64) && !named("listing") {
         injected.push(("listing", "on"));
     }
-    if non_x86_64 && !named("funcstart_patterns") {
+    if (non_x86_64 || raw) && !named("funcstart_patterns") {
         injected.push(("funcstart_patterns", "on"));
     }
     if non_x86_64 && !named("aif") {
@@ -2740,8 +2749,9 @@ pub(crate) fn parse_args_with_filters(
         if names.is_some() {
             return Err("--raw-image uses explicit --entry/--addr seeds, not --functions".into());
         }
-        if addrs.is_empty() && entry_seeds.is_empty() {
-            return Err("--raw-image requires at least one --entry or --addr".into());
+        let patterns_off = options.iter().any(|(name, value)| name == "funcstart_patterns" && value == "off");
+        if addrs.is_empty() && entry_seeds.is_empty() && patterns_off {
+            return Err("--raw-image with funcstart_patterns off requires at least one --entry or --addr".into());
         }
         if addrs
             .iter()

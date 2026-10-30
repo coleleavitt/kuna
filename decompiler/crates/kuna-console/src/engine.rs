@@ -2614,7 +2614,8 @@ impl ConsoleProgram {
                 for &(lo, hi) in &exec {
                     let Ok(size) = usize::try_from(hi - lo) else { continue };
                     if let Some(bytes) = self.read_bytes(lo, size) {
-                        seeds.extend(set.scan(lo, &bytes));
+                        let weak_ok = set.only_weak();
+                        seeds.extend(set.scan_hits(lo, &bytes).into_iter().filter(|h| weak_ok || !h.weak).map(|h| h.vma));
                     }
                 }
                 seeds.sort_unstable();
@@ -2725,7 +2726,7 @@ impl ConsoleProgram {
         if std::mem::take(&mut self.pending_dex_prototypes) {
             self.lock_dex_prototypes();
         }
-        if !self.pending_synthetic_entries.is_empty() {
+        if !self.pending_synthetic_entries.is_empty() || self.container == ProgramContainer::Raw {
             // (kuna `rawdiscover`) A headerless or TE image reaches this point
             // holding only the `--entry` addresses or the container entry,
             // because the object-file discovery tier below declines without an
@@ -3927,11 +3928,6 @@ pub fn bootstrap_from_raw(
     if target.trim().is_empty() {
         return Err(KunaError::lowlevel(
             "raw image input requires --target <SLEIGH-language-id>",
-        ));
-    }
-    if entries.is_empty() {
-        return Err(KunaError::lowlevel(
-            "raw image input requires at least one --entry or --addr",
         ));
     }
 
