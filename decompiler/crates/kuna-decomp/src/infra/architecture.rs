@@ -773,6 +773,9 @@ pub struct Architecture {
     /// lifting the common guard onto the MULTIEQUAL output so the table bounds
     /// (C++ `switch_multi_pred`).
     pub switch_multi_pred: bool,
+    /// (kuna) Recover an unbounded single-LOAD jump table by reading until its
+    /// layout ends (option `switchtrim`).  See [`crate::p2_lift::kuna_switchtrim`].
+    pub switch_trim: bool,
     /// (kuna, angr `test_decompiling_optimized_memcpy`) Recover the interleaved
     /// jump tables of an MSVC optimized memcpy/memmove (Duff's device).  When a
     /// function holds several jump tables whose case bodies are reachable only as
@@ -1916,6 +1919,9 @@ pub struct Architecture {
     /// follows a no-fall-through instruction, is a function of its own. Off
     /// restores the previous discovery set exactly; x86/x86-64 ELF only.
     pub analysis_coldentry: bool,
+    /// (kuna) Withhold an exception-cleanup `.cold` fragment from the function
+    /// list (option `ehcold`).  See `kuna_analysis::entry::kuna_ehcold`.
+    pub analysis_ehcold: bool,
     /// (kuna) Reject a discovered function entry that falls strictly inside a
     /// single-function `.pdata` `RUNTIME_FUNCTION` body (`pdatainterior`);
     /// default **on**. The PE half of [`Self::analysis_fdeinterior`] and the same
@@ -3068,6 +3074,7 @@ impl Architecture {
             switch_guard_bound: false,
             switch_shared_case: false,
             switch_multi_pred: false,
+            switch_trim: false,
             unrolled_guard: false,
             jumptable_share_partial: true,
             noreturn_extern_match: true, // (kuna) DIV-13 default-on (angr incorrect-duplication-chcon)
@@ -3278,6 +3285,7 @@ impl Architecture {
             analysis_unwindstarts: false,
             analysis_fdeinterior: false,
             analysis_coldentry: false,
+            analysis_ehcold: false,
             analysis_pdatainterior: false,
             analysis_pdbinterior: false,
             analysis_funcstart_patterns: false,
@@ -3500,6 +3508,7 @@ impl Architecture {
         self.const_select_jump = false; // (kuna) default: upstream byte-identical (constant-select indirect branch)
         self.switch_guard_bound = false; // (kuna) default: upstream byte-identical (angr opt-in)
         self.switch_shared_case = true; // (kuna) DIV-14 default-on (angr loop-carried-guard PIC switch recovery; slower on the functions it recovers, kept on for quality; 0/675 byte-identical)
+        self.switch_trim = true; // (kuna) default-on: a jump table no guard bounds is read until its layout ends
         self.switch_multi_pred = true; // (kuna) DIV-13 default-on (angr multi-predecessor unrolled-guard jump-table; 0/675 ablation)
         self.unrolled_guard = false; // (kuna) default: upstream byte-identical (angr opt-in)
         self.jumptable_share_partial = true; // (kuna) DIV: the upstream stageJumpTable shape
@@ -3741,6 +3750,7 @@ impl Architecture {
         // (kuna) DIV-61 `.eh_frame` FDE-interior entry suppression — default-ON.
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;
+        self.analysis_ehcold = true; // (kuna) an EH cleanup .cold part reached only from its owner's landing pads is not a function
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — default-ON.
         self.analysis_pdatainterior = true;
         // (kuna) PDB-procedure-interior entry suppression — default-ON.
@@ -4607,6 +4617,7 @@ impl Architecture {
         // (kuna, angr) carry the multi-predecessor unrolled-guard jump-table gate
         // (`option switchmultipred`) so `JumpBasic::checkUnrolledGuard` reaches it.
         ctx.switch_multi_pred = self.switch_multi_pred;
+        ctx.switch_trim = self.switch_trim;
         // (kuna, angr) carry the interleaved unrolled-guard partial-flow gate
         // (`option unrolledguard`) so `FlowInfo::collectEdges` reaches it.
         ctx.unrolled_guard = self.unrolled_guard;

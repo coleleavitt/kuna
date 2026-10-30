@@ -4698,6 +4698,25 @@ deferred entry pass at the commit point, and its entries join the inventory *aft
 the `fdeinterior` filter (which would otherwise reject every one of them by
 construction). x86/x86-64 ELF only; inert without `.eh_frame`.
 
+**(kuna) Unless the fragment is an exception cleanup** (`ehcold`,
+default-**on**; `decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_ehcold.rs`).
+GCC also moves a function's landing-pad cleanups into its `.cold` partition. Each
+landing pad inside the owner's FDE is a stub (`mov rbx,rax; jmp <cold>`), and the
+cold fragment is a ladder of `free; call _Unwind_Resume` rungs with its own FDE.
+The FDE oracle listed it as a function and `coldentry` added one per rung, each
+decompiling from an undefined `rbx` into `_Unwind_Resume()`: 193 of the 657
+functions of IDA's `objc.so`. IDA attaches such a fragment to its owner as a
+function tail. kuna has no tails, so it withholds the fragment instead. An FDE
+body is an EH cold part when no function symbol names its start, every direct
+`jmp`/`jcc rel32` into it comes from one other FDE body (its owner), no direct
+`call rel32` targets it, and at least one of those jumps sits in the first 16
+bytes of a landing pad that the owner's LSDA lists
+(`entry/mod.rs (scan_eh_frame_landing_pads_owned)` pairs every pad with its
+FDE). The commit drops every discovered entry inside such a body, its start
+included, after the `coldentry` entries are added. A cold throw path reached by
+an ordinary branch (`may_throw.cold`) is not a landing-pad target and stays a
+function. x86/x86-64 ELF only.
+
 **(kuna) `.pdata` interiors are not function starts either** (`pdatainterior`,
 default-**on**, DIV-155;
 `decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_pdatainterior.rs`). The

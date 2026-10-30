@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_356() {
-    assert_eq!(kuna_num_settables(), 356);
-    assert_eq!(SETTABLE_TABLE.len(), 356);
+fn settable_count_is_358() {
+    assert_eq!(kuna_num_settables(), 358);
+    assert_eq!(SETTABLE_TABLE.len(), 358);
 }
 
 #[test]
-fn tier_counts_are_122_core_134_transform_100_analysis() {
+fn tier_counts_are_122_core_135_transform_101_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_122_core_134_transform_100_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (122, 134, 100));
+    assert_eq!((core, transform, analysis), (122, 135, 101));
 }
 
 #[test]
@@ -348,6 +348,7 @@ fn option_values_live_value_present_for_156() {
         // (kuna) Multi-entry `.cold` fragment entries — an analysis-pass gate with
         // no codegen live reader. Default-ON.
         "coldentry",
+        "ehcold",
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — the PE half
         // of `fdeinterior`, an analysis-pass gate with no codegen live reader.
         // Default-ON.
@@ -939,7 +940,8 @@ fn option_values_live_value_present_for_156() {
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
     // 156 -> 157: +1 for `importdata`.
     // 157 -> 158: +1 for `calleeretpurge` (live_field).
-    assert_eq!(with_live, 158);
+    // 158 -> 159: +1 for `switchtrim` (live_field).
+    assert_eq!(with_live, 159);
 }
 
 #[test]
@@ -1164,7 +1166,9 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `swiftcall`, beside `swifttypes`.
     // +1 for `calleeretpurge`.
     // +1 for `dwarfnocall`.
-    assert_eq!(json.matches("},\n").count(), 355);
+    // +1 for `switchtrim`.
+    // +1 for `ehcold`.
+    assert_eq!(json.matches("},\n").count(), 357);
 }
 
 #[test]

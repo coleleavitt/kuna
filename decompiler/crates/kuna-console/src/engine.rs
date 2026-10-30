@@ -2752,7 +2752,7 @@ impl ConsoleProgram {
         // load it swept the whole image on every binary and was discarded whenever
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
-        let want_coldentry = self.arch().analysis_coldentry;
+        let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
         if (want_listing
             || want_fast_funcdisc
             || want_operand_refs
@@ -2876,6 +2876,11 @@ impl ConsoleProgram {
         // fragment is jumped into at, added past the suppression above.
         let cold_entries = std::mem::take(&mut merged.fde_interior_entries);
         merged.entries.extend(cold_entries);
+        // (kuna, `ehcold`) An exception-cleanup cold part is its owner's, not a
+        // function: drop every entry inside one, its start included.
+        let mut eh_cold = std::mem::take(&mut merged.eh_cold);
+        eh_cold.sort_unstable();
+        kuna_analysis::entry::kuna_ehcold::suppress_eh_cold_entries(&mut merged.entries, &eh_cold);
         // (kuna, `pdbinterior`) The same rejection inside PDB procedures, on its own
         // terms: see `suppress_pdb_interior_entries`.
         suppress_pdb_interior_entries(self.arch(), &code_space, &mut merged);
@@ -3070,6 +3075,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // dropped here and the discovery set is exactly what it was before.
         "fdeinterior" => arch.analysis_fdeinterior,
         "coldentry" => arch.analysis_coldentry,
+        "ehcold" => arch.analysis_ehcold,
         "pdatainterior" => arch.analysis_pdatainterior,
         // (kuna) PDB-procedure-interior entry suppression — the extents come out of
         // the `.pdb`, so switching `pdb` off withdraws them too.

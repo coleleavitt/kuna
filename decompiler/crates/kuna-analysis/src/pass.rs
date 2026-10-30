@@ -418,6 +418,10 @@ pub struct AnalysisOutput {
     /// fragment. Added after the [`Self::fde_bodies`] suppression. Produced only by
     /// [`crate::entry::kuna_coldentry`] (`coldentry`).
     pub fde_interior_entries: Vec<u64>,
+    /// (kuna) FDE bodies that are another function's exception-cleanup cold
+    /// part; every entry inside one is dropped at the commit. Produced only by
+    /// [`crate::entry::kuna_ehcold`] (`ehcold`).
+    pub eh_cold: Vec<(u64, u64)>,
     /// (kuna) PDB procedure extents that describe exactly one function, as
     /// `[start, end)`, sorted and disjoint. Applied after [`Self::fde_bodies`],
     /// only where a function is committed at `start` (a `static` function has an
@@ -808,6 +812,7 @@ impl AnalysisOutput {
         self.entries.extend(other.entries);
         self.fde_bodies.extend(other.fde_bodies);
         self.fde_interior_entries.extend(other.fde_interior_entries);
+        self.eh_cold.extend(other.eh_cold);
         self.pdb_bodies.extend(other.pdb_bodies);
         self.entry_names.extend(other.entry_names);
         self.noreturn.extend(other.noreturn);

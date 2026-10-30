@@ -145,6 +145,9 @@ Three tiers:
 | image-base-relative switch whose bound guard is duplicated across multiple predecessors renders as a computed call | [`switchmultipred`](#switchmultipred) |
 | 'Too many branches' where the dispatch block has several guarded incoming paths | [`switchmultipred`](#switchmultipred) |
 | msvc memmove small-count tail dispatch truncated to an indirect call | [`switchmultipred`](#switchmultipred) |
+| a switch with an unreachable default renders as a computed jump-as-call through a table | [`switchtrim`](#switchtrim) |
+| `*(code **)(a0 * 8 + table)` called instead of a switch | [`switchtrim`](#switchtrim) |
+| Too many branches on a table indexed with no range check | [`switchtrim`](#switchtrim) |
 | one switch recovered but sibling interleaved jump tables degrade to computed calls | [`unrolledguard`](#unrolledguard) |
 | 'Could not find op at target address' during recovery of an msvc optimized memcpy dispatch | [`unrolledguard`](#unrolledguard) |
 | duff's-device tail dispatch rendered as 'Treating indirect jump as call' | [`unrolledguard`](#unrolledguard) |
@@ -553,6 +556,9 @@ Three tiers:
 | functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry) |
 | a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry) |
 | gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry) |
+| many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold) |
+| a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold) |
+| a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold) |
 | spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
 | a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
 | function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
@@ -1668,6 +1674,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/switch-model · angr · opt-in-tool · angr-abnormal-switch-case-case3
 - **Example:** `option switchmultipred on`
 
+### `switchtrim` -- on | off, default `on`
+
+- **Symptoms:** a switch with an unreachable default renders as a computed jump-as-call through a table; `*(code **)(a0 * 8 + table)` called instead of a switch; Too many branches on a table indexed with no range check.
+- **What it does:** Recover a jump table that no guard bounds, and end it where its layout ends. A switch whose default is unreachable (`__builtin_unreachable()`, an enum the compiler trusts) indexes its table with no range check, so JumpBasic sees the full width of the index, the range exceeds jumptablemax, and the BRANCHIND stays a computed jump-as-call -- `v1 = *(code **)(a0 * 8 + 0x402000); return (*v1)();`. The upstream sanity check (JumpBasic::sanityCheck, kept as reasonable_rows) only stops at a zero row or a far row with no image bytes, which is no help once the range is unbounded. With the option on, after every guard-based extension has declined, a table whose path holds exactly one LOAD is opened to [0, jumptablemax); emulation stops at the first row it cannot read, and the sanity check keeps the rows before the first one that points into the table's own bytes (the entries read, first to last) or, on an object load, outside the image's executable memory -- IDA's trim_jtable stop rules. Fewer than two surviving rows is no table, and the computed jump stays. Bounded tables are untouched.
+- **When to flip:** On by default. Keep it on when a switch renders as `(*v1)()` through a table read with an unbounded index -- typically a switch with an unreachable default. Flip OFF if a recovered switch carries cases that are not really part of it (a table followed directly by another code-pointer table with no gap), or to restore the computed jump.
+- **Where / provenance:** P2/switch-model · kuna · structure-recovery · ida95-18-switch-trim
+- **Example:** `option switchtrim off`
+
 ### `unrolledguard` -- on | off, default `off` (destructive opt-in)
 
 - **Symptoms:** one switch recovered but sibling interleaved jump tables degrade to computed calls; 'Could not find op at target address' during recovery of an msvc optimized memcpy dispatch; duff's-device tail dispatch rendered as 'Treating indirect jump as call'.
@@ -2575,6 +2589,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default) lists each split-out unlikely path of a stripped GCC binary as its own sub_<addr>, as Ghidra does: the tell-tale of it being off is a run of sub_<addr> cold fragments with gaps between them, and a hot function whose decompile inlines an error/abort tail reached by a jump into the middle of another function's FDE. Flip off to restore the previous discovery set exactly.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-coldentry
 - **Example:** `--option coldentry off`
+
+### `ehcold` -- on | off, default `on`
+
+- **Symptoms:** many sub_<addr> functions that end in _Unwind_Resume(); a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely; a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume.
+- **What it does:** Withhold an exception-cleanup .cold fragment from the function list. GCC moves a function's landing-pad cleanups into its .cold partition: each landing pad inside the owner's FDE is a stub (`mov rbx,rax; jmp <cold>`), and the cold fragment, which has its own FDE, is a ladder of `free; call _Unwind_Resume` rungs. The FDE oracle listed the fragment as a function and coldentry added one more per rung; each decompiled from an undefined rbx and ended in _Unwind_Resume() (193 of 657 functions on IDA's objc.so). IDA attaches the fragment to its owner as a function tail (eh_parse append_func_tail). kuna has no tails, so the fragment is withheld instead: an FDE body with no function symbol at its start, entered by direct jmp/jcc rel32 only from ONE other FDE body (its owner), targeted by no direct call, and jumped to from the first 16 bytes of a landing pad the owner's LSDA lists, contributes no entries -- the commit drops every discovered entry inside it, its start included. x86/x86-64 ELF only.
+- **When to flip:** On by default. Keep it on for gcc -O2 C++ binaries, where cleanup ladders otherwise flood the function list with sub_<addr> fragments that start from an undefined register and end in _Unwind_Resume(). Flip OFF to list and decompile the cold cleanup code on its own (to read what a destructor chain frees).
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-22-ehcold
+- **Example:** `--option ehcold off`
 
 ### `fdeinterior` -- on | off, default `on`
 

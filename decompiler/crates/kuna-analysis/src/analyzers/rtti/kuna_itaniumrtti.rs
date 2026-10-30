@@ -153,6 +153,12 @@ struct TypeInfo {
     /// is the Itanium `offset_flags >> 8` for a vmi base and 0 for an si base —
     /// the datum the MSVC sibling pass discards with its `pmd` fields.
     bases: Vec<(u64, i64)>,
+    /// Virtual bases as `(base typeinfo VMA, offset of the vbase-offset word from
+    /// the vtable address point)`: for a base with `__virtual_mask` set,
+    /// `offset_flags >> 8` locates the displacement in the vtable instead of being
+    /// it. Moved into [`Self::bases`] once the vtable is known
+    /// ([`resolve_virtual_bases`]).
+    virtual_bases: Vec<(u64, i64)>,
     /// Byte extent of the object, used to reject a pointer *inside* a typeinfo from
     /// being read as a vtable header.
     size: u64,
@@ -215,7 +221,7 @@ impl AnalysisPass for ItaniumRttiPass {
             return out;
         }
         let img = ImageBytes::new(ctx.file);
-        let typeinfos = decode_typeinfos(&img, &rk, &candidates);
+        let mut typeinfos = decode_typeinfos(&img, &rk, &candidates);
         if typeinfos.is_empty() {
             return out;
         }
@@ -223,6 +229,7 @@ impl AnalysisPass for ItaniumRttiPass {
         let text = TextRanges::new(ctx.file);
         let relocated = relocated_slots(ctx.file);
         let subs = recover_subvtables(&img, &rk, &text, &relocated, &typeinfos);
+        resolve_virtual_bases(&img, &rk, &mut typeinfos, &subs);
         emit(&typeinfos, &subs, &rk, &mut out);
         out
     }
@@ -336,8 +343,8 @@ fn decode_typeinfos(
     let mut out = Vec::new();
     for (addr, flavor, name_addr, class) in named {
         let flavor = flavor.unwrap_or_else(|| sniff_flavor(img, rk, addr, &accepted));
-        let (bases, size) = read_bases(img, rk, addr, flavor, &accepted);
-        out.push(TypeInfo { addr, name_addr, class, bases, size });
+        let (bases, virtual_bases, size) = read_bases(img, rk, addr, flavor, &accepted);
+        out.push(TypeInfo { addr, name_addr, class, bases, virtual_bases, size });
     }
     out
 }
@@ -376,21 +383,22 @@ fn read_bases(
     addr: u64,
     flavor: Flavor,
     accepted: &HashSet<u64>,
-) -> (Vec<(u64, i64)>, u64) {
+) -> (Vec<(u64, i64)>, Vec<(u64, i64)>, u64) {
     let ptr = rk.ptr_size() as u64;
     match flavor {
-        Flavor::Class => (Vec::new(), 2 * ptr),
+        Flavor::Class => (Vec::new(), Vec::new(), 2 * ptr),
         Flavor::SiClass => {
             let base = read_ptr(img, rk, addr + 2 * ptr).filter(|b| accepted.contains(b));
             // An si base is by definition at displacement 0.
-            (base.map(|b| vec![(b, 0)]).unwrap_or_default(), 3 * ptr)
+            (base.map(|b| vec![(b, 0)]).unwrap_or_default(), Vec::new(), 3 * ptr)
         }
         Flavor::VmiClass => {
             let Some(count) = read_u32(img, rk, addr + 2 * ptr + 4) else {
-                return (Vec::new(), 2 * ptr);
+                return (Vec::new(), Vec::new(), 2 * ptr);
             };
             let count = count.min(MAX_BASES) as u64;
             let mut bases = Vec::new();
+            let mut virtual_bases = Vec::new();
             for i in 0..count {
                 let entry = addr + 2 * ptr + 8 + i * 2 * ptr;
                 let Some(bti) = read_ptr(img, rk, entry) else {
@@ -403,11 +411,57 @@ fn read_bases(
                     continue;
                 }
                 // Itanium `__base_class_type_info::__offset_flags`: the low 8 bits
-                // are access/virtual flags, the rest a SIGNED byte displacement.
-                bases.push((bti, (flags as i64) >> 8));
+                // are access/virtual flags, the rest a SIGNED byte displacement --
+                // or, for a virtual base (bit 0), the vtable offset of the word
+                // holding it.
+                let flags = sign_extend(flags, rk);
+                if flags & 1 != 0 {
+                    virtual_bases.push((bti, flags >> 8));
+                } else {
+                    bases.push((bti, flags >> 8));
+                }
             }
-            (bases, 2 * ptr + 8 + count * 2 * ptr)
+            (bases, virtual_bases, 2 * ptr + 8 + count * 2 * ptr)
         }
+    }
+}
+
+/// Give each virtual base its displacement, and add the virtual bases a class
+/// inherits through its bases (`D : L, R` with `L : virtual B` lists only L and
+/// R, yet B has its own sub-vtable in D). For a base subobject at `disp` whose
+/// typeinfo names virtual base V at vtable offset `slot`, V lies at `disp` plus
+/// the signed word at `slot` from the address point of the sub-vtable D keeps
+/// for that subobject (offset-to-top `-disp`).
+fn resolve_virtual_bases(img: &ImageBytes, rk: &RefKind, typeinfos: &mut [TypeInfo], subs: &[SubVtable]) {
+    let shape: HashMap<u64, (Vec<(u64, i64)>, Vec<(u64, i64)>)> =
+        typeinfos.iter().map(|t| (t.addr, (t.bases.clone(), t.virtual_bases.clone()))).collect();
+    for ti in typeinfos.iter_mut() {
+        let vbase_at = |disp: i64, slot: i64| -> Option<i64> {
+            let sub = subs.iter().find(|s| s.typeinfo == ti.addr && s.offset_to_top == -disp)?;
+            read_ptr(img, rk, sub.first_slot.wrapping_add(slot as u64)).map(|v| sign_extend(v, rk))
+        };
+        let mut found: Vec<(u64, i64)> = ti.bases.clone();
+        let mut work: Vec<(u64, i64, u32)> = vec![(ti.addr, 0, 0)];
+        let mut seen: HashSet<u64> = HashSet::new();
+        while let Some((b, disp, depth)) = work.pop() {
+            if !seen.insert(b) || depth > MAX_BASES {
+                continue;
+            }
+            let Some((nonvirtual, virtuals)) = shape.get(&b) else { continue };
+            for &(b2, d2) in nonvirtual {
+                work.push((b2, disp + d2, depth + 1));
+            }
+            for &(b2, slot) in virtuals {
+                if found.iter().any(|&(f, _)| f == b2) {
+                    continue;
+                }
+                if let Some(d) = vbase_at(disp, slot) {
+                    found.push((b2, disp + d));
+                    work.push((b2, disp + d, depth + 1));
+                }
+            }
+        }
+        ti.bases = found;
     }
 }
 
@@ -851,6 +905,49 @@ mod tests {
         assert_eq!(named[&0x1010], "Shape::vtable_1");
     }
 
+    /// A virtual base's `offset_flags >> 8` is the vtable offset of its
+    /// vbase-offset word, not its displacement: `D : virtual B` keeps B at +16,
+    /// stored 24 bytes before D's address point, and the secondary sub-vtable
+    /// at offset-to-top -16 is B's.
+    #[test]
+    fn virtual_base_displacement_is_read_from_the_vtable() {
+        let rk = RefKind::new(true, 0, End::Little);
+        let mut rodata = vec![0u8; 0x20];
+        rodata[0x00..0x03].copy_from_slice(b"1B\0");
+        rodata[0x10..0x13].copy_from_slice(b"1D\0");
+        let mut rel = vec![0u8; 0x100];
+        let put = |v: &mut [u8], off: usize, x: u64| v[off..off + 8].copy_from_slice(&x.to_le_bytes());
+        put(&mut rel, 0x00, 0);
+        put(&mut rel, 0x08, 0x7080);
+        put(&mut rel, 0x10, 0x1000);
+        put(&mut rel, 0x20, 16);
+        put(&mut rel, 0x28, 0);
+        put(&mut rel, 0x30, 0x70a0);
+        put(&mut rel, 0x38, 0x1020);
+        put(&mut rel, 0x40, (-16i64) as u64);
+        put(&mut rel, 0x48, 0x70a0);
+        put(&mut rel, 0x50, 0x1010);
+        put(&mut rel, 0x80, 0xdead);
+        put(&mut rel, 0x88, 0x5000);
+        put(&mut rel, 0xa0, 0xbeef);
+        put(&mut rel, 0xa8, 0x5010);
+        rel[0xb4..0xb8].copy_from_slice(&1u32.to_le_bytes());
+        put(&mut rel, 0xb8, 0x7080);
+        put(&mut rel, 0xc0, (((-24i64) << 8) | 3) as u64);
+        let img = ImageBytes::from_spans(vec![(0x5000, &rodata), (0x7000, &rel)]);
+        let cands = vec![(0x7080u64, Some(Flavor::Class)), (0x70a0u64, Some(Flavor::VmiClass))];
+        let mut tis = decode_typeinfos(&img, &rk, &cands);
+        assert_eq!(tis[1].bases, vec![]);
+        assert_eq!(tis[1].virtual_bases, vec![(0x7080, -24)]);
+        let text = TextRanges::for_test(vec![(0x1000, 0x2000)]);
+        let subs = recover_subvtables(&img, &rk, &text, &HashSet::new(), &tis);
+        resolve_virtual_bases(&img, &rk, &mut tis, &subs);
+        assert_eq!(tis[1].bases, vec![(0x7080, 16)]);
+        let by_addr: HashMap<u64, &TypeInfo> = tis.iter().map(|t| (t.addr, t)).collect();
+        let secondary = subs.iter().find(|s| s.typeinfo == 0x70a0 && s.offset_to_top == -16).unwrap();
+        assert_eq!(subvtable_suffix(&tis[1], secondary, &by_addr), "vtable_for_B");
+    }
+
     /// A secondary sub-vtable takes the NAME of the base subobject its
     /// `offset-to-top` displacement identifies — the multiple-inheritance case the
     /// probe's `Widget : Loggable, Drawable` produces (`Drawable` at +16, so its
@@ -862,6 +959,7 @@ mod tests {
             name_addr: 0x5000,
             class: "Drawable".into(),
             bases: vec![],
+            virtual_bases: vec![],
             size: 16,
         };
         let widget = TypeInfo {
@@ -869,6 +967,7 @@ mod tests {
             name_addr: 0x5020,
             class: "Widget".into(),
             bases: vec![(0x7080, 16)],
+            virtual_bases: vec![],
             size: 56,
         };
         let by_addr: HashMap<u64, &TypeInfo> =

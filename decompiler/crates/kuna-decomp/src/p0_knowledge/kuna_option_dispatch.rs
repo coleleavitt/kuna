@@ -317,6 +317,7 @@ kuna_options! { self, p1;
     "switchguardbound" => on_off!(switch_guard_bound, "Switch CBRANCH-guard index bound"),
     "switchsharedcase" => on_off!(switch_shared_case, "Switch loop-carried-guard table"),
     "switchmultipred" => on_off!(switch_multi_pred, "Switch multi-predecessor unrolled-guard table"),
+    "switchtrim" => on_off!(switch_trim, "Unguarded jump-table recovery with layout trimming"),
     "unrolledguard" => on_off!(unrolled_guard, "Interleaved unrolled-guard jump-table partial-flow recovery"),
     "jtsharepartial" => on_off!(jumptable_share_partial, "Shared jump-table partial sub-decompilation"),
     "noreturn_externmatch" => on_off!(noreturn_extern_match, "Name-matched extern no-return"),
@@ -999,6 +1000,7 @@ kuna_options! { self, p1;
     "coldentry" => {
         on_off!(analysis_coldentry, "Multi-entry .cold fragment entry discovery")
     },
+    "ehcold" => on_off!(analysis_ehcold, "Exception-cleanup .cold fragment suppression"),
     "fdeinterior" => {
         on_off!(analysis_fdeinterior, ".eh_frame FDE-interior entry suppression")
     },
