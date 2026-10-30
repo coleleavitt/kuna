@@ -1099,6 +1099,12 @@ Three tiers:
 | v850-style explicit flag compare collapsed to a clean signed less-than | [`ovlesssimplify`](#ovlesssimplify) |
 | want the raw CONCAT11(CARRY1(...)) intrinsics visible instead of one wide add | [`addcarrychain`](#addcarrychain) |
 | 8-bit adc carry-chain pair (6502 style) folded into a single 16-bit addition | [`addcarrychain`](#addcarrychain) |
+| invalidInstructionException() after a call in a stripped rust or clang binary | [`trapaftercall`](#trapaftercall) |
+| a panic helper call is not marked no-return | [`trapaftercall`](#trapaftercall) |
+| ud2 after a call is printed as a jump-as-call | [`trapaftercall`](#trapaftercall) |
+| a function-pointer call renders as a call of __llvm_retpoline_r11 | [`retpolinethunk`](#retpolinethunk) |
+| a call of a stripped retpoline thunk sub_<addr> loses the called pointer | [`retpolinethunk`](#retpolinethunk) |
+| the pointer loaded into r11 before a call is never used | [`retpolinethunk`](#retpolinethunk) |
 | a function that runs into undecodable, encrypted or packed bytes ends with a plain return; and no warning | [`decodehalt`](#decodehalt) |
 | a self-decrypting stub decompiles to case 0x<hex>: return; with error null in --json | [`decodehalt`](#decodehalt) |
 | nothing in the emitted C says the decompiled body is incomplete | [`decodehalt`](#decodehalt) |
@@ -1117,6 +1123,11 @@ Three tiers:
 | GetLastError() or another argument-less import eats the pushes staged for the call after it | [`calleeprotostack`](#calleeprotostack) |
 | a buffer whose address is passed to an api is read back as an incoming parameter instead of the local | [`calleeprotostack`](#calleeprotostack) |
 | an import with a known signature still has its cleanup guessed from the caller's push run | [`calleeprotostack`](#calleeprotostack) |
+| a void i386 function returns an uninitialised long double | [`x87depth`](#x87depth) |
+| a function that discards a float call result returns st0 | [`x87depth`](#x87depth) |
+| `long double v1; // st0  | [`x87depth`](#x87depth) |
+|  st1` is returned but never assigned | [`x87depth`](#x87depth) |
+| a caller's x87 push makes a void callee return a float | [`x87depth`](#x87depth) |
 | a call to an msvc c++ import that takes a class by value keeps only its hidden return pointer | [`msvcbyval`](#msvcbyval) |
 | the arguments after a by-value class render as stores before the call | [`msvcbyval`](#msvcbyval) |
 | a copy constructor or a by-value return fills a local the caller never passes on | [`msvcbyval`](#msvcbyval) |
@@ -3966,6 +3977,22 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **Where / provenance:** P5/simplification-quiescence · ghidra-upstream · correctness-fix · GH-8913
 - **Example:** `option addcarrychain off`
 
+### `trapaftercall` -- on | off, default `on`
+
+- **Symptoms:** invalidInstructionException() after a call in a stripped rust or clang binary; a panic helper call is not marked no-return; ud2 after a call is printed as a jump-as-call.
+- **What it does:** End the flow at an x86 call instruction followed by `ud2`. clang with trap-unreachable (the Darwin and rustc default) emits `ud2` after every call it knows cannot return, and execution never reaches it after a call that returns. In a stripped image such a callee has no name, so no name list marks it no-return, flow walks into the trap, and the call is followed by `(*(invalidInstructionException() as ...))()`. When the instruction is a machine `call` (E8, or FF /2, after prefixes) and the next two bytes are 0F 0B, the call site is no-return: the artificial halt is planted and, for a direct call, its call spec is marked, as for a named no-return callee (an indirect call through a GOT slot is left unmarked, because ActionDeindirect would otherwise restart the function when it resolves the slot). A tail `jmp` the flow turned into a call is not evidence. IDA also takes two `int3` bytes (MSVC) as evidence; kuna does not, because anti-debug code returns into an `int3` pad on purpose (int3pad). Per call site; x86 language ids only.
+- **When to flip:** On by default. The OFF symptom is a stripped clang, Apple or Rust binary where every panic or fatal-error helper call is followed by a jump-as-call through invalidInstructionException(). Flip off to see the trap the compiler planted.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · ida95-51
+- **Example:** `option trapaftercall off`
+
+### `retpolinethunk` -- on | off, default `on`
+
+- **Symptoms:** a function-pointer call renders as a call of __llvm_retpoline_r11; a call of a stripped retpoline thunk sub_<addr> loses the called pointer; the pointer loaded into r11 before a call is never used.
+- **What it does:** Read a call to a retpoline thunk as the indirect call it stands for. `-mretpoline` (clang) and `-mindirect-branch=thunk` (gcc) compile every indirect call into a direct call to a per-register thunk, `call 1f; 2: pause; lfence; jmp 2b; 1: mov %reg,(%rsp); ret`, which returns into the target held in the register. The cspecs carry that effect as the `x86_indirect_thunk_<reg>` call-fixups and the call-fixup installer applies them by the name gcc gives the thunk, but clang names its thunks `__llvm_retpoline_<reg>` and a stripped image names neither, so the call printed as `__llvm_retpoline_r11(a1)`, a call of the thunk itself with the target lost. When a direct callee has no fixup of its own, the flow builder reads its first bytes for that shape (E8 call over the pause/lfence spin to a `[REX] 89 /r 24; C3` store of the register over the return address) and applies the `x86_indirect_thunk_<reg>` fixup the register names. x86 language ids only; a register with no fixup in the cspec keeps the plain call.
+- **When to flip:** On by default. The OFF symptom is a binary built with -mretpoline (or a stripped gcc -mindirect-branch=thunk build) where every function-pointer call renders as a call of `__llvm_retpoline_r11`/`sub_<thunk>` and the pointer it loads into r11 is lost. Flip off to see the thunk calls.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · ida95-51
+- **Example:** `option retpolinethunk off`
+
 ### `decodehalt` -- on | off, default `on`
 
 - **Symptoms:** a function that runs into undecodable, encrypted or packed bytes ends with a plain return; and no warning; a self-decrypting stub decompiles to case 0x<hex>: return; with error null in --json; nothing in the emitted C says the decompiled body is incomplete; a branch that leaves a --define-function extent renders as an ordinary return; kuna disassemble reports .byte at an address the decompiled C returns from; PowerPC64 isel becomes halt_baddata with no target-selection advice.
@@ -4005,6 +4032,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default: the flip moves 0 of 675 datatest assertions -- both parity corpora are symbol-less byte chunks whose callees carry no declared prototype, so nothing in them reaches the locked branch. Flip OFF to restore the pre-signature behaviour. With it off, a Win32 API whose arguments are staged across an intervening call renders with only the arguments pushed after that call, the staged ones are dropped, and the buffer whose address was among them decays into an incoming parameter -- so the call that fills it and the calls that read it disagree about which object they are talking about. Inert on any target whose callees carry no signature, and on any spec that states its own extrapop (x86gcc `__cdecl extrapop="4"`, x86-64, every RISC spec).
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · re-needs-getlasterror-consumes-arguments-prepared
 - **Example:** `option calleeprotostack off`
+
+### `x87depth` -- on | off, default `on`
+
+- **Symptoms:** a void i386 function returns an uninitialised long double; a function that discards a float call result returns st0; `long double v1; // st0 ;  st1` is returned but never assigned; a caller's x87 push makes a void callee return a float.
+- **What it does:** Retire an ST0 return the x87 stack depth proves empty. SLEIGH has no x87 stack top: ST0..ST7 are fixed registers, each push or pop is a copy shift, and a call shifts nothing. A function that calls a float-returning helper and discards the result (`call noisy; fstp st(0)`) reaches its `ret` with ST0 holding what the pops moved down, so return recovery reads it as a `long double` result made of an undefined value, and callerreads reads the push shift in a caller (`ST1 = ST0`) as a read of the returned value. The pass recovers the depth as IDA's x87 solver does, without an LP: before SSA each block's raw ops are scanned in order, the `ST7 = ST6` copy that opens a push adds one, the `ST6 = ST7` copy that closes a pop removes one, and a pop or another read of ST(i) needs a depth above i. Under the System V i386 rules the stack is empty at entry and at every call, and a call leaves 0 or 1 values; reads bound each call's unknown from below, the next call and joins pin it, and joins of two calls relate them (union-find with offsets). A return whose depth comes out exactly 0 joins the returns x87emptyreturn proves empty, so the ST0 trial is retired when every return agrees. callerreads uses the same walk from each call's return address and ignores ST0 at a site whose next call proves the callee left nothing. An MMX access, a tag-word write, a negative depth or a conflict at a join gives no answer.
+- **When to flip:** On by default: 0/675 datatest assertions move. The OFF symptom is an i386 function that only calls a double-returning helper for its side effect and is printed as `long double f(...)` returning an uninitialised `v1; // st0 | st1`. Flip off for hand-written x87 code that keeps values on the stack across calls, which the System V assumptions do not describe.
+- **Where / provenance:** P4/output-prototype · kuna · correctness-fix · ida95-51
+- **Example:** `option x87depth off`
 
 ### `msvcbyval` -- on | off, default `on`
 

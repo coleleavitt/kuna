@@ -878,7 +878,6 @@ kuna_options! { self, p1;
     "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
     "mba" => on_off!(mba, "Linear MBA simplification"),
     "avxintrinsics" => on_off!(avx_intrinsics, "Intel intrinsic names for AVX user-ops"),
-    "calleeretpurge" => on_off!(callee_ret_purge, "callee purge from its own ret imm16"),
     "x87depth" => on_off!(x87_depth, "x87 stack depth at returns"),
     "trapaftercall" => on_off!(trap_after_call, "no-return evidence from a trap after a call"),
     "retpolinethunk" => on_off!(retpoline_thunk, "retpoline thunks recognized by their body"),

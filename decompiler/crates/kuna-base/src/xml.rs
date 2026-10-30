@@ -2161,7 +2161,8 @@ mod tests {
         // and kuna-calleeretpurge / a callee's `ret imm16` is the call's extrapop
         // and kuna-switchtrim / an unguarded jump table is read until its layout ends
         // and kuna-tailcontract / a tail-calling thunk sees its callee's prototype in a single decompile
-        assert_eq!(count, 674, "corpus file count drifted");
+        // and kuna-calleeretpurge-x86 / the personal/x86-stack calleeretpurge test, kept beside bugs-misc's
+        assert_eq!(count, 675, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
