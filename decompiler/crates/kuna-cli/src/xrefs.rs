@@ -4,6 +4,7 @@
 //!   kuna xrefs <binary> --to <name|0xaddr>   [--json] [--kind k,k..] [--mode MODE]
 //!   kuna xrefs <binary> --from <name|0xaddr> [--json] [--kind k,k..] [--mode MODE]
 //!              [--option N V].. [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]
+//!              [--raw-image --target T --base VMA --entry VMA]
 //! ```
 //!
 //! `--to` answers *what references this?* — every call site, branch, and data
@@ -68,6 +69,7 @@ struct XrefArgs {
     target: Option<String>,
     sleighpath: Option<String>,
     isa: Option<kuna_console::engine::ArmIsa>,
+    raw: crate::image::RawFlags,
 }
 
 /// A resolved query target: an address, the best name the program has for it,
@@ -220,14 +222,17 @@ fn query(args: &XrefArgs) -> Result<String, String> {
         base: None,
         ..Args::serial()
     };
+    let mut load = load;
+    args.raw.apply(&mut load);
     // The object view first: an input without one (a UEFI TE) is refused
     // before the engine is brought up for nothing. A missing file keeps the
     // message `load_program` would have given it.
     std::fs::canonicalize(&args.binary)
         .map_err(|_| format!("binary not found: {}", args.binary))?;
-    let bytes = crate::image::image_bytes(
+    let bytes = args.raw.image(
         &args.binary,
         kuna_analysis::loader::macho_fat::slice_pref(args.slice.as_deref(), args.target.as_deref()),
+        args.target.as_deref(),
     )?;
     let file = kuna_analysis::loadimage_object::parse_object(&bytes)
         .map_err(|e| format!("could not parse {}: {e}", args.binary))?;
@@ -615,8 +620,13 @@ fn parse_args(argv: &[String]) -> Result<XrefArgs, String> {
     let mut isa = None;
 
     let mut i = 0;
+    let mut raw = crate::image::RawFlags::default();
     while i < argv.len() {
         let a = argv[i].as_str();
+        if raw.take(argv, &mut i)? {
+            i += 1;
+            continue;
+        }
         match a {
             "--json" => json = true,
             "--to" | "--from" => {
@@ -657,6 +667,10 @@ fn parse_args(argv: &[String]) -> Result<XrefArgs, String> {
 
     let binary = binary.ok_or("xrefs requires <binary>")?;
     let (direction, spec) = spec.ok_or("xrefs requires --to <target> or --from <target>")?;
+    raw.check(target.as_deref())?;
+    if raw.on && slice.is_some() {
+        return Err("--slice does not apply to --raw-image input".into());
+    }
     Ok(XrefArgs {
         binary,
         spec,
@@ -669,6 +683,7 @@ fn parse_args(argv: &[String]) -> Result<XrefArgs, String> {
         target,
         sleighpath,
         isa,
+        raw,
     })
 }
 
@@ -687,7 +702,8 @@ fn usage() {
     eprintln!(
         "usage: kuna xrefs <binary> (--to <name|0xaddr> | --from <name|0xaddr>) [--json] \\\n\
          \x20                  [--kind call,jump,data,read,write] [--mode auto|reliable|aggressive|fast] \\\n\
-         \x20                  [--option N V].. [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]\n\
+         \x20                  [--option N V].. [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D] \\\n\
+         \x20                  [--raw-image --target T --base VMA --entry VMA]\n\
          \n\
          --to    everything that references the target (call sites, branches, data references).\n\
          \x20       An import is one callable under two addresses -- a forwarding veneer and the\n\

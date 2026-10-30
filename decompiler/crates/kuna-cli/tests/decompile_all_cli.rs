@@ -2121,6 +2121,12 @@ fn raw_image_rejects_missing_metadata_and_object_only_surfaces() {
              "--entry", "0", "--isa", "thumb", "--reachable-from", "0"],
         vec!["decompile-graph", &binary, "--raw-image", "--target", target, "--base", "0",
              "--entry", "0", "--isa", "thumb"],
+        vec!["xrefs", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0", "--isa", "thumb", "--from", "0"],
+        vec!["strings", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0"],
+        vec!["crypto", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0"],
     ] {
         let (_stdout, stderr, ok) = run_kuna(&args);
         assert!(ok, "{args:?} read no ELF view: {stderr}");

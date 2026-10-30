@@ -1196,9 +1196,11 @@ A function no direct call reaches and no seed names is still undiscovered;
 `--define-function` asserts it. Named `--functions`, section-relative selectors
 and `--slice` are rejected. Support covers `decompile` (text and JSON),
 `decompile-all`, `functions` (`--summary` and `--reachable-from` included),
-`decompile-project` and `decompile-graph`. For a byte-addressed target the
-call graph and the analysis passes read an ELF view of the image (`objectview`).
-`disassemble`/`read`, `xrefs` and `strings` take no raw-image flags. A headerless file used without `--raw-image`
+`decompile-project`, `decompile-graph`, `xrefs`, `strings` and `crypto` (the
+last three take `--raw-image --target T --base VMA --entry VMA` too). For a
+byte-addressed target the call graph, the analysis passes and the scanners
+read an ELF view of the image (`objectview`). `disassemble`/`read` take no
+raw-image flags. A headerless file used without `--raw-image`
 reports the required raw-image command shape, including when its first byte is
 `<`; only a parsed document containing `<binaryimage>` is treated as XML. Quoted
 console filenames preserve paths containing whitespace; the interactive spelling
