@@ -614,6 +614,7 @@ pub fn universal_sched(
             act!(ActionSpacebase::boxed("base")),
             act!(ActionNonzeroMask::boxed("analysis")),
             act!(ActionInferTypes::boxed("typerecovery")),
+            act!(crate::kuna_indexrescale::ActionIndexRescale::boxed("typerecovery")),
             // (kuna) structsynth: once propagation has settled, complete a
             // `struct_N` over a pointer parameter dereferenced at two or more
             // constant offsets and type-lock the parameter to it.  It sits here

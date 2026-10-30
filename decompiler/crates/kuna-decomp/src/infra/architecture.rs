@@ -672,6 +672,8 @@ pub struct Architecture {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
     pub dyn_alloca: bool,
+    /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
+    pub index_rescale: bool,
     /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
     pub loop_rotate: bool,
     /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
@@ -3239,6 +3241,7 @@ impl Architecture {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            index_rescale: false,
             loop_rotate: false,
             post_increment: false,
             va_start: false,
@@ -3743,6 +3746,7 @@ impl Architecture {
         self.bit_idioms = true;
         self.helper_roles = true;
         self.dyn_alloca = true;
+        self.index_rescale = true;
         self.loop_rotate = true;
         self.post_increment = true;
         self.va_start = true;
@@ -4744,6 +4748,7 @@ impl Architecture {
         ctx.bit_idioms = self.bit_idioms;
         ctx.helper_roles = self.helper_roles;
         ctx.dyn_alloca = self.dyn_alloca;
+        ctx.index_rescale = self.index_rescale;
         ctx.loop_rotate = self.loop_rotate;
         ctx.post_increment = self.post_increment && self.print.out_lang() == crate::kuna_lang::OutLang::C;
         ctx.va_start = self.va_start;

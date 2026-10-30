@@ -181,6 +181,8 @@ Three tiers:
 | a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
 | a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote) |
 | a cast back to a variable's own declared type at each read | [`typevote`](#typevote) |
+| *(int *)((long)p + v1) where v1 only takes multiples of 4 | [`indexrescale`](#indexrescale) |
+| a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale) |
 | a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
 | a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
 | a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
@@ -1969,6 +1971,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see which values type inference left undefined.
 - **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-typevote
 - **Example:** `--option typevote off`
+
+### `indexrescale` -- on | off, default `on`
+
+- **Symptoms:** *(int *)((long)p + v1) where v1 only takes multiples of 4; a loop steps an offset by the element size and adds it to the base.
+- **What it does:** Rescale a byte offset into an array to an element index. When a variable's web (joined through MULTIEQUAL, INDIRECT, COPY and constant steps) is written only by constants and steps that are multiples of k and read only as an offset added to a pointer to k-byte elements (not the address of a non-array structure field), by its own steps, or by compares with multiples of k, its constants are divided by k and each add becomes PTRADD(p, i, k): *(int *)((long)rule + v2) with v2 = 4 / v2 = 0xc prints rule[v2] with v2 = 1 / v2 = 3. Assumes the byte offset does not wrap, as an array offset does.
+- **When to flip:** On (default). Flip off to see the byte offsets the compiler kept.
+- **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-indexrescale
+- **Example:** `--option indexrescale off`
 
 ### `vastart` -- on | off, default `on`
 

@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3711,
-    3711
+    3714,
+    3714
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1113,6 +1113,9 @@
     "data:KUNA-GLOBALREF #6: a value the function also divides by keeps the cast in both passes",
     "data:KUNA-GLOBALREF #7: the direct read beside the named buffer is unchanged",
     "data:KUNA-GLOBALREF #8: the buffer the function also reads as a long is never named by address",
+    "data:KUNA-INDEXRESCALE #1: the selected element is an index (default)",
+    "data:KUNA-INDEXRESCALE #2: the index constants are element counts (default)",
+    "data:KUNA-INDEXRESCALE #3: indexrescale off keeps the byte offset",
     "data:KUNA-LIBCWIDEN #1: off, the faccessat wrapper's path stays a width-only integer",
     "data:KUNA-LIBCWIDEN #2: on, faccessat's declaration types it",
     "data:KUNA-LIBCWIDEN #3: off, both of renameat's names stay integers",

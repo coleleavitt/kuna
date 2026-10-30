@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
+    pub index_rescale: bool,
     /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
     pub loop_rotate: bool,
     /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
@@ -1959,6 +1961,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            index_rescale: false,
             loop_rotate: false,
             post_increment: false,
             va_start: false,
