@@ -7846,7 +7846,21 @@ and RAW files, compression sections stored uncompressed, and GUID-defined
 sections for EDK2 LZMA (`lzma-rs`, the 13-byte LZMA-alone header), LZMA with
 the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Brotli
 (`brotli-decompressor`, after EDK2's 16-byte size header) and CRC32. Every
-PE32/TE section is a module named by the file's UI section.
+PE32/TE section is a module named by the file's UI section. `containers.rs (detect)` reads U-Boot
+legacy images, Intel HEX, Motorola S-records, ESP32/ESP8266 application images,
+uClinux bFLT v4 (rebasing GOT entries and relocations past the 64-byte header,
+as `binfmt_flat` does) and Qualcomm MBN/SBL wrappers, and returns either one
+flat image (lowest to highest loaded address, gaps filled, at most 256 MiB;
+an ESP image whose segments span more keeps the segments in the entry's
+16 MiB window) with the processor, base and entries its header states, or the
+ELF it wraps. `svd.rs (parse)` reads a CMSIS-SVD device with the kuna XML
+reader: peripherals (`derivedFrom` reusing the base's registers and type),
+clusters, `dim`/`dimIncrement`/`dimIndex` expansion, register sizes inherited
+from the peripheral or device, and `<interrupt>` names. `Peripheral::c_struct`
+lays a peripheral out as a C structure, dropping a register that overlaps an
+earlier one and padding gaps. The CLI asserts the structure (`typedef`), the
+peripheral as a typed global at its base (`data`) and its register range as
+volatile, and names IRQ handlers from the interrupts.
 
 The real-binary path of §1.2 is the fourth binding, console-side: `bootstrap_from_object`
 plays the leaf role itself — it resolves the language from the object header

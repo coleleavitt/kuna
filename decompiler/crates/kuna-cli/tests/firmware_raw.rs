@@ -25,3 +25,15 @@ fn an_explicit_base_is_kept() {
     assert_eq!(code, 0, "{err}");
     assert!(!err.contains("Cortex-M vector table"));
 }
+
+#[test]
+fn intel_hex_with_svd_names_peripherals_and_interrupts() {
+    let hex = common::fixture("cortexm3_raw.hex");
+    let svd = common::fixture("cortexm3_raw.svd");
+    let (out, err, code) = common::run_kuna(&["decompile-all", &hex, "--svd", &svd]);
+    assert_eq!(code, 0, "{err}");
+    assert!(err.contains("Intel HEX: 516 bytes at 0x8000000"), "{err}");
+    assert!(out.contains("void USART1_IRQHandler(void)"), "{out}");
+    assert!(out.contains("USART1.DR = 0x78;"));
+    assert!(out.contains("GPIOA.ODR = GPIOA.ODR ^ 0x20;"));
+}

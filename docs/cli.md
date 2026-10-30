@@ -1236,6 +1236,40 @@ $ kuna decompile-all stm32.bin
 ...
 ```
 
+**Containers.** A file that is not an object file is also tried as a firmware
+container (`kuna_analysis::loader::firmware::containers`). Each is flattened
+into a temporary raw image (removed when the run ends) and given the
+arguments its header states:
+
+| container | recognized by | processor | base / entries |
+|---|---|---|---|
+| U-Boot legacy uImage | magic `27 05 19 56` | `ih_arch` (ARM, AArch64, x86, MIPS with the byte order that finds more `jr ra`, PowerPC, SH, SPARC, m68k, Xtensa, RISC-V) | `ih_load`, `ih_ep` (odd ARM entry: Thumb); gzip payloads inflated |
+| Intel HEX | every line a checksummed `:` record | `--target` or the Cortex-M probe | lowest address; type 03/05 records |
+| Motorola S-record | every line a checksummed `S0`-`S9` record | `--target` or the Cortex-M probe | lowest address; S7/S8/S9 |
+| ESP32 / ESP8266 app image | `E9`, segment table | chip id: Xtensa (ESP32, S2, S3, ESP8266) or RISC-V (C2, C3, C6, H2, P4) | lowest segment; header entry |
+| uClinux bFLT v4 | `bFLT` | ColdFire unless `--target` | 0; header entry; GOT and relocations rebased past the 64-byte header |
+| Qualcomm MBN / SBL / GPT image | SBL codeword, MBN header, `EFI PART` | the wrapped ELF's | the ELF is loaded as is |
+
+A flat image whose processor the container does not state is probed for a
+Cortex-M vector table like a raw dump.
+
+**`--svd FILE`** imports a CMSIS-SVD device description
+(`kuna_analysis::loader::firmware::svd`): each peripheral becomes a structure
+`<NAME>_Type` (registers as members, clusters flattened into
+`<cluster>_<register>`, `dim` arrays expanded, overlapping alternates dropped,
+gaps as reserved bytes; a `derivedFrom` peripheral reuses its base's type),
+declared at its base address as a typed global with a volatile range over its
+registers, and each `<interrupt>` names the Cortex-M handler of that IRQ
+`<NAME>_IRQHandler`. The access then reads `USART1.DR = 0x78;` instead of
+`dat_40011004 = 0x78;`.
+
+```sh
+$ kuna decompile-all stm32.hex --svd STM32F401.svd
+[kuna firmware] Intel HEX: 516 bytes at 0x8000000, ...
+[kuna firmware] Cortex-M vector table: base 0x8000000, ...
+[kuna firmware] SVD MINI_F4: 3 peripherals, 1 interrupts
+```
+
 ## `kuna decompile-all` / `kuna functions` — whole binary, machine-readable
 
 ```bash

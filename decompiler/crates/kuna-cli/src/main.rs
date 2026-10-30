@@ -81,8 +81,14 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::from(2);
     }
-    let rest = rawfront::prepare(sub, &rest);
-    let rest = rest.as_slice();
+    let prepared = match rawfront::prepare(sub, &rest) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let rest = prepared.args.as_slice();
     runtime_hints::note_for_invocation(sub, rest);
     let code = match sub {
         "-V" | "--version" | "version" => {
