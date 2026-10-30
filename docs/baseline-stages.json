@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3371,
-    3371
+    3379,
+    3379
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -990,7 +990,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 355 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 358 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1581,6 +1581,9 @@
     "data:RETPAIRHALF #6: a high register that feeds the low one is not returned",
     "data:RETPAIRHALF #7: a stored word, a scrubbed register and an svc argument stay void",
     "data:RETPAIRHALF #8: a high register written to fpscr or cpsr stays void",
+    "data:RETPOLINETHUNK #1: off, the thunk is called and the pointer is lost",
+    "data:RETPOLINETHUNK #2: on, the call goes through the loaded pointer",
+    "data:RETPOLINETHUNK #3: on, the pointer comes from the table",
     "data:RETPUSHEDHALF #1: by default the alignment push/pop leaves a one-argument function returning one register",
     "data:RETPUSHEDHALF #2: with the option off the bug returns: the pushed register becomes a fifth argument",
     "data:RETPUSHEDHALF #3: and the invented argument is used only as the high half of the return",
@@ -1887,6 +1890,8 @@
     "data:TIEDPHITRIM #7: both passes print store_loop's live store of each fetched byte into buf[0]",
     "data:TIEDPHITRIM #8: both passes print store_join's store of the joined byte into buf[0]",
     "data:TIEDPHITRIM #9: both passes keep upstream's merge at outparam_join's if/else join",
+    "data:TRAPAFTERCALL #1: off, flow runs into the ud2 after the call",
+    "data:TRAPAFTERCALL #2: both passes, the helper is called with its argument",
     "data:Third aggregate field is published",
     "data:Third array field is published",
     "data:UCOMISS unordered #10: setnp beside an exact setb stays",
@@ -1931,6 +1936,9 @@
     "data:VENEERTAILCALL #9: a veneer with no output of its own keeps the body of a callee that returns a value",
     "data:VOIDTAILRETURN #1: the bare trailing return; is printed by EXACTLY ONE of the two passes - the shipped default keeps it, `option voidtailreturn on` elides it (2 would mean the option did nothing)",
     "data:VOIDTAILRETURN #2: both passes really emitted the function, so #1 cannot pass vacuously on a pass that produced no C",
+    "data:X87DEPTH #1: off, drop2 returns an undefined long double",
+    "data:X87DEPTH #2: on, drop2 returns nothing",
+    "data:X87DEPTH #3: on, keep still returns the product",
     "data:ZEROIDIOMUSE #1: off, the watchdog call inside the loop has an empty argument list",
     "data:ZEROIDIOMUSE #2: on, both loaded registers reach the call as arguments",
     "data:ZEROIDIOMUSE #3: the zeroing idiom itself is folded to the constants reader is called with in BOTH passes, so the option moved no other call",
