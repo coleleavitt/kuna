@@ -17,6 +17,8 @@
 //! instructions it reaches. When every one agrees, that change is the callee's
 //! extrapop and `ActionExtraPopSetup` uses it in place of the model's.
 //! A body with no reachable return, or whose returns disagree, says nothing.
+//! The ObjC `objc_msgSend*_stret` imports have no body to read but pop the
+//! hidden result pointer like any struct-returning function, so they get 8.
 //! 32-bit x86 only: x86-64 code does not pop arguments, and the decode is not
 //! free when a Ghidra host serves the instructions.
 
@@ -163,10 +165,22 @@ pub fn seed(arch: &mut crate::architecture::Architecture, data: &mut Funcdata) {
                 p
             }
         };
-        if let Some(p) = purge {
+        if let Some(p) = purge.or_else(|| stret_purge(arch, data.get_call_specs(i).get_name())) {
             data.kuna_set_callee_purge(&e, p);
         }
     }
+}
+
+/// The ObjC message senders that return a structure in memory pop its hidden
+/// pointer on i386, as IDA special-cases them (`pc.so` 0x37670): they are
+/// imports, so there is no body to read the `ret $4` from.
+fn stret_purge(arch: &crate::architecture::Architecture, name: &str) -> Option<int4> {
+    const SENDERS: [&str; 3] = ["objc_msgSend_stret", "objc_msgSendSuper_stret", "objc_msgSendSuper2_stret"];
+    if !arch.get_description().starts_with("x86:LE:32") {
+        return None;
+    }
+    let bare = name.strip_prefix("__imp_").unwrap_or(name).trim_start_matches('_');
+    SENDERS.contains(&bare).then_some(8)
 }
 
 /// The extrapop call `i` should use: the callee's own decoded return purge when

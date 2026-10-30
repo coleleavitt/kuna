@@ -1025,6 +1025,12 @@ pub struct Architecture {
     /// (kuna) A retpoline thunk recognized by its body gets the cspec's
     /// `x86_indirect_thunk_<reg>` fixup (option `retpolinethunk`).
     pub retpoline_thunk: bool,
+    /// (kuna) Remove a System V x86-64 register save area and mark the function
+    /// variadic (option `varargsave`).
+    pub vararg_save: bool,
+    /// (kuna) A dynamic stack allocation becomes `alloca(size)` (option
+    /// `alloca`). See [`crate::p3_dataflow::kuna_alloca`].
+    pub alloca_calls: bool,
     pub global_call_ranges: bool,
     /// (kuna) Let the callee's decoded body answer for the call's RETURN
     /// register too (option `calleeretpreserves`).  See
@@ -3325,6 +3331,8 @@ impl Architecture {
             x87_depth: true,
             trap_after_call: true,
             retpoline_thunk: true,
+            vararg_save: true,
+            alloca_calls: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
             callee_scratch_body: true,
@@ -3811,6 +3819,8 @@ impl Architecture {
         self.x87_depth = true;
         self.trap_after_call = true;
         self.retpoline_thunk = true;
+        self.vararg_save = true;
+        self.alloca_calls = true;
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)
         self.callee_scratch_body = true; // (kuna) DIV-149 default-on: a decoded callee that clobbers only SCRATCH registers still counts as a body for calleepreserves, so the value a caller sets before MSVC's out-of-line stack probe survives it (0/675 ablation)
@@ -4664,6 +4674,8 @@ impl Architecture {
         };
         ctx.x87_empty_storage = crate::p4_calls::kuna_x87emptyreturn::storage(self);
         ctx.x87_depth = self.x87_depth;
+        ctx.vararg_regs = crate::p4_calls::kuna_varargsave::regs(self);
+        ctx.alloca_calls = self.alloca_calls;
         ctx.trap_after_call = self.trap_after_call && self.get_description().starts_with("x86:");
         ctx.retsysreg_userops = ids(crate::kuna_retsysreg::STATE_USEROP_NAMES);
         ctx.retsysreg_cop_userops = ids(crate::kuna_retsysreg::COP_USEROP_NAMES);
@@ -5856,7 +5868,7 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ALLOCA, BUILTIN_VA_START,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -5902,6 +5914,9 @@ impl Architecture {
             // (kuna bitidioms) byte swap and rotate.
             userops.register_builtin(BUILTIN_BSWAP, &adapter)?;
             userops.register_builtin(BUILTIN_ROTL, &adapter)?;
+            // (kuna alloca, varargsave) the dynamic allocation and va_list set-up.
+            userops.register_builtin(BUILTIN_ALLOCA, &adapter)?;
+            userops.register_builtin(BUILTIN_VA_START, &adapter)?;
             Ok(())
         })();
         self.userops = userops;
@@ -8258,6 +8273,29 @@ impl crate::userop::UseropTypeArchitecture for BuiltinTypeArch {
     }
     fn get_type_bool(&self) -> Rc<crate::dtype::Datatype> {
         self.types.get_base(1, type_metatype::TYPE_BOOL).expect("builtin: getBase(BOOL)")
+    }
+    fn get_va_list_pointer(&self) -> Option<Rc<crate::dtype::Datatype>> {
+        use crate::dtype::{TypeFactory, TypeField};
+        if self.types.get_size_of_pointer() != 8 {
+            return None;
+        }
+        let tag = self.types.get_type_struct("__va_list_tag").ok()?;
+        let uint = self.types.get_base(4, type_metatype::TYPE_UINT).ok()?;
+        let void_ptr = self.types.get_type_pointer(8, self.types.get_type_void().ok()?, 1).ok()?;
+        let field = |ident: int4, offset: int4, name: &str, ty: &Rc<crate::dtype::Datatype>| TypeField {
+            ident,
+            offset,
+            name: name.to_string(),
+            field_type: Rc::clone(ty),
+        };
+        let fields = vec![
+            field(0, 0, "gp_offset", &uint),
+            field(1, 4, "fp_offset", &uint),
+            field(2, 8, "overflow_arg_area", &void_ptr),
+            field(3, 16, "reg_save_area", &void_ptr),
+        ];
+        let tag = self.types.set_fields_struct_raw(&tag, fields, Vec::new(), 24, 8, 0).ok()?;
+        self.types.get_type_pointer(8, tag, 1).ok()
     }
 }
 

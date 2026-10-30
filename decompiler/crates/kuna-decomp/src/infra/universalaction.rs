@@ -373,6 +373,8 @@ pub fn universal_sched(
         rrow!("x87truncate", "analysis", crate::kuna_x87truncate::RuleX87Truncate::new("analysis")),
         rrow!("selectdiv", "analysis", crate::kuna_selectdiv::RuleSelectDiv::new("analysis")),
         rrow!("bitidioms", "analysis", crate::kuna_bitidioms::RuleBitIdioms::new("analysis")),
+        rrow!("alloca", "analysis", crate::kuna_alloca::RuleAlloca::new("analysis")),
+        rrow!("allocaprobe", "analysis", crate::kuna_alloca::RuleAllocaProbe::new("analysis")),
         rrow!("gobool", "analysis", crate::kuna_gobool::RuleGoBoolReturn::with_group(false, "analysis")),
         rrow!("boolsignless", "analysis", crate::kuna_flagcompare::RuleBoolSignLess::with_group(false, "analysis")),
         rrow!("sborrowge", "analysis", crate::kuna_flagcompare::RuleSborrowGe::with_group(false, "analysis")),

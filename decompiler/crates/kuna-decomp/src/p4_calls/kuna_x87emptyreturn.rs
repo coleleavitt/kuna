@@ -171,8 +171,13 @@ pub fn capture(data: &mut Funcdata) {
     let Some(storage) = data.get_arch().x87_empty_storage.clone() else {
         return;
     };
+    data.kuna_x87_float_returns.clear();
+    data.kuna_x87_float_calls.clear();
     if data.get_arch().x87_depth {
-        data.kuna_x87_empty_returns = crate::p4_calls::kuna_x87depth::empty_returns(data, &storage);
+        let facts = crate::p4_calls::kuna_x87depth::facts(data, &storage);
+        data.kuna_x87_empty_returns = facts.empty_returns;
+        data.kuna_x87_float_returns = facts.float_returns;
+        data.kuna_x87_float_calls = facts.float_calls;
     }
     let has_free = data.obank().iter_code(OpCode::CPUI_CALLOTHER).any(|id| {
         data.obank()

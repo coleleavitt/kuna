@@ -233,6 +233,14 @@ fn apply(step: Step, d: Depth, calls: &mut Calls) -> Option<Depth> {
 }
 
 /// Walk one block from `start`, returning its exit depth.
+/// The calls the walk met: the call's address and its unknown, and the first
+/// unknown of each direct callee, which every later call to it shares.
+#[derive(Default)]
+struct Sites {
+    calls: Vec<(Address, usize)>,
+    by_callee: std::collections::HashMap<(kuna_base::types::int4, u64), usize>,
+}
+
 fn walk_block(
     data: &Funcdata,
     block: crate::context::BlockId,
@@ -240,6 +248,7 @@ fn walk_block(
     storage: &Storage,
     calls: &mut Calls,
     returns: &mut Vec<(Address, Depth)>,
+    sites: &mut Sites,
 ) -> Option<Depth> {
     let mut d = start;
     for id in data.bb_ops(block) {
@@ -252,7 +261,20 @@ fn walk_block(
         if matches!(step, Step::Return) && op.get_halt_type() == 0 {
             returns.push((op.get_addr().clone(), d));
         }
+        let is_call = matches!(step, Step::Call);
         d = apply(step, d, calls)?;
+        if let (true, Depth::AfterCall(c, _)) = (is_call, d) {
+            sites.calls.push((op.get_addr().clone(), c));
+            let entry = data.get_call_specs_index(id).map(|i| data.get_call_specs(i).get_entry_address().clone());
+            if let Some(key) = entry.filter(|e| !e.is_invalid()).and_then(|e| Some((e.get_space()?.get_index(), e.get_offset()))) {
+                match sites.by_callee.get(&key) {
+                    Some(&first) => calls.link(c, 0, first, 0)?,
+                    None => {
+                        sites.by_callee.insert(key, c);
+                    }
+                }
+            }
+        }
     }
     Some(d)
 }
@@ -334,13 +356,22 @@ pub fn call_leaves<T: kuna_sleigh::translate::Translate + ?Sized>(
     calls.value(delta)
 }
 
-/// The returns whose x87 depth is proven to be 0, or nothing when the function
-/// is not analyzable under the System V assumptions.
-pub fn empty_returns(data: &Funcdata, storage: &Storage) -> Vec<Address> {
+/// What the depth proves: the returns at depth 0 and at depth 1, and the
+/// calls that leave a value on the stack.
+#[derive(Default)]
+pub struct DepthFacts {
+    pub empty_returns: Vec<Address>,
+    pub float_returns: Vec<Address>,
+    pub float_calls: Vec<Address>,
+}
+
+/// The depth facts of `data`, or none when the function is not analyzable
+/// under the System V assumptions.
+pub fn facts(data: &Funcdata, storage: &Storage) -> DepthFacts {
     solve(data, storage).unwrap_or_default()
 }
 
-fn solve(data: &Funcdata, storage: &Storage) -> Option<Vec<Address>> {
+fn solve(data: &Funcdata, storage: &Storage) -> Option<DepthFacts> {
     let n = data.bblocks_get_size() as usize;
     if n == 0 {
         return None;
@@ -349,11 +380,12 @@ fn solve(data: &Funcdata, storage: &Storage) -> Option<Vec<Address>> {
     let index: std::collections::HashMap<_, _> = blocks.iter().enumerate().map(|(i, &b)| (b, i)).collect();
     let mut calls = Calls::new();
     let mut returns = Vec::new();
+    let mut sites = Sites::default();
     let mut entry: Vec<Option<Depth>> = vec![None; n];
     entry[0] = Some(Depth::Known(0));
     let mut pending = vec![0usize];
     while let Some(i) = pending.pop() {
-        let exit = walk_block(data, blocks[i], entry[i]?, storage, &mut calls, &mut returns)?;
+        let exit = walk_block(data, blocks[i], entry[i]?, storage, &mut calls, &mut returns, &mut sites)?;
         let b = data.bblocks_ref().block(blocks[i]);
         for s in 0..b.size_out() {
             let j = *index.get(&b.get_out(s))?;
@@ -366,25 +398,65 @@ fn solve(data: &Funcdata, storage: &Storage) -> Option<Vec<Address>> {
             }
         }
     }
-    let mut out = Vec::new();
+    let mut out = DepthFacts::default();
     for (addr, d) in returns {
         let depth = match d {
-            Depth::Known(k) => k,
-            Depth::AfterCall(c, k) => match calls.value(c) {
-                Some(v) => v + k,
-                None => continue,
-            },
+            Depth::Known(k) => Some(k),
+            Depth::AfterCall(c, k) => calls.value(c).map(|v| v + k),
         };
-        if depth == 0 {
-            out.push(addr);
+        match depth {
+            Some(0) => out.empty_returns.push(addr),
+            Some(1) => out.float_returns.push(addr),
+            _ => {}
         }
     }
+    out.float_calls = sites.calls.into_iter().filter(|&(_, c)| calls.value(c) == Some(1)).map(|(a, _)| a).collect();
     Some(out)
+}
+
+/// Warn where the x87 depth contradicts a declared type, as IDA does
+/// (`WARN_MUST_RET_FP`, and the call warning of hexx64.so 0x81970): a function
+/// typed to return a non-float that leaves a value on the stack at every
+/// return, and a call to a callee typed so that leaves one.
+pub fn warn(data: &mut Funcdata) {
+    if !data.get_arch().x87_depth {
+        return;
+    }
+    let float = |t: Option<&std::rc::Rc<crate::dtype::Datatype>>| t.is_some_and(|t| t.get_metatype() == crate::dtype::type_metatype::TYPE_FLOAT);
+    let proto = data.get_func_proto();
+    if proto.is_output_locked()
+        && !float(proto.get_output_type())
+        && !data.kuna_x87_float_returns.is_empty()
+        && data.kuna_x87_empty_returns.is_empty()
+    {
+        data.warning_header("x87depth: the function leaves a value on the x87 stack but its return type is not floating-point");
+    }
+    let mut warnings = Vec::new();
+    for i in 0..data.num_calls() {
+        let fc = data.get_call_specs(i);
+        let Some(addr) = data.obank().get(fc.get_op()).map(|o| o.get_addr().clone()) else { continue };
+        if data.kuna_x87_float_calls.contains(&addr) && fc.proto().is_output_locked() && !float(fc.proto().get_output_type()) {
+            warnings.push((format!("x87depth: call to {} leaves a value on the x87 stack but is not typed to return one", fc.get_name()), addr));
+        }
+    }
+    for (text, addr) in warnings {
+        data.warning(&text, &addr);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn calls_to_one_callee_share_their_effect() {
+        let mut c = Calls::new();
+        let first = c.add();
+        let second = c.add();
+        c.link(second, 0, first, 0).unwrap();
+        c.need(Depth::AfterCall(second, 0), 1).unwrap();
+        assert_eq!(c.value(first), Some(1));
+    }
 
     #[test]
     fn a_discarded_call_result_pins_the_call() {

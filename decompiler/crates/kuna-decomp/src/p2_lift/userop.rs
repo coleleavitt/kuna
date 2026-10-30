@@ -147,6 +147,10 @@ pub const BUILTIN_ROTL: uint4 = 0x1000000d;
 pub const BUILTIN_SWIFT_ERROR: uint4 = 0x1000000e;
 /// (kuna swiftcall) The error a throwing Swift function hands back.
 pub const BUILTIN_SWIFT_THROW: uint4 = 0x1000000f;
+/// (kuna) Built-in id for `alloca`, a dynamic stack allocation (`alloca`).
+pub const BUILTIN_ALLOCA: uint4 = 0x1000000e;
+/// (kuna) Built-in id for `va_start`, a System V `va_list` set-up (`varargsave`).
+pub const BUILTIN_VA_START: uint4 = 0x1000000f;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -806,6 +810,11 @@ pub trait UseropTypeArchitecture {
     fn get_type_wchar(&self) -> Rc<crate::dtype::Datatype>;
     /// C++ `glb->types->getBase(1,TYPE_BOOL)`.
     fn get_type_bool(&self) -> Rc<crate::dtype::Datatype>;
+    /// (kuna) A pointer to the System V x86-64 `__va_list_tag`, when pointers
+    /// are 8 bytes.
+    fn get_va_list_pointer(&self) -> Option<Rc<crate::dtype::Datatype>> {
+        None
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1047,17 @@ impl UserOpManage {
                 }
             }
             BUILTIN_ROTL => UserPcodeOp::new_unspecialized(b"rotl", BUILTIN_ROTL as int4),
+            BUILTIN_ALLOCA => {
+                let ptr_size = types.get_size_of_pointer();
+                let word_size = types.get_default_data_space_word_size();
+                let ptr_type = types.get_type_pointer(ptr_size, types.get_type_void(), word_size);
+                let size_type = types.get_base_int(ptr_size);
+                UserPcodeOp::new_datatype(b"alloca", BUILTIN_ALLOCA as int4, Some(ptr_type), &[Some(size_type)])
+            }
+            BUILTIN_VA_START => match types.get_va_list_pointer() {
+                Some(ptr) => UserPcodeOp::new_datatype(b"va_start", BUILTIN_VA_START as int4, None, &[Some(ptr)]),
+                None => UserPcodeOp::new_unspecialized(b"va_start", BUILTIN_VA_START as int4),
+            },
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };
         self.builtinmap.insert(i, res);
