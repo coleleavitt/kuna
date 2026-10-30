@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3710,
-    3710
+    3716,
+    3716
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3000,6 +3000,12 @@
     "data:mba #2: off keeps the and-not form",
     "data:mba #3: on folds (x ^ y) + 2*(x & y) to an add",
     "data:mba #4: on folds (x & ~y) + y to an or",
+    "data:mba groups #1: off keeps the four-leaf form",
+    "data:mba groups #2: off keeps the six-leaf form",
+    "data:mba groups #3: off keeps the polynomial form",
+    "data:mba groups #4: on folds the four-leaf group to one boolean function",
+    "data:mba groups #5: on folds six leaves to a + b + (c | d) + (e ^ f)",
+    "data:mba groups #6: on normalizes the polynomial to x * y",
     "data:mirror receives the local without a device read",
     "data:mixed argument reads: byte uses fifth argument",
     "data:mixed argument reads: complete six-argument prototype",
