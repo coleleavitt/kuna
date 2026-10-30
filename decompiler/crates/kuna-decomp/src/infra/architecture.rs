@@ -3832,7 +3832,7 @@ impl Architecture {
         self.region_edge_order = false; // (kuna) SAILR P2 default-OFF opt-in (H2 post-dominator + dominance-tiered edge-virtualization ordering; only reorders which goto is chosen when virtualizing, so OFF is byte-identical)
         self.outline_spec = String::new(); // (kuna) default-OFF opt-in (excise a supplied single-entry region into a synthesized pseudofunction call; destructive, and inert with no region supplied)
         self.cond_stmts = crate::p8_structure::kuna_condstmts::DEFAULT_CAP; // (kuna) condstmts default-on: a folded condition operand prints at most 3 statements before its test (0/675 ablation)
-        self.cond_fold = 0; // (kuna) default-OFF opt-in (angr Phoenix MultiStatementExpression short-circuit relaxation: fold `A || B` across a sibling carrying a bounded prefix, rendered as a comma expression; OFF is byte-identical)
+        self.cond_fold = crate::p8_structure::kuna_condfold::MAX_PREFIX_STMTS_ANGR; // (kuna) default `on` (angr Phoenix MultiStatementExpression short-circuit relaxation, capped by condstmts' comma budget; a loop's test block is never folded); 0/675 datatest assertions
         self.reduce_return_gotos = true; // (kuna) DIV-13 default-on (angr SAILR goto-reduction; 0/675 ablation)
         self.flatten_ifelse = true; // (kuna) DIV-13 default-on (angr IfElseFlattener; 0/675 ablation)
         self.revert_cross_jumps = true; // (kuna) DIV-13 default-on (angr SAILR CrossJumpReverter; 0/675 ablation)

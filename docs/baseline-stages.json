@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3684,
-    3684
+    3688,
+    3688
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2542,6 +2542,10 @@
     "data:condfold #5: the sibling prefix stores survive verbatim in both renderings, only their placement changes (off plus on = 2 each)",
     "data:condfold #6: the shared clause body is unchanged by the fold (off plus on = 2)",
     "data:condfold #7: the untouched tail arms are identical in both passes (off plus on = 2)",
+    "data:condfold-default #1: by default the two BOM tests fold into one short-circuit with the reset as a comma operand",
+    "data:condfold-default #2: with the option off they stay two ifs",
+    "data:condfold-default #3: the comment loop keeps its do-while test in both passes",
+    "data:condfold-default #4: one goto by default, two with the option off",
     "data:condfold-newbury #1: OFF virtualizes one of the two edges into the shared body to a goto; WIDE folds the cascade so no goto is emitted",
     "data:condfold-newbury #2: OFF must also emit the goto's target label inside the sibling arm; WIDE emits no label",
     "data:condfold-newbury #3: WIDE folds the two equality guards into one inverted short-circuit condition guarding the terminating arm",

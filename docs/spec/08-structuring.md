@@ -215,6 +215,14 @@ admission rules takes it. The predicate is their union — the two rules were
 derived independently against the two shapes above and neither subsumes the
 other.
 
+**Defaults and the loop test.** `condfold` defaults to `on`; `condstmts`
+(default 3) still re-splits an operand that prints more statements than its
+cap. `kuna_condfold.rs (compute_condfold_sets)` admits no block that branches
+back to a block dominating it (`is_loop_latch`): that block is a loop's test,
+and folding it into a short-circuit operand leaves the loop no condition, so a
+`do { ... } while (c)` would come out as `while( true )` with the test as an
+exit.
+
 **The shared width budget.** Every admitted sibling first has to fit the
 policy level's **printed-width budget**: `kuna_condfold.rs (printed_shape)`
 walks the block's live op list with the *same* skip rules the printer applies
