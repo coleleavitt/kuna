@@ -886,6 +886,10 @@ Three tiers:
 | kuna functions lists <dll>_Ordinal_<n> imports | [`peordinal`](#peordinal) |
 | a BSTR or VARIANT api call has no prototype because its import is ordinal-only | [`peordinal`](#peordinal) |
 | a winsock program shows socket, connect and recv as ordinal placeholders | [`peordinal`](#peordinal) |
+| an EFI driver entry point takes two undefined8 parameters | [`uefi`](#uefi) |
+| a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...) | [`uefi`](#uefi) |
+| a protocol GUID in .data is an unnamed 16-byte blob | [`uefi`](#uefi) |
+| a DXE core's static boot-services table is raw words | [`uefi`](#uefi) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3255,6 +3259,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default) on any PE. The tell-tale of the gap is OLEAUT32_Ordinal_2, WS2_32_Ordinal_23 or MSVBVM60_Ordinal_595 in decompile output, kuna functions or kuna xrefs. Flip off to get back the synthesized <DLL>_Ordinal_<n> names, e.g. to compare against a tool that prints ordinals, or if a target ships a private DLL under one of these names with a different export layout.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-peordinal
 - **Example:** `--option peordinal off`
+
+### `uefi` -- on | off, default `on`
+
+- **Symptoms:** an EFI driver entry point takes two undefined8 parameters; a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...); a protocol GUID in .data is an unnamed 16-byte blob; a DXE core's static boot-services table is raw words.
+- **What it does:** UEFI module markup for a PE image whose Subsystem is an EFI application, boot driver, runtime driver or ROM (10..13). The entry point gets the locked prototype EFI_STATUS _ModuleEntryPoint(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable). EFI_SYSTEM_TABLE, EFI_BOOT_SERVICES, EFI_RUNTIME_SERVICES, EFI_DXE_SERVICES, EFI_PEI_SERVICES, the console text protocols and EFI_GUID are built from the UEFI and PI specifications with natural alignment for the image's pointer width, and every service member is a typed function pointer, so `SystemTable->BootServices->LocateProtocol(&guid, 0, &iface)` renders as a member call with its arguments. Every 16-byte value in a data section equal to a GUID declared in the EDK2 package files (965 names, gEfiLoadedImageProtocolGuid and the rest) is named and typed EFI_GUID. A service table the module defines statically (the DXE, PEI and SMM cores) is found by its EFI_TABLE_HEADER signature (IBI SYST, BOOTSERV, RUNTSERV, DXE_SERV, PEI SERV) and typed. The ARM PEI-services getters (Thumb `mrc p15,0,r0,c13,c0,2; bx lr`, the A32 form, and AArch64 `mrs x0, tpidr_el0; ret`) are named ArmReadTpidrurw and return EFI_PEI_SERVICES **.
+- **When to flip:** On by default; it only acts on EFI-subsystem PE images, so every other input is byte-identical. Flip off to see the module without the EFI types: the entry then takes two untyped words and every service call is an indirect call through an offset.
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-53
+- **Example:** `option uefi off`
 
 ## Core rendering defaults
 

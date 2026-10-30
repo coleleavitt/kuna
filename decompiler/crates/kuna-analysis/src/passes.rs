@@ -537,6 +537,7 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // default run is byte-identical and bound to the real-PE path (the XML datatest
     // oracle is untouched). Types/typed-locals/lines are the deferred PR-P2/P3.
     if format == object::BinaryFormat::Pe {
+        passes.push(Box::new(crate::uefi::UefiPass));
         passes.push(Box::new(crate::pdb::PdbPass));
         // S1 PDB-procedure-interior entry suppression (`pdbinterior`): the same
         // `.pdb`'s S_GPROC32/S_LPROC32 code lengths reported on `pdb_bodies`, for

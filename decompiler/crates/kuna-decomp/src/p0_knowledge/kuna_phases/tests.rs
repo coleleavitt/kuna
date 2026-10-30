@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_354() {
-    assert_eq!(kuna_num_settables(), 354);
-    assert_eq!(SETTABLE_TABLE.len(), 354);
+fn settable_count_is_355() {
+    assert_eq!(kuna_num_settables(), 355);
+    assert_eq!(SETTABLE_TABLE.len(), 355);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_99_analysis() {
+fn tier_counts_are_121_core_134_transform_100_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_99_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 99));
+    assert_eq!((core, transform, analysis), (121, 134, 100));
 }
 
 #[test]
@@ -322,6 +322,8 @@ fn option_values_live_value_present_for_156() {
         // with no codegen live reader (read console-side via kuna_live_value),
         // same as `libcsigs` above. Default-ON (DIV-141).
         "win32sigs",
+        // (kuna) The UEFI module pass -- an analysis-pass gate read console-side. Default-ON.
+        "uefi",
         // (kuna) The libgcc `__divdi3` contract -- an analysis-pass gate read
         // console-side via kuna_live_value, like `libcsigs`. Default-off.
         "libgccsigs",

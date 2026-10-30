@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3367,
-    3367
+    3372,
+    3372
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -986,7 +986,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 354 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 355 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1901,6 +1901,11 @@
     "data:UCOMISS unordered #7: nanignore none keeps the guards",
     "data:UCOMISS unordered #8: no ordered spelling of an unordered flag",
     "data:UCOMISS unordered #9: an isnan test beside an exact jbe stays",
+    "data:UEFI #1: off, the boot-services call is an offset off an untyped word",
+    "data:UEFI #2: on, the entry carries the specification's prototype",
+    "data:UEFI #3: on, the boot-services table is read as a member",
+    "data:UEFI #4: on, the service is a member call and its GUID argument is named",
+    "data:UEFI #5: on, the protocol GUIDs of the install call are named",
     "data:UNSIGNED-BYTE-VM-SELECTOR #1: the selector declaration remains in both passes",
     "data:UNSIGNED-BYTE-VM-SELECTOR #2: recovered switch remains in both passes",
     "data:UNSIGNED-BYTE-VM-SELECTOR #3: low case remains in both passes",

@@ -1723,6 +1723,8 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) Gate the UEFI module markup pass (`uefi`); default on.
+    pub analysis_uefi: bool,
     /// (kuna) Gate the built-in libc signature lookup for a function name the
     /// operator DECLARED (`declaredlibcproto`); default on.  Read at declaration
     /// time by `ConsoleProgram::declare_function`, not by an analysis pass.
@@ -3243,6 +3245,7 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            analysis_uefi: false,
             analysis_declaredlibcproto: false,
             analysis_unmappedentry: false,
             analysis_thumbswitch: true,
@@ -3679,6 +3682,7 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.analysis_uefi = true;
         // (kuna) DIV-139 declared-name libc prototype lookup -- default-ON.
         self.analysis_declaredlibcproto = true;
         self.analysis_strings = true;
