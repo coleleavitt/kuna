@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_411() {
-    assert_eq!(kuna_num_settables(), 411);
-    assert_eq!(SETTABLE_TABLE.len(), 411);
+fn settable_count_is_412() {
+    assert_eq!(kuna_num_settables(), 412);
+    assert_eq!(SETTABLE_TABLE.len(), 412);
 }
 
 #[test]
-fn tier_counts_are_130_core_153_transform_128_analysis() {
+fn tier_counts_are_131_core_153_transform_128_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_153_transform_128_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 153, 128));
+    assert_eq!((core, transform, analysis), (131, 153, 128));
 }
 
 #[test]
@@ -332,6 +332,8 @@ fn option_values_live_value_present_for_187() {
         "dwarfscopes",
         // (kuna) DWARF global types -- a commit-time gate read console-side.
         "dwarfglobaltypes",
+        // (kuna) Segment user-op rewriting -- read through the ArchContext segment table.
+        "segmentize",
         // (kuna) Global typing from stored values -- a batch ledger read in project.rs.
         "storetype",
         // (kuna) The UEFI module pass -- an analysis-pass gate read console-side. Default-ON.
@@ -1247,7 +1249,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `ehcold`.
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
-    assert_eq!(json.matches("},\n").count(), 410);
+    assert_eq!(json.matches("},\n").count(), 411);
 }
 
 #[test]

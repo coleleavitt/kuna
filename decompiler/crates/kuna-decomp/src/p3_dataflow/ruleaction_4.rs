@@ -232,6 +232,10 @@ impl RuleLoadVarnode {
 /// constant-space Varnode encodes.  The C++ stores the raw `AddrSpace *` pointer
 /// in the offset; the Rust port (LOSS-015) stores the space's manager *index*,
 /// resolved back here through the function's space manager.
+pub(crate) fn space_from_const_pub(data: &Funcdata, vn: VarnodeId) -> Option<Rc<kuna_base::space::AddrSpace>> {
+    space_from_const(data, vn)
+}
+
 fn space_from_const(data: &Funcdata, vn: VarnodeId) -> Option<Rc<kuna_base::space::AddrSpace>> {
     let idx = offset_of(data, vn);
     let manage = data.get_arch().manage();

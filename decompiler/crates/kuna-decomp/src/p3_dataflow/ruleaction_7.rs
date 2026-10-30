@@ -1472,11 +1472,30 @@ impl Rule for RuleSegment {
         }
     }
 
-    fn apply_op(&mut self, _op: OpId, _data: &mut Funcdata) -> int4 {
-        // STUB(W4): SegmentOp *segdef =
-        // ... segdef->execute(bindlist) / hasFarPointerSupport / contiguous_test /
-        // findContiguousWhole are all unported W4 surfaces.  No change here.
-        0
+    /// C++ `RuleSegment::applyOp`: a segment of two constants is the constant
+    /// the spec's segment body computes. (The far-pointer arm, which joins a
+    /// base and an inner read as the two halves of one wider value, is not
+    /// ported.)
+    fn apply_op(&mut self, op: OpId, data: &mut Funcdata) -> int4 {
+        let Some(o) = data.obank().get(op) else { return 0 };
+        let (Some(in0), Some(vn1), Some(vn2), Some(out)) = (o.get_in(0), o.get_in(1), o.get_in(2), o.get_out()) else {
+            return 0;
+        };
+        let constant = |vn| data.vbank().get(vn).filter(|v| v.is_constant()).map(|v| v.get_offset());
+        let (Some(base), Some(inner)) = (constant(vn1), constant(vn2)) else { return 0 };
+        let Some(spc) = crate::ruleaction_4::space_from_const_pub(data, in0) else { return 0 };
+        let defs = std::rc::Rc::clone(&data.get_arch().segment_defs);
+        let Some(def) = defs.for_space(&spc) else { return 0 };
+        let Some(val) = def.execute(data.get_arch(), base, inner) else { return 0 };
+        let size = data.vbank().get(out).map_or(4, |v| v.get_size());
+        data.op_remove_input(op, 2);
+        data.op_remove_input(op, 1);
+        let c = data.new_constant(size, val & kuna_base::address::calc_mask(size));
+        if data.op_set_input(op, c, 0).is_err() {
+            return 0;
+        }
+        data.op_set_opcode(op, typeop_for(OpCode::CPUI_COPY));
+        1
     }
 }
 

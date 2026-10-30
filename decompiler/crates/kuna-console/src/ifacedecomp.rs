@@ -1188,7 +1188,17 @@ decomp_command!(
             }
         }
         let spec_roots = dcp_mut(status)?.spec_roots.clone();
-        match bootstrap_from_raw(&filename, &target, base, &entries, isa, &spec_roots) {
+        // A language id can contain spaces (`x86:LE:16:Real Mode`), which a
+        // console token cannot: `_` stands for a space when the id as written
+        // has no specification.
+        let loaded = bootstrap_from_raw(&filename, &target, base, &entries, isa, &spec_roots).or_else(|e| {
+            if target.contains('_') {
+                bootstrap_from_raw(&filename, &target.replace('_', " "), base, &entries, isa, &spec_roots)
+            } else {
+                Err(e)
+            }
+        });
+        match loaded {
             Ok(prog) => {
                 let desc = prog.description().to_string();
                 dcp_mut(status)?.conf = Some(prog);

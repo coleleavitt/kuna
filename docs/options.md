@@ -1564,6 +1564,9 @@ Three tiers:
 | large global initializer exhausts memory during heritage | [`globalcallranges`](#globalcallranges) |
 | tiny constructors cause a quadratic number of global call guards | [`globalcallranges`](#globalcallranges) |
 | a function with many global assignments uses gigabytes before emitting C | [`globalcallranges`](#globalcallranges) |
+| 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x... | [`segmentize`](#segmentize) |
+| segment(0x1000,0x10) instead of a folded address | [`segmentize`](#segmentize) |
+| every stack access of 16-bit code is a segment(...) expression | [`segmentize`](#segmentize) |
 
 ## Toggleable transforms
 
@@ -4864,6 +4867,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on for initializers that write many globals and call small constructors at distinct constant destinations. Flip off to compare the original all-globals-at-every-call guard placement. Unknown callee bodies and unresolved or overlapping actual pointers retain their existing guards.
 - **Where / provenance:** P3/call-guard · kuna · performance · gh-1034
 - **Example:** `option globalcallranges off`
+
+### `segmentize` -- on | off, default `on`
+
+- **Symptoms:** 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x...; segment(0x1000,0x10) instead of a folded address; every stack access of 16-bit code is a segment(...) expression.
+- **What it does:** Port of Ghidra's ActionSegmentize and RuleSegment for a language whose processor spec declares a <segmentop> (x86 16-bit real and protected mode). Every segment(base, inner) user-op the SLEIGH semantics emit for a segment-relative address becomes the internal SEGMENTOP, which the stack analysis and the LOAD/STORE rules already understood: a segment over the stack pointer is a stack access (the base is ignored, as upstream does), and a segment of two constants folds to the address the spec's own p-code body computes (`(zext(base) << 4) + zext(inner)` in real mode). The pspec <segmentop> element is now decoded and its body compiled; both halves used to be stubs, so every stack push read as `*(unsigned short *)segment(v2,v1) = 0xe062` and a DS-relative store as `*(unsigned short *)segment(0x1000,0x10) = 0x1234`. Every other language has no segment op and is unchanged.
+- **When to flip:** On by default: a BIOS or DOS real-mode routine reads `dat_10010 = 0x1234;` and calls without the pushed return address. Flip off to see the raw segment(base, inner) user-ops, for example to check which segment register an access used.
+- **Where / provenance:** P3/simplification-quiescence · ghidra · correctness-fix · ida95-56
+- **Example:** `option segmentize off`
 
 ## Programmatic use
 

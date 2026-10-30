@@ -642,6 +642,8 @@ pub struct ArchContext {
     /// (kuna `jumpassist`) The compiled `<jumpassist>` scripts; empty with the
     /// option off.
     pub jump_assists: Rc<crate::kuna_jumpassist::JumpAssists>,
+    /// (kuna) The `<segmentop>` definitions (`ActionSegmentize`, `RuleSegment`).
+    pub segment_defs: Rc<crate::kuna_segmentops::SegmentDefs>,
     /// Shared spaces retain the pointer identities and indices used by lifted
     /// Varnodes. [`Self::new_shared`] accepts the engine's manager; [`Self::new`]
     /// wraps an owned manager for fixtures.
@@ -1848,6 +1850,7 @@ impl ArchContext {
             call_mechanism_effects: false,
             dex: None,
             jump_assists: Rc::default(),
+            segment_defs: Rc::default(),
             manage,
             min_laned_register_size: 4,
             x87_empty_storage: None,

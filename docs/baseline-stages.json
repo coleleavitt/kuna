@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3684,
-    3684
+    3690,
+    3690
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 411 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 412 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1775,6 +1775,12 @@
     "data:SAVED-XMM-WIN64 fixture #1: unaffected XMM6-9 lane spills are absent from the local frame",
     "data:SAVED-XMM-WIN64 fixture #2: the disjoint caller-owned Rect still reaches its helper and return",
     "data:SAVED-XMM-WIN64 fixture #3: an observed XMM spill stays mapped at its frame slot",
+    "data:SEGMENTIZE #1: off, the DS store is a segment user-op",
+    "data:SEGMENTIZE #2: off, the call's return-address push is a store",
+    "data:SEGMENTIZE #3: on, the store is to the folded linear address (pass 2 and the BIOS)",
+    "data:SEGMENTIZE #4: no push survives the rewrite",
+    "data:SEGMENTIZE #5: the BIOS reset path calls its POST routine in segment F000",
+    "data:SEGMENTIZE #6: the segment user-ops (three lines) are all in the off pass",
     "data:SETLOCALE RETTYPE #1: NULL locale arg is typed char *",
     "data:SETLOCALE RETTYPE #2: no untyped indirect call",
     "data:SETLOCALE RETTYPE #3: call is the named setlocale",

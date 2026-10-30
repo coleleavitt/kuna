@@ -9765,3 +9765,22 @@ inspiration = "IDA 9.5 ELF loader PT_TLS handling (elf 0x41950/0x435a0) and TLS-
 change_kind = "analysis-enablement"
 tier = "analysis"
 symptoms = "a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset|thread-local variables of an executable have no names although .symtab has STT_TLS symbols|the TLS block is not modelled"
+
+[[settable]]
+option = "segmentize"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P3"
+subphase = "simplification-quiescence"
+strength = "HARD"
+rewind = "P2"
+issue = "ida95-56"
+summary = "Port of Ghidra's ActionSegmentize and RuleSegment for a language whose processor spec declares a <segmentop> (x86 16-bit real and protected mode). Every segment(base, inner) user-op the SLEIGH semantics emit for a segment-relative address becomes the internal SEGMENTOP, which the stack analysis and the LOAD/STORE rules already understood: a segment over the stack pointer is a stack access (the base is ignored, as upstream does), and a segment of two constants folds to the address the spec's own p-code body computes (`(zext(base) << 4) + zext(inner)` in real mode). The pspec <segmentop> element is now decoded and its body compiled; both halves used to be stubs, so every stack push read as `*(unsigned short *)segment(v2,v1) = 0xe062` and a DS-relative store as `*(unsigned short *)segment(0x1000,0x10) = 0x1234`. Every other language has no segment op and is unchanged."
+use_when = "On by default: a BIOS or DOS real-mode routine reads `dat_10010 = 0x1234;` and calls without the pushed return address. Flip off to see the raw segment(base, inner) user-ops, for example to check which segment register an access used."
+example = "option segmentize off"
+source_decompiler = "ghidra"
+inspiration = "Ghidra coreaction.cc ActionSegmentize, ruleaction.cc RuleSegment, userop.cc SegmentOp::unify/execute"
+change_kind = "correctness-fix"
+tier = "core"
+symptoms = "16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x...|segment(0x1000,0x10) instead of a folded address|every stack access of 16-bit code is a segment(...) expression"

@@ -2225,6 +2225,31 @@ none on x86-64), and a narrowed value that a wider reader takes back gains a
 cast (`(long)(int)v` on AArch64), which is why the option stays off by default
 (`tests/stages/kuna-regsigned.xml`).
 
+### Segment user-ops (`segmentize`)
+
+A language whose processor spec declares a `<segmentop>` (x86 16-bit real and
+protected mode) computes every segment-relative address through the SLEIGH
+user-op `segment(base, inner)`. The `<segmentop>` element is decoded with the
+other pspec user-ops (`decompiler/crates/kuna-decomp/src/infra/architecture.rs (init_userops_and_fixups)`), and its
+`<pcode>` body is compiled once per architecture into
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_segmentops.rs (SegmentDefs)`.
+With `segmentize` on (the default) `ActionSegmentize`
+(`decompiler/crates/kuna-decomp/src/p9_emit/coreaction_render.rs (ActionSegmentize)`)
+runs once per function before heritage, as upstream does: every live CALLOTHER of
+that user-op with three inputs becomes `SEGMENTOP(space, base, inner)`, a
+constant base or inner resized to the declared width. Heritage and the
+LOAD/STORE spacebase checks already treat a SEGMENTOP over the stack pointer as
+a stack access and ignore its base, so the return-address push of a near call
+and every `push`/`pop` become stack traffic. `RuleSegment`
+(`decompiler/crates/kuna-decomp/src/p3_dataflow/ruleaction_7.rs (RuleSegment)`)
+folds a SEGMENTOP of two constants into a COPY of the address the spec's own
+body computes (`SegmentOp::execute`: `(zext(base) << 4) + zext(inner)` in real
+mode), so a store through `DS = 0x1000` at offset `0x10` is to `dat_10010`. The
+far-pointer arm of upstream's rule (a base and an inner read as the halves of
+one wider value) is not ported. Before this, both the action and the rule were
+stubs and the pspec element was never decoded, so 16-bit output carried
+`*(unsigned short *)segment(v2,v1) = 0xe062` for every call.
+
 ## 3.4 Conditional execution
 
 `decompiler/crates/kuna-decomp/src/p3_dataflow/condexe.rs

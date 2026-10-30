@@ -1238,6 +1238,7 @@ kuna_options! { self, p1;
             if val { "on" } else { "off" }
         ))
     },
+    "segmentize" => on_off!(segmentize, "Segment user-op rewriting"),
     "dwarfglobaltypes" => on_off!(analysis_dwarfglobaltypes, "DWARF global types"),
     "dwarfscopes" => {
         let val = on_or_off(p1)?;
