@@ -303,6 +303,9 @@ Three tiers:
 | goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue) |
 | a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue) |
 | continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue) |
+| if (c) goto label_N; ... label_N: where an if around the skipped statements would do | [`gotosink`](#gotosink) |
+| label_N: ... if (c) goto label_N; where a do-while would do | [`gotosink`](#gotosink) |
+| label_N: ... goto label_N; at the end of a statement run instead of a loop | [`gotosink`](#gotosink) |
 | goto to a label that only returns | [`gotoreduce`](#gotoreduce) |
 | label_N: return; shared tail after an if | [`gotoreduce`](#gotoreduce) |
 | more gotos than angr for the same function | [`gotoreduce`](#gotoreduce) |
@@ -2239,6 +2242,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: 0/675 datatest assertions move. Flip off to print the goto to the loop test. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib 1.3.2, libexpat, libyaml): 9 functions change, gotos 9,853 -> 9,838, `continue;` 50 -> 65, every one a `goto label_X;` to an empty `label_X: ;` directly above `} while (...)` (zlib inflate, Lua str_pack, four expat tokenizers). Jumps into the latch of a `while( true )` loop, the commoner shape, are unchanged: they resume after the loop head, not at it.
 - **Where / provenance:** P8/goto-quality · kuna · structure-recovery · kuna-whilecontinue
 - **Example:** `option whilecontinue off`
+
+### `gotosink` -- on | off, default `on`
+
+- **Symptoms:** if (c) goto label_N; ... label_N: where an if around the skipped statements would do; label_N: ... if (c) goto label_N; where a do-while would do; label_N: ... goto label_N; at the end of a statement run instead of a loop.
+- **What it does:** Two print-tree rewrites of a structured statement list, run after every other structuring pass. Backward goto: `L: S1..Sk; goto L;` becomes `while( true ) { S1..Sk }` (the trailing jump is then the loop's back edge, which the print-time goto census leaves out), and `L: S1..Sk; if (c) goto L;` becomes `do { S1..Sk } while (c);`; in the infinite loop every other jump to `L` whose innermost loop is the new one prints as `continue;`. A run with a `break;` or `continue;` that no loop or switch inside it encloses is left alone, because the new loop would capture it. Sinking: `if (c) goto L; S1..Sk; L: T` with the `if` and `L` in one list becomes `if (!c) { S1..Sk } L: T` (at most 16 components, the condition one basic block whose branch is negated). Before both, every BlockList that is a member of a list is spliced into it (a jump that named the list names its first member), so statements that print as one sequence are siblings. Labels no jump reaches any more are released.
+- **When to flip:** On by default: 0/675 datatest assertions move. Measured over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 58 functions change, every one with fewer gotos and none with more; gotos 9,069 -> 8,892, labels 3,124 -> 3,076, `continue;` 55 -> 128. Sinking fires rarely after the structurer (it already sinks a local jump): 0 times with the default passes, 3 times with crossjumprevert/taildup/gotoreduce/returndup off. Flip off to keep the backward gotos.
+- **Where / provenance:** P8/goto-quality · kuna · structure-recovery · kuna-gotosink
+- **Example:** `option gotosink off`
 
 ### `gotoreduce` -- on | off, default `on`
 

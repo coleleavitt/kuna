@@ -34,6 +34,8 @@ a87f400000000000a87f400000000000a87f400000000000a87f400000000000a87f400000000000
 <symbol space="ram" offset="0x407cb0" name="little2_scanRef"/>
 </binaryimage>
 <script>
+  <!-- this test pins its own option; gotosink would turn the backward gotos it counts into loops -->
+  <com>option gotosink off</com>
   <com>lo fu little2_attributeValueTok</com>
   <com>decompile</com>
   <com>print C</com>

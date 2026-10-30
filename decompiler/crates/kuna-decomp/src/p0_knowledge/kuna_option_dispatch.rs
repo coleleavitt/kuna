@@ -861,6 +861,7 @@ kuna_options! { self, p1;
     "javanew" => on_off!(java_new, "Java new T(args) from an allocation and its <init> call"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
+    "gotosink" => on_off!(goto_sink, "goto sinking and backward-goto loops"),
     "cmpmerge" => on_off!(cmp_merge, "comparison merge"),
     "importdata" => on_off!(import_data, "import-slot data-read rendering"),
     "gotonext" => on_off!(goto_next, "goto-to-next suppression"),

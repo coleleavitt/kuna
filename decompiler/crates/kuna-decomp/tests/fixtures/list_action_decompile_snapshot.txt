@@ -305,6 +305,7 @@
 0298                  dedupitetail
 0299                  iteregion
 0300                  iteboolean
-0301                  paramcopyhoist
-0302        !         prototypewarnings
-0303                  stop
+0301                  gotosink
+0302                  paramcopyhoist
+0303        !         prototypewarnings
+0304                  stop

@@ -166,6 +166,34 @@ scope; conditional loops disable recovery because their continue may evaluate
 a condition or iterator rather than restart the first leaf. Other destinations
 retain gotos. `off` restores the original collapse precedence and rendering.
 
+**`gotosink` — backward gotos become loops; a jump over a run becomes an
+`if`.** `kuna_gotosink.rs (ActionGotoSink)` runs after the other
+blockrecovery passes that edit the tree (last before `paramcopyhoist`), with
+`gotosink on` (the default). It first splices every `BlockList` that is a
+member of a list or graph into its parent (`BlockGraph::kuna_flatten_lists`):
+a nested list prints its members in order anyway, so the edit is invisible,
+and a jump that named the list now names its first member, where it lands.
+Then, to a fixpoint over every list:
+
+* A component that ends in a plain jump back to the front leaf of an earlier
+  component of the same list, `L: S1..Sk; goto L;`, is wrapped with
+  everything from `L` on in a `BlockInfLoop` around a `BlockList`; the jump
+  at the end is the loop's back edge, which the print-time census leaves out,
+  and every other plain jump to `L` whose innermost loop is the new one is
+  retagged `continue`. A conditional jump back, `L: S1..Sk; if (c) goto L;`,
+  becomes a `BlockDoWhile` whose body ends in the jump's condition block.
+  A run holding a `break` or `continue` that no loop (for `continue`) or loop
+  or switch (for `break`) inside it encloses is skipped.
+* An if-goto whose target is the front leaf of a later component of the same
+  list, `if (c) goto L; S1..Sk; L:`, with one to sixteen components between
+  and a condition that is one basic block, becomes a two-component `BlockIf`
+  over those components, and the condition's branch is negated
+  (`Funcdata::block_basic_negate_lastop`) so it prints `if (!c)`.
+
+Labels no carrier reaches any more are released
+(`kuna_gotolabel::release_converted_labels`), and `mark_label_bump_up` runs
+again so a new loop prints its head's label above itself.
+
 **`whilecontinue` — the continue point of a conditional loop.** With
 `whilecontinue on` (the default, and only while `loopcontinue` is on),
 `kuna_loopcontinue.rs (continue_points)` gives a conditional loop the leaf its

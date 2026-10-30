@@ -2165,7 +2165,8 @@ mod tests {
         // and kuna-condfold-default / condfold on by default keeps a loop test
         // and kuna-linearswitch / a linear equality chain re-rolls into a switch
         // and kuna-cmpmerge / two comparisons of the same operands merge into one
-        assert_eq!(count, 678, "corpus file count drifted");
+        // and kuna-gotosink / backward gotos become loops, a jump over a run becomes an if
+        assert_eq!(count, 679, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
