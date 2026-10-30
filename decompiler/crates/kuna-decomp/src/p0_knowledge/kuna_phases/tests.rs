@@ -1158,7 +1158,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unwindstarts`; its P1 row sits beside `eh_frame_full`.
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
-    assert_eq!(json.matches("},\n").count(), 356);
+    assert_eq!(json.matches("},\n").count(), 357);
 }
 
 #[test]
