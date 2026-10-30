@@ -2969,6 +2969,23 @@ moves.
   `dwarfstructs off` stays exactly the pre-DIV-86 name-only mapping its own row
   promises.
 
+- **Prototype merge** (`protomerge`, default-off; kuna;
+  `decompiler/crates/kuna-decomp/src/p4_calls/kuna_protomerge.rs (merge)`): the
+  load-time sources park whole prototypes on a function at the analysis commit
+  (the by-name and by-address libc tables, the demangled C++ signature, DWARF),
+  and the last used to replace the earlier wholesale. With the option on, two
+  prototypes of the same shape (arity, variadic slot, the same size in every
+  slot) merge slot by slot: each slot keeps the type that says more (a named
+  aggregate or enum, or a pointer to one, over a pointer to a scalar, over a
+  pointer to void, over a float or bool, over an integer, over an undefined),
+  ties going to the later source; names fill in from the earlier one; a return
+  type survives a later source that leaves the return open. Different shapes
+  replace as before, and directive, console and decompile-time prototypes are
+  never merged. This is IDA's per-argument `score_tinfo` merge. It is off
+  because on Lua 5.4.8 with DWARF it changed 2,757 lines of `decompile-all`
+  output, mostly for the worse (`char *` parameters became `unsigned char *` with
+  casts, a `StackValue *` parameter became `unsigned long`).
+
 - **Name ladder** (`nameladder`, default-on; kuna;
   `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
   a function name that is not in a prototype table or the no-return list as

@@ -18,6 +18,10 @@ Three tiers:
 | a field access like f->_flags with no layout anywhere in the output | [`structdefs`](#structdefs) |
 | you have to run decompile-project just to read the .h for one function's struct | [`structdefs`](#structdefs) |
 | a synthesized struct_N appears in a parameter type with no definition | [`structdefs`](#structdefs) |
+| a byte swap prints as four masked shifts ORed together | [`bitidioms`](#bitidioms) |
+| a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms) |
+| bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms) |
+| hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
 | a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
 | `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
 | a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
@@ -329,6 +333,9 @@ Three tiers:
 | stack-protector canary compare against fs:0x28 and a __stack_chk_fail branch cluttering the epilogue | [`stackguard`](#stackguard) |
 | shared-return goto forced by the canary check block | [`stackguard`](#stackguard) |
 | flip off to keep the real canary instructions for auditing the protector | [`stackguard`](#stackguard) |
+| aarch64 functions keep the stack canary compare and __stack_chk_fail branch | [`canaryglobal`](#canaryglobal) |
+| an arm or powerpc function ends in a goto to a canary check | [`canaryglobal`](#canaryglobal) |
+| stackguard strips x86-64 canaries but not aarch64 ones | [`canaryglobal`](#canaryglobal) |
 | a Windows PE function opens with `v8 = dat_140074040 ^ (unsigned long long)v1;` and ends with a one-argument call taking `v8 ^ (unsigned long long)v1` | [`msvcstackguard`](#msvcstackguard) |
 | an unnamed one-argument callee (`__security_check_cookie`) called just before every return | [`msvcstackguard`](#msvcstackguard) |
 | `--option stackguard on` and `off` give byte-identical output on a Windows binary | [`msvcstackguard`](#msvcstackguard) |
@@ -812,6 +819,9 @@ Three tiers:
 | a char array literal appears at an address inside a function's code | [`codestrings`](#codestrings) |
 | instruction bytes print as a four-character string literal | [`codestrings`](#codestrings) |
 | a function pointer argument renders as a short garbage string | [`codestrings`](#codestrings) |
+| a libc function's FILE * parameter becomes void * because a later source declared it | [`protomerge`](#protomerge) |
+| a demangled C++ class pointer parameter is replaced by unsigned long | [`protomerge`](#protomerge) |
+| a dwarf prototype erases a parameter name the library table gave | [`protomerge`](#protomerge) |
 | a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide) |
 | a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide) |
 | a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide) |
@@ -1418,6 +1428,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Flip on when you are reading a function whose arguments are pointers to composites and want the layout in front of you -- `structsynth`'s synthesized `struct_N`, a DWARF struct on an unstripped binary, `libctypes`' opaque `FILE`/`DIR` shells -- instead of opening the `decompile-project` header to find it. Default OFF: it is a presentation default, and a preamble in front of every function is noise for a caller diffing bodies or feeding one function to a matcher. It changes nothing but the text above the function -- the body, its line contents and every recovered type are identical either way -- but it DOES move line numbers, so a consumer pinning a line number should read `line_mappings` rather than assume the first line is the signature. The preamble is documentation, not a compilable unit: a padding member spelled `undefined1` needs the export's recompile prelude to compile, which is one more reason the project surface keeps the definitions in the header.
 - **Where / provenance:** P9/type-definition-preamble · angr · presentation-default · kuna-structdefs
 - **Example:** `option structdefs on`
+
+### `bitidioms` -- on | off, default `off`
+
+- **Symptoms:** a byte swap prints as four masked shifts ORed together; a rotate prints as a pair of opposite shifts ORed together; bswap or rev instructions decompile to shift and mask soup; hash or crc code full of paired shifts.
+- **What it does:** Fold a byte swap or a constant rotate written out as shifts, masks and ORs into a call: bswap(x) when every leaf of an INT_OR tree moves whole bytes of the same x so that byte i lands in byte N-1-i (2, 4 or 8 bytes, each destination byte exactly once; masks, shifts and zero-extended byte pieces accepted), and rotl(x, n) for (x << n) | (x >> (W - n)) with a constant n. SLEIGH lifts bswap/rev and rol/ror into exactly that shift form, and compilers emit it for the portable C, so the decompiled C showed four masked shifts where the source said __builtin_bswap32. This is Hex-Rays' slot-filling bswap matcher and its rotate rule (it prints _byteswap_ulong and __ROL4__).
+- **When to flip:** Off by default: the datatest corpus has a leading-zero-count case and two PowerPC rotate-and-mask cases whose expected C it rewrites. Flip on for crypto, hashing, checksum and network-order code, where bswap/rev/rol/ror and their portable C spellings otherwise print as masked shift soup.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-bitidioms
+- **Example:** `--option bitidioms on`
 
 ### `mulblob` -- on | off, default `on`
 
@@ -2122,6 +2140,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default (DIV-14): removes compiler-inserted stack-protector boilerplate and the shared-return goto it forces. Flip OFF to keep the real canary-check instructions in the output (e.g. to audit the protector itself, or if an unusual non-glibc `ptr+0x28` compare guarding a call is being matched). It is marked destructive because it deletes those real instructions, but it is byte-identical over the 675 datatests (the `Partial splitting` cases opt out via `option stackguard off`).
 - **Where / provenance:** P7/edge-virtualization · angr · opt-in-tool · angr-StackCanarySimplifier
 - **Example:** `option stackguard on`
+
+### `canaryglobal` -- on | off, default `on`
+
+- **Symptoms:** aarch64 functions keep the stack canary compare and __stack_chk_fail branch; an arm or powerpc function ends in a goto to a canary check; stackguard strips x86-64 canaries but not aarch64 ones.
+- **What it does:** Let the stack-guard strip (stackguard) also recognise a canary read from a global variable named __stack_chk_guard (glibc on AArch64, ARM, PowerPC and the i386 PIC form; ___stack_chk_guard on Mach-O) or __security_cookie, as Hex-Rays does by name. The strip was pinned to the x86-64 glibc TLS slot fs:0x28, so on AArch64 the compare against the saved copy and the __stack_chk_fail branch stayed in every protected function. With this on, an unwritten read of such a named global (directly, or through the INDIRECTs a call adds) counts as a canary source in the compare test and in the slot release, under the same CBRANCH, no-return-handler and saved-slot rules.
+- **When to flip:** On (default); inert without stackguard on and without a global of one of those names. Flip off to keep the canary check of a function that reads one of those globals for another purpose.
+- **Where / provenance:** P7/edge-virtualization · kuna · correctness-fix · kuna-canaryglobal
+- **Example:** `--option canaryglobal off`
 
 ### `msvcstackguard` -- on | off, default `off` (destructive opt-in)
 
@@ -3110,6 +3136,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default). Flip off for firmware that keeps short, unpadded strings in its code section and loses their literals in the decompiled C.
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-codestrings
 - **Example:** `--option codestrings off`
+
+### `protomerge` -- on | off, default `off`
+
+- **Symptoms:** a libc function's FILE * parameter becomes void * because a later source declared it; a demangled C++ class pointer parameter is replaced by unsigned long; a dwarf prototype erases a parameter name the library table gave.
+- **What it does:** Merge the prototypes the load-time sources park on one function slot by slot instead of letting the later source replace the earlier wholesale. The libc tables (by name and by address), the named-aggregate libctypes tables, the demangled C++ signature and DWARF each park a whole prototype at the analysis commit, in that order; before this the last one won even where an earlier one knew more about a parameter. With this on, when both have the same shape (arity, variadic slot, and the same size in every slot), each slot keeps the type that says more (a named struct, union, enum or array, or a pointer to one, over a pointer to a scalar, over a pointer to void, over a float or bool, over an integer, over an undefined), ties going to the later source; names fill in from the earlier one when the later has none; a return type survives when the later source leaves the return open. Prototypes of a different shape replace each other as before. Directive, console and decompile-time prototypes are not merged.
+- **When to flip:** Off by default: measured on Lua 5.4.8 with DWARF it changed 2,757 lines of decompile-all output and mostly for the worse (char pointers became unsigned char pointers with casts, a StackValue * parameter became unsigned long), so the scoring or the source order needs work before it can be on. Flip on to experiment with slot-by-slot merging of library, demangled and DWARF prototypes.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-protomerge
+- **Example:** `--option protomerge off`
 
 ### `aifpoolslide` -- on | off, default `on`
 

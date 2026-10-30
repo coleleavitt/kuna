@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3367,
-    3367
+    3374,
+    3374
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -978,9 +978,16 @@
     "data:KUNA-ASSERT #1: routed assertions take effect (compareform original + namelock rename)",
     "data:KUNA-ASSERT #2: kassert list reports the P3 config assertion with rewind scope",
     "data:KUNA-ASSERT #3: kassert list reports the cosmetic P9 assertion as HINT via HARD mechanism",
+    "data:KUNA-BITIDIOMS #1: the staged rev swaps fold to bswap (bitidioms on)",
+    "data:KUNA-BITIDIOMS #2: ror folds to rotl by 13 (bitidioms on)",
+    "data:KUNA-BITIDIOMS #3: default (off) keeps the rotate as a shift pair",
+    "data:KUNA-BITIDIOMS #4: default (off) keeps the halfword stage of the swap",
     "data:KUNA-CALLPLACEHOLDER #1: strncpy takes its three declared arguments",
     "data:KUNA-CALLPLACEHOLDER #2: strlen takes its one declared argument",
     "data:KUNA-CALLPLACEHOLDER #3: no call reads the return-address slot as an argument",
+    "data:KUNA-CANARYGLOBAL #1: canaryglobal off keeps the __stack_chk_fail call",
+    "data:KUNA-CANARYGLOBAL #2: canaryglobal off keeps the compare against the global",
+    "data:KUNA-CANARYGLOBAL #3: both passes return fill(...) + 1",
     "data:KUNA-CATALOG #10: fast whole-project discovery is default-off but live-toggleable",
     "data:KUNA-CATALOG #11: mapped ELF x86 flow recovery is default-on in P2",
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",

@@ -8,6 +8,7 @@ pub mod fspec;
 pub mod modelrules;
 pub mod coreaction_protos;
 pub mod kuna_calleedeadarg;
+pub mod kuna_protomerge;
 pub mod kuna_hiddenretarg; // (kuna) a value left in the hidden-return register is no argument a callee cannot take
 pub mod kuna_calleereadarg; // (kuna) keep a refused argument the callee's own body reads
 pub mod kuna_zerofillreturn; // (kuna) the zero a narrow write leaves in a returned q register's upper half is no part of the value

@@ -132,6 +132,10 @@ pub const BUILTIN_SYSCALL_ERROR: uint4 = 0x10000007;
 /// (kuna) Built-in id for `strlen`, the length an inline `repnz scasb` scan
 /// computes (`strlenscan`).
 pub const BUILTIN_STRLEN: uint4 = 0x10000008;
+/// (kuna) Built-in id for `bswap`, a byte reversal (`bitidioms`).
+pub const BUILTIN_BSWAP: uint4 = 0x10000009;
+/// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
+pub const BUILTIN_ROTL: uint4 = 0x1000000a;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -998,6 +1002,8 @@ impl UserOpManage {
                 let len_type = types.get_base_int(ptr_size);
                 UserPcodeOp::new_datatype(b"strlen", BUILTIN_STRLEN as int4, Some(len_type), &[Some(ptr_type)])
             }
+            BUILTIN_BSWAP => UserPcodeOp::new_unspecialized(b"bswap", BUILTIN_BSWAP as int4),
+            BUILTIN_ROTL => UserPcodeOp::new_unspecialized(b"rotl", BUILTIN_ROTL as int4),
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };
         self.builtinmap.insert(i, res);

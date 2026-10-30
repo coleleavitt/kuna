@@ -106,6 +106,7 @@ kuna_options! { self, p1;
     "addcarrychain" => on_off!(add_carry_chain, "Carry-chain wide-add recovery"),
     "ovlesssimplify" => on_off!(ov_less_simplify, "OV-flag signed-compare simplification"),
     "booleanmask" => on_off!(fold_boolean_mask, "Boolean sign-mask folding"),
+    "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),
     "cancelbytearithmetic" => {
         let (val, msg) =
@@ -793,6 +794,7 @@ kuna_options! { self, p1;
         Ok(format!("Maximum jumptable size set to {val}"))
     },
     "stackguard" => on_off!(strip_stack_guard, "Stack-guard canary stripping"),
+    "canaryglobal" => on_off!(canary_global, "Stack-guard canary read from a named global"),
     "msvcstackguard" => {
         on_off!(strip_msvc_stack_guard, "MSVC /GS frame-cookie stripping")
     },
@@ -1282,7 +1284,10 @@ kuna_options! { self, p1;
         on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
     },    "codestrings" => {
         on_off!(analysis_codestrings, "Code-section string acceptance rule")
+    },    "protomerge" => {
+        on_off!(analysis_protomerge, "Slot-by-slot merge of load-time prototypes")
     },
+
 
 
 

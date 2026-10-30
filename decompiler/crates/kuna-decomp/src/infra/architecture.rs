@@ -627,6 +627,9 @@ pub struct Architecture {
     /// (kuna GH-1282) Fold `(b<<k) s>> k` boolean sign-extension-mask idioms
     /// (C++ `fold_boolean_mask`).
     pub fold_boolean_mask: bool,
+    /// (kuna `bitidioms`) Fold shift/OR byte swaps and rotates into `bswap` /
+    /// `rotl` (see [`crate::kuna_bitidioms`]).
+    pub bit_idioms: bool,
     /// Keep mapped global array bases separate from negative element offsets
     /// (option `globalarrayanchor`).
     pub global_array_anchor: bool,
@@ -1366,6 +1369,9 @@ pub struct Architecture {
     /// (kuna) Strip the glibc -fstack-protector canary epilogue
     /// (C++ `strip_stack_guard`).
     pub strip_stack_guard: bool,
+    /// (kuna `canaryglobal`) The stack-guard strip also recognises a canary read
+    /// from a global named `__stack_chk_guard` / `__security_cookie`.
+    pub canary_global: bool,
     /// (kuna) Strip the MSVC `/GS` frame-cookie boilerplate -- the entry-side
     /// `cookie ^ SP` scramble and the epilogue `__security_check_cookie((cookie
     /// ^ SP) ^ SP)` call (option `msvcstackguard`, default-off).  The sibling of
@@ -2514,6 +2520,8 @@ pub struct Architecture {
     pub analysis_fidproto: bool,
     /// (kuna) IDA's string rule inside code sections (`codestrings`). Default on.
     pub analysis_codestrings: bool,
+    /// (kuna) Merge load-time prototypes slot by slot (`protomerge`). Default on.
+    pub analysis_protomerge: bool,
     /// (kuna) Gate the Go `pclntab` function-name recovery pass (`gopclntab`); the
     /// kuna analog of Ghidra's `GolangSymbolAnalyzer` (name-recovery half). Default
     /// **on**, but the pass is registered ONLY for a Go binary
@@ -3037,6 +3045,7 @@ impl Architecture {
             sparc_struct_return: false,
             ov_less_simplify: false,
             fold_boolean_mask: false,
+            bit_idioms: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
             simd_lane_fold: false,
@@ -3189,6 +3198,7 @@ impl Architecture {
             mark_indirect_only: false,
             hide_shadow: false, // (kuna) option hideshadow; reset_defaults sets the shipped default (on)
             strip_stack_guard: false,
+            canary_global: false,
             strip_msvc_stack_guard: false,
             strip_security_check: false,
             branch_flip: false,
@@ -3358,6 +3368,7 @@ impl Architecture {
             analysis_flirt: false,
             analysis_fidproto: true,
             analysis_codestrings: true,
+            analysis_protomerge: false,
             analysis_gopclntab: false,
             analysis_gotypes: false,
             analysis_gonoreturn: false,
@@ -3477,6 +3488,7 @@ impl Architecture {
         self.sparc_struct_return = false; // (kuna) default: upstream byte-identical (GH-6882)
         self.ov_less_simplify = true; // (kuna) DIV-2 default-on (GH-7190)
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
+        self.bit_idioms = false;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`
@@ -3609,6 +3621,7 @@ impl Architecture {
         self.fpu_trunc_views = true;
         self.fold_call_ret_phi = true; // (kuna) default-on: a call result foldcallret already proved order-safe folds even when the call reads a global it may also write (0/675 ablation, stages PARITY OK); `option foldcallretphi off` restores the spill
         self.strip_security_check = true; // (kuna) DIV-82 default-on: REMOVES CODE (strips rustc's bounds/slice/divide-by-zero panic branches, the SEFCOM Oxidizer SecurityCheckRemover port). Name-triggered on seven Rust-only `core::panicking`/`core::slice::index`/`core::str` helpers, so it is structurally inert on a C binary: 0/675 datatests and 0 changed lines over the C fixtures
+        self.canary_global = true;
         self.strip_stack_guard = true; // (kuna) DIV-14 default-on: REMOVES CODE (strips the -fstack-protector canary epilogue). Per-test opt-out (`option stackguard off`) on the 2 Partial-splitting datatests keeps the corpus byte-identical
         self.branch_flip = true; // (kuna) DIV-13 default-on (angr negated-guard branch flipping; per-test opt-out on the datatests it changes)
         self.name_style_angr = true; // (kuna) default-on: angr-style default naming
@@ -3831,6 +3844,7 @@ impl Architecture {
         self.analysis_flirt = false;
         self.analysis_fidproto = true;
         self.analysis_codestrings = true;
+        self.analysis_protomerge = false;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)
@@ -4186,6 +4200,34 @@ impl Architecture {
         }
     }
 
+    /// (kuna `protomerge`) Park a load-time prototype like
+    /// [`Self::set_function_prototype_pieces_at`], merged slot by slot with the
+    /// one already parked there (`kuna_protomerge::merge`) when the option is on.
+    pub fn merge_function_prototype_pieces_at(
+        &mut self,
+        addr: &Address,
+        pieces: crate::fspec::PrototypePieces,
+    ) {
+        if let Some((sid, _)) = self.symboltab.find_function_across_scopes(addr) {
+            self.merge_function_proto_pieces(sid, pieces);
+        }
+    }
+
+    /// The by-name twin of [`Self::merge_function_prototype_pieces_at`].
+    pub fn merge_function_prototype_pieces(&mut self, name: &str, pieces: crate::fspec::PrototypePieces) {
+        if let Ok(sid) = self.query_global_function(name) {
+            self.merge_function_proto_pieces(sid, pieces);
+        }
+    }
+
+    fn merge_function_proto_pieces(&mut self, sid: crate::database::SymbolId, pieces: crate::fspec::PrototypePieces) {
+        let merged = match self.symboltab.function_proto_pieces_of(sid) {
+            Some(old) if self.analysis_protomerge => crate::kuna_protomerge::merge(old, pieces),
+            _ => pieces,
+        };
+        self.symboltab.set_function_proto_pieces(sid, merged);
+    }
+
     // -----------------------------------------------------------------------
     // Funcdata construction (the W3 boot boundary)
     // -----------------------------------------------------------------------
@@ -4372,6 +4414,7 @@ impl Architecture {
         // reads `data.get_arch().<flag>`; the rule is registered `enabled=false`
         // so the live flag drives both the DIV default and the toggle).
         ctx.fold_boolean_mask = self.fold_boolean_mask; // GH-1282 booleanmask
+        ctx.bit_idioms = self.bit_idioms;
         ctx.global_array_anchor = self.global_array_anchor;
         ctx.cancel_byte_arithmetic = self.cancel_byte_arithmetic; // cancelbytearithmetic
         ctx.simd_lane_fold = self.simd_lane_fold; // simdlane
@@ -4563,6 +4606,7 @@ impl Architecture {
         ctx.mark_indirect_only = self.mark_indirect_only; // indirectonly
         ctx.hide_shadow = self.hide_shadow; // hideshadow
         ctx.strip_stack_guard = self.strip_stack_guard; // stackguard
+        ctx.canary_global = self.canary_global;
         ctx.strip_msvc_stack_guard = self.strip_msvc_stack_guard; // msvcstackguard
         ctx.strip_security_check = self.strip_security_check; // securitycheck
         ctx.branch_flip = self.branch_flip; // branchflip (negated-guard branch flipping)
@@ -5440,7 +5484,7 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -5473,6 +5517,9 @@ impl Architecture {
             userops.register_builtin(BUILTIN_SYSCALL_ERROR, &adapter)?;
             // (kuna strlenscan) the length an inline `repnz scasb` computes.
             userops.register_builtin(BUILTIN_STRLEN, &adapter)?;
+            // (kuna bitidioms) byte swap and rotate.
+            userops.register_builtin(BUILTIN_BSWAP, &adapter)?;
+            userops.register_builtin(BUILTIN_ROTL, &adapter)?;
             Ok(())
         })();
         self.userops = userops;

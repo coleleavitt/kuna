@@ -5337,7 +5337,7 @@ fn commit_analysis_output(
             }
         }
         let name = pieces.name.clone();
-        prog.arch_mut().set_function_prototype_pieces(&name, pieces);
+        prog.arch_mut().merge_function_prototype_pieces(&name, pieces);
     }
 
     // 5c. Library prototypes bound by ENTRY ADDRESS. Same
@@ -5351,7 +5351,7 @@ fn commit_analysis_output(
     //     C++ streams below so DWARF ground truth still wins over both.
     for (addr, pieces) in out.prototypes_at {
         let a = Address::new(Rc::clone(code_space), addr);
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
     let held: Vec<_> = out
         .arm_float_prototypes
@@ -5416,7 +5416,7 @@ fn commit_analysis_output(
             }
             msvc_applied.insert(addr);
         }
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
     let space_index = code_space.get_index();
     for (addr, decl) in msvc_byval {
@@ -5439,7 +5439,7 @@ fn commit_analysis_output(
     //     global by-name query never reaches). Empty when the gate is off.
     for (addr, pieces) in out.cpp_dwarf.prototypes {
         let a = Address::new(Rc::clone(code_space), addr);
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
 
     // 6. Processor-context decode-mode paints (the kuna analog of ARM's
