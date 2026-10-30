@@ -6,9 +6,10 @@
 //!   `loadimage_object::section_kind_flags`.
 //! - [`ElfFormat::compiler_model`] returns the same `gcc`/`default` tokens the
 //!   old `language_id_for` baked into the id string.
-//! - [`ElfFormat::resolve_imports`] just calls
-//!   [`crate::loader::elf_plt::resolve_plt_imports`] (its internals are
-//!   untouched) and re-wraps each `PltSym` as an [`ImportSym`].
+//! - [`ElfFormat::resolve_imports`] re-wraps the `PltSym`s of
+//!   [`crate::loader::elf_plt::resolve_imports_with_got_slots`] as
+//!   [`ImportSym`]s: the PLT stubs, then the `.got` slots of imports no stub
+//!   fronts, which [`ElfFormat::import_slots`] also reports as ranges.
 //! - [`ElfFormat::const_ranges`] is `elf_plt::mips_got_const_ranges`.
 //!
 //! The existing ELF fixtures + the 675 datatests are the proof this is
@@ -121,15 +122,27 @@ impl ObjectFormat for ElfFormat {
         out
     }
 
+    /// The PLT stubs, then the GOT slots of imports no stub jumps through.
     fn resolve_imports(&self, file: &object::File, bytes: &[u8]) -> Vec<ImportSym> {
-        // `elf_plt`'s internals are unchanged; just re-wrap each PltSym.
-        crate::loader::elf_plt::resolve_plt_imports(file, bytes)
+        let (stubs, slots) = crate::loader::elf_plt::resolve_imports_with_got_slots(file, bytes);
+        stubs
             .into_iter()
+            .chain(slots)
             .map(|p| ImportSym {
                 addr: p.addr,
                 name: p.name,
                 kind: super::ImportSymKind::Import,
             })
+            .collect()
+    }
+
+    /// The GOT slots [`ElfFormat::resolve_imports`] names, one pointer wide.
+    fn import_slots(&self, file: &object::File, bytes: &[u8]) -> Vec<(u64, u64)> {
+        let width = if file.is_64() { 8 } else { 4 };
+        crate::loader::elf_plt::resolve_imports_with_got_slots(file, bytes)
+            .1
+            .into_iter()
+            .map(|p| (p.addr, p.addr + width))
             .collect()
     }
 

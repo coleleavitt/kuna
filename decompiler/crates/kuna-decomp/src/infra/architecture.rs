@@ -1682,9 +1682,9 @@ pub struct Architecture {
     // which Ghidra ships off (`AddressTableAnalyzer.setDefaultEnablement(false)`).
     /// (kuna) Gate the no-return-known pass (`noreturn_known`); default on.
     pub analysis_noreturn_known: bool,
-    /// (kuna) Gate PE/Mach-O import-slot call binding (`peimportcall`): paint
-    /// `Varnode::externref` over PE IAT slots and typed Mach-O lazy/non-lazy
-    /// symbol-pointer entries so `ActionDeindirect` can bind `call [slot]` to
+    /// (kuna) Gate PE/Mach-O/ELF import-slot call binding (`peimportcall`): paint
+    /// `Varnode::externref` over PE IAT slots, typed Mach-O lazy/non-lazy
+    /// symbol-pointer entries and ELF `.got` import slots so `ActionDeindirect` can bind `call [slot]` to
     /// the import already resolved there. The upstream Win32 no-return list
     /// remains PE/COFF-only. Also read (through the ArchSeam) by
     /// `Architecture::query_function`, whose no-return carry is the flow half of

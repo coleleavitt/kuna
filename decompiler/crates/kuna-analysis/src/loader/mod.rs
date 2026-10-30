@@ -73,7 +73,7 @@ pub mod kuna_dynrelocs;
 // synthetic extern slot, and mark both halves foldable.
 pub mod kuna_msvcfpconst;
 pub mod format;
-// (kuna) PE/Mach-O import-slot call binding (`peimportcall`): `externref` over
+// (kuna) PE/Mach-O/ELF import-slot call binding (`peimportcall`): `externref` over
 // typed import-pointer slots + upstream's strictly PE-only no-return API names.
 pub mod kuna_peimportcall;
 // (kuna) `rexthunk`: an x86-64 `REX FF 25` tail jump is not an import thunk.

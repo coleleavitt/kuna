@@ -1,4 +1,4 @@
-//! PE/Mach-O import-slot call binding (`peimportcall`) — bind a call through an
+//! PE/Mach-O/ELF import-slot call binding (`peimportcall`) — bind a call through an
 //! import pointer to the symbol the loader already resolved at that slot.
 //!
 //! ## The gap
@@ -22,17 +22,20 @@
 //! Two additive facts share the compatibility gate:
 //!
 //! 1. **`externref` over import-pointer slots.** One `[slot, slot+ptr)` range per
-//!    PE Import-Directory entry or typed Mach-O lazy/non-lazy symbol-pointer
-//!    indirect-symbol entry, committed into the symbol table's property map
+//!    PE Import-Directory entry, typed Mach-O lazy/non-lazy symbol-pointer
+//!    indirect-symbol entry, or ELF `.got` slot of an undefined function symbol
+//!    no PLT stub jumps through, committed into the symbol table's property map
 //!    (`Database::setPropertyRange(Varnode::externref, …)`) exactly as the
 //!    loader's read-only section ranges are. `Scope::queryProperties` ORs the
 //!    property map into a global Varnode's flags, so the slot read now carries
 //!    `persist|externref` and `ActionDeindirect` resolves it through the
-//!    FunctionSymbol `pe_iat` already registered at the slot VA. (kuna's
+//!    FunctionSymbol the format's import resolver (`pe_iat`, `macho_stubs`,
+//!    `elf_plt`) already registered at the slot VA. (kuna's
 //!    `query_function` keys on the Varnode's own address rather than upstream's
 //!    `ExternRefSymbol::refaddr` indirection, so the slot-VA registration lines
 //!    up without a second symbol.) Mach-O stubs, exports, LOCAL/ABS indirect
-//!    entries, and ordinary data such as `__objc_msgrefs` are not painted.
+//!    entries, ordinary data such as `__objc_msgrefs`, and an ELF function
+//!    pointer stored outside `.got` are not painted.
 //! 2. **The Win32 no-return API names.** kuna's shipped
 //!    `PeMacFunctionsThatDoNotReturn` carries only the shared CRT names; the
 //!    Windows API exits (`ExitProcess`, `ExitThread`, `FreeLibraryAndExitThread`,
@@ -51,7 +54,7 @@ use crate::pass::{AnalysisCtx, AnalysisOutput, AnalysisPass, NoReturnFact, Phase
 /// `decompiler/crates/kuna-analysis/data/PEFunctionsThatDoNotReturn`.
 const PE_WIN32_NORETURN_LIST: &str = include_str!("../../data/PEFunctionsThatDoNotReturn");
 
-/// The PE/Mach-O import-slot call binding pass (gate id `peimportcall`).
+/// The PE/Mach-O/ELF import-slot call binding pass (gate id `peimportcall`).
 #[derive(Clone, Copy, Default)]
 pub struct PeImportCallPass;
 
@@ -70,7 +73,7 @@ impl AnalysisPass for PeImportCallPass {
             object::BinaryFormat::Pe | object::BinaryFormat::Coff => {
                 out.noreturn = scan_win32_noreturn(ctx.file, ctx.bytes);
             }
-            object::BinaryFormat::MachO => {}
+            object::BinaryFormat::MachO | object::BinaryFormat::Elf => {}
             _ => return out,
         }
         out.externref = crate::loader::format::import_slots(ctx.file, ctx.bytes);

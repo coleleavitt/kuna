@@ -721,6 +721,20 @@ exe is the only non-ELF binary in this tree large enough to statically link the
 MinGW CRT (≈0.5 MB), on par with the existing `mcount_x86_64` (0.9 MB).
 **Pin the VMAs as test consts** (`x86_64-w64-mingw32-objdump -d/-p`).
 
+`elf_got_noreturn_x86_64` (15824 B, ELF x86-64 PIE, source `elf_got_noreturn_x86_64.c`) is the
+ELF **GOT import-call** fixture (`--option peimportcall`, `tests/stages/ghdec-elfgotcall.xml`).
+Built with `-fno-plt`, so every libc call is `call *slot(%rip)` through a `R_X86_64_GLOB_DAT`
+slot in `.got` and no PLT stub names the import. `check`@`0x1190` ends in the `abort` slot
+`0x3fb0`; `die`@`0x11b0` ends in the `exit` slot `0x3fd0`, and both fall into the next function
+when the slot is unbound. `pick`@`0x11f0` reads `classes`@`0x3dc0` in `.data.rel.ro`, two words
+filled by `R_X86_64_64` relocations against `isalpha`/`isdigit` -- the same import names outside
+`.got`, which must stay program data.
+
+```bash
+gcc -O2 -fPIC -pie -fno-plt -fno-reorder-blocks-and-partition -fno-stack-protector \
+    -Wl,--build-id=none -o elf_got_noreturn_x86_64 elf_got_noreturn_x86_64.c
+```
+
 `pe_noreturn_import.exe` (6173 B, PE32+/x86-64, source `pe_noreturn_import.c`) is the
 PE **import-call binding** fixture (`--option peimportcall`, `tests/stages/ghdec-peimportcall.xml`).
 Its point is the one call shape `pe_imports.exe` does not have: a *direct indirect*

@@ -3000,7 +3000,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
     match pass_id {
         "armframes" => arch.analysis_listing && arch.analysis_funcstart_patterns && arch.analysis_armframes,
         "noreturn_known" => arch.analysis_noreturn_known,
-        // (kuna) PE/Mach-O import-slot call binding — typed-slot `externref`
+        // (kuna) PE/Mach-O/ELF import-slot call binding — typed-slot `externref`
         // paint plus PE-only Win32 no-return names, committed only when enabled.
         "peimportcall" => arch.analysis_peimportcall,
         "libproto" => arch.analysis_libproto,
@@ -4675,8 +4675,8 @@ fn commit_analysis_output(
         );
     }
 
-    // 1c. (kuna) External-reference address ranges (`out.externref`) — the PE IAT
-    //     or typed Mach-O symbol-pointer slots `peimportcall` reports. OR `Varnode::externref`
+    // 1c. (kuna) External-reference address ranges (`out.externref`) — the PE IAT,
+    //     typed Mach-O symbol-pointer or ELF `.got` import slots `peimportcall` reports. OR `Varnode::externref`
     //     over each `[first, last_open)` range in the same symbol-table property map,
     //     which `Scope::queryProperties` folds into every global Varnode covering the
     //     range. That one flag is what `ActionDeindirect`'s `queryExternalRefFunction`

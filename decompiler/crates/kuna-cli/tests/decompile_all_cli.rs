@@ -2183,8 +2183,9 @@ fn functions_and_decompile_all_agree_on_size() {
         panic!("kuna decompile-all failed: {stderr}");
     }
     // Both documents are address-ordered over the same entry set, so the size
-    // columns line up positionally.
-    let want = json_sizes(&inventory);
+    // columns line up positionally. The inventory also lists the `.got` slot of
+    // an import no PLT stub fronts, which has a name and no body to decompile.
+    let want: Vec<u64> = json_sizes(&inventory).into_iter().filter(|&size| size != 0).collect();
     let got = json_sizes(&decompiled);
     assert_eq!(
         want, got,

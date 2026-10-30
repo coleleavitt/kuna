@@ -386,6 +386,23 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         passes.push(Box::new(crate::rtti::kuna_itaniumrtti::ItaniumRttiPass));
     }
 
+    // S1 PE/Mach-O/ELF import-slot call binding (PeImportCallPass): paint
+    // `Varnode::externref` over PE IAT slots, typed Mach-O lazy/non-lazy
+    // symbol-pointer entries and ELF `.got` import slots so `ActionDeindirect`
+    // resolves `call [slot]` to the FunctionSymbol already registered at that VA.
+    // The Win32 no-return API list remains strictly PE/COFF. Facts are committed
+    // only when `peimportcall` is on. Ahead of the Go and Rust blocks, so
+    // `gopclntab` keeps its appended-last contract on a Go ELF.
+    if matches!(
+        format,
+        object::BinaryFormat::Pe
+            | object::BinaryFormat::Coff
+            | object::BinaryFormat::MachO
+            | object::BinaryFormat::Elf
+    ) {
+        passes.push(Box::new(crate::loader::kuna_peimportcall::PeImportCallPass));
+    }
+
     // S1 Go pclntab function-name recovery (GoPclntabPass): when the binary is Go
     // (`detect_compiler == Go`, via `.go.buildinfo`/`.note.go.buildid` — the same
     // gate the Go no-return list uses), parse the embedded `pclntab` and emit a
@@ -425,18 +442,6 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // off` drops the facts at the read-symbols boundary.
     if compiler.is_rust() {
         passes.push(Box::new(crate::strings::kuna_strrecords::StrRecordPass::rust()));
-    }
-
-    // S1 PE/Mach-O import-slot call binding (PeImportCallPass): paint
-    // `Varnode::externref` over PE IAT slots and typed Mach-O lazy/non-lazy
-    // symbol-pointer entries so `ActionDeindirect` resolves `call [slot]` to the
-    // FunctionSymbol already registered at that VA. The Win32 no-return API list
-    // remains strictly PE/COFF. Facts are committed only when `peimportcall` is on.
-    if matches!(
-        format,
-        object::BinaryFormat::Pe | object::BinaryFormat::Coff | object::BinaryFormat::MachO
-    ) {
-        passes.push(Box::new(crate::loader::kuna_peimportcall::PeImportCallPass));
     }
 
     // S1 MSVC RTTI / vftable recovery (RttiPass): on a Windows PE, parse the
@@ -1768,21 +1773,22 @@ mod tests {
     }
 
     /// The import-slot binding pass (`peimportcall`) is registered only where a
-    /// loader exposes typed import-pointer slots: PE/COFF and Mach-O.
+    /// loader exposes import-pointer slots: PE/COFF, Mach-O and ELF.
     #[test]
-    fn peimportcall_pass_is_pe_coff_macho_gated() {
+    fn peimportcall_pass_is_pe_coff_macho_elf_gated() {
         for c in [Compiler::Gcc, Compiler::Clang, Compiler::Go, Compiler::Unknown] {
             for fmt in [
                 object::BinaryFormat::Pe,
                 object::BinaryFormat::Coff,
                 object::BinaryFormat::MachO,
+                object::BinaryFormat::Elf,
             ] {
                 assert!(
                     ids(&passes_for(c, fmt)).contains(&"peimportcall"),
                     "{c:?}/{fmt:?} must carry peimportcall"
                 );
             }
-            for fmt in [object::BinaryFormat::Elf, object::BinaryFormat::Wasm] {
+            for fmt in [object::BinaryFormat::Wasm] {
                 assert!(
                     !ids(&passes_for(c, fmt)).contains(&"peimportcall"),
                     "{c:?}/{fmt:?} must not carry peimportcall"
@@ -1825,15 +1831,11 @@ mod tests {
         assert!(!elf.contains(&"objc"), "ELF must not carry the objc pass");
         assert!(macho.contains(&"objc"), "Mach-O must carry the objc pass");
         // Compare the format-neutral base after dropping each format's gated
-        // additions: `itaniumrtti` for ELF and `peimportcall` plus `objc` for
-        // Mach-O.
+        // additions: `itaniumrtti` for ELF and `objc` for Mach-O.
         let elf_neutral: Vec<&str> =
             elf.iter().copied().filter(|&p| p != "itaniumrtti").collect();
-        let macho_neutral: Vec<&str> = macho
-            .iter()
-            .copied()
-            .filter(|&p| !matches!(p, "peimportcall" | "objc"))
-            .collect();
+        let macho_neutral: Vec<&str> =
+            macho.iter().copied().filter(|&p| p != "objc").collect();
         assert!(!elf_neutral.contains(&"itaniumrtti"));
         assert_eq!(
             macho_neutral, elf_neutral,
