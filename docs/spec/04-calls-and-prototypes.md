@@ -3018,6 +3018,12 @@ deliberately NOT here: on the wire they travel as `<localdb>` category-0
 symbols (chapter [06](06-variables-and-merge.md) §6.2), matching upstream's
 symbol-backed `ProtoStoreSymbol::encode`, which writes nothing.
 
+**(kuna `chkstkdarwin`) A de-indirected stack probe restarts.** When
+`FuncCallSpecs::deindirect` resolves a call to `___chkstk_darwin` while
+`chkstkdarwin` is on, it records the indirect override and schedules a
+restart without merging the prototype. On the re-flow the call is direct
+before heritage, where `ActionChkstkDarwin` deletes it (chapter 02 §2.12).
+
 ## 4.4 kuna extensions
 
 ### (kuna) `narrowext` — a narrow argument or return value extended as the ABI states

@@ -152,6 +152,8 @@ kuna_options! { self, p1;
     "fastfailnoreturn" => on_off!(fastfail_noreturn, "Windows int 0x29 (__fastfail) no-return"),
     "ptrauthtrap" => on_off!(ptrauth_trap, "arm64e pointer-auth failure-check removal"),
     "relronoreturn" => on_off!(relro_noreturn, "Flow-time no-return call through a relocated read-only slot"),
+    "chkstkdarwin" => on_off!(chkstk_darwin, "Darwin ___chkstk_darwin stack-probe removal"),
+    "outlinedinline" => on_off!(outlined_inline, "MachineOutliner fragment inlining"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;
@@ -899,6 +901,7 @@ kuna_options! { self, p1;
     "noreturn_known" => on_off!(analysis_noreturn_known, "No-return-known analysis pass"),
     "peimportcall" => on_off!(analysis_peimportcall, "PE/Mach-O/ELF import-slot call binding"),
     "authptrcall" => on_off!(analysis_authptrcall, "arm64e __auth_ptr call binding"),
+    "arm64evcall" => on_off!(analysis_arm64evcall, "arm64e virtual-call resolution"),
     "libproto" => on_off!(analysis_libproto, "Library-prototype analysis pass"),
     "libcsigs" => on_off!(analysis_libcsigs, "Measured libc signature extension"),
     "libgccsigs" => on_off!(analysis_libgccsigs, "libgcc __divdi3 DI-mode contract"),

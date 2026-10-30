@@ -2142,7 +2142,10 @@ mod tests {
         // and kuna-kernelcache-merge / several kernel-collection entries in one image
         // and kuna-xnutables / kalloc_type views and external-method tables
         // and kuna-osclassinfo / DriverKit class records
-        assert_eq!(count, 630, "corpus file count drifted");
+        // and kuna-arm64evcall / arm64e virtual calls by pointer-auth discriminator
+        // and kuna-outlined / the Darwin stack probe and MachineOutliner fragments
+        // and kuna-a64-sysregs / AArch64 system-register names and Apple instructions
+        assert_eq!(count, 633, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

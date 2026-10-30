@@ -31,7 +31,7 @@
 //!   rebased to a real VMA (statically the resolved pointer is just
 //!   `imagebase + target`), and the signing context dyld signs the slot with —
 //!   key, 16-bit diversity, address diversity — is kept beside it
-//!   ([`ChainedFixups::pac_auth`]).
+//!   ([`ChainedFixups::auth`]).
 //! - **Bind / import-ordinal chains** — a bind entry names an *external* symbol
 //!   whose runtime address is unknown statically, so it is never entered into
 //!   the pointer overlay (a consumer reading that slot misses and falls back,
@@ -141,22 +141,22 @@ pub struct ChainedFixups {
     /// resolved into `rebases` once every chain has been read
     /// ([`resolve_kernel_cache_levels`]).
     kernel_cache: Vec<(u64, u8, u64)>,
-    /// `slot_vma → signing context` for every arm64e auth rebase in `rebases`.
-    auth: HashMap<u64, PacAuth>,
+    /// `slot_vma → signing context` for every authenticated arm64e entry,
+    /// rebase or bind.
+    auth: HashMap<u64, AuthContext>,
 }
 
-/// The pointer-authentication context of an arm64e auth rebase
-/// (`dyld_chained_ptr_arm64e_auth_rebase`): dyld signs the rebased pointer with
-/// `key` and a discriminator built from `diversity`, blended with the slot's own
-/// address when `address_diversity` is set.
+/// How dyld signs an authenticated chained pointer at load: the key, whether
+/// the slot address is blended into the discriminator, and the 16-bit constant
+/// diversifier. A C++ virtual-function slot carries the hash of the method's
+/// mangled name here, so the same method has the same diversifier in every
+/// vtable and at every call site.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct PacAuth {
-    /// `ptrauth_key`: 0 = IA, 1 = IB, 2 = DA, 3 = DB.
+pub struct AuthContext {
+    /// `0` IA, `1` IB, `2` DA, `3` DB.
     pub key: u8,
-    /// The 16-bit constant discriminator.
+    pub addr_div: bool,
     pub diversity: u16,
-    /// Whether the slot address is blended into the discriminator.
-    pub address_diversity: bool,
 }
 
 impl ChainedFixups {
@@ -185,12 +185,6 @@ impl ChainedFixups {
         self.rebases.get(&va).copied()
     }
 
-    /// The signing context of the auth rebase at slot `va`; `None` for a plain
-    /// rebase, a bind, or a non-fixup slot.
-    pub fn pac_auth(&self, va: u64) -> Option<PacAuth> {
-        self.auth.get(&va).copied()
-    }
-
     /// Every resolved rebase target, in no particular order.
     pub fn targets(&self) -> impl Iterator<Item = u64> + '_ {
         self.rebases.values().copied()
@@ -199,6 +193,17 @@ impl ChainedFixups {
     /// Every `(slot_vma, resolved_pointer)` rebase, in no particular order.
     pub fn rebases(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.rebases.iter().map(|(&va, &target)| (va, target))
+    }
+
+    /// The signing context of the authenticated entry at slot `va`.
+    pub fn auth(&self, va: u64) -> Option<AuthContext> {
+        self.auth.get(&va).copied()
+    }
+
+    /// Every `(slot_vma, signing context)` authenticated entry, in no particular
+    /// order.
+    pub fn auth_slots(&self) -> impl Iterator<Item = (u64, AuthContext)> + '_ {
+        self.auth.iter().map(|(&va, &ctx)| (va, ctx))
     }
 
     /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
@@ -509,11 +514,11 @@ fn walk_chain(
             next
         } else {
             let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
+            if let Some(ctx) = auth_context(raw, pointer_format) {
+                out.auth.insert(va, ctx);
+            }
             if let Some(target) = decoded {
                 out.rebases.insert(va, target);
-                if let Some(auth) = auth_context(raw, pointer_format) {
-                    out.auth.insert(va, auth);
-                }
             } else if let Some((ordinal, addend)) = bind_entry(raw, pointer_format) {
                 if let Some((name, import_addend)) = imports.get(ordinal).filter(|(n, _)| !n.is_empty()) {
                     out.binds.insert(va, (Rc::clone(name), import_addend.wrapping_add(addend)));
@@ -595,6 +600,27 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
     }
 }
 
+/// The signing context of an authenticated arm64e or kernel-cache entry: `auth`
+/// (bit 63) set, key in bits 49..50, address diversity bit 48, diversifier in
+/// bits 32..47. The layout is shared by the auth rebase and auth bind of every
+/// arm64e format and by `dyld_chained_ptr_64_kernel_cache_rebase`.
+fn auth_context(raw: u64, pointer_format: u16) -> Option<AuthContext> {
+    let arm64e = matches!(
+        pointer_format,
+        ptr_format::ARM64E
+            | ptr_format::ARM64E_USERLAND
+            | ptr_format::ARM64E_USERLAND24
+            | ptr_format::ARM64E_KERNEL
+            | ptr_format::ARM64E_FIRMWARE
+            | ptr_format::PTR_64_KERNEL_CACHE
+    );
+    (arm64e && (raw >> 63) & 1 == 1).then(|| AuthContext {
+        key: ((raw >> 49) & 3) as u8,
+        addr_div: (raw >> 48) & 1 == 1,
+        diversity: ((raw >> 32) & 0xFFFF) as u16,
+    })
+}
+
 /// The import ordinal and inline addend of a **bind** word, or `None` for a
 /// rebase. The arm64e variants differ in the ordinal width (16 bits, 24 for
 /// `_USERLAND24`); an authenticated bind carries its PAC context where the plain
@@ -624,20 +650,6 @@ fn bind_entry(raw: u64, pointer_format: u16) -> Option<(usize, i64)> {
 fn kernel_cache_rebase(raw: u64, pointer_format: u16) -> Option<(u64, u8, u64)> {
     matches!(pointer_format, ptr_format::PTR_64_KERNEL_CACHE | ptr_format::X86_64_KERNEL_CACHE)
         .then(|| ((raw >> 51) & 0xFFF, ((raw >> 30) & 3) as u8, raw & 0x3FFF_FFFF))
-}
-
-/// The signing context of an arm64e auth rebase word (`auth == 1`, `bind == 0`):
-/// `diversity` in bits 32..47, `addrDiv` in bit 48, `key` in bits 49..50.
-fn auth_context(raw: u64, pointer_format: u16) -> Option<PacAuth> {
-    let arm64e = matches!(
-        pointer_format,
-        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24
-    );
-    (arm64e && (raw >> 62) == 0b10).then(|| PacAuth {
-        key: ((raw >> 49) & 0b11) as u8,
-        diversity: ((raw >> 32) & 0xFFFF) as u16,
-        address_diversity: (raw >> 48) & 1 == 1,
-    })
 }
 
 /// Map a VMA to its file offset via the segment table (the inverse of the load
@@ -734,12 +746,9 @@ mod tests {
         let mut out = ChainedFixups::default();
         walk_chain(&file, &segs, imagebase, 8, ptr_format::ARM64E, imagebase, &[], &mut out);
         assert_eq!(out.resolved_ptr(imagebase), Some(0x1_0000_8028));
-        assert_eq!(
-            out.pac_auth(imagebase),
-            Some(PacAuth { key: 2, diversity: 0x1234, address_diversity: true })
-        );
+        assert_eq!(out.auth(imagebase), Some(AuthContext { key: 2, addr_div: true, diversity: 0x1234 }));
         assert_eq!(out.resolved_ptr(imagebase + 8), Some(0x1_0000_8050));
-        assert_eq!(out.pac_auth(imagebase + 8), None);
+        assert_eq!(out.auth(imagebase + 8), None);
     }
 
     /// arm64e **non-auth** rebase (plain ARM64E): the 43-bit target is a full
@@ -984,6 +993,20 @@ mod tests {
     }
 
 
+
+    /// Every authenticated entry keeps its signing context: the `__const` rebase
+    /// of `macho_arm64e_auth` is IA, address-diversified, `0x1234`; its
+    /// `__auth_ptr` bind is IA with no diversity; a plain rebase has none.
+    #[test]
+    fn auth_context_is_kept() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_arm64e_auth");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert_eq!(fixups.auth(0x100004000), Some(AuthContext { key: 0, addr_div: true, diversity: 0x1234 }));
+        assert_eq!(fixups.auth(0x100004018), Some(AuthContext { key: 0, addr_div: false, diversity: 0 }));
+        assert_eq!(fixups.auth(0x100008000), None);
+    }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
     #[test]

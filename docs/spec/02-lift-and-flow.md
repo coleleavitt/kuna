@@ -2822,3 +2822,81 @@ the `x30` read lose their only reader and die to dead-code elimination.
 `off` keeps the checks, to audit where the compiler authenticates. Pinned by
 `tests/stages/kuna-ptrauthtrap.xml` (two passes over the `macho_arm64e_auth`
 fixture).
+
+## 2.12 The Darwin stack probe
+
+**(kuna) `option chkstkdarwin on|off`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_chkstkdarwin.rs
+(ActionChkstkDarwin)`.** Apple's compilers probe every page of a frame larger
+than a page, or of a variable-length one, before allocating it: the size goes
+in x9 and `___chkstk_darwin` touches each page below sp, preserving every
+register. The default call model has the call clobber x0–x18 like any other
+call. A value kept in a caller-saved register across the probe therefore
+printed as an undefined local, and the call itself is runtime machinery the
+source never wrote. IDA drops it from the same list as
+`__security_check_cookie`.
+
+The action deletes each CALL whose callee is `___chkstk_darwin` (any number of
+leading underscores) and whose output nothing reads. It runs pre-SSA, in the
+`cleanupcode` window, so heritage never sees the clobber and the size
+computation dies to dead-code elimination. A call through an arm64e
+`__auth_ptr` slot is still a CALLIND at that point; `ActionDeindirect`
+resolves it after heritage. When it resolves to the probe,
+`FuncCallSpecs::deindirect` schedules a restart
+(`decompiler/crates/kuna-decomp/src/p4_calls/fspec.rs (deindirect)`), and the
+re-flow builds the call direct, where the action deletes it. Pinned by
+`tests/stages/kuna-outlined.xml`.
+
+## 2.13 MachineOutliner fragments
+
+**(kuna) `option outlinedinline on|off`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_outlinedinline.rs
+(is_outlined_name)`.** At `-Oz`, and in much Swift and Apple system code,
+clang's MachineOutliner moves instruction sequences that repeat across
+functions into shared `OUTLINED_FUNCTION_<n>` fragments. A caller reaches a
+fragment with `bl`, or ends by tail-branching to one. A fragment has no frame
+of its own and reads and writes its caller's registers, so a caller split
+across fragments printed as opaque calls with arguments that make no sense.
+IDA marks the fragments outlined by name and Hex-Rays inlines them.
+
+At the analysis commit, every function symbol named `OUTLINED_FUNCTION_<n>`
+(any number of leading underscores) is flagged inline, which is what
+`option inline <name>` does; flow then splices the fragment into each caller
+through upstream's inliner (§2.4). Upstream's hard-model inliner refuses two
+shapes that are the common ones here: a tail call (`b OUTLINED_FUNCTION_n`
+lifts to a CALL with a RETURN at its own address, so there is no distinct
+return address) and a call nothing follows (the fragment ends its caller by
+tail-calling a no-return routine). For a fragment, both are accepted and the
+clone keeps the fragment's own RETURN as the caller's. A fragment whose flow
+reaches unmapped memory, which happens in a dyld-cache extract when it
+tail-branches into another library, is not inlined and stays a call. The
+detection is name based, like IDA's: a stripped image keeps its fragments as
+calls. Pinned by `tests/stages/kuna-outlined.xml`.
+
+## 2.14 AArch64 system registers and Apple instructions
+
+The AARCH64 SLEIGH spec named 304 system registers by hand; any other
+`MRS`/`MSR` lifted to `UnkSytemRegRead(op0, op1, CRn, CRm, op2)` /
+`UnkSytemRegWrite(..., Xt)`. `AARCH64_sysregs.sinc` defines 1,612 more as
+volatile 8-byte registers at `register:0x8000` (the `AARCH64.pspec` volatile
+ranges cover them), and `AARCH64_sysregs_cop.sinc` adds a `CopReg`
+constructor for each. The names come from two public tables: LLVM's AArch64
+system-register table, read back by disassembling every MRS/MSR encoding,
+and the Apple implementation-defined registers of the Asahi Linux m1n1
+project (`HID*`, `SPRR_*`, `GXF_*`, `CTRR_*`, `PMC*`, ...). Where the read
+and write names of one encoding differ, as for `DBGDTRRX_EL0` and
+`DBGDTRTX_EL0`, each direction gets its own constructor. A read of HID0_EL1
+now prints `v = hid0_el1;`, the same way `tpidrro_el0` always printed.
+
+`AARCH64_apple.sinc` decodes Apple's instructions in the unallocated
+`0x0020xxxx` space for every AArch64 image, as IDA does. The words are
+permanently undefined on other cores, so decoding them costs nothing there.
+The group is in bits 15..10: `MUL53LO`/`MUL53HI Vd, Vn` (0, 1),
+`WKDMC`/`WKDMD Xd, Xn` (2, 3; they replace two `NotYetImplemented`
+placeholders), AMX (4, `AARCH64_AMXext.sinc`), and in group 5 `GEXIT`,
+`GENTER #imm5` and `SDSB #imm5` (bits 9..5 = 0, 1, 3). Each lifts to an
+opaque pcodeop over its register operands, because the semantics are not
+documented. An iOS kernelcache function that used to stop at its first
+`GENTER` with a bad-instruction halt now decodes through it. These are
+decode-table corrections with no option. Pinned by
+`tests/stages/kuna-a64-sysregs.xml`.

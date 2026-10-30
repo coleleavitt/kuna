@@ -439,6 +439,8 @@ Three tiers:
 | no Win32 API names anywhere in a decompiled PE | [`peimportcall`](#peimportcall) |
 | an arm64e call renders as (*dat_<addr>)(...) through an __auth_ptr slot | [`authptrcall`](#authptrcall) |
 | ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall) |
+| an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method | [`arm64evcall`](#arm64evcall) |
+| c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls | [`arm64evcall`](#arm64evcall) |
 | heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
 | dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
 | caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
@@ -470,6 +472,10 @@ Three tiers:
 | (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap) |
 | a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap) |
 |  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap) |
+| a __chkstk_darwin() or ___chkstk_darwin() call in an apple function | [`chkstkdarwin`](#chkstkdarwin) |
+| a value kept in a caller-saved register across the stack probe prints as an undefined local | [`chkstkdarwin`](#chkstkdarwin) |
+| an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense | [`outlinedinline`](#outlinedinline) |
+| a function body is a string of OUTLINED_FUNCTION calls | [`outlinedinline`](#outlinedinline) |
 | go function returning bool prints v = CONCAT71((undefined7)(v >> 8), a == b) instead of returning the comparison | [`gobool`](#gobool) |
 | return value masked with 0xffffffff around a boolean | [`gobool`](#gobool) |
 | undefined7 casts feeding a concatenation at every boolean return | [`gobool`](#gobool) |
@@ -2356,6 +2362,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-apple-authptrcall
 - **Example:** `option authptrcall off`
 
+### `arm64evcall` -- on | off, default `on`
+
+- **Symptoms:** an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method; c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls.
+- **What it does:** Resolve arm64e C++ virtual calls by their pointer-auth discriminator. arm64e signs every vtable slot with key IA, address diversity and a 16-bit constant, the hash of the method's mangled name; the constant survives in each slot's LC_DYLD_CHAINED_FIXUPS entry and is re-materialized at every call site (movk x17, #d, lsl #48; blraa x8, x17). So (slot index, diversifier) names a method without any class type, which is how IDA's arm64 module resolves these calls. The analysis tier files every run of consecutive IA-signed, address-diversified slots in a __const section under (index in run, diversifier), skipping __cxa_pure_virtual/__cxa_deleted_virtual and slots bound to another image; it then walks back up to 24 raw A64 words from each blraa/braa with a register modifier to the movk and the authenticated vtable-pointer load (autda/autdb/autdza/ldraa), summing add #imm and pre-index ldr writebacks into the slot offset. When the slot holds one method in this image the CALLIND is built as a direct call to it; when it holds several, the call gets a warning naming the candidates.
+- **When to flip:** On by default: an arm64e virtual call whose slot one class of this image fills reads as that method's call, and an overridden one names its candidates. Flip off to see every virtual call as (**(code **)(*obj + off))(...). The unique-target case trusts that no other image overrides the method; a plugin or kext built against this image could. Inert on any image without IA-signed __const slots.
+- **Where / provenance:** P1/external-refinement · kuna · structure-recovery · kuna-apple-arm64evcall
+- **Example:** `option arm64evcall off`
+
 ### `noreturn_disc` -- on | off, default `on`
 
 - **Symptoms:** heavily-called custom die()/fatal() wrapper still treated as returning; dead code after a stripped sub_ wrapper that never falls through at 3+ call sites; caller swallows the next function after a wrapper call.
@@ -2427,6 +2441,22 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Leave on: an arm64e function's tail call reads as the call alone. Flip off to audit where the compiler checks an authenticated pointer. Inert on any image without a brk #0xc470-0xc473 trap.
 - **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-apple-ptrauthtrap
 - **Example:** `option ptrauthtrap off`
+
+### `chkstkdarwin` -- on | off, default `on` (destructive opt-in)
+
+- **Symptoms:** a __chkstk_darwin() or ___chkstk_darwin() call in an apple function; a value kept in a caller-saved register across the stack probe prints as an undefined local.
+- **What it does:** Delete the ___chkstk_darwin stack-probe calls. Apple's compilers probe every page of a frame larger than a page (or of a variable-length one) before allocating it: the size goes in x9 and ___chkstk_darwin touches each page below sp, preserving every register. The default call model has the call clobber x0-x18 like any other, which cuts the data flow of the live argument registers across it (a value kept in x8 across the probe prints as an undefined local), and the call itself is runtime machinery the source never wrote; IDA drops it from its stack-probe list. The CALL is deleted pre-SSA (the cleanupcode window), so heritage never sees the clobber and the size computation dies to dead-code elimination; a call through __auth_ptr that ActionDeindirect resolves later restarts the function once to reach that window.
+- **When to flip:** Leave on: a function with a large or variable-length frame reads without the probe call and keeps the values that live across it. Flip off to see where the compiler probes the stack. Inert on any image without a ___chkstk_darwin callee.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · kuna-apple-chkstkdarwin
+- **Example:** `option chkstkdarwin off`
+
+### `outlinedinline` -- on | off, default `on`
+
+- **Symptoms:** an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense; a function body is a string of OUTLINED_FUNCTION calls.
+- **What it does:** Inline clang's MachineOutliner fragments into their callers. At -Oz, and in much Swift and Apple system code, the outliner moves instruction sequences that repeat across functions into shared OUTLINED_FUNCTION_<n> fragments and calls them with bl, or ends a caller with b. A fragment is not a function of the source: it has no frame, reads and writes the caller's registers, and a caller split across fragments reads as opaque calls that hide its data flow. IDA marks them outlined by name and Hex-Rays inlines them. On: every function symbol named OUTLINED_FUNCTION_<n> is flagged inline (what option inline <name> does), so flow splices the fragment into each caller; a tail call to a fragment, or a call nothing follows, keeps the fragment's own RETURN instead of being refused as upstream's inliner does.
+- **When to flip:** Leave on: a caller reads as one body, with the fragment's arithmetic and its tail call in place. Flip off to see the fragments as calls. Name based, like IDA: a stripped image keeps its fragments as calls.
+- **Where / provenance:** P2/inline-inject · kuna · structure-recovery · kuna-apple-outlinedinline
+- **Example:** `option outlinedinline off`
 
 ### `gobool` -- off | auto | always, default `auto` (destructive opt-in)
 

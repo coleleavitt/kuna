@@ -812,8 +812,8 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   `ARM64E_USERLAND`, `ARM64E_USERLAND24`). An arm64e authenticated rebase stores
   a 32-bit offset from the image base plus its signing context (key, address
   diversity, 16-bit diversifier). The slot reads as `imagebase + offset`, and the
-  context is kept beside it (`ChainedFixups::pac_auth`); no consumer reads it
-  yet. A bind entry names an import whose address is
+  context is kept beside it (`ChainedFixups::auth`, which also records an
+  authenticated bind's context). A bind entry names an import whose address is
   unknown statically, so it is absent from the pointer overlay — a consumer
   misses and falls back rather than reading a wrong address — but its ordinal is
   resolved through the blob's imports table to the symbol it names
@@ -1756,6 +1756,32 @@ indirect-symbol walk does, and reports the slot as an `externref` range. The
 commit and `ActionDeindirect` then treat the slot exactly like a `__got` slot.
 A bind with a nonzero addend points inside the import rather than at it, so it
 is skipped. Off, such a call renders `(*dat_<slot>)(...)` as before.
+
+arm64e C++ virtual calls are resolved by their signing context
+(`decompiler/crates/kuna-analysis/src/analyzers/rtti/kuna_arm64evcall.rs (resolve)`,
+`arm64evcall`, Mach-O only, default on). arm64e signs every vtable slot with
+key IA, address diversity and a 16-bit diversifier, the hash of the method's
+mangled name. The chained-fixup resolver keeps that context for every
+authenticated entry (`decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (AuthContext)`),
+and a call site re-materializes the same constant to authenticate the loaded
+slot: `movk x17, #d, lsl #48; blraa x8, x17`. So `(slot index, diversifier)`
+names a method without any class type. The pass files every run of
+consecutive IA-signed, address-diversified slots in a `__const` section under
+`(index in run, diversifier)`. A slot bound to another image, and a slot
+holding `__cxa_pure_virtual` or `__cxa_deleted_virtual`, keeps its place in
+the run but adds no method. It then walks back up to 24 raw A64 words from
+each `blraa`/`braa` with a register modifier: first to the `movk` that sets
+the diversifier, then along `mov` copies, `add #imm` and pre-index `ldr`
+writebacks of the slot address to the authenticated vtable-pointer load
+(`autda`, `autdb`, `autdza`, `ldraa`). Any branch on the way, or any other
+write to the tracked register, gives up. The walk reads instruction words
+because the lifted p-code no longer carries the modifier. The result is
+committed as `call site → methods`. When flow builds the CALLIND at such a
+site and the slot holds one method, the call is built as a direct call to it
+(`decompiler/crates/kuna-decomp/src/infra/decompile_drive.rs (vcall_resolution)`).
+When it holds several, the call keeps its indirect form and gets a warning
+naming the candidates. A unique method is unique within this image only: a
+plugin or kext built against it could override the method.
 
 Two arch-marker passes paint **decode context** rather than names, because a wrong
 decode mode is unrecoverable downstream. `decompiler/crates/kuna-analysis/src/loader/arm_markers.rs

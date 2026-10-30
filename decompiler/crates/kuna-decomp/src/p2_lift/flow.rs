@@ -373,6 +373,14 @@ pub trait FlowEnvironment {
         None
     }
 
+    /// (kuna `arm64evcall`) The direct callee of the arm64e virtual call at
+    /// `site` when its vtable slot holds one method in this image, or a note
+    /// naming the candidates when it holds several. The default shell knows
+    /// none.
+    fn vcall_resolution(&self, _site: &Address) -> (Option<Address>, Option<String>) {
+        (None, None)
+    }
+
     /// (kuna `msvcsig`) Does `entry` carry a locked MSVC prototype? Such a callee's
     /// copied prototype gets the stack adjustment its parameter list implies, as
     /// `ActionDefaultParams` gives a declared callee it seeds itself
@@ -2814,6 +2822,13 @@ truncating the fall-through here"
         if direct.is_none() {
             direct = self.env.relro_noreturn_call(&self.data, op);
         }
+        if direct.is_none() {
+            let (vcall, note) = self.env.vcall_resolution(&op_addr);
+            direct = vcall;
+            if let Some(note) = note {
+                self.data.warning(&note, &op_addr);
+            }
+        }
 
         // C++ flow.cc:730-731: `if (fc != 0 && fc->getEntryAddress() ==
         // res->getEntryAddress()) res->setAddress(Address());` — while weaving a
@@ -3109,6 +3124,15 @@ truncating the fall-through here"
         // Carry any warnings the nested flow buffered back to the top-level
         // function's comment store (the C++ `inline_head`/`data` reach the same
         // `glb->commentdb`).  This includes nested "Could not inline here".
+        // (kuna `outlinedinline`) A fragment whose flow leaves the image (a
+        // dyld-cache extract tail-calling into another library) stays a call.
+        if inlineflow.has_unmapped_target()
+            && self.data.get_arch().outlined_inline
+            && crate::kuna_outlinedinline::is_outlined_name(inlineflow.data.get_name())
+        {
+            *inlinefd = inlineflow.data;
+            return Ok(-1);
+        }
         let nested_comments = inlineflow.data.drain_pending_comments();
         for (tp, ad, txt) in nested_comments {
             self.data.push_raw_comment(tp, ad, txt);
@@ -3222,6 +3246,9 @@ truncating the fall-through here"
         retaddr: &mut Address,
     ) -> KunaResult<bool> {
         if !inlineflow.data.get_func_proto().is_no_return() {
+            if self.ends_without_return_site(inlineflow, op) {
+                return Ok(true);
+            }
             let nextop = match self.dead_next(op) {
                 Some(n) => n,
                 None => {
@@ -3241,6 +3268,25 @@ truncating the fall-through here"
             self.op_mark_start_basic(nextop);
         }
         Ok(true)
+    }
+
+    /// (kuna `outlinedinline`) Does the call `op` to a MachineOutliner fragment
+    /// end its function, so the fragment's own RETURN is the caller's? That is
+    /// the case for a tail call (`b OUTLINED_FUNCTION_n`, a CALL with a RETURN at
+    /// its own address) and for a call nothing follows (the fragment ends the
+    /// caller by tail-calling a no-return routine). Upstream refuses both; the
+    /// clone then keeps the fragment's RETURN as is.
+    fn ends_without_return_site(&self, inlineflow: &FlowInfo<'a, E>, op: OpId) -> bool {
+        if !self.data.get_arch().outlined_inline
+            || !crate::kuna_outlinedinline::is_outlined_name(inlineflow.data.get_name())
+        {
+            return false;
+        }
+        let Some(next) = self.dead_next(op) else { return true };
+        let (Some(call), Some(next)) = (self.data.obank().get(op), self.data.obank().get(next)) else {
+            return false;
+        };
+        next.code() == OpCode::CPUI_RETURN && next.get_addr() == call.get_addr()
     }
 
     /// If the given injected op is a CALL, CALLIND, or BRANCHIND, add references to

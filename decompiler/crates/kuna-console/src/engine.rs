@@ -3034,6 +3034,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // paint plus PE-only Win32 no-return names, committed only when enabled.
         "peimportcall" => arch.analysis_peimportcall,
         "authptrcall" => arch.analysis_authptrcall,
+        "arm64evcall" => arch.analysis_arm64evcall,
         // (kuna) ELF GOT data imports: the slot names + externref paint exist only
         // to let `importdata` render a read through the slot, so they share its gate.
         "elfgotimports" => arch.import_data,
@@ -4777,6 +4778,24 @@ fn commit_analysis_output(
                     .set_attribute(sid, kuna_decomp::varnode::varnode_flags::namelock);
             }
         }
+    }
+
+    // 1--. (kuna `arm64evcall`) The methods each arm64e virtual call site's slot
+    //      can hold; flow reads them when it builds the CALLIND.
+    for v in &out.vcall_sites {
+        prog.arch_mut().kuna_vcall_targets.insert(v.site, v.targets.clone());
+    }
+
+    // 1---. (kuna `outlinedinline`) Flag clang's MachineOutliner fragments inline,
+    //       so flow splices each into its callers.
+    if prog.arch().outlined_inline {
+        let fragments: Vec<Address> = prog
+            .symbols
+            .iter()
+            .filter(|s| kuna_decomp::kuna_outlinedinline::is_outlined_name(&s.name))
+            .map(|s| s.addr.clone())
+            .collect();
+        kuna_decomp::kuna_outlinedinline::mark_inline(prog.arch_mut(), &fragments);
     }
 
     // 1-. (kuna `elfgotimports`) The import a loader import slot holds. A

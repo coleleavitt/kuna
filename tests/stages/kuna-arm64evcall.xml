@@ -1,0 +1,61 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    arm64e virtual calls resolved by pointer-auth discriminator
+    (`option arm64evcall on|off`).
+
+    Issue: an arm64e C++ virtual call loads its target from a vtable slot and
+    authenticates it with `blraa`/`braa`, so it renders as
+    `(**(code **)(*obj + off))(...)` with no hint of the method. iOS 16.4.1
+    debugserver has 295 such sites.
+
+    Stage / sub-stage: P1 external-refinement. `analyzers/rtti/kuna_arm64evcall.rs`
+    indexes every run of IA-signed, address-diversified `__const` slots by
+    (index in run, diversifier) from the chained fixups, walks back from each
+    call to its `movk #d, lsl #48` and the authenticated vtable-pointer load,
+    and the flow builds the CALLIND as a direct call when the slot holds one
+    method, or warns with the candidates when it holds several.
+
+    P0 assertion: `option arm64evcall on|off`.
+
+    The XML wrapper only supplies the harness architecture; every pass loads
+    the `macho_arm64e_vcall` fixture (two vtables `{A_f, A_g}` and
+    `{B_f, A_g}`, see the fixtures README) through the object bootstrap.
+
+    Pass 1 (`option arm64evcall off`) reproduces the BUG: both calls are
+    anonymous slot calls.
+    Pass 2 (`option arm64evcall on`, the shipped default) is the FIX:
+    `_call_g` calls `_A_g` (slot 1 holds it in both vtables) and `_call_f`
+    names its two candidates.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c0035fd6
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_arm64e_vcall</com>
+  <com>option arm64evcall off</com>
+  <com>read symbols</com>
+  <com>load function _call_f</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function _call_g</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_arm64e_vcall</com>
+  <com>read symbols</com>
+  <com>load function _call_f</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function _call_g</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="ARM64EVCALL #1: off leaves the slot-1 call anonymous" min="1" max="1">\(\*a0 \+ 8\)\)\(\)</stringmatch>
+<stringmatch name="ARM64EVCALL #2: on calls the one method slot 1 holds" min="1" max="1">  _A_g\(\);</stringmatch>
+<stringmatch name="ARM64EVCALL #3: on names both candidates of the overridden slot" min="1" max="1">virtual call to one of 2 methods: _A_f, _B_f</stringmatch>
+</decompilertest>

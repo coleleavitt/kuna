@@ -1151,6 +1151,42 @@ tail call), `_call_auth_ptr` `0x100000448` (`blraaz` through `__auth_ptr`),
 `__auth_ptr[0]`@`0x100004018` an authenticated bind of `_ext_func`,
 `__data[0]`@`0x100008000` a plain rebase to `_helper2`.
 
+### `macho_arm64e_vcall` — arm64e virtual calls
+
+`macho_arm64e_vcall` (~33 KB) is built the same way by `macho_arm64e_vcall.py`
+(which imports the conversion helpers of `macho_arm64e_auth.py`). Two
+vtables sit in `__DATA_CONST,__const`: `_vtable_A` `{0, 0, _A_f, _A_g}` and
+`_vtable_B` `{0, 0, _B_f, _A_g}`. Each slot is signed key IA,
+address-diversified, with diversifier `0x0f0f` for slot 0 and `0x0a0a` for
+slot 1. `_call_f` (`0x100000340`) and `_call_g` (`0x100000360`) load the
+vtable pointer, `autda` it, load slot 0 / slot 1 with a pre-index writeback,
+and `braa` with the slot's diversifier. `_A_f` `0x100000328`, `_A_g`
+`0x100000330`, `_B_f` `0x100000338`.
+
+```bash
+clang -target arm64-apple-macos11 -march=armv8.5-a -c macho_arm64e_vcall.s -o v.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+         -e _main -o v_arm64 v.o
+python3 macho_arm64e_vcall.py v_arm64 macho_arm64e_vcall
+```
+
+### `macho_arm64_outlined` — the Darwin stack probe and outlined fragments
+
+`macho_arm64_outlined` (plain arm64, ~33 KB) is `macho_arm64_outlined.s` linked
+as-is:
+
+```bash
+clang -target arm64-apple-macos11 -c macho_arm64_outlined.s -o o.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+         -undefined dynamic_lookup -e _main -o macho_arm64_outlined o.o
+```
+
+`_probe` (`0x100000378`) keeps its argument in x8 across `bl ___chkstk_darwin`
+(a `__stubs` import) and returns it plus one. `_OUTLINED_FUNCTION_0`
+(`0x1000003a0`) is `(w0 + w1) * 2; ret`, called by `_sum2` (`0x1000003b4`).
+`_OUTLINED_FUNCTION_1` (`0x1000003ac`) is `mov w0, #7; b _exit`, tail-called by
+`_bail` (`0x1000003cc`).
+
 ### `macho_objc_refs_arm64` — selector, class and super references + `__objc_stubs`
 
 `macho_objc_refs_arm64` (arm64, ~50 KB) is the fixture for the ObjC reference-slot

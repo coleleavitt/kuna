@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_365() {
-    assert_eq!(kuna_num_settables(), 365);
-    assert_eq!(SETTABLE_TABLE.len(), 365);
+fn settable_count_is_368() {
+    assert_eq!(kuna_num_settables(), 368);
+    assert_eq!(SETTABLE_TABLE.len(), 368);
 }
 
 #[test]
-fn tier_counts_are_123_core_139_transform_103_analysis() {
+fn tier_counts_are_123_core_142_transform_103_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_139_transform_103_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 139, 103));
+    assert_eq!((core, transform, analysis), (123, 142, 103));
 }
 
 #[test]
@@ -949,7 +949,9 @@ fn option_values_live_value_present_for_163() {
     // 154 -> 155: +1 for `rangefold` (live_field = range_fold).
     // 154 -> 155: +1 for `pow2select` (live_field = pow2_select).
     // 154 -> 155: +1 for `whilecontinue`.
-    assert_eq!(with_live, 165);
+    // +1 for `arm64evcall` (live_field = analysis_arm64evcall).
+    // +2 for `chkstkdarwin` and `outlinedinline`.
+    assert_eq!(with_live, 168);
 }
 
 #[test]
@@ -1182,7 +1184,9 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `iokitclasses`, beside `cfstrings`.
     // +1 for `xnutables`, beside `iokitclasses`.
     // +1 for `osclassinfo`, beside `xnutables`.
-    assert_eq!(json.matches("},\n").count(), 364);
+    // +1 for `arm64evcall`; its P1 row sits beside `authptrcall`.
+    // +2 for `chkstkdarwin` and `outlinedinline`, beside `ptrauthtrap`.
+    assert_eq!(json.matches("},\n").count(), 367);
 }
 
 #[test]

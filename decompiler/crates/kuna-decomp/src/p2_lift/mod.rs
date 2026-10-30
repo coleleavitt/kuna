@@ -42,6 +42,8 @@ pub mod kuna_cortexmpriv; // (kuna) fold the Cortex-M isCurrentModePrivileged() 
 pub mod kuna_cleanupcode; // (kuna) oxidizer CleanupCodeRemover: delete rust drop/dealloc call sites
 pub mod kuna_gomorestack; // (kuna) fold the Go stack-growth entry guard (docs/multilang.md W2)
 pub mod kuna_gowritebarrier; // (kuna) fold the Go GC write-barrier diamond (docs/multilang.md W2)
+pub mod kuna_outlinedinline; // (kuna) inline clang's OUTLINED_FUNCTION_<n> fragments into their callers
+pub mod kuna_chkstkdarwin; // (kuna) drop the Darwin ___chkstk_darwin stack probe
 pub mod kuna_ptrauthtrap; // (kuna) drop the arm64e pointer-auth failure checks
 pub mod kuna_linuxsyscall; // (kuna) name the 32-bit Linux int 0x80 sites instead of calling through swi()
 pub mod kuna_x64syscall; // (kuna) give the x86-64 SYSCALL user-op the Linux ABI register effects
