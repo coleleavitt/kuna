@@ -2145,7 +2145,11 @@ mod tests {
         // and kuna-arm64evcall / arm64e virtual calls by pointer-auth discriminator
         // and kuna-outlined / the Darwin stack probe and MachineOutliner fragments
         // and kuna-a64-sysregs / AArch64 system-register names and Apple instructions
-        assert_eq!(count, 633, "corpus file count drifted");
+        // and kuna-machoehframe / a stripped Mach-O's __eh_frame FDE starts join the inventory
+        // and kuna-machobinds / a Mach-O pointer slot filled by a bind is named for its import
+        // and kuna-exporttrie / Mach-O export tries name stripped exports and cross-image imports through re-exports
+        // and kuna-dyldcompanion / companion images join a dyld cache rebuild
+        assert_eq!(count, 637, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

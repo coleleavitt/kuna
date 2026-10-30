@@ -3038,6 +3038,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (kuna) ELF GOT data imports: the slot names + externref paint exist only
         // to let `importdata` render a read through the slot, so they share its gate.
         "elfgotimports" => arch.import_data,
+        "machobinds" => arch.analysis_machobinds,
         "libproto" => arch.analysis_libproto,
         // (kuna) The measured libc signature extension — the ~200 prototypes the
         // 27-entry base table does not carry, seeded onto IMPORTED names only. The
@@ -3072,6 +3073,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // changing: adds entries), so a default run is byte-identical and an image
         // carrying `LC_FUNCTION_STARTS` gains nothing (the starts are a subset).
         "unwindstarts" => arch.analysis_unwindstarts,
+        "machoehframe" => arch.analysis_machoehframe,
         // (kuna) PE CRT entry-function prototype recovery — a standalone stashed pass
         // whose one prototype is computed at LOAD but COMMITTED only when this gate
         // is on. Default-ON; off renders the `void(void)` form exactly.
@@ -4293,8 +4295,10 @@ pub fn bootstrap_from_object_with_isa(
     // imports from the real table rather than fabricating one.
     let (bytes, datadir_note) =
         kuna_analysis::loader::pe_datadirs::tolerate_oversized_data_directories(bytes);
+    let (bytes, clamp_note) = kuna_analysis::loader::kuna_machotolerance::clamp_out_of_file_ranges(bytes);
+    let crypt_note = kuna_analysis::loader::kuna_machotolerance::encryption_note(&bytes);
     let load_notes: Vec<String> =
-        [shdr_note, dosmagic_note, datadir_note].into_iter().flatten().collect();
+        [shdr_note, dosmagic_note, datadir_note, clamp_note, crypt_note].into_iter().flatten().collect();
     for note in &load_notes {
         kuna_base::notes::say_once(path, &format!("[kuna] {note}"));
     }

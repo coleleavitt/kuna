@@ -912,6 +912,22 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   peel costs about 0.15 s per read and `kuna functions` on the kernel takes
   3.7 s and 429 MB.
 
+(kuna) **Mach-O load tolerance**
+(`decompiler/crates/kuna-analysis/src/loader/kuna_machotolerance.rs`). A segment,
+section, symbol table or string table whose file range runs past the end of a
+truncated or hand-edited Mach-O used to fail the whole load: `object` checks the
+symbol table eagerly in `File::parse`, and the loader reads each segment's file
+range when it maps it. `clamp_out_of_file_ranges` clamps each such range to the
+bytes the file holds (segment `filesize`, section `size`, `nsyms`, `strsize`) in
+a copy of the image, applied at the same two points as the ELF and PE header
+repairs, and says so once on stderr. Virtual sizes are untouched, so the rest of
+each data segment still reads as zero-filled memory and nothing is invented. A
+Mach-O with `LC_ENCRYPTION_INFO[_64]` `cryptid != 0` still loads, but its
+encrypted range is App Store ciphertext that decompiles to noise, so the engine
+load names it once (`encryption_note`): `Mach-O is encrypted (LC_ENCRYPTION_INFO
+cryptid 1): file bytes 0x4000..0x... are ciphertext and decompile to noise;
+decrypt the app first`.
+
 (kuna) **dyld shared cache.** A cache file is not an object file: it is a main
 file starting `dyld_v1`, sub-caches beside it (`.01`, `.27.dylddata`,
 `.44.dyldlinkedit`, ...) and a `.symbols` file, each a header plus a mapping
@@ -927,7 +943,21 @@ to the object path before reading it whole). The image is chosen by
 sets, and which the console accepts before any image is loaded, since choosing
 the first one is its job). It matches a full install name, then a unique
 basename, then a unique basename minus its last extension (`libobjc.A`), and a
-one-image cache needs no choice. The cache is read through
+one-image cache needs no choice. Several images can share one program: `dyldimage A+B+...` rebuilds `A`
+with the segments of the companions `B...` appended (all but their
+`__LINKEDIT`), their named symbols (exports and `.symbols` locals) added as
+locals with renumbered section ordinals, and the names of their own calls
+(their islands and their own stubs, which `own_stubs` makes `xrefs.rs
+(collect)` resolve through each companion's indirect table) merged into the
+note. A companion's stub and pointer sections are retyped to `S_REGULAR`,
+because the merged indirect-symbol table is `A`'s alone. The merged header and
+load commands no longer fit before `A`'s first section, so they get pages of
+their own and every segment follows them. A Mach-O reader that keeps the last
+`__TEXT` it sees would then take a companion's, so the function-starts and
+`__unwind_info` readers keep the first. On iOS 16.4.1,
+`CoreFoundation+libobjc.A.dylib` loads in 2.6 s and 430 MB, and libobjc's
+`class_copyMethodList` decompiles in that program with every call named, as it
+does on its own. The cache is read through
 file handles, never mapped whole, so the cost follows the image, not the 3 GB
 of the cache. Every header field is read only when it lies below the header's
 own `mappingOffset`, which is how `dyld_cache_format.h` adds fields. That one
@@ -1579,6 +1609,41 @@ funcsym stream:
   `__la_symbol_ptr`/`__got` slots are named too for `-fno-plt`-style indirect
   calls. `INDIRECT_SYMBOL_LOCAL`/`ABS` entries are skipped; the C-ABI leading `_`
   is stripped.
+- **Export tries** (kuna, `exporttrie`, default on, env-bridged):
+  `decompiler/crates/kuna-analysis/src/loader/format/macho/exports.rs (parse_export_trie)`
+  walks a Mach-O export trie (`LC_DYLD_EXPORTS_TRIE`, or the export range of
+  `LC_DYLD_INFO`) iteratively, visiting each node once, and reports each name
+  with its image-relative offset, its absolute value, or the dylib ordinal and
+  name it is re-exported from. Two consumers read it. `macho_stubs.rs
+  (trie_exports)` adds, as exports, the trie names a thin image's symbol table
+  lacks, which is every export of a dylib whose nlists were stripped. In a dyld
+  cache rebuild, `xrefs.rs (Names::adopt_imports_of)` resolves each undefined
+  symbol of the rebuilt image through the trie of the dylib its two-level
+  ordinal names. It follows `EXPORT_SYMBOL_FLAGS_REEXPORT` entries and, unless
+  the dylib is `MH_NO_REEXPORTED_DYLIBS`, its `LC_REEXPORT_DYLIB` umbrellas, up
+  to eight levels. A cross-image call or slot whose target exactly one import
+  resolves to is then named after that import. On iOS 16.4.1 that renames 12 of
+  CoreFoundation's 764 cross-image names and 29 of UIKitCore's 1,457 to the
+  names the source called: `bzero` for `_platform_bzero`, `acos` for its alias
+  `acosl`, `objc_release` for `objc_release_x0`. iOS 14's cross-image calls go
+  through other images' stubs, whose indirect entries already carry the import
+  name, so nothing changes there.
+- **Bound pointer slots** (kuna, `machobinds`, default on):
+  `decompiler/crates/kuna-analysis/src/loader/kuna_machobinds.rs (MachoBindSlotsPass)`
+  names every pointer slot a bind record fills that the indirect-symbol table
+  does not: chained-fixup binds and classic `LC_DYLD_INFO` bind opcodes alike,
+  the way IDA names each `<sym>_ptr`. A C function or data pointer initialized
+  to an import, an arm64e `__auth_ptr`, a vtable or Swift witness slot all read
+  as anonymous `dat_<addr>` without it. A bind with an addend is skipped (the
+  slot holds `&sym + addend`), and so are `__objc_*` and `__cfstring`, whose own
+  passes name their slots. The names go through the channel `elfgotimports`
+  uses for ELF GOT slots: an `externref` paint and a symbol-table name committed
+  at `read symbols`, which `query_function` resolves for a call through the slot
+  (`peimportcall`, `ActionDeindirect`) or, with `importdata`, a read through it,
+  and which never joins the function inventory. On the 84 MB Toyota app 71,257
+  slots gain names (mostly Swift metadata and witness slots, ObjC metaclass and
+  `_objc_empty_cache` words) while `kuna functions` stays byte-identical
+  (314,038 entries).
 - **dyld shared cache cross-image references** (kuna, `dyldcrossrefs`,
   default on, env-bridged): an image rebuilt from a dyld shared cache calls into
   other images past its own stubs. The cache builder sends a `bl` to a stub
@@ -4546,6 +4611,8 @@ a wrong entry is a garbage `sub_<addr>`; a missed one is invisible until a calle
 overruns into it (§1.7).
 
 (kuna) **`__unwind_info` is a stripping-proof function-start source for Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_unwindinfo.rs (UnwindInfoStartsPass)`, option `unwindstarts`, default-off). The linker folds each object's `__compact_unwind` records into one `__TEXT,__unwind_info` section whose second-level pages — regular `(functionOffset, encoding)` pairs, or compressed `u32`s whose low 24 bits are the offset from the page's first function — list, in ascending order, the start of every function the unwinder can describe (one per `.cfi_startproc`). Because the section lives in the mapped `__TEXT` segment it survives the `strip` that removes `LC_FUNCTION_STARTS` from `__LINKEDIT`, which is the whole of its value: on an App-Store app whose function starts were stripped, `LC_MAIN`, the exports, `__mod_init_func` and the thin symbol stream seed only a handful of entries, and arm64 has no always-on prologue sweep (oracle 5 is x86-64-only), so the gap between the few seeds is the entire text and nothing starts a function inside it. Measured on a decrypted 249 MB arm64 `Instagram.app` with no `LC_FUNCTION_STARTS`, the default inventory is 59,222 — of which only 23 are real `__text` functions, the rest `__got` slots and `__stubs` — while `__unwind_info` records 204,800 real starts; with the option on all 204,800 are recovered and each decodes to a normal function body. On an image that still carries `LC_FUNCTION_STARTS` the oracle is a strict no-op: every unwind start is already a function-starts entry — the linker folds runs of adjacent same-encoding functions into one page entry, so the set is in fact a *subset* (on the 84 MB Toyota app, 185,937 unwind entries against 296,775 function starts, discovery unchanged at 314,038). Only the function **starts** are read; the compact encodings (frame size, saved-register set, frameless stack size) are deliberately ignored, because kuna's S5/S7 frame analysis recovers the stack frame from the code — the same reason the `.eh_frame` oracle inherits CFI rather than rebuilding it. Output-changing (it adds entries), so default-off: a default run is byte-identical to before.
+
+(kuna) **`__eh_frame` FDE starts on Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_machoehframe.rs (MachoEhFrameStartsPass)`, option `machoehframe`, default-on). A Mach-O describes most functions' unwinding in `__unwind_info` and falls back to a DWARF FDE in `__TEXT,__eh_frame` for a function the compact encoding cannot describe (a variable stack adjustment, an unusual register save). Each FDE's `pcBegin` is a function start, exactly as on ELF, where the always-on discovery already reads `.eh_frame` (oracle 3); the pass runs that same walk (`scan_eh_frame_starts`, now accepting a Mach-O's `__eh_frame`) and keeps the starts that lie in an executable section and carry no symbol. Like `__unwind_info` the section lives in `__TEXT` and survives the strip of `LC_FUNCTION_STARTS`; unlike it, every FDE is a real function start with no folding, and the pass is cheap, so it is on by default, as IDA's Mach-O loader runs its `eh_frame` parse on every load. On an image that keeps `LC_FUNCTION_STARTS` it adds nothing.
 
 (kuna) **The x86-64 half of oracle 4 reads two encodings, because "PC-relative" is
 a link model and not part of the idiom.** `main` reaches `rdi` as a `lea

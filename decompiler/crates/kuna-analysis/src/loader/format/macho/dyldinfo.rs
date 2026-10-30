@@ -39,6 +39,12 @@ const MAX_BINDS: usize = 1 << 20;
 /// `LC_DYLD_INFO` Mach-O. Empty for a chained-fixup image (which has no bind
 /// opcodes), a non-Mach-O, or an unparsable program.
 pub fn resolve_dyld_info_binds(file: &object::File, bytes: &[u8]) -> HashMap<u64, String> {
+    resolve_dyld_info_bind_slots(file, bytes).into_iter().map(|(slot, (name, _))| (slot, name)).collect()
+}
+
+/// As [`resolve_dyld_info_binds`], with each bind's addend: the slot holds
+/// `&symbol + addend` at run time.
+pub fn resolve_dyld_info_bind_slots(file: &object::File, bytes: &[u8]) -> HashMap<u64, (String, i64)> {
     if file.format() != object::BinaryFormat::MachO {
         return HashMap::new();
     }
@@ -49,7 +55,7 @@ pub fn resolve_dyld_info_binds(file: &object::File, bytes: &[u8]) -> HashMap<u64
     }
 }
 
-fn collect<Mach>(bytes: &[u8], ptr_size: u64) -> HashMap<u64, String>
+fn collect<Mach>(bytes: &[u8], ptr_size: u64) -> HashMap<u64, (String, i64)>
 where
     Mach: MachHeader<Endian = object::Endianness>,
 {
@@ -77,14 +83,15 @@ where
 
 /// Replay one bind program, recording each `DO_BIND*` slot under the current
 /// symbol. Decoding stops at the first malformed byte (never guesses a slot).
-fn replay(program: &[u8], segments: &[u64], ptr_size: u64, out: &mut HashMap<u64, String>) {
+fn replay(program: &[u8], segments: &[u64], ptr_size: u64, out: &mut HashMap<u64, (String, i64)>) {
     let mut p = 0usize;
     let mut addr: Option<u64> = None;
     let mut symbol = String::new();
-    let bind = |addr: &mut Option<u64>, symbol: &str, out: &mut HashMap<u64, String>| {
+    let mut addend = 0i64;
+    let bind = |addr: &mut Option<u64>, symbol: &str, addend: i64, out: &mut HashMap<u64, (String, i64)>| {
         if let Some(a) = *addr {
             if !symbol.is_empty() {
-                out.insert(a, symbol.to_string());
+                out.insert(a, (symbol.to_string(), addend));
             }
             *addr = Some(a.wrapping_add(ptr_size));
         }
@@ -104,7 +111,8 @@ fn replay(program: &[u8], segments: &[u64], ptr_size: u64, out: &mut HashMap<u64
                 let Some(_) = uleb(program, &mut p) else { return };
             }
             BIND_OPCODE_SET_ADDEND_SLEB => {
-                let Some(_) = sleb(program, &mut p) else { return };
+                let Some(value) = sleb(program, &mut p) else { return };
+                addend = value;
             }
             BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM => {
                 let Some(end) = program[p..].iter().position(|&b| b == 0) else { return };
@@ -120,14 +128,14 @@ fn replay(program: &[u8], segments: &[u64], ptr_size: u64, out: &mut HashMap<u64
                 let Some(delta) = uleb(program, &mut p) else { return };
                 addr = addr.map(|a| a.wrapping_add(delta));
             }
-            BIND_OPCODE_DO_BIND => bind(&mut addr, &symbol, out),
+            BIND_OPCODE_DO_BIND => bind(&mut addr, &symbol, addend, out),
             BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB => {
-                bind(&mut addr, &symbol, out);
+                bind(&mut addr, &symbol, addend, out);
                 let Some(delta) = uleb(program, &mut p) else { return };
                 addr = addr.map(|a| a.wrapping_add(delta));
             }
             BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED => {
-                bind(&mut addr, &symbol, out);
+                bind(&mut addr, &symbol, addend, out);
                 addr = addr.map(|a| a.wrapping_add(imm as u64 * ptr_size));
             }
             BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB => {
@@ -137,7 +145,7 @@ fn replay(program: &[u8], segments: &[u64], ptr_size: u64, out: &mut HashMap<u64
                     if out.len() >= MAX_BINDS {
                         return;
                     }
-                    bind(&mut addr, &symbol, out);
+                    bind(&mut addr, &symbol, addend, out);
                     addr = addr.map(|a| a.wrapping_add(skip));
                 }
             }
@@ -208,9 +216,10 @@ mod tests {
         ];
         let mut out = HashMap::new();
         replay(&program, &[0x1000, 0x2000], 8, &mut out);
-        assert_eq!(out.get(&0x2010).map(String::as_str), Some("_a"));
-        assert_eq!(out.get(&0x2020).map(String::as_str), Some("_a"));
-        assert_eq!(out.get(&0x20a8).map(String::as_str), Some("_b"));
+        let name = |a: u64| out.get(&a).map(|(n, addend)| (n.as_str(), *addend));
+        assert_eq!(name(0x2010), Some(("_a", 0)));
+        assert_eq!(name(0x2020), Some(("_a", 0)));
+        assert_eq!(name(0x20a8), Some(("_b", 0)));
         assert_eq!(out.len(), 3);
     }
 

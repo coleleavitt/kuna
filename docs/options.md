@@ -571,6 +571,8 @@ Three tiers:
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
 | functions the unwinder describes in __unwind_info missing from the inventory | [`unwindstarts`](#unwindstarts) |
+| a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame | [`machoehframe`](#machoehframe) |
+| functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory | [`machoehframe`](#machoehframe) |
 | functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry) |
 | a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry) |
 | gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry) |
@@ -855,6 +857,12 @@ Three tiers:
 | calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island | [`dyldcrossrefs`](#dyldcrossrefs) |
 | a cache image's __got loads name nothing | [`dyldcrossrefs`](#dyldcrossrefs) |
 | cross-library calls of an ios framework have no names | [`dyldcrossrefs`](#dyldcrossrefs) |
+| a call through a mach-o function pointer bound to an import renders (*dat_<addr>)() | [`machobinds`](#machobinds) |
+| a mach-o data pointer bound to an external symbol reads as *dat_<addr> | [`machobinds`](#machobinds) |
+| arm64e __auth_ptr or vtable slots bound to imports have no names | [`machobinds`](#machobinds) |
+| a stripped mach-o dylib's exported functions are unnamed although its export trie lists them | [`exporttrie`](#exporttrie) |
+| a dyld cache call is named after the implementation (_platform_memmove) instead of the imported name (memmove) | [`exporttrie`](#exporttrie) |
+| re-exported symbols resolve to the wrong name | [`exporttrie`](#exporttrie) |
 | rust binary renders with c output and no rust abi handling because a stripped image lost its language signals | [`sourcelang`](#sourcelang) |
 | a c binary is detected as another language and language-gated rules misfire | [`sourcelang`](#sourcelang) |
 | go runtime passes do not run on a go binary whose buildinfo section was stripped | [`sourcelang`](#sourcelang) |
@@ -2662,6 +2670,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-unwindstarts
 - **Example:** `--option unwindstarts on`
 
+### `machoehframe` -- on | off, default `on`
+
+- **Symptoms:** a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame; functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory.
+- **What it does:** Extend Mach-O function discovery with the FDE starts in __TEXT,__eh_frame. A Mach-O describes most functions' unwinding in __unwind_info and falls back to a DWARF FDE in __eh_frame for a function the compact encoding cannot describe; every FDE pcBegin is a function start, exactly as on ELF, where kuna already reads .eh_frame in its always-on entry discovery. The section lives in __TEXT, so it survives the strip that removes LC_FUNCTION_STARTS. The walk is the ELF one (CIE augmentation R pointer encoding, pcrel/sdata4 in practice) pointed at __eh_frame; starts outside an executable section or already named are dropped. IDA runs the same eh_frame parse on every Mach-O load.
+- **When to flip:** Leave on: on an image that keeps LC_FUNCTION_STARTS the FDE starts are already known and nothing changes; on a stripped one they are starts nothing else records. Turn off to see discovery without them.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-machoehframe
+- **Example:** `--option machoehframe off`
+
 ### `coldentry` -- on | off, default `on`
 
 - **Symptoms:** functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list; a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde; gaps between consecutive sub_<addr> cold fragments that hold code.
@@ -3225,7 +3241,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `dyldimage` -- none | <install-name>, default `none`
 
 - **Symptoms:** a dyld_shared_cache file is rejected as an unrecognized input format; cannot decompile an ios or macos system library because it only exists inside the dyld shared cache; dyld shared cache holds N images; choose one with --image.
-- **What it does:** Choose which image of a dyld shared cache to load. A cache (dyld_shared_cache_arm64e and its sub-caches .01, .27.dylddata, .44.dyldlinkedit, ... and .symbols beside it) holds every system library of an iOS or macOS release; kuna rebuilds the chosen image as a standalone thin Mach-O before anything parses it, so the loader, the analysis passes and every surface see an ordinary Mach-O. The rebuild keeps each segment at its cache address, applies the cache's slide info (v2, v3 with arm64e auth pointers, v5) at slide zero so every rebased pointer reads as its unslid target, and gives the image a private __LINKEDIT with its own symbol table, the local symbols the cache moved to its .symbols file in place of the <redacted> placeholders, the renumbered indirect-symbol table, and copies of the export trie, function starts and data-in-code. The name matches a full install name (/usr/lib/libobjc.A.dylib), else a unique basename (libobjc.A.dylib, CoreFoundation), else a unique basename without its last extension (libobjc.A). `none` (default) loads the image of a one-image cache and refuses a larger one with the image count. The image is rebuilt inside `load file`, so the choice travels as the KUNA_DYLD_IMAGE environment variable; the CLI's global `--image NAME` sets it for every subcommand, and the console sets it with `option dyldimage NAME` before `load file`, accepted before any image is loaded. `kuna unpack <cache> --list` lists the images and `kuna unpack <cache> --image NAME` writes the rebuilt Mach-O.
+- **What it does:** Choose which image of a dyld shared cache to load. A cache (dyld_shared_cache_arm64e and its sub-caches .01, .27.dylddata, .44.dyldlinkedit, ... and .symbols beside it) holds every system library of an iOS or macOS release; kuna rebuilds the chosen image as a standalone thin Mach-O before anything parses it, so the loader, the analysis passes and every surface see an ordinary Mach-O. The rebuild keeps each segment at its cache address, applies the cache's slide info (v2, v3 with arm64e auth pointers, v5) at slide zero so every rebased pointer reads as its unslid target, and gives the image a private __LINKEDIT with its own symbol table, the local symbols the cache moved to its .symbols file in place of the <redacted> placeholders, the renumbered indirect-symbol table, and copies of the export trie, function starts and data-in-code. The name matches a full install name (/usr/lib/libobjc.A.dylib), else a unique basename (libobjc.A.dylib, CoreFoundation), else a unique basename without its last extension (libobjc.A). `none` (default) loads the image of a one-image cache and refuses a larger one with the image count. `A+B+...` adds companion images to the same program: their segments, their symbols (as locals) and the names of their own calls are merged into A's rebuild, so code in B that A calls can be decompiled in the same run. The image is rebuilt inside `load file`, so the choice travels as the KUNA_DYLD_IMAGE environment variable; the CLI's global `--image NAME` sets it for every subcommand, and the console sets it with `option dyldimage NAME` before `load file`, accepted before any image is loaded. `kuna unpack <cache> --list` lists the images and `kuna unpack <cache> --image NAME` writes the rebuilt Mach-O.
 - **When to flip:** Set it (or pass --image) whenever the input is a dyld shared cache: kuna decompile dyld_shared_cache_arm64e --image CoreFoundation CFStringCreateCopy. Not used for any other input.
 - **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-apple-dyldcache
 - **Example:** `option dyldimage /usr/lib/libobjc.A.dylib`
@@ -3237,6 +3253,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Leave on: CoreFoundation's 9,136 calls into stub islands render as __stack_chk_fail(), os_unfair_lock_lock_with_options(...) instead of sub_18c99b570(). Turn off to see the raw island addresses, for example to check a call against the cache's island layout.
 - **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-apple-dyldcache
 - **Example:** `option dyldcrossrefs off`
+
+### `machobinds` -- on | off, default `on`
+
+- **Symptoms:** a call through a mach-o function pointer bound to an import renders (*dat_<addr>)(); a mach-o data pointer bound to an external symbol reads as *dat_<addr>; arm64e __auth_ptr or vtable slots bound to imports have no names.
+- **What it does:** Name every Mach-O pointer slot a bind record fills that the LC_DYSYMTAB indirect-symbol table does not already name: chained-fixup binds (LC_DYLD_CHAINED_FIXUPS) and classic LC_DYLD_INFO bind opcodes alike, as IDA names each <sym>_ptr. A C function or data pointer initialized to an import, an arm64e __auth_ptr, a vtable or Swift witness slot otherwise read as an anonymous dat_<addr>. A bind with an addend is skipped (the slot holds &sym + addend, not the import), and so are __objc_* and __cfstring, whose own passes name their slots. Each slot is painted externref and named in the symbol table only - the channel elfgotimports uses for ELF GOT slots - so query_function resolves a call (peimportcall/ActionDeindirect) or, with importdata, a data read through it, while the slot never joins the function inventory. Committed at `read symbols`. Default-on: 0/675 datatest change, and the 84 MB Toyota app keeps its 314,038-entry inventory byte for byte while 71,257 bound slots gain names.
+- **When to flip:** Leave on: calls and reads through bound data pointers name their import - (*dat_<slot>)() becomes ext_handler(), *dat_<slot> becomes ext_counter with importdata. Turn off to see the raw slots.
+- **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-analysis-machobinds
+- **Example:** `--option machobinds off`
+
+### `exporttrie` -- on | off, default `on`
+
+- **Symptoms:** a stripped mach-o dylib's exported functions are unnamed although its export trie lists them; a dyld cache call is named after the implementation (_platform_memmove) instead of the imported name (memmove); re-exported symbols resolve to the wrong name.
+- **What it does:** Read Mach-O export tries (LC_DYLD_EXPORTS_TRIE, or the export range of LC_DYLD_INFO) for names. A thin image whose symbol table lacks an export the trie lists - a stripped system dylib keeps its trie and loses its nlists - gets that name at the trie's address. A dyld shared cache image rebuilt with dyldcrossrefs names each call and GOT slot into another image after the symbol the image itself imports: every undefined symbol is resolved through the export trie of the dylib its two-level ordinal names, following EXPORT_SYMBOL_FLAGS_REEXPORT entries and LC_REEXPORT_DYLIB umbrellas (libSystem, Foundation) up to eight levels, and an address exactly one import resolves to takes that import's name. So a call that lands in libsystem_platform's _platform_bzero reads as the bzero the source called, and UIKitCore's acos as acos rather than its alias acosl. Read inside `load file`, so the gate travels as the KUNA_EXPORTTRIE environment variable.
+- **When to flip:** Leave on. Turn off to see cross-image calls named after the target image's own symbols (the implementation name) and a stripped dylib's exports unnamed.
+- **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-analysis-exporttrie
+- **Example:** `--option exporttrie off`
 
 ### `sourcelang` -- auto | c | rust | go | swift, default `auto`
 

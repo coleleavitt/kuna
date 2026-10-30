@@ -137,6 +137,10 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         // byte-identical and an image carrying `LC_FUNCTION_STARTS` gains nothing
         // (unwind starts are a strict subset there). After EntryDiscoveryPass.
         Box::new(crate::entry::kuna_unwindinfo::UnwindInfoStartsPass),
+        // (kuna `machoehframe`) S1 Mach-O `__eh_frame` FDE function starts, the
+        // Mach-O arm of the ELF `.eh_frame` oracle. Commit gated by
+        // `--option machoehframe on|off` (default-ON).
+        Box::new(crate::entry::kuna_machoehframe::MachoEhFrameStartsPass),
         // (kuna `entrymainproto`) S1 PE CRT entry-function prototype recovery: the
         // function `__scrt_common_main_seh` calls immediately after the named
         // argc/argv/envp CRT accessors gets the prototype that call site
@@ -420,6 +424,13 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
             | object::BinaryFormat::Elf
     ) {
         passes.push(Box::new(crate::loader::kuna_peimportcall::PeImportCallPass));
+    }
+
+    // (kuna `machobinds`) S1 Mach-O bound pointer slots: name each slot a bind
+    // fills that no indirect entry names, through the same symbol-table-only
+    // channel, and paint it `externref`. Committed only when `machobinds` is on.
+    if format == object::BinaryFormat::MachO {
+        passes.push(Box::new(crate::loader::kuna_machobinds::MachoBindSlotsPass));
     }
 
     // S1 Go pclntab function-name recovery (GoPclntabPass): when the binary is Go
@@ -1893,7 +1904,7 @@ mod tests {
         assert!(macho.contains(&"objc"), "Mach-O must carry the objc pass");
         // Compare the format-neutral base after dropping each format's gated
         // additions: `itaniumrtti` and `elfgotimports` for ELF and `authptrcall`,
-        // `arm64evcall`, `cfstrings` and `objc` for Mach-O.
+        // `arm64evcall`, `cfstrings`, `machobinds` and `objc` for Mach-O.
         let elf_neutral: Vec<&str> = elf
             .iter()
             .copied()
@@ -1902,7 +1913,7 @@ mod tests {
         let macho_neutral: Vec<&str> = macho
             .iter()
             .copied()
-            .filter(|&p| !matches!(p, "authptrcall" | "arm64evcall" | "cfstrings" | "iokitclasses" | "xnutables" | "osclassinfo" | "objc"))
+            .filter(|&p| !matches!(p, "authptrcall" | "arm64evcall" | "cfstrings" | "machobinds" | "iokitclasses" | "xnutables" | "osclassinfo" | "objc"))
             .collect();
         assert!(!elf_neutral.contains(&"itaniumrtti"));
         assert_eq!(

@@ -28,6 +28,9 @@
     `(*dat_100004018)()`.
     Pass 2 (`option authptrcall on`, the shipped default) is the FIX:
     `ext_func()`. `_call_table` calls `_helper` in both passes.
+    Pass 1 also turns `machobinds` off: that pass names the same bound
+    __auth_ptr slot through the symbol table, so with it on both passes call
+    `ext_func()`.
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 c0035fd6
@@ -38,6 +41,7 @@ c0035fd6
   <com>clear architecture</com>
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_arm64e_auth</com>
   <com>option authptrcall off</com>
+  <com>option machobinds off</com>
   <com>read symbols</com>
   <com>load function _call_auth_ptr</com>
   <com>decompile</com>

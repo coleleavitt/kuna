@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_368() {
-    assert_eq!(kuna_num_settables(), 368);
-    assert_eq!(SETTABLE_TABLE.len(), 368);
+fn settable_count_is_371() {
+    assert_eq!(kuna_num_settables(), 371);
+    assert_eq!(SETTABLE_TABLE.len(), 371);
 }
 
 #[test]
-fn tier_counts_are_123_core_142_transform_103_analysis() {
+fn tier_counts_are_123_core_142_transform_106_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_142_transform_103_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 142, 103));
+    assert_eq!((core, transform, analysis), (123, 142, 106));
 }
 
 #[test]
@@ -341,6 +341,9 @@ fn option_values_live_value_present_for_163() {
         // gate with no codegen live reader (read console-side via kuna_live_value),
         // same as `eh_frame_full` above. Default-off.
         "unwindstarts",
+        "exporttrie",
+        "machobinds",
+        "machoehframe",
         // (kuna) `.eh_frame` FDE-interior entry suppression — an analysis-pass gate
         // with no codegen live reader (read console-side via kuna_live_value), same
         // as the gates around it. Default-ON (DIV-61).
@@ -1186,7 +1189,10 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `osclassinfo`, beside `xnutables`.
     // +1 for `arm64evcall`; its P1 row sits beside `authptrcall`.
     // +2 for `chkstkdarwin` and `outlinedinline`, beside `ptrauthtrap`.
-    assert_eq!(json.matches("},\n").count(), 367);
+    // +1 for `machoehframe`; its P1 row follows `unwindstarts`.
+    // +1 for `machobinds`; its P1 row follows `dyldcrossrefs`.
+    // +1 for `exporttrie`; its P1 row follows `machobinds`.
+    assert_eq!(json.matches("},\n").count(), 370);
 }
 
 #[test]

@@ -129,14 +129,14 @@ where
         let Ok(Some((segment, section_data))) = Mach::Segment::from_command(command) else {
             continue;
         };
-        if trim(segment.name()) == b"__TEXT" {
+        if trim(segment.name()) == b"__TEXT" && text_base.is_none() {
             text_base = Some(segment.vmaddr(endian).into());
         }
         let Ok(secs) = segment.sections(endian, section_data) else {
             continue;
         };
         for sec in secs {
-            if trim(sec.name()) == b"__unwind_info" {
+            if trim(sec.name()) == b"__unwind_info" && unwind.is_none() {
                 if let Some((off, size)) = sec.file_range(endian) {
                     unwind = Some((off, size));
                 }
