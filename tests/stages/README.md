@@ -345,3 +345,7 @@ fixtures and their generator live in
 (`decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/gen_iokit.py`) with
 `iokitclasses` off and on: the OSMetaClass constructor, the metaclass objects and
 a vtable-only override gain their names.
+
+`kuna-kernelcache-merge.xml` loads the synthetic kernel collection's kext alone
+and then together with the kernel (`kernelcache com.apple.kernel,Widget`): only
+the merged image names the kernel object the kext points at.

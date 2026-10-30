@@ -862,7 +862,24 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   header it would overwrite. `auto` takes the `MH_EXECUTE` entry (the kernel);
   any other value names an entry by its bundle id, exactly or by a unique
   case-insensitive dotted suffix (`IOSurface`), a miss lists the
-  candidates, and `list` stops the load with every entry id. A kext calls into the kernel and into the kexts it depends on
+  candidates, and `list` stops the load with every entry id.
+  A comma-separated list or `all` loads several entries as one image
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/merge.rs (merge)`):
+  their segment commands are concatenated at their collection addresses (one
+  shared `__LINKEDIT` kept), and a symbol table, indirect-symbol table and
+  `LC_FUNCTION_STARTS` are rebuilt behind the collection. The entries' symbols
+  are renumbered into one local / external-defined / undefined order; a
+  symbol's section ordinal moves to the merged section list, or, past the 255
+  ordinals an `nlist` can name, to the first merged section of the same kind
+  (code or data), since only the kind is read from it; and each stub or
+  pointer section's `reserved1` moves to its entry's part of the merged
+  indirect table. The rebuilt header goes in front of the collection, so every
+  file offset moves by the header's page-rounded size; the kernel's
+  `LC_UNIXTHREAD`, `LC_UUID` and version commands are kept. The collection's
+  `__BRANCH_STUBS` / `__BRANCH_GOTS` segments, where a release cache's
+  cross-entry branches land, are added to whatever is loaded, which sends even
+  a single entry through this path when they exist. `kuna functions` on the
+  whole iOS 16.4.1 collection takes 45 s and 1.5 GB and lists 166,184 entries. A kext calls into the kernel and into the kexts it depends on
   with a direct `bl` that the collection's builder resolved, so the only record
   of the callee's name is the kext's undefined `nlist`; when the chosen entry is
   not the kernel, each undefined symbol that another entry exports from an

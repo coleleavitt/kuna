@@ -175,3 +175,53 @@ fn truncated_fileset_entry_header_is_refused() {
     image[0x2000 + 20..0x2000 + 24].copy_from_slice(&u32::MAX.to_le_bytes());
     assert!(peel(image, &KernelcacheChoice::Entry("Widget".into())).is_err());
 }
+
+fn segment_names(image: &[u8]) -> Vec<String> {
+    use object::read::{Object, ObjectSegment};
+    let file = object::File::parse(image).unwrap();
+    file.segments().map(|s| s.name().unwrap().unwrap_or("").to_string()).collect()
+}
+
+/// Two entries load as one image: both entries' code and symbols, the kext's
+/// `__got` still named through the merged indirect-symbol table.
+#[test]
+fn several_entries_merge_into_one_image() {
+    use object::read::{Object, ObjectSymbol};
+    let merged = peel(fixture("fileset.macho"), &KernelcacheChoice::Entry("com.apple.kernel,Widget".into())).unwrap();
+    assert!(merged.note.as_deref().unwrap().contains("as one image"), "{:?}", merged.note);
+    let file = object::File::parse(&*merged.bytes).unwrap();
+    let names: Vec<String> = file.symbols().filter_map(|s| s.name().ok().map(str::to_string)).collect();
+    for want in ["_kernel_add", "_kernel_dispatch", "_widget_start", "_widget_via_stub"] {
+        assert!(names.iter().any(|n| n == want), "{want} missing from {names:?}");
+    }
+    let imports = crate::loader::macho_stubs::resolve_macho_imports(&file, &merged.bytes);
+    let got = imports.iter().find(|i| i.addr == 0xffff_fff0_0700_8800).map(|i| String::from_utf8_lossy(&i.name).into_owned());
+    assert_eq!(got.as_deref(), Some("kernel_add"));
+    assert_eq!(segment_names(&merged.bytes).iter().filter(|s| *s == "__TEXT_EXEC").count(), 2);
+
+    let all = peel(fixture("fileset.macho"), &KernelcacheChoice::Entry("all".into())).unwrap();
+    assert_eq!(all.bytes, merged.bytes, "`all` is both entries here");
+}
+
+/// A collection's `__BRANCH_STUBS` segment is mapped with the chosen entry.
+#[test]
+fn branch_stub_segments_load_with_the_entry() {
+    let mut image = fixture("fileset.macho");
+    let ncmds = u32::from_le_bytes(image[16..20].try_into().unwrap());
+    let sizeofcmds = u32::from_le_bytes(image[20..24].try_into().unwrap()) as usize;
+    let at = 32 + sizeofcmds;
+    let mut seg = vec![0u8; 72];
+    seg[0..4].copy_from_slice(&0x19u32.to_le_bytes());
+    seg[4..8].copy_from_slice(&72u32.to_le_bytes());
+    seg[8..22].copy_from_slice(b"__BRANCH_STUBS");
+    seg[24..32].copy_from_slice(&0xffff_fff0_0700_7000u64.to_le_bytes());
+    seg[32..40].copy_from_slice(&0x800u64.to_le_bytes());
+    seg[40..48].copy_from_slice(&0x3000u64.to_le_bytes());
+    seg[48..56].copy_from_slice(&0x800u64.to_le_bytes());
+    image[at..at + 72].copy_from_slice(&seg);
+    image[16..20].copy_from_slice(&(ncmds + 1).to_le_bytes());
+    image[20..24].copy_from_slice(&((sizeofcmds + 72) as u32).to_le_bytes());
+    let kext = peel(image, &KernelcacheChoice::Entry("Widget".into())).unwrap();
+    assert!(kext.note.as_deref().unwrap().contains("1 branch-stub segments"), "{:?}", kext.note);
+    assert!(segment_names(&kext.bytes).iter().any(|s| s == "__BRANCH_STUBS"));
+}

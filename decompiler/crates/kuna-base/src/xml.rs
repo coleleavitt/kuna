@@ -2132,7 +2132,8 @@ mod tests {
         // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
         // and kuna-iokitclasses / IOKit class and vtable recovery
-        assert_eq!(count, 612, "corpus file count drifted");
+        // and kuna-kernelcache-merge / several kernel-collection entries in one image
+        assert_eq!(count, 613, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
