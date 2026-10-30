@@ -808,7 +808,9 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   `decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (ChainedFixups)`
   parses `LC_DYLD_CHAINED_FIXUPS` into a VMA→resolved-pointer overlay (rebase and
   arm64e auth-rebase handled; bind entries deliberately absent, so a consumer
-  misses and falls back rather than reading a wrong address).
+  misses and falls back rather than reading a wrong address). An auth rebase also
+  keeps its signing context — key, 16-bit diversity, address diversity —
+  (`ChainedFixups::pac_auth`); no consumer reads it yet.
 
 An explicit target changes only language selection: the parsed container still
 owns section mapping, image base, symbols, and imports. Container header class is
