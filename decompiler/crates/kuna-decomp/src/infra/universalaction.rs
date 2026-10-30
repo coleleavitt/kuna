@@ -375,6 +375,7 @@ pub fn universal_sched(
         rrow!("bitidioms", "analysis", crate::kuna_bitidioms::RuleBitIdioms::new("analysis")),
         rrow!("intabs", "analysis", crate::kuna_bitidioms::RuleIntAbs::new("analysis")),
         rrow!("strcpychain", "analysis", crate::kuna_helperrole::RuleStrcpyChain::new("analysis")),
+        rrow!("dynalloca", "analysis", crate::kuna_dynalloca::RuleDynAlloca::new("analysis")),
         rrow!("gobool", "analysis", crate::kuna_gobool::RuleGoBoolReturn::with_group(false, "analysis")),
         rrow!("boolsignless", "analysis", crate::kuna_flagcompare::RuleBoolSignLess::with_group(false, "analysis")),
         rrow!("sborrowge", "analysis", crate::kuna_flagcompare::RuleSborrowGe::with_group(false, "analysis")),

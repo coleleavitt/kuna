@@ -599,3 +599,13 @@ virtualize-to-goto tie-break is the structurer's own address-keyed order over
 identification is recomputed by every consumer. How the structurer matches
 schemas over this tree, virtualizes edges, and falls back to
 `CollapseStructure` is chapter [08 — Structuring](08-structuring.md).
+
+**Dynamic alloca** (`dynalloca`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p7_regions/kuna_dynalloca.rs (RuleDynAlloca)`):
+a variable-length array or an `alloca` moves the stack pointer by a run-time
+amount (`sub rsp, rax`); once types are in, the new stack pointer value is
+`PTRADD(sp, -n, 1)` off the stack's spacebase input, which printed as
+`&(&Stack[-8])[-n]`. The rule turns that PTRADD, when `n` is not a constant,
+into the typed builtin `alloca(n)` (`void *`), as Hex-Rays prints `alloca` for a
+run-time stack move. gcc `-O2` `vla(int n) { char buf[n]; return use(buf, n); }`
+reads `v1 = alloca((long)a0 + 0xfU & 0xfffffffffffffff0); return use(v1,(long)a0);`.

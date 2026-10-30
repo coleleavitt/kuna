@@ -24,6 +24,8 @@ Three tiers:
 | hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
 | memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s) | [`helperroles`](#helperroles) |
 | an inlined strcpy shows as a strlen call followed by a memcpy | [`helperroles`](#helperroles) |
+| a variable-length array prints as &(&Stack[-8])[-n] | [`dynalloca`](#dynalloca) |
+| sub rsp, rax decompiles to stack pointer arithmetic instead of alloca | [`dynalloca`](#dynalloca) |
 | a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
 | `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
 | a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
@@ -1606,6 +1608,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to keep the memcpy/strlen pair as the binary spells it.
 - **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-helperroles
 - **Example:** `--option helperroles off`
+
+### `dynalloca` -- on | off, default `on`
+
+- **Symptoms:** a variable-length array prints as &(&Stack[-8])[-n]; sub rsp, rax decompiles to stack pointer arithmetic instead of alloca.
+- **What it does:** Print a stack pointer moved down by a run-time amount as alloca(n). A variable-length array or an alloca call compiles to sub rsp, n (sub sp, sp, xN) with n computed at run time; once types are in, the new stack pointer value is PTRADD(stack pointer, -n, 1), which printed as &(&Stack[-8])[-n]. With this on, that PTRADD with a non-constant n becomes the typed builtin alloca(n), returning void *.
+- **When to flip:** On (default). Flip off to see the stack-pointer arithmetic a dynamic allocation lowers to.
+- **Where / provenance:** P7/edge-virtualization · kuna · presentation-default · kuna-dynalloca
+- **Example:** `--option dynalloca off`
 
 ### `mulblob` -- on | off, default `on`
 

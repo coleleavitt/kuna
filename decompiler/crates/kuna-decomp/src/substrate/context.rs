@@ -836,6 +836,8 @@ pub struct ArchContext {
     pub bit_idioms: bool,
     /// (kuna `helperroles`) Read by [`RuleStrcpyChain`](crate::kuna_helperrole::RuleStrcpyChain).
     pub helper_roles: bool,
+    /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
+    pub dyn_alloca: bool,
     /// Keep mapped global array bases separate from negative element offsets.
     pub global_array_anchor: bool,
     /// (kuna) Fold an exact one-byte modular cancellation around a bounded
@@ -1946,6 +1948,7 @@ impl ArchContext {
             mba: false,
             bit_idioms: false,
             helper_roles: false,
+            dyn_alloca: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)
             ret_split_global: false,     // retsplitglobal (the ArchSeam carries the real default)

@@ -108,6 +108,7 @@ kuna_options! { self, p1;
     "booleanmask" => on_off!(fold_boolean_mask, "Boolean sign-mask folding"),
     "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
     "helperroles" => on_off!(helper_roles, "Role-tagged helper-call rewrites"),
+    "dynalloca" => on_off!(dyn_alloca, "Run-time stack moves as alloca"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),
     "cancelbytearithmetic" => {
         let (val, msg) =

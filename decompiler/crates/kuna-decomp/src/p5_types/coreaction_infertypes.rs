@@ -101,6 +101,14 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
                 return t;
             }
         }
+        if in0_off == crate::userop::BUILTIN_ALLOCA as u64 {
+            if let Some(tlst) = arch.types() {
+                let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
+                if let Ok(ptr) = tlst.get_type_void().and_then(|v| tlst.get_type_pointer(out_size, v, ws)) {
+                    return ptr;
+                }
+            }
+        }
         if in0_off == crate::userop::BUILTIN_STRCPY as u64 {
             if let Some(tlst) = arch.types() {
                 let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);

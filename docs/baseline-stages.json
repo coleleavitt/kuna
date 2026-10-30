@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3692,
-    3692
+    3694,
+    3694
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1100,6 +1100,8 @@
     "data:KUNA-DECLAREDLIBCPROTO #2: so naming is not what moved, in either pass",
     "data:KUNA-DECLAREDLIBCPROTO #3: off, the arguments carry no type",
     "data:KUNA-DECLAREDLIBCPROTO #4: on, the parked signature types them",
+    "data:KUNA-DYNALLOCA #1: the run-time stack move is alloca (default)",
+    "data:KUNA-DYNALLOCA #2: dynalloca off keeps the stack arithmetic",
     "data:KUNA-ENTRYMAINPROTO #1: the option parses and round-trips in both directions, and is inert on the XML path -- the source form x <= 8 renders identically in all three passes",
     "data:KUNA-ENTRYMAINPROTO #2: the catalog documents it as a default-on P1 prototype-source correctness fix, live-toggled back on",
     "data:KUNA-ENTRYMAINPROTO #3: the catalog row names the CRT accessors an agent would grep for",
