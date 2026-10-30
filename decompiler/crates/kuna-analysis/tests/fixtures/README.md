@@ -1476,14 +1476,18 @@ With `--option objc on`: `(self->frame).width * (self->frame).height`,
 `-[Shape setFrame:](Shape *self, objc_selector *_cmd, CGRect arg1)`,
 `self->counts[arg1 & 3]`, `long block_invoke_10000071c(Block_layout *block, long arg1)`.
 
-### `macho_objc_blocks_arm64` — a stack block
+### `macho_objc_blocks_arm64` — stack blocks, captures, a `__block` cell
 
 `macho_objc_blocks_arm64` (arm64, ~50 KB) is the fixture for
 `tests/stages/kuna-objcblocks.xml`: `macho_objc_blocks.m` has a root class
 `Runner` whose `-maker:` builds a block capturing a local on its frame
 (`_NSConcreteStackBlock`; at `-O2` the linker relaxes the isa load to
-`ldr x9, <literal>` and the invoke/descriptor to `adr`) and sends it to
-`-run:with:`. Same recipe as `macho_objc_structs_arm64` at `-O2`:
+`ldr x9, <literal>` and the invoke/descriptor to `adr`) and whose
+`-tally:scale:` builds one capturing `self` (an object: the copy helper
+`objc_retain`s it), a `__block long` (a `Block_byref` cell built on the frame,
+`_Block_object_assign` flags 8 in the copy helper), a `double` and an `int`;
+both send the block to `-run:with:`. Same recipe as `macho_objc_structs_arm64`
+at `-O2`:
 
 ```bash
 clang -target arm64-apple-macos11 -fobjc-arc -O2 -c macho_objc_blocks.m -o m.o
@@ -1492,9 +1496,13 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
        -undefined dynamic_lookup -x -e _main -o macho_objc_blocks_arm64 m.o
 ```
 
-**Pinned VMAs:** `-[Runner maker:]`@`0x1000007b4`, block invoke@`0x100000814`,
-`_NSConcreteStackBlock` slot@`0x100004008`. With `--option objc on` the invoke is
-`long -[Runner maker:]_block_invoke(Block_layout_100000814 *block, long arg1) { return block->capture_0 * arg1; }`.
+**Pinned VMAs:** `-[Runner maker:]`@`0x100000804` (invoke@`0x100000864`),
+`-[Runner tally:scale:]`@`0x100000878` (invoke@`0x100000930`, copy helper@`0x100000990`),
+`_NSConcreteStackBlock` slot@`0x100004008`. With `--option objc on` the second
+invoke is `long -[Runner tally:scale:]_block_invoke(Block_layout_100000930 *block, long arg1)`
+over `struct Block_layout_100000930 { Block_layout block; objc_object *capture_0; Block_byref_32_8 *capture_1; double capture_2; int capture_3; }`,
+reading `block->capture_1->forwarding->value`; the creator shows
+`block.block.invoke = …`, `block.capture_1 = &cell_1`, `cell_1.forwarding = block.capture_1`.
 
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 

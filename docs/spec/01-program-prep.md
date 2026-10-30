@@ -4323,9 +4323,26 @@ every other binary's pass list is byte-identical to before the pass existed):
     invoke is named `<creator>_block_invoke` (`_2`, `_3` for the next blocks
     of one creator; the creator is the nearest IMP label or symbol at or before
     the store), typed from the descriptor's signature, and its first argument
-    is `Block_layout_<invoke> *` — `Block_layout` then one word per captured
+    is `Block_layout_<invoke> *` — `Block_layout` then one field per captured
     value up to the descriptor's `size` — so `return block->capture_0 * arg1;`.
-    `__block` byref cells are not modelled. The stage tests
+    Each capture's type comes from the descriptor's copy helper when the block
+    has one (`BLOCK_HAS_COPY_DISPOSE`: the helper's `_Block_object_assign`
+    flags say 3 object, 7 block, 8 byref, 16 weak, and a capture it
+    `objc_retain`s itself is an object) and otherwise from the store that
+    filled it (`str w` an `int`, `str d` a `double`, `str s` a `float`, `str q`
+    16 bytes, a frame or code address a `void *`, else a `long`). A `__block`
+    variable's cell — built on the same frame as `isa = 0`, `forwarding =
+    &cell`, `flags`/`size` (one eight-byte constant the compiler pools, or two
+    words) and the value — becomes `Block_byref_<size>_<width>` (`isa`,
+    `forwarding` of its own type, `flags`, `size`, the copy/dispose helpers
+    when `flags` says so, `value` as wide as the initializing store), and the
+    capture that holds its address a pointer to it, so the invoke reads
+    `block->capture_1->forwarding->value`. The creator's frame is typed too
+    (`LocalFact`s the decompile seeds like DWARF locals): the literal is
+    `block` (`block_2`, …) and each cell `cell_<k>`, so the build reads
+    `block.block.invoke = …; block.capture_1 = &cell_1; cell_1.forwarding = block.capture_1;`
+    — Hex-Rays' `Block_layout_<ea>` frame members. x86-64 creators and a
+    capture's signedness are not modelled. The stage tests
     `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
     run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
 

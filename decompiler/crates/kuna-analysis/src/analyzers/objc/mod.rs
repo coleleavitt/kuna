@@ -268,7 +268,7 @@ impl AnalysisPass for ObjcMetadataPass {
             creators.extend(ctx.file.symbols().filter(|s| s.kind() == object::SymbolKind::Text && s.address() != 0).filter_map(|s| {
                 Some((s.address(), s.name().ok()?.trim_start_matches('_').to_string()))
             }));
-            kuna_objcblocks::stack_blocks(&img, ctx.file, &tctx, &creators, &mut out);
+            kuna_objcblocks::stack_blocks(&img, ctx.file, ctx.bytes, &tctx, &creators, &mut out);
         }
         if let Some(table) = out.objc_classes.as_mut() {
             table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
