@@ -3016,10 +3016,12 @@ truth table, but proves every candidate with z3. Here the shape check makes the
 proof unnecessary.
 
 **Collecting.** The rule fires on an `INT_ADD`, `INT_SUB`, `INT_2COMP`,
-`INT_MULT`, `INT_AND`, `INT_OR`, `INT_XOR` or `INT_NEGATE` whose single reader
-is not one of those ops, so it sees each tree once, from the root. A defining op
-of the same set is inlined when its output has one reader; anything else is a
-leaf, up to four distinct leaves and 48 nodes. `INT_XOR` with all ones is read
+`INT_MULT`, `INT_AND`, `INT_OR`, `INT_XOR` or `INT_NEGATE`. A defining op of the
+same set is inlined when its output has one reader; anything else is a leaf, up
+to four distinct leaves and 48 nodes. The rule also fires below the root of a
+larger tree: an obfuscated sum is often xor-ed with a key, which makes the
+whole tree non-linear while the sum itself is linear. Every rewrite strictly
+lowers the op count, so repeated firing terminates. `INT_XOR` with all ones is read
 as `~`, and `INT_MULT` only by a constant.
 
 **The shape.** The tree must be linear: `+`, `-`, negation and multiplication by
@@ -3037,14 +3039,19 @@ function's empty-set term is all ones, which is -1 at every width.
 
 - a linear sum of the leaves, when every multi-leaf coefficient is 0
   (`(x ^ y) + 2*(x & y)` gives `x + y`);
-- `k + c·g(x, y) + Σ c_i·z_i`, when every multi-leaf term lies inside one pair
-  and one of twelve two-variable boolean functions `g` matches it
-  (`(x & ~y) + y + z` gives `(x | y) + z`);
+- `k + c·g + Σ c_i·z_i`, when every multi-leaf term lies inside one pair or
+  triple of leaves and one boolean function `g` of them matches
+  (`(x & ~y) + y + z` gives `(x | y) + z`; `(x & y) + (x & z) - (x & y & z)`
+  gives `x & (y | z)`). The smallest expression of every two- and
+  three-variable boolean function (14 and 254 of them; at most five ops) is
+  found once per process by growing expressions from the leaves with `&`, `|`,
+  `^` and `~`, in truth-table order so ties break the same way every run.
+  IDA's gooMBA ships the three-variable table as data (goomba.so 0x4e4a0);
 - the conjunction sum itself.
 
 The replacement is applied only when it has fewer ops than the tree and 64
 pseudo-random full-width evaluations agree with it. The new ops go before the
 root, and the root becomes a `COPY` of the result; dead-code elimination removes
 the old tree. Pinned by `tests/stages/kuna-mba.xml`. Not done: the polynomial
-(non-linear) normalizer and three-variable boolean functions, which need a
-minimal-expression table.
+(non-linear) normalizer and the I/O-fingerprint oracle for expressions that
+are not linear MBA.

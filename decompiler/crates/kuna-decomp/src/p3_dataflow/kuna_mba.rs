@@ -6,23 +6,23 @@
 //! MBAs are equal at every width when they agree on every input whose variables
 //! are each 0 or 1 (SiMBA). So the rule needs no SMT solver:
 //!
-//! 1. Collect the expression tree under an arithmetic root. Interior ops with one
-//!    reader are inlined; anything else is a leaf. The tree must have the linear
+//! 1. Collect the expression tree under an op of the arithmetic/bitwise set.
+//!    Interior ops with one reader are inlined; anything else is a leaf. The tree must have the linear
 //!    shape: `+`, `-`, negation and multiplication by a constant over bitwise
 //!    subterms (`&`, `|`, `^`, `~` of leaves only).
 //! 2. Evaluate it on the `2^n` points with each leaf 0 or 1 and Möbius-invert the
 //!    values into coefficients of the conjunction basis: `f = b0 + Σ b_S·AND(S)`.
 //! 3. Pick the cheapest of: that sum, a linear sum of the leaves (when every
-//!    multi-leaf coefficient is 0), or `k + c·g(x, y) + Σ c_i·z_i` when every
-//!    multi-leaf term lies inside one pair `x, y` and `g` is one two-variable
-//!    boolean function. Replace the root only when the candidate has fewer ops, and
+//!    multi-leaf coefficient is 0), or `k + c·g + Σ c_i·z_i` when every
+//!    multi-leaf term lies inside one pair or triple of leaves and `g` is one
+//!    boolean function of them. The smallest expression of each two- and
+//!    three-variable boolean function is found once, by growing expressions
+//!    from the leaves (IDA's gooMBA ships the same table as data). Replace the root only when the candidate has fewer ops, and
 //!    only after 64 random full-width evaluations agree.
 //!
 //! IDA 9.5's gooMBA (goomba.so 0x3eb60) runs the same truth-table step but proves
 //! every candidate with z3; the syntactic linearity check is what makes the proof
 //! unnecessary here.
-
-use std::collections::HashMap;
 
 use kuna_base::types::{int4, uintb};
 use kuna_num::opcodes::OpCode;
@@ -186,33 +186,67 @@ fn sum(terms: Vec<(Expr, u64)>, k: u64, mask: u64) -> Expr {
     }
 }
 
-/// The sixteen two-variable boolean functions, each in a smallest form.
-fn boolean2() -> Vec<Expr> {
-    let x = || Box::new(Expr::Leaf(0));
-    let y = || Box::new(Expr::Leaf(1));
-    let not = |e: Expr| Expr::Not(Box::new(e));
-    vec![
-        Expr::And(x(), y()),
-        Expr::Or(x(), y()),
-        Expr::Xor(x(), y()),
-        not(Expr::And(x(), y())),
-        not(Expr::Or(x(), y())),
-        not(Expr::Xor(x(), y())),
-        Expr::And(x(), Box::new(not(Expr::Leaf(1)))),
-        Expr::And(Box::new(not(Expr::Leaf(0))), y()),
-        Expr::Or(x(), Box::new(not(Expr::Leaf(1)))),
-        Expr::Or(Box::new(not(Expr::Leaf(0))), y()),
-        not(Expr::Leaf(0)),
-        not(Expr::Leaf(1)),
-    ]
+/// A smallest expression (fewest ops) for every non-constant boolean function
+/// of `n` variables (`n` is 2 or 3), found once by growing expressions from the
+/// leaves with `&`, `|`, `^` and `~` until no truth table gets cheaper.
+fn boolean_table(n: usize) -> &'static [Expr] {
+    static TABLES: std::sync::OnceLock<[Vec<Expr>; 2]> = std::sync::OnceLock::new();
+    let tables = TABLES.get_or_init(|| [minimal_exprs(2), minimal_exprs(3)]);
+    &tables[n - 2]
 }
 
-/// Rename leaf `0`/`1` of a two-variable expression to `p.0`/`p.1`.
-fn remap(e: &Expr, p: (usize, usize)) -> Expr {
+fn minimal_exprs(n: usize) -> Vec<Expr> {
+    let points = 1usize << n;
+    let full = (1u32 << points) - 1;
+    let tt = |e: &Expr| -> u32 {
+        (0..points).fold(0, |acc, p| {
+            let leaves: Vec<u64> = (0..n).map(|i| ((p >> i) & 1) as u64).collect();
+            acc | (((e.eval(&leaves, 1)) as u32 & 1) << p)
+        })
+    };
+    let mut best: std::collections::BTreeMap<u32, Expr> = std::collections::BTreeMap::new();
+    for i in 0..n {
+        best.insert(tt(&Expr::Leaf(i)), Expr::Leaf(i));
+    }
+    loop {
+        let known: Vec<Expr> = best.values().cloned().collect();
+        let mut changed = false;
+        let mut offer = |e: Expr, best: &mut std::collections::BTreeMap<u32, Expr>| {
+            let t = tt(&e);
+            if t == 0 || t == full {
+                return;
+            }
+            if best.get(&t).is_none_or(|b| e.ops() < b.ops()) {
+                best.insert(t, e);
+                changed = true;
+            }
+        };
+        for a in &known {
+            offer(Expr::Not(Box::new(a.clone())), &mut best);
+            for b in &known {
+                if a.ops() + b.ops() + 1 > 9 {
+                    continue;
+                }
+                let (x, y) = (Box::new(a.clone()), Box::new(b.clone()));
+                offer(Expr::And(x.clone(), y.clone()), &mut best);
+                offer(Expr::Or(x.clone(), y.clone()), &mut best);
+                offer(Expr::Xor(x, y), &mut best);
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut out: Vec<Expr> = best.into_values().collect();
+    out.sort_by_key(Expr::ops); // stable: ties keep truth-table order
+    out
+}
+
+/// Rename leaf `i` of a small expression to `p[i]`.
+fn remap(e: &Expr, p: &[usize]) -> Expr {
     let r = |e: &Expr| Box::new(remap(e, p));
     match e {
-        Expr::Leaf(0) => Expr::Leaf(p.0),
-        Expr::Leaf(_) => Expr::Leaf(p.1),
+        Expr::Leaf(i) => Expr::Leaf(p[*i]),
         Expr::Const(c) => Expr::Const(*c),
         Expr::Add(a, b) => Expr::Add(r(a), r(b)),
         Expr::Sub(a, b) => Expr::Sub(r(a), r(b)),
@@ -225,23 +259,21 @@ fn remap(e: &Expr, p: (usize, usize)) -> Expr {
     }
 }
 
-/// `(g, c, k)` with `c*g(x,y) + k` equal to the two-variable coefficients `b2`.
-fn single_boolean(b2: &[u64; 4], mask: u64) -> Option<(Expr, u64, u64)> {
-    let mut best: Option<(Expr, u64, u64)> = None;
-    for g in boolean2() {
-        let gb = coefficients(&g, 2, mask);
-        let Some(s0) = (1..4).find(|&s| gb[s] != 0) else { continue };
-        for c in [b2[s0], b2[s0].wrapping_neg() & mask] {
-            if (1..4).all(|s| gb[s].wrapping_mul(c) & mask == b2[s]) {
-                let k = b2[0].wrapping_sub(gb[0].wrapping_mul(c)) & mask;
-                let better = best.as_ref().is_none_or(|(bg, _, _)| g.ops() < bg.ops());
-                if better {
-                    best = Some((g.clone(), c, k));
-                }
+/// `(g, c, k)` with `c*g + k` equal to the coefficients `bs` of a function of
+/// `n` variables (`bs[0]` is the constant term).
+fn single_boolean(bs: &[u64], n: usize, mask: u64) -> Option<(Expr, u64, u64)> {
+    let sets = 1usize << n;
+    for g in boolean_table(n) {
+        let gb = coefficients(g, n, mask);
+        let Some(s0) = (1..sets).find(|&s| gb[s] != 0) else { continue };
+        for c in [bs[s0], bs[s0].wrapping_neg() & mask] {
+            if (1..sets).all(|s| gb[s].wrapping_mul(c) & mask == bs[s]) {
+                let k = bs[0].wrapping_sub(gb[0].wrapping_mul(c)) & mask;
+                return Some((g.clone(), c, k));
             }
         }
     }
-    best
+    None
 }
 
 /// The cheapest expression equal to the linear MBA `f` over `n` leaves.
@@ -252,18 +284,19 @@ fn simplify(f: &Expr, n: usize, mask: u64) -> Expr {
     if multi.is_empty() {
         return full;
     }
-    // Every multi-leaf term inside one pair: a boolean function of that pair
-    // plus a linear sum of the other leaves.
-    let pair = multi.iter().fold(0usize, |acc, &s| acc | s);
-    if pair.count_ones() != 2 {
+    // Every multi-leaf term inside one pair or triple of leaves: a boolean
+    // function of those plus a linear sum of the other leaves.
+    let group = multi.iter().fold(0usize, |acc, &s| acc | s);
+    let m = group.count_ones() as usize;
+    if !(2..=3).contains(&m) {
         return full;
     }
-    let p0 = pair.trailing_zeros() as usize;
-    let p1 = (pair & !(1 << p0)).trailing_zeros() as usize;
-    let b2 = [b[0], b[1 << p0], b[1 << p1], b[pair]];
-    let Some((g, c, k)) = single_boolean(&b2, mask) else { return full };
-    let mut terms = vec![(remap(&g, (p0, p1)), c)];
-    terms.extend((0..n).filter(|&i| i != p0 && i != p1).map(|i| (Expr::Leaf(i), b[1 << i])));
+    let vars: Vec<usize> = (0..n).filter(|&i| group & (1 << i) != 0).collect();
+    let local = |s: usize| -> usize { (0..m).filter(|&j| s & (1 << j) != 0).map(|j| 1 << vars[j]).sum() };
+    let bs: Vec<u64> = (0..1usize << m).map(|s| if s == 0 { b[0] } else { b[local(s)] }).collect();
+    let Some((g, c, k)) = single_boolean(&bs, m, mask) else { return full };
+    let mut terms = vec![(remap(&g, &vars), c)];
+    terms.extend((0..n).filter(|&i| group & (1 << i) == 0).map(|i| (Expr::Leaf(i), b[1 << i])));
     let cand = sum(terms, k, mask);
     if cand.ops() < full.ops() {
         cand
@@ -461,13 +494,9 @@ impl Rule for RuleMbaSimplify {
         if size > 8 {
             return 0;
         }
-        // Only the root of a candidate tree: a single reader that is itself a
-        // candidate will see this op as its interior.
-        if let Some(reader) = data.lone_descend(out) {
-            if data.obank().get(reader).is_some_and(|r| is_candidate(r.code())) {
-                return 0;
-            }
-        }
+        // A subtree is simplified on its own too: a non-linear reader (an
+        // `^ v0` over the whole sum) must not hide a linear tree below it.
+        // Each rewrite strictly lowers the op count, so this terminates.
         let mut col = Collector { data, size, leaves: Vec::new(), nodes: 0 };
         let Some(expr) = col.op(op) else { return 0 };
         let leaves = col.leaves;
@@ -533,6 +562,24 @@ mod tests {
         let z = Box::new(Expr::Leaf(2));
         let f = Expr::Add(Box::new(Expr::Add(Box::new(Expr::And(x(), Box::new(Expr::Not(y())))), y())), z.clone());
         assert_eq!(simplify(&f, 3, m), Expr::Add(Box::new(Expr::Or(x(), y())), z));
+    }
+
+    #[test]
+    fn three_variable_function() {
+        // (x & y) + (x & z) - (x & y & z) == x & (y | z)
+        let m = u32::MAX as u64;
+        let z = || Box::new(Expr::Leaf(2));
+        let and = |a: Box<Expr>, b: Box<Expr>| Box::new(Expr::And(a, b));
+        let f = Expr::Sub(Box::new(Expr::Add(and(x(), y()), and(x(), z()))), and(and(x(), y()), z()));
+        let s = simplify(&f, 3, m);
+        assert_eq!(s.ops(), 2, "{s:?}");
+        assert!(agree(&f, &s, 3, m));
+    }
+
+    #[test]
+    fn tables_cover_every_function() {
+        assert_eq!(boolean_table(2).len(), 14);
+        assert_eq!(boolean_table(3).len(), 254);
     }
 
     #[test]
