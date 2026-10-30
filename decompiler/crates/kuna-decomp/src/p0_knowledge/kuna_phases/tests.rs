@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_382() {
-    assert_eq!(kuna_num_settables(), 382);
-    assert_eq!(SETTABLE_TABLE.len(), 382);
+fn settable_count_is_383() {
+    assert_eq!(kuna_num_settables(), 383);
+    assert_eq!(SETTABLE_TABLE.len(), 383);
 }
 
 #[test]
-fn tier_counts_are_124_core_145_transform_113_analysis() {
+fn tier_counts_are_124_core_146_transform_113_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_124_core_145_transform_113_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (124, 145, 113));
+    assert_eq!((core, transform, analysis), (124, 146, 113));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_165() {
+fn option_values_live_value_present_for_166() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -966,7 +966,8 @@ fn option_values_live_value_present_for_165() {
     // +2 for `chkstkdarwin` and `outlinedinline`.
     // 154 -> 155: +1 for `repstring` (live_field = rep_string).
     // 155 -> 156: +1 for `copyrun` (live_field = copy_run).
-    assert_eq!(with_live, 174);
+    // 154 -> 155: +1 for `arithhelpers` (live_field = arith_helpers).
+    assert_eq!(with_live, 175);
 }
 
 #[test]
@@ -1207,7 +1208,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +5 for `uefi`, `storetype`, `dwarfscopes`, `dwarfglobaltypes` and `tlsnames`.
     // +1 for `repstring`; its P3 row sits beside `strlenscan`.
     // +1 for `copyrun`; its P3 row sits beside `repstring`.
-    assert_eq!(json.matches("},\n").count(), 381);
+    // +1 for `arithhelpers`; its P2 row sits beside `msvcftol`.
+    assert_eq!(json.matches("},\n").count(), 382);
 }
 
 #[test]

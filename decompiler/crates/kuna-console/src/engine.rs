@@ -5763,13 +5763,20 @@ fn commit_analysis_output(
     //    check (`CallFixupAnalyzer.java:89`): only set when no fixup is already
     //    parked, so a hand-applied `fixup apply` is never clobbered. A name with no
     //    registered fixup or no matching FunctionSymbol is a silent no-op.
-    if !out.call_fixups.is_empty() {
-        // Rebuild the same target→fixup map the pass used (the fact carries only
-        // the function name; the fixup is re-derived from the live pcodeinjectlib).
-        let map = kuna_analysis::callfixup::target_fixup_map(prog.arch());
-        for fact in &out.call_fixups {
+    //    Function names recovered by the analysis passes (PDB, DWARF, FID) are
+    //    probed too, as Ghidra's analyzer probes every program function: an MSVC
+    //    image names its CRT helpers only in its PDB.
+    let map = kuna_analysis::callfixup::target_fixup_map(prog.arch());
+    if !map.is_empty() {
+        let names: std::collections::BTreeSet<&str> = out
+            .call_fixups
+            .iter()
+            .map(|fact| fact.func_name.as_str())
+            .chain(out.symbols.iter().filter(|s| s.kind == SymKind::Function).map(|s| s.name.as_str()))
+            .collect();
+        for func_name in names {
             let Some(fixup_name) =
-                kuna_analysis::callfixup::call_fixup_name_for_function(&fact.func_name, &map)
+                kuna_analysis::callfixup::call_fixup_name_for_function(func_name, &map)
             else {
                 continue;
             };
@@ -5782,15 +5789,17 @@ fn commit_analysis_output(
             if injectid < 0 {
                 continue;
             }
-            // function name → FunctionSymbol id; skip if it no longer resolves.
-            let Ok(sid) = prog.arch().query_global_function(&fact.func_name) else {
+            // Every FunctionSymbol of that name: an ARM Thumb function also has an
+            // `entry|1` twin, and calls resolve to the even entry.
+            let Some(scope) = prog.arch().symboltab.get_global_scope() else {
                 continue;
             };
-            // getCallFixup()==null guard: only auto-apply when no fixup is set.
-            if prog.arch().symboltab.function_inject_id_for_symbol(sid) >= 0 {
-                continue;
+            for sid in prog.arch().symboltab.query_by_name(scope, func_name) {
+                // getCallFixup()==null guard: only auto-apply when no fixup is set.
+                if prog.arch().symboltab.function_inject_id_for_symbol(sid) < 0 {
+                    prog.arch_mut().symboltab.set_function_inject_id(sid, injectid);
+                }
             }
-            prog.arch_mut().symboltab.set_function_inject_id(sid, injectid);
         }
     }
 
