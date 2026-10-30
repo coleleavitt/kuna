@@ -3909,7 +3909,10 @@ every other binary's pass list is byte-identical to before the pass existed):
   bit) is a two-field struct named after the instantiation, the payload then
   a one-byte `is_nil` tag; a Clang-imported type (`__C.CGSize`, `__C.NSString`)
   is the C type of that name when the image has one (DWARF, the Objective-C
-  pass), inline for a struct and through a pointer for a class. Any other type
+  pass), inline for a struct and through a pointer for a class; in an image
+  that kept its symbols, a global variable's storage symbol (`$s…vp`) types
+  its data object with the variable's demangled type under the dotted name
+  (`callfix.ctr.step = 2;`). Any other type
   — an enum with payloads, an imported value type (`Foundation.Date`), a
   generic instantiation without a known layout, a tuple, an existential — is
   `undefined<n>` over the bytes up to the next field, so the layout is always

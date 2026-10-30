@@ -145,6 +145,24 @@ impl AnalysisPass for SwiftMetadataPass {
             types.locate_all();
             let regs = kuna_swifttypes::Registers::for_arch(ctx.file.architecture());
             types.emit(regs.as_ref(), &mut out);
+            // A global variable's storage symbol (`$s…vp`) names its type:
+            // a typed data object where the image kept its symbols.
+            for s in ctx
+                .file
+                .symbols()
+                .filter(|s| s.kind() == object::SymbolKind::Data && s.is_definition())
+            {
+                let (Ok(name), addr) = (s.name(), s.address()) else {
+                    continue;
+                };
+                if let Some((path, t)) = types.global_variable(name) {
+                    out.swift_types.typed_data.push(crate::pass::TypedDataFact {
+                        addr,
+                        name: path,
+                        type_: t,
+                    });
+                }
+            }
             if let (true, Some(regs)) = (ctx.arch.analysis_swiftcall, regs.as_ref()) {
                 let symbols: Vec<(u64, String)> = ctx
                     .file
@@ -159,7 +177,9 @@ impl AnalysisPass for SwiftMetadataPass {
                         .swift_types
                         .input_hints
                         .iter()
-                        .filter_map(|h| Some((h.func_addr, h.type_.as_ref()?.get_name().to_string())))
+                        .filter_map(|h| {
+                            Some((h.func_addr, h.type_.as_ref()?.get_name().to_string()))
+                        })
                         .collect();
                     for f in &out.swift_types.models {
                         let maybe = if f.maybe_self { " maybe_self" } else { "" };
@@ -351,7 +371,12 @@ impl Namer<'_> {
     /// linker folded it with code of another type, or with a member that is
     /// not a getter.
     pub fn ambiguous_self(&self, addr: u64) -> bool {
-        self.owners_disagree(addr) || self.claims.borrow().get(&addr).is_some_and(|c| c.iter().any(|c| !c.getter))
+        self.owners_disagree(addr)
+            || self
+                .claims
+                .borrow()
+                .get(&addr)
+                .is_some_and(|c| c.iter().any(|c| !c.getter))
     }
 
     /// Whether the linker folded the function at `addr` with code of another

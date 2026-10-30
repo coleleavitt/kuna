@@ -1167,6 +1167,22 @@ impl<'a> Types<'a> {
         self.tf.get_type_pointer(self.ptr_size, t, 1).ok()
     }
 
+    /// The dotted path and type of the global variable a `$s…vp` storage
+    /// symbol names (`Module.name`), when its type maps.
+    pub fn global_variable(&self, symbol: &str) -> Option<(String, Rc<Datatype>)> {
+        let tree = demangle_swift_tree(symbol)?;
+        let [entity] = tree.children.as_slice() else {
+            return None;
+        };
+        if entity.kind != Kind::Variable {
+            return None;
+        }
+        let ty = entity.child_of_kind(Kind::Type)?;
+        let t = self.kuna_type(ty, u32::MAX)?;
+        let name = crate::demangle::kuna_swift::name::print_name(&tree)?;
+        Some((name, t))
+    }
+
     /// `Type *`: the pointer a class or struct `self` is passed as.
     pub(super) fn self_pointer(&self, addr: u64, path: &str) -> Option<Rc<Datatype>> {
         let st = self
