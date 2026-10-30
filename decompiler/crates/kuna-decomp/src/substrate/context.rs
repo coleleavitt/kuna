@@ -1305,6 +1305,8 @@ pub struct ArchContext {
     pub devectorize_reduction: bool,
     /// (kuna) `strlenscan` — collapse an inline `repnz scasb` length into `strlen`.
     pub strlen_scan: bool,
+    /// (kuna) `whilecontinue` — recover `continue;` in while-do and do-while loops.
+    pub while_continue: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -1998,6 +2000,7 @@ impl ArchContext {
             wide_slice_reduce: false,    // wideslice (Architecture::reset_defaults sets the shipped default: on)
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
+            while_continue: false, // whilecontinue (live value copied from the Architecture)
             stack_store_guard: false,
             region_structure: false,     // regionstructure (opt-in default-off)
             guard_arm: false,            // guardarm (opt-in default-off)
