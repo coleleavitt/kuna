@@ -310,9 +310,12 @@ impl AnalysisPass for FuncStartPatternPass {
             return out;
         }
         let starts = full_pattern_starts_with_mode(ctx.file);
+        let explicit_isa = ctx.arch.input_arm_isa_override;
         out.context_paints = starts
             .iter()
-            .filter_map(|&(addr, mode)| Some(crate::pass::ContextPaint { addr, end: None, var: "TMode", value: mode? }))
+            .filter(|_| !explicit_isa)
+            .filter(|&&(_, mode)| mode == Some(1))
+            .map(|&(addr, _)| crate::pass::ContextPaint { addr, end: None, var: "TMode", value: 1 })
             .collect();
         out.entries = starts.into_iter().map(|(vma, _)| vma).collect();
         out

@@ -3359,7 +3359,9 @@ agrees, `ActionExtraPopSetup` uses that value as the call's extrapop, exactly,
 in place of the prototype's, and in place of an unknown model's guess. A callee
 with no reachable return (a PLT stub, a no-return function), whose returns
 disagree, or whose return writes the stack pointer in any other way keeps the
-prototype's answer. `option calleeretpurge off` restores the model's extrapop.
+prototype's answer. The probe runs on 32-bit x86 only: x86-64 code does not pop
+arguments, and the decode is not free when a Ghidra host serves the
+instructions. `option calleeretpurge off` restores the model's extrapop.
 
 ### (kuna) `tailcontract` — a single decompile states its tail callees first
 

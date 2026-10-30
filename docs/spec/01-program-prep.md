@@ -4629,6 +4629,16 @@ paint, the pattern scan and the recursive-descent promotion (§1.6) lift betafli
 STM32F405 from 1 to ~1830 discovered functions (and libopencm3 `button` from 1 to
 31, with `main` decoding as a real Thumb body rather than A32 garbage).
 
+An ARM pair's `<setcontext name="TMode" value="1"/>` travels with the start it
+finds (`patterns/mod.rs (scan_with_mode)`), and the pass paints `TMode=1` at
+each such start, so a Thumb prologue found in a stripped image decodes as Thumb
+instead of A32 garbage. A pair that sets `TMode` 0 (A32) paints nothing, because
+A32 is the image default. An explicit `--isa` names the mode itself, so the pass
+paints nothing then. Before any
+pattern is tried at an offset, its byte must be one some post pattern (or a bare
+pattern's marked byte) accepts; the skip is exact and makes the scan about 4x
+faster (52 ms vs 216 ms over git's 3.1 MB `.text`, identical hits).
+
 **LSDA landing pads** (`eh_frame_full`, default-off): the deeper
 `GccExceptionAnalyzer` markup — follow each FDE's CIE `L` augmentation to its
 `.gcc_except_table` LSDA, decode the call-site table, and emit each landing pad as

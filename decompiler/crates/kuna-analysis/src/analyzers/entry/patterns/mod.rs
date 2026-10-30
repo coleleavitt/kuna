@@ -276,8 +276,7 @@ impl FuncStartPatterns {
         self.scan_with_mode(sec_addr, data).into_iter().map(|(vma, _)| vma).collect()
     }
 
-    /// [`Self::scan`], with the `TMode` value the matching pair sets. A pair that
-    /// sets `TMode` 0 (A32) needs a 4-aligned start.
+    /// [`Self::scan`], with the `TMode` value the matching pair sets.
     pub fn scan_with_mode(&self, sec_addr: u64, data: &[u8]) -> Vec<(u64, Option<u32>)> {
         let mut out: Vec<(u64, Option<u32>)> = Vec::new();
         let n = data.len();
@@ -303,9 +302,6 @@ impl FuncStartPatterns {
             // <patternpairs>: a post at the candidate + a pre ending at it.
             if !hit {
                 'pairs: for pp in &self.pairs {
-                    if pp.tmode == Some(0) && vma % 4 != 0 {
-                        continue;
-                    }
                     // Find a post matching at the candidate first (cheap reject).
                     if !pp.post.iter().any(|p| p.matches(here)) {
                         continue;

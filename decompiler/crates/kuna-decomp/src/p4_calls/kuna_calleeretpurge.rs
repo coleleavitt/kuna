@@ -17,6 +17,8 @@
 //! instructions it reaches. When every one agrees, that change is the callee's
 //! extrapop and `ActionExtraPopSetup` uses it in place of the model's.
 //! A body with no reachable return, or whose returns disagree, says nothing.
+//! 32-bit x86 only: x86-64 code does not pop arguments, and the decode is not
+//! free when a Ghidra host serves the instructions.
 
 use kuna_base::address::Address;
 use kuna_base::space::spacetype;
@@ -93,7 +95,10 @@ fn sign_extend(v: u64, size: u32) -> i64 {
 /// The net stack-pointer change of every `RETURN` reachable from `entry`, when
 /// they all agree; `None` when none is reached or two disagree.
 pub fn probe_return_purge<T: kuna_sleigh::translate::Translate + ?Sized>(tr: &T, entry: &Address) -> Option<int4> {
-    let sp_storage = ["ESP", "RSP"].iter().find_map(|name| tr.probe_register(name))?;
+    if tr.probe_register("RSP").is_some() {
+        return None;
+    }
+    let sp_storage = tr.probe_register("ESP")?;
     let sp_vn = kuna_sleigh::translate::varnode_data_from_storage(&sp_storage);
     let sp = (sp_vn.space.as_ref()?.get_index(), sp_vn.offset, sp_vn.size);
     if entry.get_space()?.get_type() != spacetype::IPTR_PROCESSOR {
