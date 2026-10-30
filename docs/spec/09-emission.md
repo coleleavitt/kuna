@@ -1785,6 +1785,23 @@ lives somewhere the analysis never resolved to a variable, exactly as upstream's
 `stack0x00000008` is (kuna capitalizes the space and drops the `0x` so the
 token is at least a legal C identifier).
 
+**Globals wider than their Symbol.** `coreaction_render.rs (ActionMapGlobals)`
+ports upstream `Funcdata::mapGlobals`. It groups the function's persistent
+Varnodes that overlap in storage order. When a group starts inside a global
+data Symbol but runs past its end, the function gets the header warning
+`Globals starting with '_' overlap smaller symbols at the same address`, and
+each interior Varnode of the group that no Symbol holds is named after the
+Symbol and its byte distance from it (`small_4`, upstream `coverVarnodes`).
+These names live on the function (`Funcdata::global_covers`), not in the
+global scope, so a later function does not see them. Upstream also creates a
+`DAT_` Symbol for a group no Symbol holds; kuna creates none and names that
+storage `dat_<addr>` when it prints it. A read that starts at a global data
+Symbol but is wider than it prints the Symbol's name with a leading `_`
+(`_small`, upstream `pushMismatchSymbol`); one that starts inside the Symbol
+prints as unnamed storage. Function Symbols take no part: an import slot named
+after its function keeps its plain rendering
+(`tests/stages/kuna-mapglobals.xml`).
+
 One unnamed high-variable case is deliberately canonicalized before that
 choice. If any member is the unaffected input stack pointer, every member uses
 that member's storage-form leaf (`Register0000000000000000` on x86-64), with

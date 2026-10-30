@@ -2394,6 +2394,14 @@ impl ArchContext {
             .and_then(|gq| gq.find_container_entry(addr, 1, &Address::default()).map(|e| (e.first, e.size)))
     }
 
+    /// The first offset, size and name of the smallest global data Symbol
+    /// whose storage holds `addr`, if any.
+    pub(crate) fn global_data_symbol_at(&self, addr: &Address) -> Option<(u64, int4, String)> {
+        let gq = self.effective_global_query(addr)?;
+        let e = gq.find_container_entry(addr, 1, &Address::default())?;
+        (!e.is_function).then(|| (e.first, e.size, e.symbol_name.clone()))
+    }
+
     /// Like [`name_for_global_varnode`](Self::name_for_global_varnode) but also
     /// returns the owning Symbol's scope-name chain (innermost first, global
     /// excluded) for namespace-qualified rendering (`PrintC::pushSymbolScope`).
