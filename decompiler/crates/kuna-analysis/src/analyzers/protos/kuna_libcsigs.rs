@@ -770,7 +770,7 @@ impl AnalysisPass for LibcSigsPass {
         let imported = super::loaded_function_names(ctx.file, ctx.bytes, &reloc_imports, true);
         let types = ctx.arch.types();
         let (_addr_size, word_size) = ctx.arch.data_org();
-        seed_named_prototypes(&mut out, &imported, LIBC_EXT, types, word_size, super::L);
+        seed_named_prototypes(&mut out, &imported, LIBC_EXT, types, word_size, super::L, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &resolved, LIBC_EXT, types, word_size, super::L);
         let complex_max = crate::analyzers::dwarf::kuna_dwarfcomplex::max_size(
             ctx.file.format(),
@@ -785,7 +785,7 @@ impl AnalysisPass for LibcSigsPass {
         .filter(|(size, _)| *size <= complex_max)
         .map(|(_, row)| row)
         .collect();
-        seed_named_prototypes(&mut out, &imported, &complex, types, word_size, super::L);
+        seed_named_prototypes(&mut out, &imported, &complex, types, word_size, super::L, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &resolved, &complex, types, word_size, super::L);
         let arm = ctx.arch.archid.starts_with("ARM:");
         if arm || !kuna_typedcallabi::returns_doubles_whole(ctx.arch) {
@@ -798,7 +798,7 @@ impl AnalysisPass for LibcSigsPass {
             out.prototypes_at = kept_at;
             if arm {
                 let mut libm = AnalysisOutput::default();
-                seed_named_prototypes(&mut libm, &imported, LIBM_VFP, types, word_size, super::L);
+                seed_named_prototypes(&mut libm, &imported, LIBM_VFP, types, word_size, super::L, ctx.arch.analysis_nameladder);
                 seed_resolved_prototypes(&mut libm, &resolved, LIBM_VFP, types, word_size, super::L);
                 let float = float.into_iter().chain(libm.prototypes).map(|p| (None, p));
                 let float_at = float_at.into_iter().chain(libm.prototypes_at).map(|(at, p)| (Some(at), p));

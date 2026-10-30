@@ -1272,7 +1272,13 @@ kuna_options! { self, p1;
         on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
     },    "tailcallentryall" => {
         on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
+    },    "compacttable" => {
+        on_off!(analysis_compacttable, "AArch64 compact jump-table reads in the reference walk")
+    },    "nameladder" => {
+        on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
     },
+
+
 
 
     "gopclntab" => {

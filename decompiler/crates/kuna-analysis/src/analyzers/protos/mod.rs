@@ -40,6 +40,7 @@ use crate::pass::{AnalysisCtx, AnalysisOutput, AnalysisPass, Phase};
 
 pub mod kuna_libgcc;
 mod kuna_libcnames;
+pub mod kuna_nameladder;
 pub mod kuna_libcsigs;
 pub mod kuna_libctypes;
 pub mod kuna_win32sigs;
@@ -168,6 +169,29 @@ const LIBC: &[(&str, Sig)] = &[
     // (`sysdeps/unix/sysv/linux/ptrace.c` fetches `pid_t`, `void *`, `void *` after
     // the request with `va_arg`), which is also the call form ptrace(2) documents.
     ("ptrace", Sig { ret: Ty::Long, params: &[Ty::Int, Ty::Int, Ty::VoidPtr, Ty::VoidPtr], vararg: -1 }),
+];
+
+/// The Itanium `operator new` / `operator delete` imports, by mangled name
+/// (`m` = 64-bit `size_t`, `j` = 32-bit). Seeded while `cppsig` is on.
+const CXX_ALLOC: &[(&str, Sig)] = &[
+    ("_Znwm", Sig { ret: Ty::VoidPtr, params: &[Ty::Size], vararg: -1 }),
+    ("_Znam", Sig { ret: Ty::VoidPtr, params: &[Ty::Size], vararg: -1 }),
+    ("_Znwj", Sig { ret: Ty::VoidPtr, params: &[Ty::Size], vararg: -1 }),
+    ("_Znaj", Sig { ret: Ty::VoidPtr, params: &[Ty::Size], vararg: -1 }),
+    ("_ZnwmRKSt9nothrow_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::VoidPtr], vararg: -1 }),
+    ("_ZnamRKSt9nothrow_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::VoidPtr], vararg: -1 }),
+    ("_ZnwjRKSt9nothrow_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::VoidPtr], vararg: -1 }),
+    ("_ZnajRKSt9nothrow_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::VoidPtr], vararg: -1 }),
+    ("_ZnwmSt11align_val_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::Size], vararg: -1 }),
+    ("_ZnamSt11align_val_t", Sig { ret: Ty::VoidPtr, params: &[Ty::Size, Ty::Size], vararg: -1 }),
+    ("_ZdlPv", Sig { ret: Ty::Void, params: &[Ty::VoidPtr], vararg: -1 }),
+    ("_ZdaPv", Sig { ret: Ty::Void, params: &[Ty::VoidPtr], vararg: -1 }),
+    ("_ZdlPvm", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size], vararg: -1 }),
+    ("_ZdaPvm", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size], vararg: -1 }),
+    ("_ZdlPvj", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size], vararg: -1 }),
+    ("_ZdaPvj", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size], vararg: -1 }),
+    ("_ZdlPvSt11align_val_t", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size], vararg: -1 }),
+    ("_ZdlPvmSt11align_val_t", Sig { ret: Ty::Void, params: &[Ty::VoidPtr, Ty::Size, Ty::Size], vararg: -1 }),
 ];
 
 /// Build the kuna [`Datatype`] for a [`Ty`] using the architecture's type factory.
@@ -362,6 +386,7 @@ fn seed_named_prototypes(
     types: &dyn TypeFactory,
     word_size: uint4,
     layout: kuna_libctypes::Layout,
+    ladder: bool,
 ) {
     for (name, sig) in table {
         if !names.contains(*name) {
@@ -369,6 +394,21 @@ fn seed_named_prototypes(
         }
         if let Ok(pieces) = build_pieces(name, sig, types, word_size, layout) {
             out.prototypes.push(pieces);
+        }
+    }
+    if !ladder {
+        return;
+    }
+    let mut spelled: Vec<&String> = names.iter().filter(|n| table.iter().all(|(t, _)| t != n)).collect();
+    spelled.sort_unstable();
+    for present in spelled {
+        let hit = kuna_nameladder::fallbacks(present)
+            .into_iter()
+            .find_map(|f| table.iter().find(|(t, _)| *t == f));
+        if let Some((_, sig)) = hit {
+            if let Ok(pieces) = build_pieces(present, sig, types, word_size, layout) {
+                out.prototypes.push(pieces);
+            }
         }
     }
 }
@@ -608,8 +648,12 @@ impl AnalysisPass for LibProtoPass {
         let present = loaded_function_names(ctx.file, ctx.bytes, &reloc_imports, false);
         let types = ctx.arch.types();
         let (_addr_size, word_size) = ctx.arch.data_org();
-        seed_named_prototypes(&mut out, &present, LIBC, types, word_size, L);
+        seed_named_prototypes(&mut out, &present, LIBC, types, word_size, L, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &imports, LIBC, types, word_size, L);
+        if ctx.arch.analysis_cppsig.enabled() {
+            seed_named_prototypes(&mut out, &present, CXX_ALLOC, types, word_size, L, ctx.arch.analysis_nameladder);
+            seed_resolved_prototypes(&mut out, &imports, CXX_ALLOC, types, word_size, L);
+        }
         out.c_runtime_imports = crate::loader::pe_iat::c_runtime_import_names(ctx.bytes);
         out
     }
@@ -1053,7 +1097,7 @@ mod tests {
             !imported.contains("memcmp"),
             "a same-named resolver export makes global by-name parking ambiguous"
         );
-        seed_named_prototypes(&mut out, &imported, kuna_libcsigs::LIBC_EXT, &types, 1, L);
+        seed_named_prototypes(&mut out, &imported, kuna_libcsigs::LIBC_EXT, &types, 1, L, false);
         seed_resolved_prototypes(&mut out, &imports, kuna_libcsigs::LIBC_EXT, &types, 1, L);
         let seeded: Vec<(u64, usize)> = out
             .prototypes_at
@@ -1092,7 +1136,7 @@ mod tests {
             .expect("install char core type");
         types.cache_core_types().expect("cache core types");
         let mut out = AnalysisOutput::default();
-        seed_named_prototypes(&mut out, &candidates, LIBC, &types, 1, L);
+        seed_named_prototypes(&mut out, &candidates, LIBC, &types, 1, L, false);
         let names: HashSet<&str> =
             out.prototypes.iter().map(|pieces| pieces.name.as_str()).collect();
 

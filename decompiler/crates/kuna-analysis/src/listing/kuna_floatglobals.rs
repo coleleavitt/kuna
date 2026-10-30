@@ -495,6 +495,7 @@ fn switch_targets(
             max_entries,
             preserved: if ctx.arch.analysis_switchreach { &ctx.preserved } else { &[] },
             far: ctx.arch.analysis_switchreach,
+            compact: ctx.arch.analysis_compacttable && ctx.arch.archid.starts_with("AARCH64"),
         },
     )
     .cases

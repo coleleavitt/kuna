@@ -2957,6 +2957,18 @@ moves.
   `dwarfstructs off` stays exactly the pre-DIV-86 name-only mapping its own row
   promises.
 
+- **Name ladder** (`nameladder`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
+  a function name that is not in a prototype table or the no-return list as
+  spelled is retried under its undecorated spellings, each rung stripping one
+  more decoration: a `j_` jump-thunk prefix, an import prefix (`__imp_`, `_imp_`,
+  `imp__`), a stdcall/fastcall `@N` decoration, the leading ABI underscores, and
+  a trailing `_<digits>` duplicate-name suffix. The first spelling a table holds
+  gives the prototype (keyed to the image's own name) or the no-return verdict.
+  A name the table holds as spelled is never retried, so the ladder only adds
+  facts. This is IDA's type-library lookup ladder (`guess_tinfo`,
+  `cleanup_name`).
+
 - **Discriminant-value naming** (`variantnames`, default-on,
   `decompiler/crates/kuna-analysis/src/analyzers/dwarf/kuna_variantnames.rs`;
   `docs/multilang.md`, the first `VariantLayout` consumer) closes the loop the
@@ -3285,6 +3297,19 @@ moves.
   below replaces it for MSVC names unless `msvcsig` is off. Like the DWARF arm the
   pass runs at `load file`, so both certainty tiers are computed there and stashed
   apart, and the mode selects which of them the analysis commit applies.
+  Three more shapes are read (kuna, after IDA's `guess_tinfo`): a scope that is
+  always a namespace (`std`, `std::__1`, `std::__cxx11`, `__gnu_cxx`,
+  `__cxxabiv1`, `boost` and a few more; IDA's `CPP_NAMESPACES`) proves a function
+  nested directly in it takes no `this`, so `proven` applies it; an
+  `operator new` / `operator delete` (global or class-scope, both static) parses
+  with `void *` as the return of the allocation forms; and a gcc
+  `[clone .localalias]` or `[clone .lto_priv.N]` suffix is dropped because those
+  copies keep the signature, while `.constprop`, `.isra`, `.part` and `.cold`
+  clones, whose signature differs, stay refused. While `cppsig` is not `off`,
+  `libproto` also parks `void *(size_t[, ...])` / `void(void *[, size_t])` on the
+  imported Itanium allocation functions (`_Znwm`, `_Znam`, `_ZdlPv`, `_ZdlPvm`,
+  their `nothrow_t` and `align_val_t` forms and the 32-bit `j` spellings), so a
+  `T *p = operator new(n)` no longer needs a cast.
 - **MSVC declarations** (`msvcsig`, `on|off`, default `on`, applied only while
   `cppsig` is not `off`;
   `decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_msvcsig.rs`, the
@@ -7236,6 +7261,23 @@ eight instructions and at the first call, as they did. How the range check is
 read once it is found is *not* gated, so the option off is not the old walk:
 ssh `-O2`'s dispatch at `0x42a26` in `main` reads 9 of its 13 cases on the old
 walk, all 13 with the option on, and none with it off.
+
+*Compact tables* (`compacttable`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_switchtable.rs (compact_targets)`).
+clang and gcc lower a dense AArch64 switch to a table of byte, halfword or word
+offsets counted in instructions: `ldrb w, [table, idx]; adr x, base;
+add x, x, w, lsl #2; br x` (gcc writes the add as `uxtb #2` or `sxtb #2`). The
+fold knew a 32-bit delta added to a base and a Thumb doubled offset but no
+shifted entry, so it read no case of such a table. With the option on the fold
+carries a sign- or zero-extended entry through a left shift by one to three (or
+a multiply by 2, 4 or 8) and through an add of a constant base, and reads each
+case as `base + (entry << shift)`, under the same range-check, mask,
+executable-section and minimum-entry rules as the other shapes; the slice also
+follows that shift. This is IDA's jump-table target formula (`(sext? elem) <<
+shift` added to the element base). On Lua 5.4.8 built `-O2` for AArch64 the
+call sites `kuna xrefs --from` lists grow from 17 to 53 in `luaK_posfix`, 8 to
+67 in `str_format`, 2 to 6 in `getoption`, 59 to 85 in musl's `printf_core` and
+0 to 1 in `pop_arg`; the other fourteen functions with a `br` are unchanged.
 
 *The `-O0` chain.* gcc spends seven instructions between its `ja` and the jump:
 `mov %eax,%eax; lea 0(,%rax,4),%rdx; lea jt(%rip),%rax; mov (%rdx,%rax,1),%eax;

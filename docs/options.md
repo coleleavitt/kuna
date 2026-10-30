@@ -796,6 +796,13 @@ Three tiers:
 | protoorder decompiles a caller before the callees its switch cases call | [`switchreach`](#switchreach) |
 | every call inside a switch is missing from a gcc -O0 binary | [`switchreach`](#switchreach) |
 | a recursive interpreter function loses its pointer parameter types in a whole-binary run | [`switchreach`](#switchreach) |
+| kuna xrefs reports 0 references to a function called only from an aarch64 switch case | [`compacttable`](#compacttable) |
+| an aarch64 switch's case bodies are missing from decompile-graph | [`compacttable`](#compacttable) |
+| calleevote refuses an aarch64 function because its recorded calls differ from the call graph | [`compacttable`](#compacttable) |
+| j_printf gets no printf prototype | [`nameladder`](#nameladder) |
+| __imp_exit is not marked no-return | [`nameladder`](#nameladder) |
+| a flirt-named memcpy_0 has no memcpy prototype | [`nameladder`](#nameladder) |
+| a mach-o or coff name with a leading underscore misses its libc prototype | [`nameladder`](#nameladder) |
 | a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide) |
 | a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide) |
 | a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide) |
@@ -3054,6 +3061,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default). It only adds case bodies that a range check, a mask or a full table bounds, so it completes the call graph: callers appear in kuna xrefs and decompile-graph, calleevote stops refusing functions whose recorded calls exceed the graph, and protoorder decompiles the callees a switch calls first. Flip off to reproduce the call graph from before, or when a whole-binary run gives a function in a large recursion (an interpreter's execute or eval loop, which recurses through switch cases) plainer integer types than before: the new edges put it in a cycle, where protoorder does not carry its callees' prototypes; protoorder off shows whether that is the cause.
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · jtxref-case-body-calls
 - **Example:** `--option switchreach off`
+
+### `compacttable` -- on | off, default `on`
+
+- **Symptoms:** kuna xrefs reports 0 references to a function called only from an aarch64 switch case; an aarch64 switch's case bodies are missing from decompile-graph; calleevote refuses an aarch64 function because its recorded calls differ from the call graph.
+- **What it does:** Read AArch64-style compact jump tables in the reference walk behind kuna xrefs, decompile-graph and switchreach. clang and gcc lower a dense AArch64 switch to a table of byte, halfword or word offsets counted in instructions: ldrb/ldrh w, [table, idx]; adr x, base; add x, x, w, uxtb|sxtb #2 (or lsl #2); br x. The register-chain fold knew 32-bit deltas added to a base and Thumb doubled offsets, but no shifted entry, so it read no case of such a table and every function called only from a case had no caller. On, the fold carries a sign- or zero-extended entry through a left shift by 1-3 (or a multiply by 2, 4 or 8) and an add of a constant base, and reads each case as base + (entry << shift), with the same range check, mask, executable-section and minimum-entry rules as the other table shapes. Off, such a dispatch is unresolved as before.
+- **When to flip:** On (default). It only reads a table whose dispatch adds a shifted table entry to a constant base under a range check or mask, so it adds case bodies and their callees to the call graph of AArch64 binaries. Flip off to reproduce the older call graph or if a hand-written dispatch with that shape is not a switch.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-compacttable
+- **Example:** `--option compacttable off`
+
+### `nameladder` -- on | off, default `on`
+
+- **Symptoms:** j_printf gets no printf prototype; __imp_exit is not marked no-return; a flirt-named memcpy_0 has no memcpy prototype; a mach-o or coff name with a leading underscore misses its libc prototype.
+- **What it does:** Try a function name under its undecorated spellings when the exact spelling is not in a built-in prototype or no-return table. The rungs, each stripping one more decoration than the last, are: a j_ jump-thunk prefix (repeated), an import prefix (__imp_, _imp_, imp__), a stdcall/fastcall @N decoration (f@12, @f@12), the leading ABI underscores of 32-bit COFF and Mach-O, and a trailing _<digits> duplicate-name suffix (memcpy_0). The first spelling the table holds gives the prototype or the no-return verdict, keyed to the image's own name. A name that is in the table as spelled is never retried, so this only adds facts. This is IDA's type-library lookup ladder (guess_tinfo / cleanup_name).
+- **When to flip:** On (default). It changes nothing for a name a table already holds as spelled; it adds the libc/libm prototype and the no-return verdict for decorated spellings such as j_printf, __imp_exit, _strlen@4 or memcpy_0. Flip off when a binary defines its own function whose name only differs from a libc name by such a decoration (sha256_2 is not sha256) and the added prototype is wrong.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-nameladder
+- **Example:** `--option nameladder off`
 
 ### `aifpoolslide` -- on | off, default `on`
 

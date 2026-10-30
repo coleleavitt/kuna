@@ -2504,6 +2504,10 @@ pub struct Architecture {
     pub analysis_funcchunks: bool,
     /// (kuna) Run `tailcallentry` on AArch64, x86 and RISC-V as well as ARM (`tailcallentryall`). Default off.
     pub analysis_tailcallentryall: bool,
+    /// (kuna) Read AArch64 compact (shifted-offset) jump tables in the reference walk (`compacttable`). Default on.
+    pub analysis_compacttable: bool,
+    /// (kuna) Retry prototype/no-return name lookups under undecorated spellings (`nameladder`). Default on.
+    pub analysis_nameladder: bool,
     /// (kuna) Gate the Go `pclntab` function-name recovery pass (`gopclntab`); the
     /// kuna analog of Ghidra's `GolangSymbolAnalyzer` (name-recovery half). Default
     /// **on**, but the pass is registered ONLY for a Go binary
@@ -3343,6 +3347,8 @@ impl Architecture {
             analysis_tailcallentry: false,
             analysis_funcchunks: false,
             analysis_tailcallentryall: false,
+            analysis_compacttable: true,
+            analysis_nameladder: true,
             analysis_gopclntab: false,
             analysis_gotypes: false,
             analysis_gonoreturn: false,
@@ -3811,6 +3817,8 @@ impl Architecture {
         self.analysis_tailcallentry = false; // tail-call function-entry recovery default-off
         self.analysis_funcchunks = false;
         self.analysis_tailcallentryall = false;
+        self.analysis_compacttable = true;
+        self.analysis_nameladder = true;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)
