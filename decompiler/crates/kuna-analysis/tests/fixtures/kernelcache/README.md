@@ -21,6 +21,15 @@ metaclass vtables; each class has a vtable with its `getMetaClass()`; `Derived`
 overrides `Base::m2` and adds one method. Only `meta_of_derived`, `Base::m1` and
 `Base::m2` have symbols, and pointers are plain absolute words.
 
+`prelinked_merged.macho`, `prelinked_split.macho` and `chainstarts.macho`
+(written by `gen_prelinked.py`, plain Python 3) are pre-fileset images: an iOS
+12-14 style kernel with a merged kext found through `__kmod_start` and every
+pointer threaded through `__thread_starts` (four of them the handlers of an
+`IOExternalMethodDispatch` table); an iOS 11 style kernel with a stripped kext
+in `__PRELINK_TEXT` whose `__got` / `__stubs` are untyped and whose plist has no
+`<plist>` wrapper; and an SPTM-style static image with one
+`DYLD_CHAINED_PTR_ARM64E_KERNEL` chain in `__chain_starts`.
+
 `dext_osclassinfo.macho` (written by `gen_dext.py`) is a stripped arm64
 DriverKit-style executable for the `osclassinfo` pass: one `__osclassinfo`
 pointer to an `OSClassLoadInformation` record for `MyDriver` (superclass

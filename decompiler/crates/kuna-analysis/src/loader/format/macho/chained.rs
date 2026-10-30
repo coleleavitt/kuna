@@ -458,22 +458,8 @@ fn walk_segment(
         return;
     }
 
-    // The chain stride: arm64e formats hop in 8-byte units, the 64-bit generic
-    // formats in 4-byte units (fixup-chains.h).
-    let stride: u64 = match pointer_format {
-        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24 => 8,
-        ptr_format::PTR_64
-        | ptr_format::PTR_64_OFFSET
-        | ptr_format::ARM64E_KERNEL
-        | ptr_format::ARM64E_FIRMWARE
-        | ptr_format::PTR_64_KERNEL_CACHE
-        | ptr_format::PTR_32
-        | ptr_format::PTR_32_FIRMWARE
-        | ptr_format::ARM64E_SEGMENTED => 4,
-        ptr_format::X86_64_KERNEL_CACHE => 1,
-        // An unhandled format: leave its chains unresolved (the inert path).
-        _ => return,
-    };
+    // An unhandled format: leave its chains unresolved (the inert path).
+    let Some(stride) = chain_stride(pointer_format) else { return };
 
     // dyld computes the chain head from the **mach_header** pointer, not the
     // per-segment base: `chain = mh + segment_offset + pageIndex*page_size +
@@ -490,7 +476,7 @@ fn walk_segment(
         }
         let page_va = imagebase + segment_offset + (pi as u64) * (page_size as u64);
         if page_start & PTR_START_MULTI == 0 {
-            walk_chain(file, segs, page_va + page_start as u64, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out);
+            walk_chain(file, segs, page_va + page_start as u64, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
             continue;
         }
         // Several chains on one page: the low bits index the overflow list
@@ -499,7 +485,7 @@ fn walk_segment(
         for _ in 0..0x8000u32 {
             let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
             let offset = (start & !PTR_START_LAST) as u64;
-            walk_chain(file, segs, page_va + offset, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out);
+            walk_chain(file, segs, page_va + offset, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
             if start & PTR_START_LAST != 0 {
                 break;
             }
@@ -507,6 +493,60 @@ fn walk_segment(
         }
     }
 }
+
+/// The chain stride: arm64e formats hop in 8-byte units, the 64-bit generic
+/// formats in 4-byte units (fixup-chains.h).
+fn chain_stride(pointer_format: u16) -> Option<u64> {
+    match pointer_format {
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24 => Some(8),
+        ptr_format::PTR_64
+        | ptr_format::PTR_64_OFFSET
+        | ptr_format::ARM64E_KERNEL
+        | ptr_format::ARM64E_FIRMWARE
+        | ptr_format::PTR_64_KERNEL_CACHE
+        | ptr_format::PTR_32
+        | ptr_format::PTR_32_FIRMWARE
+        | ptr_format::ARM64E_SEGMENTED => Some(4),
+        ptr_format::X86_64_KERNEL_CACHE => Some(1),
+        _ => None,
+    }
+}
+
+/// (kuna) The rebases of a static image's `__TEXT,__chain_starts` blob
+/// (`dyld_chained_starts_offsets`: `u32 pointer_format, u32 starts_count, u32
+/// chain_starts[]`, each an offset from the image base), as `ld -static
+/// -fixup_chains` writes it for SPTM, TXM and other firmware. `segments` are
+/// `(vmaddr, fileoff, filesize)`. Each rebase is `(slot, target, width)`, the
+/// width 4 for the 32-bit formats.
+pub fn chain_starts_rebases(
+    file: &[u8],
+    segments: &[(u64, u64, u64)],
+    imagebase: u64,
+    starts: &[u8],
+) -> Vec<(u64, u64, usize)> {
+    let segs: Vec<SegInfo> =
+        segments.iter().map(|&(vmaddr, fileoff, filesize)| SegInfo { vmaddr, fileoff, filesize }).collect();
+    let (Some(format), Some(count)) = (rd_u32(starts, 0), rd_u32(starts, 4)) else { return Vec::new() };
+    let Some(id) = u16::try_from(format).ok().filter(|&f| f != ptr_format::ARM64E_SEGMENTED) else {
+        return Vec::new();
+    };
+    let Some(stride) = chain_stride(id) else { return Vec::new() };
+    let mut out = ChainedFixups::default();
+    for i in 0..(count as usize).min(starts.len() / 4) {
+        let Some(offset) = rd_u32(starts, 8 + 4 * i) else { break };
+        let format = Format { id, imagebase, max_valid: 0 };
+        let hops = file.len() / stride as usize;
+        walk_chain(file, &segs, imagebase.wrapping_add(offset as u64), stride, format, &[], &mut out, hops);
+    }
+    let width = if matches!(id, ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE) { 4 } else { 8 };
+    let mut rebases: Vec<(u64, u64, usize)> = out.rebases.into_iter().map(|(va, t)| (va, t, width)).collect();
+    rebases.sort_unstable();
+    rebases
+}
+
+/// A defensive cap on one page's chain: no real one is longer than
+/// page_size/stride; this just bounds a hostile/corrupt header.
+const PAGE_CHAIN_HOPS: usize = 0x10000;
 
 /// What a chain's words mean: the pointer format, the image base the offset
 /// formats add, and the `max_valid_pointer` of `DYLD_CHAINED_PTR_32`.
@@ -528,12 +568,11 @@ fn walk_chain(
     format: Format,
     imports: &[(Rc<str>, i64)],
     out: &mut ChainedFixups,
+    max_hops: usize,
 ) {
     let mut va = first_va;
     let narrow = matches!(format.id, ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE);
-    // A defensive cap: no real page chain is longer than page_size/stride; this
-    // just bounds a hostile/corrupt header (the inert/no-op contract).
-    for _ in 0..0x10000u32 {
+    for _ in 0..max_hops {
         let Some(fo) = va_to_fileoff(segs, va) else { return };
         let raw = if narrow { rd_u32(file, fo as usize).map(u64::from) } else { rd_u64(file, fo as usize) };
         let Some(raw) = raw else { return };
@@ -806,7 +845,7 @@ mod tests {
         let mut file = auth.to_le_bytes().to_vec();
         file.extend(plain.to_le_bytes());
         let mut out = ChainedFixups::default();
-        walk_chain(&file, &segs, imagebase, 8, Format { id: ptr_format::ARM64E, imagebase, max_valid: 0 }, &[], &mut out);
+        walk_chain(&file, &segs, imagebase, 8, Format { id: ptr_format::ARM64E, imagebase, max_valid: 0 }, &[], &mut out, PAGE_CHAIN_HOPS);
         assert_eq!(out.resolved_ptr(imagebase), Some(0x1_0000_8028));
         assert_eq!(out.auth(imagebase), Some(AuthContext { key: 2, addr_div: true, diversity: 0x1234 }));
         assert_eq!(out.resolved_ptr(imagebase + 8), Some(0x1_0000_8050));

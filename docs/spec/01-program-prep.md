@@ -972,9 +972,48 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   address, the `IOClass` of each of its `IOKitPersonalities`;
   `decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelink.rs (kexts)`,
   a small XML plist reader that resolves `ID`/`IDREF`). A pre-fileset
-  (prelinked) kernelcache loads as its kernel; `list` prints its plist's kexts,
-  and naming one is refused because extracting a prelinked kext is not
-  implemented.
+  (prelinked) kernelcache is one `MH_EXECUTE` kernel that carries its kexts
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelinked.rs (rebase)`).
+  Its pointers are not in a fixup table but threaded through the words
+  themselves: `__TEXT,__thread_starts` (iOS 12-14) opens with a word whose bit
+  0 picks a 4- or 8-byte hop unit, then lists each chain's offset from the
+  image base up to `0xffffffff`. A chain word with bit 62 clear is a rebase:
+  authenticated (bit 63) it holds a 32-bit offset from the base, otherwise a
+  43-bit sign-extended address with its top byte in bits 43..50, exactly as
+  xnu's `rebase_threaded_starts` reads it; bits 51..61 hop to the next word.
+  `__TEXT,__chain_starts`, which `ld -static -fixup_chains` writes for SPTM,
+  TXM and other static images, holds a pointer format, a count and each
+  chain's offset from the base, and its chains are walked by the
+  `LC_DYLD_CHAINED_FIXUPS` decoder in `chained.rs (chain_starts_rebases)`.
+  Every rebase is written into its slot before anything reads the image, so
+  `auto`, which loads the kernel, already sees real pointers (iOS 14.8 A12:
+  338,665 pointers, and 37,000 IOKit class and method names where there were
+  none). The kexts come in two layouts
+  (`fileset/prelinked.rs (entries)`). Up to iOS 11 each is a whole Mach-O in
+  `__PRELINK_TEXT` at the plist's `_PrelinkExecutableLoadAddr`, its segments
+  spread over the `__PLK_*` and `__PRELINK_DATA` ranges, its file offsets
+  relative to its own header and not always consistent; from iOS 12 they are
+  merged into the kernel's own segments, `__PRELINK_INFO,__kmod_start` points
+  at each one's header, which describes only its `__TEXT_EXEC`, and the plist
+  names it by `ModuleIndex` (failing that, `__kmod_info`'s `kmod_info_t` name
+  does). Each kext header's segment and section offsets are rewritten to the
+  absolute offsets of their addresses, and a merged kext's code sections get
+  the instruction flags its stripped header no longer carries. `list` prints
+  these entries, and a kext is chosen by the same names as in a fileset
+  (`fileset/prelinked.rs (cut)`). On a merged cache the kernel already holds
+  every kext, and a kext alone keeps the kernel's non-code segments beside
+  its own code, because they hold its data. On an older cache a stripped kext
+  has no symbols and untyped `__got` / `__stubs` sections, so each one chosen
+  gets a symbol table of the kernel symbols its `__got` slots, stubs and `bl`s
+  reach, each absolute at the kernel address in the undefined range, where a
+  fileset kext's bound imports sit, plus an indirect-symbol table for those
+  sections, which are retyped to non-lazy pointers and 12- (16-, for
+  `__auth_stubs`) byte stubs; the import walk then names its stubs and slots
+  after the kernel functions they reach. Several entries, or `all`, go through
+  the same `merge` as a fileset's, the kernel's `__PRELINK` segments dropped
+  so nothing is mapped twice. iOS 11.4.1 A10: `all` loads 197 entries (34,425
+  functions, 8.9 s); IOSurface alone loads in 0.5 s with its calls named
+  `OSUnserializeXML`, `lck_mtx_lock`, and so on.
   A comma-separated list or `all` loads several entries as one image
   (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/merge.rs (merge)`):
   their segment commands are concatenated at their collection addresses (one

@@ -53,7 +53,9 @@ pub fn peel(bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<Peeled, String
         notes.push(note);
         image
     } else {
-        fileset::legacy(bytes, choice)?
+        let (image, note) = fileset::legacy(bytes, choice)?;
+        notes.extend(note);
+        image
     };
     let note = (!notes.is_empty()).then(|| notes.join("; "));
     Ok(Peeled { bytes, note })
