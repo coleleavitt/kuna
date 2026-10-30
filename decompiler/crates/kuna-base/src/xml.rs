@@ -2163,7 +2163,8 @@ mod tests {
         // and kuna-tailcontract / a tail-calling thunk sees its callee's prototype in a single decompile
         // and kuna-calleeretpurge-x86 / the personal/x86-stack calleeretpurge test, kept beside bugs-misc's
         // and kuna-condfold-default / condfold on by default keeps a loop test
-        assert_eq!(count, 676, "corpus file count drifted");
+        // and kuna-linearswitch / a linear equality chain re-rolls into a switch
+        assert_eq!(count, 677, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

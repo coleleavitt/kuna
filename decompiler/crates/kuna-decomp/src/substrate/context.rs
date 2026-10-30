@@ -1347,6 +1347,9 @@ pub struct ArchContext {
     pub devectorize_reduction: bool,
     /// (kuna) `strlenscan` — collapse an inline `repnz scasb` length into `strlen`.
     pub strlen_scan: bool,
+    /// (kuna) `linearswitch` — the fewest cases a linear equality chain needs to
+    /// re-roll into a switch; 0 = off.
+    pub linear_switch: int4,
     /// (kuna) `rangefold` — fold comparisons and masks a dominating branch decides.
     pub range_fold: bool,
     /// (kuna) `pow2select` — rewrite a signed division or remainder by a power of two written as a select or a sign-mask shift.
@@ -2091,6 +2094,7 @@ impl ArchContext {
             wide_slice_reduce: false,    // wideslice (Architecture::reset_defaults sets the shipped default: on)
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
+            linear_switch: 0, // linearswitch (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)
             while_continue: false, // whilecontinue (live value copied from the Architecture)

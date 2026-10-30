@@ -671,6 +671,20 @@ kuna_options! { self, p1;
         self.cond_fold = val;
         Ok(msg)
     },
+    "linearswitch" => {
+        let field = p1.trim();
+        if field == "off" {
+            self.linear_switch = 0;
+            return Ok("Linear equality chains keep their if/else form".to_string());
+        }
+        match field.parse::<i32>() {
+            Ok(n) if (3..=16).contains(&n) => {
+                self.linear_switch = n;
+                Ok(format!("Linear equality chains of {n} or more cases re-roll into a switch"))
+            }
+            _ => Err(KunaError::parse("Must specify off or a case count from 3 to 16")),
+        }
+    },
     "condstmts" => {
         let (val, msg) =
             crate::p8_structure::kuna_condstmts::OptionCondStmts.apply(p1)?;

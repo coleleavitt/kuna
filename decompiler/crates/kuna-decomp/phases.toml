@@ -4917,6 +4917,25 @@ tier = "transform"
 symptoms = "crossing goto from the else arm back into the then arm's shared clause|goto plus label into the shared body of a guard cascade whose arms reconverge|nested if where angr emits one compound short-circuit condition|second condition block assigns one value or calls something before its test and the fold is declined"
 
 [[settable]]
+option = "linearswitch"
+values = "off|3|4|<n>"
+default = "off"
+destructive = false
+phase = "P2"
+subphase = "switch-model"
+strength = "HARD"
+rewind = "P2"
+issue = "kuna-linearswitch"
+summary = "Let `loweredswitch` re-roll a linear chain of equality tests on one variable into a switch. Detection requires a binary-search split (`saw_range`) because a linear chain reads as a hand-written if/else-if; a compiler also lowers a switch of three or four cases that way, and an if/else-if chain on one variable reads as a switch too. With `linearswitch N` a chain with no range node is recorded when it has at least N cases, every case body is entered only from the chain and dominated by the chain head (a chain the compiler copied into two paths keeps its ifs), and the labels print the same signed or unsigned (an extension on the path decides, else no case value may have the sign bit set). Every other check of the cascade recovery, the single shared default sink and `loweredswitchexact`'s routing replay included, still applies."
+use_when = "Set `3` (or a larger count) when nested `if (v != 5) { if (v != 2) ... }` tests on one variable stand for a switch. Default off: re-rolling moves 4/675 datatest assertions (Copy trim #6-#8, Partial union #5). Measured at `3` over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 13 functions change, switch 298 -> 309, if 20,327 -> 20,299, gotos unchanged in total (lua_compare +2, bzip2 compress and uncompress -1 each), lines +69. A switch installed in a session stays when the option is turned off later for the same function (the installed jump table is kept), so compare off before on."
+example = "option linearswitch 3"
+source_decompiler = "kuna"
+inspiration = "clang -O2 lowers a three-case `switch (x) { case 1: ... case 2: ... case 5: ... default: ... }` to `if (x != 5) { if (x != 2) { if (x != 1) ...` and kuna prints those nested ifs"
+change_kind = "structure-recovery"
+tier = "transform"
+symptoms = "a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable|loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one|nested != tests on one variable with shared tails where the source has a switch"
+
+[[settable]]
 option = "condstmts"
 values = "off|0|1|2|3|<n>"
 default = "3"
