@@ -2860,12 +2860,14 @@ impl ConsoleProgram {
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
         let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
+        let want_addrtable = self.arch().analysis_addrtable;
         if (want_listing
             || want_fast_funcdisc
             || want_operand_refs
             || want_wide32_alone
             || want_funcstart_patterns
-            || want_coldentry)
+            || want_coldentry
+            || want_addrtable)
             && self.analysis_image.is_some()
         {
             let analysis_target = self.arch.arch_id().to_string();
@@ -2955,6 +2957,9 @@ impl ConsoleProgram {
                         merged.merge(out);
                     } else if want_wide32_alone {
                         merged.merge(kuna_analysis::passes::run_wide_strings32(&bytes, &image, self.arch()));
+                    }
+                    if want_addrtable {
+                        merged.merge(kuna_analysis::passes::run_addrtable(&bytes, &image, self.arch()));
                     }
                 }
             }
