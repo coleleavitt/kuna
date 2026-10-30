@@ -2329,6 +2329,11 @@ pub struct Architecture {
     /// and console parity paths never build, so every parity gate is
     /// byte-identical on the shipped default.
     pub analysis_formatstring: crate::kuna_formatstring::FormatStringMode,
+    /// (kuna `formatcallees`) Let the load-time format resolver also type the
+    /// calls to format functions no table declares (a program's own logger that
+    /// forwards to `vfprintf`, a `*printf*`-named import). See
+    /// `kuna_analysis::formatstring::kuna_fmtcallee`.
+    pub analysis_format_callees: bool,
     /// (kuna `formatstring static`) Per-call-site prototype overrides the
     /// LOAD-TIME format-string resolver recovered, keyed by the CONTAINING
     /// function's entry VMA and then by the call-site VMA.
@@ -3433,6 +3438,7 @@ impl Architecture {
             analysis_addrtable: false,
             analysis_operand_refs: false,
             analysis_formatstring: crate::kuna_formatstring::FormatStringMode::Off,
+            analysis_format_callees: false,
             format_call_overrides: std::collections::BTreeMap::new(),
             format_stack_args: std::rc::Rc::new(std::collections::BTreeMap::new()),
             elfmain_main_decl: None,
@@ -3934,6 +3940,7 @@ impl Architecture {
         self.analysis_addrtable = false; // Ghidra AddressTableAnalyzer default-off
         self.analysis_operand_refs = false; // Ghidra ScalarOperandAnalyzer !isElf default-off
         self.analysis_formatstring = crate::kuna_formatstring::FormatStringMode::Static; // (kuna) DIV: the LOAD-TIME format-string resolver default-ON. Ghidra's own FormatStringAnalyzer is default-off because it costs a second decompile; the static resolver reads the constant out of the image instead, so it costs nothing per function. `full` restores the second-decompile loop. Gated on the Listing (default-off), so every parity gate is byte-identical
+        self.analysis_format_callees = true; // (kuna) format functions no table declares; needs the Listing, so every parity gate is byte-identical
         self.analysis_listing = false; // Listing/xref tier default-off
         self.analysis_fast_funcdisc = false; // bounded whole-project discovery default-off
         self.analysis_lazyfuncs = false;

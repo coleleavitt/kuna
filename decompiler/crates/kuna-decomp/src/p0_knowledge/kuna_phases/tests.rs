@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_384() {
-    assert_eq!(kuna_num_settables(), 384);
-    assert_eq!(SETTABLE_TABLE.len(), 384);
+fn settable_count_is_385() {
+    assert_eq!(kuna_num_settables(), 385);
+    assert_eq!(SETTABLE_TABLE.len(), 385);
 }
 
 #[test]
-fn tier_counts_are_125_core_146_transform_113_analysis() {
+fn tier_counts_are_125_core_146_transform_114_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_146_transform_113_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 146, 113));
+    assert_eq!((core, transform, analysis), (125, 146, 114));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_167() {
+fn option_values_live_value_present_for_168() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -968,7 +968,8 @@ fn option_values_live_value_present_for_167() {
     // 155 -> 156: +1 for `copyrun` (live_field = copy_run).
     // 154 -> 155: +1 for `arithhelpers` (live_field = arith_helpers).
     // 154 -> 155: +1 for `contextnames` (live_field = context_names).
-    assert_eq!(with_live, 176);
+    // 154 -> 155: +1 for `formatcallees` (live_field = analysis_format_callees).
+    assert_eq!(with_live, 177);
 }
 
 #[test]
@@ -1211,7 +1212,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `copyrun`; its P3 row sits beside `repstring`.
     // +1 for `arithhelpers`; its P2 row sits beside `msvcftol`.
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
-    assert_eq!(json.matches("},\n").count(), 383);
+    // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
+    assert_eq!(json.matches("},\n").count(), 384);
 }
 
 #[test]
