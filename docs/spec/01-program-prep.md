@@ -7822,6 +7822,32 @@ the C++ inheritance chain modeled by composition:
   parse failures retain the headerless-image command guidance even when the first byte
   is `<`.
 
+(kuna) **Firmware front ends.** `decompiler/crates/kuna-analysis/src/loader/firmware/`
+holds the probes that turn a firmware file into raw-image arguments or into
+modules. `cortexm.rs (probe)` reads a Cortex-M vector table the way IDA 9.5's
+`cortex_m.py` does: word 0 an initial stack pointer in `0x10000000..0x40000000`
+(SRAM or a CCM/TCM alias), the fifteen system words zero or odd pointers below
+`0x20000000` with Reset non-zero (reserved slots are not checked, since NXP
+parts keep a checksum there), then IRQ words to the first word that is neither,
+at most 496, trailing zeros trimmed. The base is voted: every 2-byte-aligned
+dummy handler after the table (`bx lr`, `b .`, `b.w .`, `nop; b .`) and every
+handler target give the candidate `target - offset` when it is 0x1000-aligned,
+and the most-voted candidate wins with at least 15 votes; else the first of
+0x08000000, 0, 0x400000, 0x10000, 0x8000, 0x10000000 that holds every handler;
+else the page below the lowest handler. Handlers are named `<Exception>_Handler`
+and `IRQ<n>_Handler`, a target several IRQs share is `Default_Handler`. The CLI
+(`kuna-cli/src/rawfront.rs (prepare)`) turns the table into `--raw-image`
+arguments before a subcommand parses its own, so the engine sees an ordinary
+raw load. `uefifv.rs (walk)` walks UEFI PI firmware volumes for `kuna unpack`:
+FV header (`_FVH`, extended header), FFS files (24- or 32-byte headers, 8-byte
+alignment, erase polarity from the volume attributes), sections (4-byte
+alignment, extended sizes), nested volumes in `FIRMWARE_VOLUME_IMAGE` sections
+and RAW files, compression sections stored uncompressed, and GUID-defined
+sections for EDK2 LZMA (`lzma-rs`, the 13-byte LZMA-alone header), LZMA with
+the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Brotli
+(`brotli-decompressor`, after EDK2's 16-byte size header) and CRC32. Every
+PE32/TE section is a module named by the file's UI section.
+
 The real-binary path of §1.2 is the fourth binding, console-side: `bootstrap_from_object`
 plays the leaf role itself — it resolves the language from the object header
 (with the compiler-model fallback retry), runs `build_engine_and_init`, attaches

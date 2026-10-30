@@ -4,6 +4,7 @@
 //! ```text
 //!   kuna unpack <binary> [-o OUT] [--json]
 //!   kuna unpack <dyld_shared_cache> (--list | --image NAME [-o OUT]) [--json]
+//!   kuna unpack <uefi-firmware.fd> [--list] [-o DIR] [--json]
 //!   kuna unpack <binary> --raw-lzma START:END [--lzma-props P] [--raw-offsets]
 //! ```
 //!
@@ -109,8 +110,10 @@ pub fn run(argv: &[String]) -> i32 {
     if kuna_analysis::loader::kuna_dyldcache::is_dyld_cache_file(std::path::Path::new(&args.binary)) {
         return dyld::run(&args.binary, args.output.as_deref(), args.list, args.json);
     }
-    if args.list {
-        eprintln!("error: --list applies to a dyld shared cache; {} is not one", args.binary);
+    if args.list
+        && !std::fs::read(&args.binary).is_ok_and(|b| kuna_analysis::loader::firmware::uefifv::has_volume(&b))
+    {
+        eprintln!("error: --list applies to a dyld shared cache or a UEFI firmware image; {} is neither", args.binary);
         return 2;
     }
 
@@ -121,6 +124,10 @@ pub fn run(argv: &[String]) -> i32 {
             return 1;
         }
     };
+
+    if kuna_analysis::loader::firmware::uefifv::has_volume(&image) {
+        return run_firmware_volume(&args, &image);
+    }
 
     // NEOLite is recognized before UPX is even asked, on its own loader section
     // rather than on UPX's failure, so nothing about the UPX arm -- including
@@ -711,6 +718,7 @@ fn parse_props(spec: &str) -> Result<(u8, u8, u8), String> {
 fn usage() {
     eprintln!("usage: kuna unpack <binary> [-o OUT] [--json]");
     eprintln!("       kuna unpack <dyld_shared_cache> (--list | --image NAME [-o OUT]) [--json]");
+    eprintln!("       kuna unpack <uefi-firmware.fd> [--list] [-o DIR] [--json]");
     eprintln!(
         "       kuna unpack <binary> --raw-lzma START:END [--lzma-props pb,lp,lc] \\\n                                    [--raw-offsets] [--raw-max-size N] [-o OUT] [--json]"
     );
@@ -724,4 +732,76 @@ fn usage() {
     eprintln!("  --raw-offsets          the range endpoints are file offsets, not addresses.");
     eprintln!("  --raw-max-size N       cap a length-less decode at N bytes (default 512 MiB).");
     eprintln!("  --json                 emit {{binary,output,packer,..}} describing what was unpacked.");
+}
+
+/// A UEFI firmware image: write every PE32/TE module of every volume to
+/// `<binary>.modules/` (or `-o DIR`) as `<name>.efi` / `<name>.te`; `--list`
+/// only lists them.
+fn run_firmware_volume(args: &Args, image: &[u8]) -> i32 {
+    use kuna_analysis::loader::firmware::uefifv;
+    let walk = uefifv::walk(image);
+    let dir = PathBuf::from(args.output.clone().unwrap_or_else(|| format!("{}.modules", args.binary)));
+    if !args.list {
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            eprintln!("error: could not create {}: {e}", dir.display());
+            return 1;
+        }
+    }
+    let mut used = std::collections::BTreeMap::<String, usize>::new();
+    let mut rows = Vec::new();
+    for m in &walk.modules {
+        let stem = m.name.clone().unwrap_or_else(|| m.guid.clone());
+        let stem: String = stem.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+        let n = used.entry(stem.clone()).or_default();
+        *n += 1;
+        let stem = if *n == 1 { stem } else { format!("{stem}_{n}") };
+        let file = format!("{stem}.{}", if m.te { "te" } else { "efi" });
+        if !args.list {
+            if let Err(e) = std::fs::write(dir.join(&file), &m.image) {
+                eprintln!("error: could not write {file}: {e}");
+                return 1;
+            }
+        }
+        rows.push((file, m));
+    }
+    if args.json {
+        let items: Vec<Json> = rows
+            .iter()
+            .map(|(file, m)| {
+                Json::Object(vec![
+                    ("file".into(), Json::Str(file.clone())),
+                    ("guid".into(), Json::Str(m.guid.clone())),
+                    ("name".into(), m.name.clone().map_or(Json::Null, Json::Str)),
+                    ("type".into(), Json::Str(uefifv::file_type_name(m.file_type).into())),
+                    ("te".into(), Json::Bool(m.te)),
+                    ("size".into(), Json::Number(m.image.len().to_string())),
+                ])
+            })
+            .collect();
+        let undecoded: Vec<Json> = walk.undecoded.iter().map(|u| Json::Str(u.clone())).collect();
+        let out = Json::Object(vec![
+            ("volumes".into(), Json::Number(walk.volumes.to_string())),
+            ("modules".into(), Json::Array(items)),
+            ("undecoded".into(), Json::Array(undecoded)),
+            ("directory".into(), if args.list { Json::Null } else { Json::Str(dir.display().to_string()) }),
+        ]);
+        println!("{}", dumps_indent2(&out));
+    } else {
+        let mut text = String::new();
+        for (file, m) in &rows {
+            let _ = writeln!(text, "{:<22} {} {:>8}  {}", uefifv::file_type_name(m.file_type), m.guid, m.image.len(), file);
+        }
+        for u in &walk.undecoded {
+            let _ = writeln!(text, "undecoded: {u}");
+        }
+        let _ = writeln!(
+            text,
+            "{} modules in {} volumes{}",
+            rows.len(),
+            walk.volumes,
+            if args.list { String::new() } else { format!(", written to {}", dir.display()) }
+        );
+        print!("{text}");
+    }
+    0
 }

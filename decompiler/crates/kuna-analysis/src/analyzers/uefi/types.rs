@@ -8,7 +8,7 @@
 
 use kuna_decomp::dtype::{type_metatype, Datatype, TypeFactory, TypeField};
 use kuna_decomp::fspec::PrototypePieces;
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::rc::Rc;
 
 pub(super) const TABLE_HEADER: &[(&str, &str)] = &[
@@ -175,16 +175,16 @@ pub(super) const TABLES: &[(&str, &[(&str, &str)])] = &[
 
 /// Builds and caches the EFI types for one image.
 pub(super) struct EfiTypes<'a> {
-    types: &'a dyn TypeFactory,
-    ptr: i32,
-    built: HashMap<&'static str, Rc<Datatype>>,
+    pub(super) types: &'a dyn TypeFactory,
+    pub(super) ptr: i32,
+    pub(super) built: BTreeMap<&'static str, Rc<Datatype>>,
 }
 
 impl<'a> EfiTypes<'a> {
     /// All of [`TABLES`] under `ptr`-byte pointers, or `None` when a name is
     /// already held by a type of another shape.
     pub(super) fn build(types: &'a dyn TypeFactory, ptr: i32) -> Option<Self> {
-        let mut me = EfiTypes { types, ptr, built: HashMap::new() };
+        let mut me = EfiTypes { types, ptr, built: BTreeMap::new() };
         for (name, fields) in TABLES {
             let st = me.build_struct(name, fields)?;
             me.built.insert(name, st);
@@ -227,7 +227,8 @@ impl<'a> EfiTypes<'a> {
     pub(super) fn parse(&self, spec: &str) -> Option<Rc<Datatype>> {
         let spec = spec.trim();
         if let Some(sig) = spec.strip_prefix("fn ") {
-            let code = self.types.get_type_code_proto(&self.pieces("", sig)?).ok()?;
+            let pieces = self.pieces("", sig)?;
+            let code = self.types.get_type_code_proto(&pieces).or_else(|_| self.types.get_type_code()).ok()?;
             return self.types.get_type_pointer(self.ptr, code, 1).ok();
         }
         if let Some(open) = spec.find('[') {
@@ -252,7 +253,7 @@ impl<'a> EfiTypes<'a> {
             "UINT64" => int(8),
             "UINTN" => int(self.ptr),
             "BOOLEAN" => t.get_base(1, type_metatype::TYPE_BOOL).ok(),
-            "CHAR16" => t.get_type_char(2).ok(),
+            "CHAR16" => t.get_type_char(2).or_else(|_| t.get_base(2, type_metatype::TYPE_UINT)).ok(),
             "CHAR8" => t.get_type_char(1).ok(),
             "EFI_STATUS" => typedef(int(self.ptr), "EFI_STATUS"),
             "EFI_TPL" => typedef(int(self.ptr), "EFI_TPL"),

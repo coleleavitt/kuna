@@ -77,6 +77,7 @@ pub mod kuna_elfgotimports;
 // synthetic extern slot, and mark both halves foldable.
 pub mod kuna_msvcfpconst;
 pub mod format;
+pub mod firmware;
 // (kuna) PE/Mach-O import-slot call binding (`peimportcall`): `externref` over
 // typed import-pointer slots + upstream's strictly PE-only no-return API names.
 pub mod kuna_peimportcall;

@@ -27,6 +27,7 @@ mod optname;
 mod output;
 mod paths;
 mod project_stream;
+mod rawfront;
 mod runtime_hints;
 mod skill;
 mod specs;
@@ -80,6 +81,7 @@ fn main() -> ExitCode {
         eprintln!("error: {e}");
         return ExitCode::from(2);
     }
+    let rest = rawfront::prepare(sub, &rest);
     let rest = rest.as_slice();
     runtime_hints::note_for_invocation(sub, rest);
     let code = match sub {

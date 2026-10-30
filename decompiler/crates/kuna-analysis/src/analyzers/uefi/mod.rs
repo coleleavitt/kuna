@@ -20,7 +20,7 @@ mod types;
 
 use crate::pass::{AnalysisCtx, AnalysisOutput, AnalysisPass, Phase, FidMatch, SymFact, SymKind, TypedDataFact};
 use object::{Object, ObjectSection, SectionKind};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::OnceLock;
 
 
@@ -42,8 +42,8 @@ const PEI_GETTERS: &[(&[u8], u64, &str)] = &[
 ];
 
 /// GUID bytes (in memory order) to the EDK2 name.
-pub fn guid_names() -> &'static HashMap<[u8; 16], &'static str> {
-    static DB: OnceLock<HashMap<[u8; 16], &'static str>> = OnceLock::new();
+pub fn guid_names() -> &'static BTreeMap<[u8; 16], &'static str> {
+    static DB: OnceLock<BTreeMap<[u8; 16], &'static str>> = OnceLock::new();
     DB.get_or_init(|| {
         include_str!("guids.txt")
             .lines()
@@ -109,7 +109,7 @@ impl AnalysisPass for UefiPass {
         }
 
         let mut claimed: Vec<(u64, u64)> = Vec::new();
-        let mut used_names: HashMap<String, u32> = HashMap::new();
+        let mut used_names: BTreeMap<String, u32> = BTreeMap::new();
         let mut unique = |name: &str| {
             let n = used_names.entry(name.to_string()).or_insert(0);
             *n += 1;
@@ -191,16 +191,25 @@ mod tests {
         assert_eq!(db.get(&loaded_image), Some(&"gEfiLoadedImageProtocolGuid"));
     }
 
+    fn make_factory(ptr: i32) -> kuna_decomp::dtype::TypeFactoryImpl {
+        let types = kuna_decomp::dtype::TypeFactoryImpl::new();
+        types.set_default_alignment_map();
+        types.set_max_basetype_size(8);
+        types.setup_sizes(Some(ptr), ptr, 4);
+        types.cache_core_types().unwrap();
+        types
+    }
+
     #[test]
     fn efi_tables_have_spec_offsets() {
-        use kuna_decomp::dtype::TypeFactoryImpl;
-        let factory = TypeFactoryImpl::new();
+        let factory = make_factory(8);
         let efi = types::EfiTypes::build(&factory, 8).expect("tables build");
         let st = efi.get("EFI_SYSTEM_TABLE").unwrap();
         assert_eq!(st.get_size(), 120);
         let bs = efi.get("EFI_BOOT_SERVICES").unwrap();
         assert_eq!(bs.get_size(), 24 + 44 * 8);
-        let efi32 = types::EfiTypes::build(&TypeFactoryImpl::new(), 4).expect("tables build");
+        let factory32 = make_factory(4);
+        let efi32 = types::EfiTypes::build(&factory32, 4).expect("tables build");
         assert_eq!(efi32.get("EFI_SYSTEM_TABLE").unwrap().get_size(), 72);
     }
 }

@@ -14,6 +14,8 @@ publish = false
 [workspace.dependencies]
 thiserror = "2.0"
 flate2 = "1.1"
+lzma-rs = "0.3"
+brotli-decompressor = "5"
 smallvec = "1.15"
 slotmap = "1.0"
 object = { version = "0.39", default-features = false, features = ["read_core", "elf", "pe", "macho", "coff", "std"] }
