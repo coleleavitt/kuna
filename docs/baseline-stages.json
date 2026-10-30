@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3684,
-    3684
+    3694,
+    3694
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 411 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 414 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -3615,6 +3615,16 @@
     "data:varsources #7: address-tied stack storage stays visible",
     "data:varsources #8: every angr local declaration has a source",
     "data:varsources #9: Ghidra naming still omits sources",
+    "data:vectorabi #10: on, a VEX.128 add is __m128 in and out",
+    "data:vectorabi #1: off, addv takes and returns 8-byte scalars",
+    "data:vectorabi #2: off, the VADDPS lanes print as scalar floats packed into a CONCAT44",
+    "data:vectorabi #3: off, ymm0 is read back out of the widened zmm0",
+    "data:vectorabi #4: on, the lane run is one intrinsic with __m256 in and out",
+    "data:vectorabi #5: on, addv returns the fused add",
+    "data:vectorabi #6: on, integer vectors are __m256i",
+    "data:vectorabi #7: on, all three FMA vectors are arguments",
+    "data:vectorabi #8: on, the merge mask folds into the intrinsic",
+    "data:vectorabi #9: on, EVEX.z gives the zero-masking form",
     "data:volatile LDM: first read",
     "data:volatile LDM: fourth read",
     "data:volatile LDM: second read",

@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_411() {
-    assert_eq!(kuna_num_settables(), 411);
-    assert_eq!(SETTABLE_TABLE.len(), 411);
+fn settable_count_is_414() {
+    assert_eq!(kuna_num_settables(), 414);
+    assert_eq!(SETTABLE_TABLE.len(), 414);
 }
 
 #[test]
-fn tier_counts_are_130_core_153_transform_128_analysis() {
+fn tier_counts_are_133_core_153_transform_128_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_153_transform_128_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 153, 128));
+    assert_eq!((core, transform, analysis), (133, 153, 128));
 }
 
 #[test]
@@ -1247,7 +1247,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `ehcold`.
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
-    assert_eq!(json.matches("},\n").count(), 410);
+    assert_eq!(json.matches("},\n").count(), 413);
 }
 
 #[test]

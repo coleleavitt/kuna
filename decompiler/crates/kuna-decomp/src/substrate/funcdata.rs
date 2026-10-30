@@ -374,6 +374,9 @@ pub struct Funcdata {
     /// `(comment_type, placement_address, text)`; the function address is
     /// `baseaddr`.
     pending_comments: Vec<(kuna_base::types::uint4, Address, String)>,
+    /// (kuna `vectorabi`) Flow met a vector operation (a fused lane run or a
+    /// vector user-op), so the function's prototypes use the vector model.
+    pub kuna_vector_code: bool,
     /// Names `ActionMapGlobals` gave to the uncovered parts of a global accessed
     /// wider than its Symbol (C++ `Funcdata::coverVarnodes`): `(address, size,
     /// name)`.
@@ -797,6 +800,7 @@ impl Funcdata {
             stack_alias_holds: None,
             callee_memory: std::collections::HashMap::new(),
             pending_comments: Vec::new(),
+            kuna_vector_code: false,
             global_covers: Vec::new(),
             kuna_infertypes_settled: false,
             kuna_call_target_types: std::collections::HashMap::new(),

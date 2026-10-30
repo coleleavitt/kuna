@@ -1491,6 +1491,16 @@ Three tiers:
 | the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl) |
 | a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl) |
 | --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl) |
+| avx code reads SUB6432(zmm0,0) instead of ymm0 | [`vexzeroupper`](#vexzeroupper) |
+| a ymm or xmm argument shows as a 64-byte zmm local | [`vexzeroupper`](#vexzeroupper) |
+| vector values are widened to char[64] | [`vexzeroupper`](#vexzeroupper) |
+| eight float additions on slices of one register instead of a vector add | [`lanefuse`](#lanefuse) |
+| avx-512 mask applied as sixteen per-lane multiply-or statements | [`lanefuse`](#lanefuse) |
+| a vector function body is one statement per lane | [`lanefuse`](#lanefuse) |
+| a function taking __m256 shows (void) parameters and reads ymm registers as locals | [`vectorabi`](#vectorabi) |
+| a vector-returning function is void or undefined32 | [`vectorabi`](#vectorabi) |
+| x86-64 xmm parameter wider than 8 bytes is lost | [`vectorabi`](#vectorabi) |
+| char[32] locals for vector values | [`vectorabi`](#vectorabi) |
 | vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
 | fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
 | avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
@@ -4704,6 +4714,30 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default (DIV-143). Keep it on when a function's body re-declares one of its own parameters -- the shape is a signature `f(unsigned int a0, ...)` immediately followed by `int4 a0;`, with `&a0` the only use, and the disassembly showing that `&a0` is a `LEA` of the parameter's own frame slot. It is the standard rendering for a parameter passed by address to an API (`CryptDeriveKey`, `GetTokenInformation`, any out-parameter), because the body then never reads the slot as a value and the parameter's storage carries no Varnode. Inert unless an `&symbol` reference resolves to a `function_parameter` Symbol, so any function that does not take the address of a parameter is byte-identical. Flip OFF to restore the duplicate declaration -- worth doing only to confirm that a variable you expected to be a local really is the parameter.
 - **Where / provenance:** P9/naming-policy · kuna · correctness-fix · repipe-address-taken-key-parameter
 - **Example:** `option paramrefdecl off`
+
+### `vexzeroupper` -- on | off, default `on`
+
+- **Symptoms:** avx code reads SUB6432(zmm0,0) instead of ymm0; a ymm or xmm argument shows as a 64-byte zmm local; vector values are widened to char[64].
+- **What it does:** Split each VEX/EVEX zero-upper register write at the result's width. The x86 SLEIGH spec writes `ZmmReg1 = zext(result)` for every VEX-encoded instruction that writes an XMM or YMM register, so each write overlaps every read of the same XMM/YMM register and heritage widens the storage to all 64 bytes of ZMM: a function that reads ymm0 and returns in ymm0 had a 64-byte zmm0 input and read it back as `SUB6432(zmm0,0)`. At flow time each such `INT_ZEXT` into a 32- or 64-byte register becomes a write of the result's own width (the producing user-op writes the low register directly when its temporary has no other reader) plus zero fills of the bytes above it, cut at the YMM/ZMM boundary. x86-64 only.
+- **When to flip:** On by default: AVX code keeps xmm/ymm values at their width, which the vector calling convention (`vectorabi`) needs. Turn it off to see the SLEIGH spec's whole-ZMM writes.
+- **Where / provenance:** P2/flow-follow · kuna · correctness-fix · ida95-46
+- **Example:** `--option vexzeroupper off`
+
+### `lanefuse` -- on | off, default `on`
+
+- **Symptoms:** eight float additions on slices of one register instead of a vector add; avx-512 mask applied as sixteen per-lane multiply-or statements; a vector function body is one statement per lane.
+- **What it does:** Re-fuse the per-lane p-code of a vector instruction into one intrinsic op, and fold an AVX-512 write mask into the instruction's user-op. The x86 SLEIGH spec writes many SSE/AVX instructions lane by lane (`VADDPS ymm0,ymm0,ymm1` is eight FLOAT_ADDs on 4-byte slices), so heritage never sees the whole vector and the body prints as one float statement per lane. A run of two or more ops of one opcode (FLOAT_ADD/SUB/MULT/DIV, INT_ADD/SUB/MULT/AND/OR/XOR) whose output and inputs are consecutive equal-width slices of the same storage, covering 16, 32 or 64 bytes, becomes one built-in user-op named for the intrinsic (`_mm256_add_ps`, `_mm_add_epi32`, `_mm_and_si128`). An EVEX `{k}` mask, which the spec applies per lane after the user-op as `r[j] = zext(k_j)*r[j] | zext(!k_j)*src[j]`, becomes the user-op's masked form with the source and the mask as arguments (`_mm512_mask_add_ps(src, k, a, b)`, `_mm512_maskz_add_ps(k, a, b)` when EVEX.z is set). x86-64 only.
+- **When to flip:** On by default: vector code reads as one intrinsic per instruction and whole vectors flow into arguments and returns. Turn it off to see the SLEIGH lane statements.
+- **Where / provenance:** P2/flow-follow · kuna · new-analysis · ida95-46
+- **Example:** `--option lanefuse off`
+
+### `vectorabi` -- on | off, default `on`
+
+- **Symptoms:** a function taking __m256 shows (void) parameters and reads ymm registers as locals; a vector-returning function is void or undefined32; x86-64 xmm parameter wider than 8 bytes is lost; char[32] locals for vector values.
+- **What it does:** The SysV x86-64 vector calling convention, and the Intel vector types. The vendored x86-64-gcc.cspec describes XMM0-7 only as 8-byte float slots (XMMn_Qa), so a `__m128`, `__m256` or `__m512` argument (and #16: any XMM/YMM parameter wider than 8 bytes) had no entry: it read as an uninitialized local and the vector result was lost. With this option the default model gains, on each XMMn_Qa slot and in the same group, 16-, 32- and 64-byte entries on xmm/ymm/zmm n, and its output list the same three on register 0 (built once per model, like `armfloatreturn`). The operands and results of vector user-ops (the AVX SLEIGH ops with an intrinsic name and the `lanefuse` built-ins) take the Intel vector types `__m128`/`__m256`/`__m512` with the `d` and `i` variants from the intrinsic's element type, and a recovered vector return takes its producer's type. Applies to `x86:LE:64:default:gcc`.
+- **When to flip:** On by default: `__m256 addv(__m256 a0,__m256 a1) { return _mm256_add_ps(a0,a1); }`. Turn it off for the cspec's scalar-only float model.
+- **Where / provenance:** P4/input-prototype · kuna · correctness-fix · ida95-46
+- **Example:** `--option vectorabi off`
 
 ### `avxintrinsics` -- on | off, default `on`
 

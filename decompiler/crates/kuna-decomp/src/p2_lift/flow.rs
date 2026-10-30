@@ -1942,6 +1942,54 @@ truncating the fall-through here"
                 stat.seqnum = seq;
             }
             self.op_mark_start_instruction(firstop);
+            if self.data.get_arch().lane_fuse {
+                let mut ops = Vec::new();
+                let mut cursor = Some(firstop);
+                while let Some(op) = cursor {
+                    ops.push(op);
+                    cursor = self.dead_next(op);
+                }
+                let mut head = [0u8; 4];
+                let has_lanes = ops.iter().any(|&op| {
+                    self.data.obank().get(op).is_some_and(|o| {
+                        matches!(o.code(), OpCode::CPUI_FLOAT_ADD | OpCode::CPUI_FLOAT_SUB | OpCode::CPUI_FLOAT_MULT
+                            | OpCode::CPUI_FLOAT_DIV | OpCode::CPUI_INT_ADD | OpCode::CPUI_INT_SUB | OpCode::CPUI_INT_MULT
+                            | OpCode::CPUI_CALLOTHER)
+                    })
+                });
+                let fetched = has_lanes && self.data.get_arch().loader_fill(&mut head, curaddr).is_ok();
+                if has_lanes {
+                let vex = fetched && matches!(head[0], 0xc4 | 0xc5 | 0x62);
+                if !self.data.kuna_vector_code && crate::kuna_lanefuse::has_vector_run(&self.data, &ops) {
+                    self.data.kuna_vector_code = true;
+                }
+                crate::kuna_lanefuse::fuse(&mut self.data, &ops, vex)?;
+                if !self.data.kuna_vector_code {
+                    let vector = &self.data.get_arch().vector_userops;
+                    self.data.kuna_vector_code = ops.iter().any(|&op| {
+                        self.data.obank().get(op).is_some_and(|o| {
+                            o.code() == OpCode::CPUI_CALLOTHER
+                                && o.get_in(0).and_then(|v| self.data.vbank().get(v)).is_some_and(|v| {
+                                    u32::try_from(v.get_offset()).is_ok_and(|id| vector.binary_search_by_key(&id, |(i, _)| *i).is_ok())
+                                })
+                        })
+                    });
+                }
+                let evex_z = fetched && head[0] == 0x62 && head[3] & 0x80 != 0;
+                crate::kuna_lanefuse::fold_mask(&mut self.data, &ops, evex_z)?;
+                }
+            }
+            if self.data.get_arch().vex_zero_upper {
+                let mut insn = Vec::new();
+                let mut cursor = Some(firstop);
+                while let Some(op) = cursor {
+                    insn.push(op);
+                    cursor = self.dead_next(op);
+                }
+                for &op in &insn {
+                    crate::kuna_vexzeroupper::split(&mut self.data, op, &insn)?;
+                }
+            }
             if let Some(site) = eh_table.as_deref().and_then(|t| t.site_at(curaddr.get_offset())) {
                 if !self.is_flow_for_inline() {
                     let pad = Address::new(curaddr.get_space().expect("eh: code space").clone(), site.pad);

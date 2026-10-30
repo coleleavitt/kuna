@@ -1,0 +1,1 @@
+gcc -O2 -mavx2 -mfma -mavx512f -c vec.c -o vec.o && ld -shared -o vec_x86_64.so vec.o
