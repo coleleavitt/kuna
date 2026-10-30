@@ -2828,3 +2828,31 @@ reaches unmapped memory, which happens in a dyld-cache extract when it
 tail-branches into another library, is not inlined and stays a call. The
 detection is name based, like IDA's: a stripped image keeps its fragments as
 calls. Pinned by `tests/stages/kuna-outlined.xml`.
+
+## 2.14 AArch64 system registers and Apple instructions
+
+The AARCH64 SLEIGH spec named 304 system registers by hand; any other
+`MRS`/`MSR` lifted to `UnkSytemRegRead(op0, op1, CRn, CRm, op2)` /
+`UnkSytemRegWrite(..., Xt)`. `AARCH64_sysregs.sinc` defines 1,612 more as
+volatile 8-byte registers at `register:0x8000` (the `AARCH64.pspec` volatile
+ranges cover them), and `AARCH64_sysregs_cop.sinc` adds a `CopReg`
+constructor for each. The names come from two public tables: LLVM's AArch64
+system-register table, read back by disassembling every MRS/MSR encoding,
+and the Apple implementation-defined registers of the Asahi Linux m1n1
+project (`HID*`, `SPRR_*`, `GXF_*`, `CTRR_*`, `PMC*`, ...). Where the read
+and write names of one encoding differ, as for `DBGDTRRX_EL0` and
+`DBGDTRTX_EL0`, each direction gets its own constructor. A read of HID0_EL1
+now prints `v = hid0_el1;`, the same way `tpidrro_el0` always printed.
+
+`AARCH64_apple.sinc` decodes Apple's instructions in the unallocated
+`0x0020xxxx` space for every AArch64 image, as IDA does. The words are
+permanently undefined on other cores, so decoding them costs nothing there.
+The group is in bits 15..10: `MUL53LO`/`MUL53HI Vd, Vn` (0, 1),
+`WKDMC`/`WKDMD Xd, Xn` (2, 3; they replace two `NotYetImplemented`
+placeholders), AMX (4, `AARCH64_AMXext.sinc`), and in group 5 `GEXIT`,
+`GENTER #imm5` and `SDSB #imm5` (bits 9..5 = 0, 1, 3). Each lifts to an
+opaque pcodeop over its register operands, because the semantics are not
+documented. An iOS kernelcache function that used to stop at its first
+`GENTER` with a bad-instruction halt now decodes through it. These are
+decode-table corrections with no option. Pinned by
+`tests/stages/kuna-a64-sysregs.xml`.

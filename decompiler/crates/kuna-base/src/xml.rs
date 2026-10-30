@@ -2133,7 +2133,8 @@ mod tests {
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
         // and kuna-arm64evcall / arm64e virtual calls by pointer-auth discriminator
         // and kuna-outlined / the Darwin stack probe and MachineOutliner fragments
-        assert_eq!(count, 613, "corpus file count drifted");
+        // and kuna-a64-sysregs / AArch64 system-register names and Apple instructions
+        assert_eq!(count, 614, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
