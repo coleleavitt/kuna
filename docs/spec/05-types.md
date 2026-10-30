@@ -2711,6 +2711,62 @@ member access from pointer types, and `ruleaction_6.rs (RulePtraddUndo,
 RulePtrsubUndo)` in the main pool reverts them when the types they were built
 from degrade — the visible ping that the 7-pass ceiling exists to bound.
 
+### A static TLS variable is a field of the block below the thread pointer (`kuna_tlsnames.rs`)
+
+A local-exec access to a `__thread` variable is a load or store at a constant
+offset from the thread pointer: x86-64 `mov eax, fs:[-0x10]` lowers to
+`FS_OFFSET + -0x10`, and the untyped `fs_offset` input renders the access as
+`*(int *)(v1 + -0x10)`. The x86 TLS ABIs (variant II) place the executable's
+TLS block, `PT_TLS` rounded up to its alignment, immediately below the thread
+pointer, so the `STT_TLS` symbol with value `v` lives at
+`v - align_up(p_memsz, p_align)`. The `tlsnames` analysis pass
+(`decompiler/crates/kuna-analysis/src/analyzers/tls/mod.rs (TlsNamesPass)`, x86
+and x86-64 ELF images that are not relocatable objects) reads `PT_TLS` from the
+program headers and the defined `STT_TLS` symbols into a
+`decompiler/crates/kuna-decomp/src/p5_types/kuna_tlsnames.rs (TlsLayout)`
+(symbols sorted, a symbol that overlaps the previous one or runs past the block
+dropped), and the commit stores it on the architecture. `ActionTlsNames` runs
+before heritage like `pebnames`: when every use of the thread-pointer register
+(`FS_OFFSET` on x86-64, `GS_OFFSET` on x86) is an `INT_ADD` of a constant in
+`[-block_size, 0)`, it maps a type-locked Symbol `tls` over the register input,
+typed as a pointer to a `__tls_block` structure (each TLS symbol a field of its
+size, `undefined<n>` or a byte array, the rest holes) relative to the block's
+end. The thread pointer is one past the block, so the accesses render
+`tls[-1].counter = a0;`. A function that reads the thread control block above
+the pointer (the `fs:[0x28]` stack canary, the `fs:[0]` self pointer) or uses
+the register any other way is left as it was, so the canary keeps its form. A
+shared object's dynamic TLS goes through `__tls_get_addr` and is not touched.
+
+### A global takes the type of the values stored into it (`kuna_storetype.rs`)
+
+A global that only ever receives one kind of value has that value's type, but
+only the function that stores it knows: `gBS = SystemTable->BootServices` types
+the stored value from the entry's locked `EFI_SYSTEM_TABLE *` parameter, and
+every other function reads an untyped word and renders each boot-services call
+as an offset off it. `storetype` (default `uefi`) is a whole-program ledger in
+the `elemptr` style. After each decompile of a `decompile-all` or
+`decompile-project` batch,
+`decompiler/crates/kuna-decomp/src/p5_types/kuna_storetype.rs (record)` files,
+for every persistent varnode in the processor space, the function as a reader
+of that address, and, when the varnode is written by anything but an
+`INDIRECT`, a `MULTIEQUAL` or a `COPY` from the same address (a call's
+side-effect and the guards around it are not stores), the size and final type
+of the store. After the batch `decide` admits an address whose stores all have
+one size and one type, a pointer of that size to a named, complete structure
+or union: under `uefi` the structure's name starts with `EFI_` (only the `uefi`
+analysis pass builds such types, so the value acts on UEFI modules alone);
+under `all` any name but a synthesized `struct_N`/`anon_` record. The console
+(`kuna-console/src/project.rs (commit_store_type)`) maps a typelocked,
+namelocked symbol of that type at the address. A symbol that already starts
+there keeps its name unless it is unlocked, a typelocked one or one that only
+covers the address is left alone, and an unnamed EFI service-table pointer
+takes its EDK2 name (`gBS`, `gST`, `gRT`, `gDS`). Every function the ledger saw
+refer to a committed address is then decompiled again, and a second round
+covers values read through a global typed in the first. A single-function
+decompile records nothing and is unchanged. On EDK2's DiskIoDxe the readers go
+from `(**(code **)(dat_1a70 + 0x30))(v3,v4)` to `(*gBS->FreePages)(v3,v4)`;
+the model is the global-resolution half of IDA 9.5's `uefi.so`.
+
 ### A value returned in a float register is a float (`kuna_floatreg.rs`)
 
 A calling convention that reserves registers for floating point makes the

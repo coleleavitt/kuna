@@ -886,6 +886,11 @@ kuna_options! { self, p1;
         Ok(msg)
     },
     "callerptr" => on_off!(caller_ptr, "Caller pointer-class parameter typing"),
+    "storetype" => {
+        let mode = crate::kuna_storetype::StoreTypeMode::parse(p1.trim()).map_err(KunaError::parse)?;
+        self.storetype = mode;
+        Ok(format!("global typing from stored values set to {}", mode.as_str()))
+    },
     "callbacktype" => {
         let (mode, msg) = crate::kuna_callbacktype::OptionCallbackType.apply(p1)?;
         self.callbacktype = mode;
@@ -930,6 +935,8 @@ kuna_options! { self, p1;
         ))
     },
     "win32sigs" => on_off!(analysis_win32sigs, "Built-in Win32 API signature table"),
+    "tlsnames" => on_off!(analysis_tlsnames, "Gate the static-TLS naming (`tlsnames`); default on."),
+    "uefi" => on_off!(analysis_uefi, "Gate the UEFI module markup pass (`uefi`); default on."),
     "declaredlibcproto" => {
         on_off!(analysis_declaredlibcproto, "Declared-name libc prototype lookup")
     },
@@ -1198,6 +1205,13 @@ kuna_options! { self, p1;
             "Full-depth DWARF type resolution turned {}",
             if val { "on" } else { "off" }
         ))
+    },
+    "dwarfglobaltypes" => on_off!(analysis_dwarfglobaltypes, "DWARF global types"),
+    "dwarfscopes" => {
+        let val = on_or_off(p1)?;
+        self.analysis_dwarfscopes = val;
+        std::env::set_var("KUNA_DWARFSCOPES", if val { "on" } else { "off" });
+        Ok(format!("DWARF lexical-block and location-list locals turned {}", if val { "on" } else { "off" }))
     },
     "dwarfstructs" => {
         let val = on_or_off(p1)?;

@@ -83,6 +83,9 @@
 //! `Rustc`/`Go` — so a PE/Mach-O detecting as `Gcc`/`Clang`/`Unknown` produces
 //! byte-identical output, and the **ELF path is untouched**.
 
+mod kuna_dwarfproducer;
+pub use kuna_dwarfproducer::dwarf_compiler;
+
 use object::macho::{MachHeader32, MachHeader64};
 use object::read::macho::{
     FatArch, LoadCommandVariant, MachHeader, MachOFatFile32, MachOFatFile64,
@@ -330,7 +333,7 @@ pub fn detect_compiler_elf(file: &object::File) -> Compiler {
         return Compiler::Gcc;
     }
 
-    Compiler::Unknown
+    dwarf_compiler(file).unwrap_or(Compiler::Unknown)
 }
 
 /// Detect the toolchain that produced a **PE** image.
@@ -433,7 +436,7 @@ pub fn detect_compiler_macho(file: &object::File, bytes: &[u8]) -> Compiler {
         return Compiler::Clang;
     }
 
-    Compiler::Unknown
+    dwarf_compiler(file).unwrap_or(Compiler::Unknown)
 }
 
 /// Format-neutral fallback for the formats we do not fingerprint (COFF object,

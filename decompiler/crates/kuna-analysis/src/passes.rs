@@ -100,6 +100,7 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         // direct `call` resolves to. Registered always; the COMMIT is gated by
         // `--option win32sigs on|off` via `engine.rs::analysis_pass_enabled`.
         Box::new(crate::protos::kuna_win32sigs::Win32SigsPass),
+        Box::new(crate::tls::TlsNamesPass),
         // S1 entry discovery: find function entry points for stripped targets —
         // ELF e_entry, DT_INIT/DT_FINI + INIT_ARRAY/FINI_ARRAY pointer tables,
         // `.eh_frame` FDE pcBegin starts, the x86-64 `_start`→`main` libc-start
@@ -562,6 +563,7 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // default run is byte-identical and bound to the real-PE path (the XML datatest
     // oracle is untouched). Types/typed-locals/lines are the deferred PR-P2/P3.
     if format == object::BinaryFormat::Pe {
+        passes.push(Box::new(crate::uefi::UefiPass));
         passes.push(Box::new(crate::pdb::PdbPass));
         // S1 PDB-procedure-interior entry suppression (`pdbinterior`): the same
         // `.pdb`'s S_GPROC32/S_LPROC32 code lengths reported on `pdb_bodies`, for

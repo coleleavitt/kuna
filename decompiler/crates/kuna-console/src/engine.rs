@@ -3056,6 +3056,8 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // address. Facts computed at LOAD, COMMITTED only when this gate is on, so
         // `off` renders exactly what no Win32 prototype at all renders.
         "win32sigs" => arch.analysis_win32sigs,
+        "tlsnames" => arch.analysis_tlsnames,
+        "uefi" => arch.analysis_uefi,
         "strings" => arch.analysis_strings,
         // (kuna `fatstr`) The Rust `&str`-record string pass — gated on the SAME
         // option mode the engine's (ptr,len) literal rule reads, so one option
@@ -4642,6 +4644,17 @@ fn commit_analysis_output(
     } else {
         out.cpp_dwarf.prototypes.clear();
     }
+    // 0d. (kuna `dwarfglobaltypes`) A DWARF global keeps its declared type:
+    //     its untyped sized entry is replaced by the typed one.
+    if let Some(layout) = out.tls_layout.take() {
+        prog.arch_mut().tls_layout = Some(Rc::new(layout));
+    }
+    let dwarf_globals = std::mem::take(&mut out.dwarf_typed_globals);
+    if prog.arch().analysis_dwarfglobaltypes {
+        let typed: std::collections::BTreeSet<u64> = dwarf_globals.iter().map(|g| g.addr).collect();
+        out.data_objects.retain(|d| !typed.contains(&d.addr));
+        out.typed_data.splice(0..0, dwarf_globals);
+    }
     // 0b. (kuna `swifttypes`) The Swift type-layout arm's facts, the same
     //     deferred shape: on, the typed metadata records and the accessor
     //     prototypes fold into their streams (the register-pinned parameters
@@ -5155,6 +5168,11 @@ fn commit_analysis_output(
     //    The shared `len / char_size` element count stays exact for both: a
     //    terminated fact's len includes its NUL slot, a bounded fact's len IS
     //    the element count (char_size 1, no terminator byte to add).
+    let typed_spans: Vec<(u64, u64)> = if prog.arch().analysis_datasyms {
+        out.typed_data.iter().map(|d| (d.addr, d.addr + d.type_.get_size().max(1) as u64)).collect()
+    } else {
+        Vec::new()
+    };
     for (fact, char_size) in out
         .bounded_strings
         .iter()
@@ -5181,7 +5199,7 @@ fn commit_analysis_output(
                 None => false,
             }
         };
-        if occupied {
+        if occupied || typed_spans.iter().any(|&(lo, hi)| fact.addr >= lo && fact.addr < hi) {
             continue;
         }
 

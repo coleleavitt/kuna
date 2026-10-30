@@ -1,6 +1,12 @@
 // Shared integration-test executable. Process-sensitive tests stay separate.
 mod common;
 
+#[path = "firmware_raw.rs"]
+mod firmware_raw;
+
+#[path = "uefi_store_types.rs"]
+mod uefi_store_types;
+
 #[path = "local_array_bits.rs"]
 mod local_array_bits;
 

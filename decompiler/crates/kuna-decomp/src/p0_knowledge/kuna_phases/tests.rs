@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_371() {
-    assert_eq!(kuna_num_settables(), 371);
-    assert_eq!(SETTABLE_TABLE.len(), 371);
+fn settable_count_is_376() {
+    assert_eq!(kuna_num_settables(), 376);
+    assert_eq!(SETTABLE_TABLE.len(), 376);
 }
 
 #[test]
-fn tier_counts_are_123_core_142_transform_106_analysis() {
+fn tier_counts_are_123_core_142_transform_111_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_142_transform_106_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 142, 106));
+    assert_eq!((core, transform, analysis), (123, 142, 111));
 }
 
 #[test]
@@ -322,6 +322,16 @@ fn option_values_live_value_present_for_163() {
         // with no codegen live reader (read console-side via kuna_live_value),
         // same as `libcsigs` above. Default-ON (DIV-141).
         "win32sigs",
+        // (kuna) Static TLS naming -- an analysis-pass gate read console-side. Default-ON.
+        "tlsnames",
+        // (kuna) DWARF lexical-block and location-list locals -- a load-time env bridge.
+        "dwarfscopes",
+        // (kuna) DWARF global types -- a commit-time gate read console-side.
+        "dwarfglobaltypes",
+        // (kuna) Global typing from stored values -- a batch ledger read in project.rs.
+        "storetype",
+        // (kuna) The UEFI module pass -- an analysis-pass gate read console-side. Default-ON.
+        "uefi",
         // (kuna) The libgcc `__divdi3` contract -- an analysis-pass gate read
         // console-side via kuna_live_value, like `libcsigs`. Default-off.
         "libgccsigs",
@@ -1192,7 +1202,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `machoehframe`; its P1 row follows `unwindstarts`.
     // +1 for `machobinds`; its P1 row follows `dyldcrossrefs`.
     // +1 for `exporttrie`; its P1 row follows `machobinds`.
-    assert_eq!(json.matches("},\n").count(), 370);
+    // +5 for `uefi`, `storetype`, `dwarfscopes`, `dwarfglobaltypes` and `tlsnames`.
+    assert_eq!(json.matches("},\n").count(), 375);
 }
 
 #[test]

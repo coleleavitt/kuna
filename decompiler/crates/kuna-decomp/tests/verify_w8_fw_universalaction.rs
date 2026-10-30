@@ -132,8 +132,8 @@ fn w8_fw_universalaction_allgroups_full_order_count_head_tail() {
         head,
         vec![
             "universal", "start", "constbase", "linuxsyscall", "x64syscall", "syscallregs",
-            "pebnames", "msvcstrappend", "normalizesetup", "defaultparams", "extrapopsetup",
-            "prototypetypes", "funclink", "funclink_outonly", "fullloop",
+            "pebnames", "tlsnames", "msvcstrappend", "normalizesetup", "defaultparams",
+            "extrapopsetup", "prototypetypes", "funclink", "funclink_outonly",
         ]
     );
 

@@ -926,6 +926,22 @@ Three tiers:
 | kuna functions lists <dll>_Ordinal_<n> imports | [`peordinal`](#peordinal) |
 | a BSTR or VARIANT api call has no prototype because its import is ordinal-only | [`peordinal`](#peordinal) |
 | a winsock program shows socket, connect and recv as ordinal placeholders | [`peordinal`](#peordinal) |
+| an EFI driver entry point takes two undefined8 parameters | [`uefi`](#uefi) |
+| a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...) | [`uefi`](#uefi) |
+| a protocol GUID in .data is an unnamed 16-byte blob | [`uefi`](#uefi) |
+| a DXE core's static boot-services table is raw words | [`uefi`](#uefi) |
+| a global holding a service table is an untyped dat_ word in every function but the one that stores it | [`storetype`](#storetype) |
+| a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool | [`storetype`](#storetype) |
+| the same global prints typed in one function and untyped in the next | [`storetype`](#storetype) |
+| a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes) |
+| a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes) |
+| a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes) |
+| a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset | [`tlsnames`](#tlsnames) |
+| thread-local variables of an executable have no names although .symtab has STT_TLS symbols | [`tlsnames`](#tlsnames) |
+| the TLS block is not modelled | [`tlsnames`](#tlsnames) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3413,6 +3429,46 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default) on any PE. The tell-tale of the gap is OLEAUT32_Ordinal_2, WS2_32_Ordinal_23 or MSVBVM60_Ordinal_595 in decompile output, kuna functions or kuna xrefs. Flip off to get back the synthesized <DLL>_Ordinal_<n> names, e.g. to compare against a tool that prints ordinals, or if a target ships a private DLL under one of these names with a different export layout.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-peordinal
 - **Example:** `--option peordinal off`
+
+### `uefi` -- on | off, default `on`
+
+- **Symptoms:** an EFI driver entry point takes two undefined8 parameters; a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...); a protocol GUID in .data is an unnamed 16-byte blob; a DXE core's static boot-services table is raw words.
+- **What it does:** UEFI module markup for a PE image whose Subsystem is an EFI application, boot driver, runtime driver or ROM (10..13). The entry point gets the locked prototype EFI_STATUS _ModuleEntryPoint(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable). EFI_SYSTEM_TABLE, EFI_BOOT_SERVICES, EFI_RUNTIME_SERVICES, EFI_DXE_SERVICES, EFI_PEI_SERVICES, the console text protocols and EFI_GUID are built from the UEFI and PI specifications with natural alignment for the image's pointer width, and every service member is a typed function pointer, so `SystemTable->BootServices->LocateProtocol(&guid, 0, &iface)` renders as a member call with its arguments. Every 16-byte value in a data section equal to a GUID declared in the EDK2 package files (965 names, gEfiLoadedImageProtocolGuid and the rest) is named and typed EFI_GUID. A service table the module defines statically (the DXE, PEI and SMM cores) is found by its EFI_TABLE_HEADER signature (IBI SYST, BOOTSERV, RUNTSERV, DXE_SERV, PEI SERV) and typed. The ARM PEI-services getters (Thumb `mrc p15,0,r0,c13,c0,2; bx lr`, the A32 form, and AArch64 `mrs x0, tpidr_el0; ret`) are named ArmReadTpidrurw and return EFI_PEI_SERVICES **.
+- **When to flip:** On by default; it only acts on EFI-subsystem PE images, so every other input is byte-identical. Flip off to see the module without the EFI types: the entry then takes two untyped words and every service call is an indirect call through an offset.
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-53
+- **Example:** `option uefi off`
+
+### `storetype` -- off | uefi | all, default `uefi`
+
+- **Symptoms:** a global holding a service table is an untyped dat_ word in every function but the one that stores it; a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool; the same global prints typed in one function and untyped in the next.
+- **What it does:** Type a global from the values the program stores into it, across a whole-program batch (decompile-all, decompile-project). The function that stores `gBS = SystemTable->BootServices` is the only one that knows the global is an EFI_BOOT_SERVICES *; every function that reads it sees an untyped word and renders each service call as an offset off it. After each decompile of the batch a ledger records the type every written global took in that function and which functions refer to each global. After the batch, a global every store types alike as a pointer to a named, complete structure is committed with that type (typelock), keeping a name a symbol already gives it, and the functions that refer to it are decompiled again; a second round covers a value read through a global typed in the first. An EFI service-table pointer gets its EDK2 name (gBS, gST, gRT, gDS) when it had none. `uefi` admits only pointers to EFI_* structures, which only the `uefi` pass builds, so it acts on UEFI modules alone; `all` admits any named, complete structure or union except synthesized struct_N and anon_ records. A single-function decompile has no batch and is unchanged.
+- **When to flip:** Default `uefi`: a UEFI driver's gBS/gST/gRT read in every helper as typed tables (gBS->AllocatePool(...)) instead of (**(code **)(dat_1a70 + 0x40))(...). Flip to `all` to type other globals the same way (a FILE * a program caches, a context pointer) on any binary; flip `off` to compare.
+- **Where / provenance:** P5/type-propagation · ida · analysis-enablement · ida95-54
+- **Example:** `option storetype all`
+
+### `dwarfscopes` -- on | off, default `on`
+
+- **Symptoms:** a variable declared inside a loop or if block of a -g binary is an anonymous vN; a clang -O0 binary names the wrong stack slot after a DWARF local; a -O1 spilled variable has no name although DWARF describes its slot.
+- **What it does:** Import DWARF stack locals from nested lexical blocks and from location lists, not only from a subprogram's direct children with a single DW_OP_fbreg expression. A local declared inside a loop body or an if block (DW_TAG_lexical_block, at any depth) is a fixed stack object exactly like a function-scope one, and a variable whose DW_AT_location is a location list takes the stack slot when every frame-relative entry of the list names the same one (a value spilled to one slot for part of its life); register-only entries are left to inference. Independently of this option, a DW_OP_fbreg offset is now taken relative to the subprogram's DW_AT_frame_base: gcc's DW_OP_call_frame_cfa as before, and clang's frame-pointer bases (RBP on x86-64, EBP on i386, x29 on AArch64, s0 on RISC-V) at the distance the standard prologue leaves them below the CFA; any other register frame base places no locals, where it used to place every one of them 16 bytes off and name the wrong slot. A load-time env bridge (KUNA_DWARFSCOPES): set it before the image is loaded.
+- **When to flip:** On by default: `char scratch[32]` declared in a loop body is named and typed instead of `char v1 [31]`, and clang -O0 binaries name the right slot. Flip off to compare against direct-children-only import, or when nested locals that share one slot across sibling scopes make a function harder to read.
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-57
+- **Example:** `option dwarfscopes off`
+
+### `dwarfglobaltypes` -- on | off, default `off`
+
+- **Symptoms:** a global described by DWARF as a struct renders as raw offsets off its address; a DWARF-typed pointer global is a long or undefined8; a -g binary's globals have names but not types.
+- **What it does:** Give a DWARF global its declared type. The DWARF pass names every CU-level DW_TAG_variable with a DW_OP_addr location, but used its DW_AT_type only to size an undefined<size> symbol, namelocked and not typelocked, so inference re-derived the type at every use: a `struct config` global read as `*(int *)(cfg + 8)`, a `const char *` table as a long. On, a global whose type is complete, sized and not void is committed typelocked and namelocked with that type, in place of the untyped entry; its uses read as fields, elements and pointers of the declared type. An incomplete aggregate or an unsized type keeps the sized untyped entry. A typed global outranks a string literal the scan found inside its bytes, so a `char msg[16]` global prints by name.
+- **When to flip:** Off by default: a decompile-project export does not yet declare a typed global with its DWARF type in the generated header, so the exported body would read fields of an untyped object, and four workspace tests that pin global rendering move. Turn on for reading: the globals of a -g binary print with their source types (cfg.port, modes[i]). Leave off when exporting a project.
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-59
+- **Example:** `option dwarfglobaltypes off`
+
+### `tlsnames` -- on | off, default `on`
+
+- **Symptoms:** a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset; thread-local variables of an executable have no names although .symtab has STT_TLS symbols; the TLS block is not modelled.
+- **What it does:** Name an x86 ELF executable's static TLS variables where code reaches them through the thread pointer. A local-exec access to a __thread variable is a load at a constant offset from the thread pointer (x86-64 `mov eax, fs:[-0x10]`), lowered to FS_OFFSET + -0x10 and rendered as `*(int *)(v1 + -0x10)` off an untyped fs_offset input. The x86 TLS ABIs (variant II) put the executable's TLS block immediately below the thread pointer, so the STT_TLS symbol with value v sits at v - align_up(PT_TLS.p_memsz, PT_TLS.p_align). The loader reads PT_TLS and the defined STT_TLS symbols into a layout; in a function that reads FS_OFFSET (x86-64) or GS_OFFSET (x86) and never stores through it, the register input gets a type-locked Symbol `tls`, a pointer relative to a `__tls_block` structure (each TLS symbol a field of its size, the rest holes) that points at the block's end, so the access renders ADJ(tls)->counter. A function that stores through the base, a shared object (whose TLS goes through __tls_get_addr), an image without TLS symbols and every non-x86 target are unchanged.
+- **When to flip:** On by default: an executable's __thread variables read by name (ADJ(tls)->counter += a0) instead of offsets off fs_offset. Flip off to see the raw thread-pointer arithmetic, for example when checking the offsets against the ABI by hand.
+- **Where / provenance:** P5/type-propagation · ida · analysis-enablement · ida95-60
+- **Example:** `option tlsnames off`
 
 ## Core rendering defaults
 

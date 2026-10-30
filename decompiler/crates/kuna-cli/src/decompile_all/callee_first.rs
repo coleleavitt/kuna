@@ -93,6 +93,8 @@ pub(crate) fn decompile_callee_first(
     }
     let mut slots: Vec<Option<FuncResult>> = (0..targets.len()).map(|_| None).collect();
     kuna_decomp::kuna_elemptr::start(prog.arch_mut(), true);
+    let storetype = prog.arch().storetype;
+    prog.arch_mut().kuna_storetype.start(storetype);
     prog.arch_mut().kuna_voidret = Default::default();
     let mut reads = VoidReads::default();
     for &(index, park) in &plan {
@@ -118,7 +120,9 @@ pub(crate) fn decompile_callee_first(
         }
     }
     converge_element_globals_callee_first(prog, &targets, &plan, &base, &mut slots);
+    converge_store_types_callee_first(prog, &targets, &plan, &base, &mut slots);
     kuna_decomp::kuna_elemptr::stop(prog.arch_mut());
+    prog.arch_mut().kuna_storetype.stop();
     let mut results: Vec<FuncResult> = slots.into_iter().flatten().collect();
     if base.want_pointer_arguments {
         kuna_console::project::reconcile_pointer_arguments(&mut results);
@@ -215,6 +219,40 @@ impl VoidReads {
                 )
             {
                 self.changed.insert(k, self.stamp);
+            }
+        }
+    }
+}
+
+/// (kuna `storetype`) [`kuna_console::project::converge_store_types`] in plan
+/// order, each target with its own park decision.
+fn converge_store_types_callee_first(
+    prog: &mut ConsoleProgram,
+    targets: &[FunctionEntry],
+    plan: &[(usize, bool)],
+    base: &kuna_console::project::DecompileOptions,
+    slots: &mut [Option<FuncResult>],
+) {
+    let mode = prog.arch().storetype;
+    for _ in 0..2 {
+        let decided = prog.arch_mut().kuna_storetype.decide(mode);
+        let typed: Vec<u64> = decided
+            .into_iter()
+            .filter(|(addr, ty)| kuna_console::project::commit_store_type(prog, *addr, ty))
+            .map(|(a, _)| a)
+            .collect();
+        if typed.is_empty() {
+            return;
+        }
+        let redo = prog.arch().kuna_storetype.readers(&typed);
+        for &(index, park) in plan {
+            if !redo.contains(&targets[index].addr.get_offset()) {
+                continue;
+            }
+            let again = decompile_planned(prog, &targets[index], park, base);
+            match slots[index].as_ref() {
+                Some(first) if !kuna_console::project::redo_replaces(first, &again) => {}
+                _ => slots[index] = Some(again),
             }
         }
     }

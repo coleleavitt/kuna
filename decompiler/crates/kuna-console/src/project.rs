@@ -350,12 +350,17 @@ fn decompile_batch(
 ) -> Vec<FuncResult> {
     let mut out = Vec::with_capacity(targets.len());
     // Only the surfaces that can decide a function again pay for the replay list.
-    let replay = if prog.arch().struct_synth.fires() || prog.arch().elem_ptr {
+    let storetype = prog.arch().storetype;
+    let replay = if prog.arch().struct_synth.fires()
+        || prog.arch().elem_ptr
+        || storetype != kuna_decomp::kuna_storetype::StoreTypeMode::Off
+    {
         targets.clone()
     } else {
         Vec::new()
     };
     kuna_decomp::kuna_elemptr::start(prog.arch_mut(), targets.len() <= 1);
+    prog.arch_mut().kuna_storetype.start(if targets.len() <= 1 { kuna_decomp::kuna_storetype::StoreTypeMode::Off } else { storetype });
     let mut pending = targets.into_iter();
     decompile_pulled(prog, opts, &mut || pending.next(), &mut |r| {
         landed(&r);
@@ -363,7 +368,9 @@ fn decompile_batch(
     });
     converge_synthesized_structs(prog, opts, &replay, &mut out);
     converge_element_globals(prog, opts, &replay, &mut out);
+    converge_store_types(prog, opts, &replay, &mut out);
     kuna_decomp::kuna_elemptr::stop(prog.arch_mut());
+    prog.arch_mut().kuna_storetype.stop();
     if opts.want_pointer_arguments {
         reconcile_pointer_arguments(&mut out);
     }
@@ -398,6 +405,66 @@ pub fn converge_element_globals(
             }
         }
     }
+}
+
+/// (kuna `storetype`) Type the globals every store of the batch agrees about
+/// and decide again the functions that refer to them. Two rounds: a global
+/// typed in the first can make a value stored from it typed in the second
+/// (`gBS` first, then a protocol pointer read through it).
+pub fn converge_store_types(
+    prog: &mut ConsoleProgram,
+    opts: &DecompileOptions,
+    targets: &[FunctionEntry],
+    out: &mut [FuncResult],
+) {
+    let mode = prog.arch().storetype;
+    for _ in 0..2 {
+        let decided = prog.arch_mut().kuna_storetype.decide(mode);
+        let typed: Vec<u64> = decided.into_iter().filter(|(addr, ty)| commit_store_type(prog, *addr, ty)).map(|(a, _)| a).collect();
+        if typed.is_empty() {
+            return;
+        }
+        let redo = prog.arch().kuna_storetype.readers(&typed);
+        for (i, t) in targets.iter().enumerate() {
+            if i >= out.len() || !redo.contains(&t.addr.get_offset()) {
+                continue;
+            }
+            let again = decompile_entry(prog, t.clone(), opts);
+            if redo_replaces(&out[i], &again) {
+                out[i] = again;
+            }
+        }
+    }
+}
+
+/// Type the global at `vma` as `ty`, keeping a real name and giving an EFI
+/// service-table pointer its EDK2 name; false when a typelocked symbol already
+/// holds the address.
+pub fn commit_store_type(prog: &mut ConsoleProgram, vma: u64, ty: &std::rc::Rc<kuna_decomp::dtype::Datatype>) -> bool {
+    use kuna_decomp::varnode::varnode_flags;
+    let Some(space) = prog.arch().manage().get_default_code_space().cloned() else { return false };
+    let addr = kuna_base::address::Address::new(space, vma);
+    let invalid = kuna_base::address::Address::new_invalid();
+    let arch = prog.arch();
+    let Some(global) = arch.symboltab.get_global_scope() else { return false };
+    let existing = arch.symboltab.find_container(global, &addr, ty.get_size(), &invalid).map(|e| {
+        let entry = arch.symboltab.entry(global, e);
+        let sym = arch.symboltab.symbol(entry.symbol);
+        (entry.get_addr().get_offset() == vma, sym.get_name().to_string(), sym.is_type_locked(), sym.is_name_locked())
+    });
+    let name = match &existing {
+        Some((_, _, true, _)) | Some((false, ..)) => return false,
+        Some((true, name, false, true)) => name.clone(),
+        _ => kuna_decomp::kuna_storetype::efi_global_name(ty)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("dat_{vma:x}")),
+    };
+    let arch = prog.arch_mut();
+    let Ok((sym, _)) = arch.symboltab.upsert_data_mapped(global, &name, std::rc::Rc::clone(ty), &addr, &invalid) else {
+        return false;
+    };
+    arch.symboltab.set_attribute(sym, varnode_flags::typelock | varnode_flags::namelock);
+    true
 }
 
 /// (kuna `structsynth`) Decide again the functions that named a synthesized
@@ -850,6 +917,7 @@ pub fn decompile_pulled(
                 }
                 // (kuna `elemptr`) Record what this function said about each global.
                 kuna_decomp::kuna_elemptr::record(prog.arch_mut(), &fd);
+                kuna_decomp::kuna_storetype::record(&mut prog.arch_mut().kuna_storetype, &fd);
                 let original_display = fd.get_display_name().to_string();
                 if header_carries_types {
                     if let Some(display) = crate::kuna_projectfunctionnames::display(prog.arch(), &fd) {

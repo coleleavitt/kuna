@@ -2779,6 +2779,37 @@ moves.
   spellings the libc tables carry are `__stdcall` WinSock exports and keep the
   default. Only where the default model's `extrapop` is unknown and the spec
   registers a `__cdecl` model of its own, so x86-64 and every ELF are untouched.
+- **(kuna) UEFI module markup** (`uefi`, default on,
+  `decompiler/crates/kuna-analysis/src/analyzers/uefi/mod.rs (UefiPass)`):
+  a PE image whose optional-header `Subsystem` is 10..13 (EFI application, boot
+  service driver, runtime driver, ROM) is a UEFI module, and its entry point is
+  `EFI_STATUS _ModuleEntryPoint(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE
+  *SystemTable)`. The pass names the entry (as a symbol, and as a rename of the
+  engine placeholder the PE entry already carries) and parks that prototype on
+  it by address. The EFI types are built in Rust from the UEFI and PI
+  specifications (`analyzers/uefi/types.rs`): `EFI_GUID`, `EFI_TABLE_HEADER`,
+  `EFI_SYSTEM_TABLE`, `EFI_BOOT_SERVICES`, `EFI_RUNTIME_SERVICES`,
+  `EFI_DXE_SERVICES`, `EFI_PEI_SERVICES`, the console text protocols and
+  `EFI_CONFIGURATION_TABLE`, laid out with natural alignment at the image's
+  pointer width, with `EFI_STATUS`/`EFI_TPL`/`EFI_HANDLE`/`EFI_EVENT`/
+  `EFI_PHYSICAL_ADDRESS` as typedefs and every service member a function pointer
+  with its specification prototype, so a boot-services call renders as
+  `(*v1->LocateProtocol)(&guid,NULL,&iface)`. A `This` parameter is `VOID *`,
+  because a completed structure cannot hold a pointer to itself. Three data
+  facts follow. Every 16-byte value at 4-byte alignment in a data section that
+  equals a GUID declared in the EDK2 package files (`analyzers/uefi/guids.txt`,
+  965 names from edk2-stable202505, excluding values with eight or more zero
+  bytes such as `gZeroGuid`) becomes an `EFI_GUID` named after it, with a
+  numeric suffix on a repeat. Every 8-byte-aligned `EFI_TABLE_HEADER`
+  signature in a data section (`IBI SYST`, `BOOTSERV`, `RUNTSERV`, `DXE_SERV`,
+  `PEI SERV`) types the table a core module defines statically (`mBootServices`,
+  ...). Every ARM PEI-services getter (Thumb `mrc p15,0,r0,c13,c0,2; bx lr`, the
+  A32 form, AArch64 `mrs x0, tpidr_el0; ret`) in a code section becomes
+  `ArmReadTpidrurw` returning `EFI_PEI_SERVICES **`. A typed data fact outranks a
+  string literal the string scan found at the same address (a table's
+  signature reads as text), so the commit skips such a string. The model is IDA
+  9.5's `uefi.so` load-time half; the value tracking that names `gBS`/`gST` is
+  `storetype` (P5).
 - **(kuna) Declared names** (`declaredlibcproto`,
   `decompiler/crates/kuna-analysis/src/analyzers/protos/mod.rs (declared_libc_prototype)`,
   consulted from `decompiler/crates/kuna-console/src/engine.rs (ConsoleProgram::declare_function)`):
@@ -2923,15 +2954,39 @@ moves.
   location may include `DW_OP_plus_uconst` displacements, as emitted for interior
   equivalence views. Each unsigned LEB128 operand is decoded and added without
   signed overflow; truncated operands and dereference, piece, register, or value
-  expressions remain outside this fixed-local path. Nested lexical-block locals
-  and composite locations are a documented loss. (ida) The
+  expressions remain outside this fixed-local path. The offset is relative to
+  the subprogram's `DW_AT_frame_base`
+  (`decompiler/crates/kuna-analysis/src/analyzers/dwarf/kuna_dwarfscopes.rs (frame_base_offset)`):
+  gcc's `DW_OP_call_frame_cfa` is `call_frame_cfa`; clang's frame-pointer
+  bases are where the standard prologue leaves them, RBP on x86-64 16 bytes
+  below the CFA, EBP on i386 8 below, x29 on AArch64 16 below, s0 on RISC-V at
+  the CFA; any other register base (an `-fomit-frame-pointer` RSP) moves with
+  the body, so that function gets no DWARF stack locals. Every clang -O0 local
+  used to be placed 16 bytes off and named the wrong slot. (kuna `dwarfscopes`,
+  default on, a load-time env bridge `KUNA_DWARFSCOPES`) Locals nested in
+  `DW_TAG_lexical_block` scopes at any depth are collected in document order
+  like direct children, and a variable whose location is a location list takes
+  the stack slot when every frame-relative entry of the list names the same one;
+  register entries stay with inference. Inlined-subroutine locals and composite
+  (`DW_OP_piece`) locations remain a documented loss, and parameter storage
+  is still the calling convention's. (ida) The
   data-global fix (DIV-24): a global used to be mapped with a size-1 type, so any
   multi-byte access queried `queryContainer(addr, 4)` past it and rendered
   `dat_<addr>`; the pass now resolves `DW_AT_type` to a byte size
   (`pass.rs (DataObjectFact)`) and the commit maps an `undefined<size>` entry —
   namelocked but *not* typelocked, so inference still recovers the real type —
   matching how IDA Pro and Ghidra name symbol-table globals (`max_width`, not
-  `dat_<addr>`). Declaration-only DIEs are skipped so DWARF never fights libproto
+  `dat_<addr>`). (kuna `dwarfglobaltypes`, default off: a `decompile-project` export does not yet declare such a global with its type in the header) The pass also emits each
+  such global with its declared type (`pass.rs (AnalysisOutput::dwarf_typed_globals)`)
+  when that type is sized, complete and not void; with the option on the commit
+  drops the untyped entry for those addresses and maps the typed one,
+  typelocked and namelocked, first among the typed data facts, so
+  `cfg._12_4_ + cfg._8_4_` reads `cfg.flags + cfg.port` and
+  `*(char **)&modes[i * 8L]` reads `modes[i]`. (kuna) When neither `.comment`
+  nor the other signals name the toolchain, ELF and Mach-O detection falls back
+  to the debug info (`analyzers/sourcelang/kuna_dwarfproducer.rs (dwarf_compiler)`):
+  the first 16 compile units' `DW_AT_language` (Rust, Go, Swift) or
+  `DW_AT_producer` (`rustc`, `clang`, `GNU `) decide. Declaration-only DIEs are skipped so DWARF never fights libproto
   over imports. `dwarf_lines`
   (`decompiler/crates/kuna-analysis/src/analyzers/dwarf/lines.rs (DwarfLinesPass)`)
   is the separate `.debug_line` pass: each row becomes a `file:line` instruction
@@ -8094,6 +8149,46 @@ the C++ inheritance chain modeled by composition:
   ordinary load accepts XML only after parsing a document containing `<binaryimage>`;
   parse failures retain the headerless-image command guidance even when the first byte
   is `<`.
+
+(kuna) **Firmware front ends.** `decompiler/crates/kuna-analysis/src/loader/firmware/`
+holds the probes that turn a firmware file into raw-image arguments or into
+modules. `cortexm.rs (probe)` reads a Cortex-M vector table the way IDA 9.5's
+`cortex_m.py` does: word 0 an initial stack pointer in `0x10000000..0x40000000`
+(SRAM or a CCM/TCM alias), the fifteen system words zero or odd pointers below
+`0x20000000` with Reset non-zero (reserved slots are not checked, since NXP
+parts keep a checksum there), then IRQ words to the first word that is neither,
+at most 496, trailing zeros trimmed. The base is voted: every 2-byte-aligned
+dummy handler after the table (`bx lr`, `b .`, `b.w .`, `nop; b .`) and every
+handler target give the candidate `target - offset` when it is 0x1000-aligned,
+and the most-voted candidate wins with at least 15 votes; else the first of
+0x08000000, 0, 0x400000, 0x10000, 0x8000, 0x10000000 that holds every handler;
+else the page below the lowest handler. Handlers are named `<Exception>_Handler`
+and `IRQ<n>_Handler`, a target several IRQs share is `Default_Handler`. The CLI
+(`kuna-cli/src/rawfront.rs (prepare)`) turns the table into `--raw-image`
+arguments before a subcommand parses its own, so the engine sees an ordinary
+raw load. `uefifv.rs (walk)` walks UEFI PI firmware volumes for `kuna unpack`:
+FV header (`_FVH`, extended header), FFS files (24- or 32-byte headers, 8-byte
+alignment, erase polarity from the volume attributes), sections (4-byte
+alignment, extended sizes), nested volumes in `FIRMWARE_VOLUME_IMAGE` sections
+and RAW files, compression sections stored uncompressed, and GUID-defined
+sections for EDK2 LZMA (`lzma-rs`, the 13-byte LZMA-alone header), LZMA with
+the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Brotli
+(`brotli-decompressor`, after EDK2's 16-byte size header) and CRC32. Every
+PE32/TE section is a module named by the file's UI section. `containers.rs (detect)` reads U-Boot
+legacy images, Intel HEX, Motorola S-records, ESP32/ESP8266 application images,
+uClinux bFLT v4 (rebasing GOT entries and relocations past the 64-byte header,
+as `binfmt_flat` does) and Qualcomm MBN/SBL wrappers, and returns either one
+flat image (lowest to highest loaded address, gaps filled, at most 256 MiB;
+an ESP image whose segments span more keeps the segments in the entry's
+16 MiB window) with the processor, base and entries its header states, or the
+ELF it wraps. `svd.rs (parse)` reads a CMSIS-SVD device with the kuna XML
+reader: peripherals (`derivedFrom` reusing the base's registers and type),
+clusters, `dim`/`dimIncrement`/`dimIndex` expansion, register sizes inherited
+from the peripheral or device, and `<interrupt>` names. `Peripheral::c_struct`
+lays a peripheral out as a C structure, dropping a register that overlaps an
+earlier one and padding gaps. The CLI asserts the structure (`typedef`), the
+peripheral as a typed global at its base (`data`) and its register range as
+volatile, and names IRQ handlers from the interrupts.
 
 The real-binary path of §1.2 is the fourth binding, console-side: `bootstrap_from_object`
 plays the leaf role itself — it resolves the language from the object header

@@ -494,6 +494,8 @@ pub struct Architecture {
     /// on an image the loader proved is a Windows user-mode PE) or `on` (any image
     /// with a Windows compiler spec).  See [`kuna_pebnames`](crate::kuna_pebnames).
     pub peb_names: crate::kuna_pebnames::PebNamesMode,
+    /// (kuna) `tlsnames`: the static TLS block the loader committed.
+    pub tls_layout: Option<std::rc::Rc<crate::p5_types::kuna_tlsnames::TlsLayout>>,
     /// (kuna `structsynth`) Over which bases a structure may be synthesized from
     /// constant-offset dereferences: `off` (the default) or `param` (function
     /// parameters).  See [`kuna_structsynth`](crate::kuna_structsynth).
@@ -1674,6 +1676,10 @@ pub struct Architecture {
     /// (kuna `elemptr`) What each function of a batch said about each global,
     /// and the globals each must not type because another disagrees.
     pub kuna_elemptr: crate::kuna_elemptr::Ledger,
+    /// (kuna `storetype`) The globals a batch stored typed values into.
+    pub kuna_storetype: crate::kuna_storetype::Ledger,
+    /// (kuna `storetype`) Which stored types may type a global.
+    pub storetype: crate::kuna_storetype::StoreTypeMode,
     /// (ghidra-mode, Phase 4) Name recommendations staged for the NEXT
     /// decompile drive — `(name, storage addr, usepoint, size)`, taken (and
     /// cleared) by `decompile_func_full_with_override_dyn` and seeded into the
@@ -1753,6 +1759,14 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) Gate the static-TLS naming (`tlsnames`); default on.
+    pub analysis_tlsnames: bool,
+    /// (kuna) `dwarfglobaltypes`: lock a DWARF global's declared type.
+    pub analysis_dwarfglobaltypes: bool,
+    /// (kuna) `dwarfscopes`: DWARF locals in lexical blocks and location lists.
+    pub analysis_dwarfscopes: bool,
+    /// (kuna) Gate the UEFI module markup pass (`uefi`); default on.
+    pub analysis_uefi: bool,
     /// (kuna) Gate the built-in libc signature lookup for a function name the
     /// operator DECLARED (`declaredlibcproto`); default on.  Read at declaration
     /// time by `ConsoleProgram::declare_function`, not by an analysis pass.
@@ -3050,6 +3064,7 @@ impl Architecture {
             x64_syscall: crate::kuna_x64syscall::X64SyscallMode::Off, // (kuna) option x64syscall; reset_defaults sets the shipped default
             syscall_regs: crate::kuna_syscallregs::SyscallRegsMode::Off, // (kuna) option syscallregs; reset_defaults sets the shipped default
             image_os_userland: false, // (kuna) a load-time fact; set by the console's `load file`
+            tls_layout: None,
             peb_names: crate::kuna_pebnames::PebNamesMode::Off, // (kuna) option pebnames; reset_defaults sets the shipped default
             struct_synth: crate::kuna_structsynth::StructSynthMode::Off, // (kuna) option structsynth; reset_defaults sets the shipped default
             struct_synth_shard: None,
@@ -3286,6 +3301,8 @@ impl Architecture {
             kuna_callret_refused: std::collections::HashSet::new(),
             kuna_voidret: Default::default(),
             kuna_elemptr: crate::kuna_elemptr::Ledger::default(),
+            kuna_storetype: crate::kuna_storetype::Ledger::default(),
+            storetype: crate::kuna_storetype::StoreTypeMode::Off,
             kuna_pending_name_recs: Vec::new(), // (ghidra Phase 4) staged per drive
             kuna_pending_dyn_recs: Vec::new(),  // (ghidra Phase 4) staged per drive
             kuna_pending_proto_model: None,     // (ghidra Phase 4) staged per drive
@@ -3307,6 +3324,10 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            analysis_tlsnames: false,
+            analysis_dwarfglobaltypes: false,
+            analysis_dwarfscopes: true,
+            analysis_uefi: false,
             analysis_declaredlibcproto: false,
             analysis_unmappedentry: false,
             analysis_thumbswitch: true,
@@ -3764,6 +3785,10 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.analysis_tlsnames = true;
+        self.analysis_dwarfglobaltypes = false;
+        self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
+        self.analysis_uefi = true;
         // (kuna) DIV-139 declared-name libc prototype lookup -- default-ON.
         self.analysis_declaredlibcproto = true;
         self.analysis_strings = true;
@@ -4608,6 +4633,7 @@ impl Architecture {
             crate::kuna_fastfailnoreturn::archid_is_windows(self.get_description()),
             self.image_windows_user,
         ); // (kuna) pebnames
+        ctx.tls_layout = self.tls_layout.clone(); // (kuna) tlsnames
         ctx.struct_synth = self.struct_synth; // (kuna) structsynth
         ctx.struct_synth_shard = self.struct_synth_shard.clone();
         ctx.struct_merge = self.struct_merge; // (kuna) structmerge

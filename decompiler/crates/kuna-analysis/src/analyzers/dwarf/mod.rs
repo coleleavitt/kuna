@@ -125,6 +125,8 @@ mod kuna_cppproto;
 mod kuna_dwarfbounds;
 mod kuna_dwarfbyref;
 mod kuna_dwarflocation;
+pub mod kuna_dwarfscopes;
+use kuna_dwarfscopes::FrameBase;
 pub(crate) mod kuna_dwarfcomplex;
 mod kuna_dwarflinkage;
 
@@ -192,6 +194,15 @@ fn call_frame_cfa(arch: object::Architecture) -> Option<i64> {
         A::Riscv64 => Some(8),
         _ => None,
     }
+}
+
+/// (kuna `dwarfglobaltypes`) A global's DWARF type is worth locking when it has
+/// a size and says more than a raw word: not void, not `undefined`, and not an
+/// incomplete aggregate.
+fn global_type_is_whole(t: &Datatype) -> bool {
+    t.get_size() > 0
+        && !t.is_incomplete()
+        && !matches!(t.get_metatype(), type_metatype::TYPE_VOID | type_metatype::TYPE_UNKNOWN)
 }
 
 /// Port of `DWARFAnalyzer`: install DWARF function/global names and typed
@@ -264,6 +275,8 @@ struct DieSnap {
     /// constant displacements. Other location forms do not describe fixed locals
     /// through this field.
     fbreg_location: Option<i64>,
+    /// `DW_AT_frame_base` on a subprogram.
+    frame_base: Option<FrameBase>,
     indirect_parameter: bool,
     register_indirect_parameter: Option<kuna_dwarfbyref::HiddenValues>,
     /// Depth in the DIE tree (root unit DIE = 0).
@@ -312,6 +325,7 @@ impl DieSnap {
             has_location: false,
             addr_location: None,
             fbreg_location: None,
+            frame_base: None,
             indirect_parameter: false,
             register_indirect_parameter: None,
             depth,
@@ -466,10 +480,17 @@ fn snapshot_unit_for_abi(
         if matches!(entry.attr_value(gimli::DW_AT_prototyped), Some(gimli::AttributeValue::Flag(true))) {
             snap.prototyped = true;
         }
+        if let Some(fb) = entry.attr_value(gimli::DW_AT_frame_base) {
+            snap.frame_base = kuna_dwarfscopes::frame_base(&fb);
+        }
         if let Some(loc) = entry.attr_value(gimli::DW_AT_location) {
             snap.has_location = true;
             snap.addr_location = simple_addr_location(dwarf, unit, &loc);
-            snap.fbreg_location = simple_fbreg_location(&loc);
+            snap.fbreg_location = simple_fbreg_location(&loc).or_else(|| {
+                kuna_dwarfscopes::enabled()
+                    .then(|| kuna_dwarfscopes::loclist_frame_offset(dwarf, unit, &loc))
+                    .flatten()
+            });
             if snap.tag == gimli::DW_TAG_formal_parameter && kuna_dwarfbyref::is_fortran(language) {
                 let entry = parent_off
                     .and_then(|parent| map.get(&parent))
@@ -1065,9 +1086,16 @@ fn collect_fbreg_locals(
     cfa: i64,
     out: &mut Vec<crate::pass::LocalFact>,
 ) {
+    let Some(base) = kuna_dwarfscopes::frame_base_offset(sub.frame_base, cfa) else { return };
     let mut walk = TypeWalk::new();
-    for &coff in &sub.children {
+    let scopes = kuna_dwarfscopes::enabled();
+    let mut pending: Vec<usize> = sub.children.iter().rev().copied().collect();
+    while let Some(coff) = pending.pop() {
         let Some(child) = dies.get(&coff) else { continue };
+        if child.tag == gimli::DW_TAG_lexical_block && scopes {
+            pending.extend(child.children.iter().rev().copied());
+            continue;
+        }
         if !matches!(child.tag, gimli::DW_TAG_variable | gimli::DW_TAG_formal_parameter) {
             continue;
         }
@@ -1084,8 +1112,7 @@ fn collect_fbreg_locals(
             func_addr,
             name: child.name.clone(),
             type_: ty,
-            // stack_offset = call_frame_cfa + fbreg (DWARFExpressionEvaluator).
-            stack_offset: cfa.wrapping_add(fbreg),
+            stack_offset: base.wrapping_add(fbreg),
         });
     }
 }
@@ -1251,17 +1278,22 @@ impl AnalysisPass for DwarfPass {
                             // memory access and leave the global `dat_<addr>`). A
                             // type that cannot be sized falls back to 1 (the prior
                             // behavior for the 1-byte globals).
-                            let size = build_datatype(
+                            let ty = build_datatype(
                                 snap.type_ref,
                                 &dies,
                                 types,
                                 word_size,
                                 &mut TypeWalk::new(),
                                 false,
-                            )
-                                .map(|t| t.get_size())
-                                .filter(|&s| s >= 1)
-                                .unwrap_or(1) as u32;
+                            );
+                            let size = ty.as_ref().map(|t| t.get_size()).filter(|&s| s >= 1).unwrap_or(1) as u32;
+                            if let Some(t) = ty.filter(|t| global_type_is_whole(t)) {
+                                out.dwarf_typed_globals.push(crate::pass::TypedDataFact {
+                                    addr,
+                                    name: snap.name.clone(),
+                                    type_: t,
+                                });
+                            }
                             out.data_objects.push(crate::pass::DataObjectFact {
                                 addr,
                                 name: snap.name.clone(),
