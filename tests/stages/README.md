@@ -22,6 +22,10 @@ reads the caller's own argument.
 prototype and return statement at 40 columns, while the default prints each on
 one line.
 
+`kuna-mapglobals.xml` checks that an 8-byte read of a 4-byte global Symbol
+prints as `_small` with upstream's overlap warning, and that the uncovered
+upper half is named `small_4`.
+
 `kuna-stack-byte-copy.xml` checks pushed scratch bytes, partial reads and a
 saved snapshot with `stackstoreguard` off and on. Its CLI companion compiles
 and executes the exact C at O2 in default, stackviews and stackalias modes, and checks
