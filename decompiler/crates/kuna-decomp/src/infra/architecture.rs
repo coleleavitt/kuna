@@ -5894,6 +5894,8 @@ impl Architecture {
                 crate::userop::BUILTIN_EH_UNWINDING,
                 crate::userop::BUILTIN_EH_EXCEPTION,
                 crate::userop::BUILTIN_EH_SELECTOR,
+                crate::userop::BUILTIN_SWIFT_ERROR,
+                crate::userop::BUILTIN_SWIFT_THROW,
             ] {
                 userops.register_builtin(id, &adapter)?;
             }

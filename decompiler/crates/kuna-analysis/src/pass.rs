@@ -261,6 +261,10 @@ pub struct SwiftDeclaredFact {
     pub model: &'static str,
     pub self_slot: Option<i32>,
     pub self_reg: &'static str,
+    /// A struct instance member's `self` by value, the form the prototype
+    /// takes when the body does not read `swiftself` first (see
+    /// `analyzers::swift::self_first`).
+    pub exploded_self: Option<std::rc::Rc<kuna_decomp::dtype::Datatype>>,
     pub pieces: kuna_decomp::fspec::PrototypePieces,
 }
 

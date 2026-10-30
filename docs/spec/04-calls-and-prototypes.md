@@ -3452,6 +3452,59 @@ place; the recovered parameter takes the hinted name. A hint with no type
 names the parameter only. A body that never reads the register declares
 nothing.
 
+A symbol-named function states more than its convention: its mangled name
+carries the signature, and where every type in it maps to a kuna type the
+analysis tier declares the prototype
+(`decompiler/crates/kuna-analysis/src/analyzers/swift/kuna_swiftcall.rs
+(Binder::declared)`, committed through `set_function_prototype_pieces_at`
+under the model, so the function takes no model-only binding beside it).
+Parameters take their argument labels as names; `self` comes last and is
+pinned to `swiftself` as explicit input storage (a class member's
+`Class *`, a witness's `T *` with the `Self` metadata and the witness table
+after it); a free function has none. A by-value aggregate argument follows
+Swift's rule: a struct of up to four eight-byte integer or pointer words
+(each leaf a whole word, no padding) stays by value, and the models join it
+from the argument registers (the C join rule's bound of 16 bytes is 32 in
+the derived models, for inputs as for outputs); a wider one is declared as
+a pointer to it, the address Swift passes; a struct with a float or a
+narrow word in it has no single rule and leaves the function undeclared.
+A tuple is a struct of its elements at their natural alignment, named
+after the tuple (`(Swift.Int,Swift.Int)`) with fields `_0`, `_1`, …; it
+travels as any struct of that size. A generic function's arguments carry
+on after the declared ones: the metadata of each type parameter
+(`swift.type_metadata *metadata_A`) and the witness table of each
+conformance requirement (`void *witness_A_Hashable`); a value of a type
+parameter's type is passed by address, and a function whose return is
+generic (written through the caller's indirect result) stays undeclared.
+`throws` and typed `throws` alike select the throwing model. A struct's
+instance member is the one case the name does not settle: `self` is
+exploded into the argument registers for a non-mutating member of a struct
+of up to four words and arrives in `swiftself` otherwise (a `mutating`
+member, a wider struct). The fact carries both forms, and the commit asks
+the body (`decompiler/crates/kuna-analysis/src/analyzers/swift/mod.rs
+(self_first)`): the function's first sixty-four instructions are decoded in
+order, and a read of `swiftself` before any write to it — a spill through
+the stack pointer and its reload not counting — means the address form;
+a write first, or no touch at all, means the exploded value, declared as
+the struct by value in the trailing position. A type metadata accessor
+returns `swift.MetadataResponse` (the metadata and its state, two words in
+x0:x1 / rax:rdx), as the runtime declares it; an `async` function's
+context is a `swift.AsyncContext *` whose record names the parent context
+and the resume function at its head (`parent`, `resume_parent`), the
+function's own frame following.
+
+The error register has two moments the dataflow names
+(`decompiler/crates/kuna-decomp/src/p4_calls/kuna_swifterror.rs`, an action
+after `ActionFuncLink` has given every call its model and before heritage):
+after a call under a throwing model, an op defines the register with the
+opaque `swift_error()`, so the caller's test reads the call's error as a call
+result — `v5 = swift_error(); if (v5) { ... }` — rather than an uninitialized
+register, and where nothing reads it the op dies as any other; and in a
+function under a throwing model, the last write of the register before a
+`return` with no call between them feeds `swift_throw(e)`, so the error
+handed back is visible at the return instead of a dead write of
+`swift_allocError`'s result.
+
 A function with no signature and no name to say so still states its
 convention by what it calls (`kuna_swiftcall::callee_evidence`, read in the
 decompile drive before the model is set): a body that calls `swift_willThrow`

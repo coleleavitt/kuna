@@ -635,3 +635,68 @@ impl Namer<'_> {
         }
     }
 }
+
+/// Whether the body at `f` reads the register `reg` before it writes it:
+/// `Some(true)` on a read first (a `self` that arrives there), `Some(false)`
+/// on a write first (the register is scratch, so `self` came exploded), and
+/// `None` when the first sixty-four instructions leave it alone (so did
+/// `self`, which came exploded or not at all). The scan is linear, so a
+/// spill of the register in the prologue (a push or a `stp`, a store of it
+/// through the stack pointer) does not count as a read, nor its reload as
+/// a write. Decodes through `translate`, so its load image must be attached.
+pub fn self_first(
+    translate: &dyn kuna_sleigh::translate::Translate,
+    code_space: &std::rc::Rc<kuna_base::space::AddrSpace>,
+    reg: &str,
+    f: u64,
+) -> Option<bool> {
+    use kuna_base::address::Address;
+    use kuna_base::space::spacetype;
+    use kuna_num::opcodes::OpCode;
+    use kuna_num::pcoderaw::VarnodeData;
+    use kuna_sleigh::translate::PcodeEmit;
+    use std::rc::Rc;
+    struct Ops(Vec<(OpCode, Option<VarnodeData>, Vec<VarnodeData>)>);
+    impl PcodeEmit for Ops {
+        fn dump(&mut self, _: &Address, opc: OpCode, out: Option<&VarnodeData>, vars: &[VarnodeData]) {
+            self.0.push((opc, out.cloned(), vars.to_vec()));
+        }
+    }
+    let want = translate.get_register_data(reg).ok()?;
+    let sp = translate.get_register_data("RSP").or_else(|_| translate.get_register_data("sp")).ok();
+    let index = |v: &VarnodeData| v.space.as_ref().map(|s| s.get_index());
+    let same = |v: &VarnodeData| {
+        index(v) == index(&want)
+            && v.offset < want.offset + u64::from(want.size)
+            && want.offset < v.offset + u64::from(v.size)
+    };
+    let is_sp = |v: &VarnodeData| sp.as_ref().is_some_and(|sp| index(v) == index(sp) && v.offset == sp.offset);
+    let space = Rc::clone(code_space);
+    let mut vma = f;
+    for _ in 0..64 {
+        let mut ops = Ops(Vec::new());
+        let len = translate.one_instruction(&mut ops, &Address::new(Rc::clone(&space), vma)).ok()?;
+        for (opc, out, vars) in &ops.0 {
+            if *opc == OpCode::CPUI_RETURN {
+                return None;
+            }
+            let spill = *opc == OpCode::CPUI_STORE
+                && vars.get(2).is_some_and(same)
+                && vars.get(1).is_some_and(|p| {
+                    is_sp(p) || p.space.as_ref().is_some_and(|s| s.get_type() == spacetype::IPTR_INTERNAL)
+                });
+            let reload = *opc == OpCode::CPUI_LOAD && out.as_ref().is_some_and(same);
+            if spill || reload {
+                continue;
+            }
+            if vars.iter().any(same) {
+                return Some(true);
+            }
+            if out.as_ref().is_some_and(same) {
+                return Some(false);
+            }
+        }
+        vma += u64::try_from(len).ok()?;
+    }
+    None
+}

@@ -776,6 +776,53 @@ impl<'a> Types<'a> {
                 (hint >= 16).then(|| self.closure_struct()).flatten()
             }
             Kind::Metatype => (hint >= 8).then(|| self.void_ptr()).flatten(),
+            // A value of a generic parameter's type is passed by address.
+            Kind::DependentGenericParamType | Kind::DependentMemberType => (hint >= 8).then(|| self.void_ptr()).flatten(),
+            // An `inout` argument is the address of the value.
+            Kind::InOut => {
+                let t = self.kuna_type(inner.first()?, u32::MAX)?;
+                (hint >= 8).then(|| tf.get_type_pointer(self.ptr_size, t, 1).ok()).flatten()
+            }
+            // A tuple is laid out like a struct of its elements, each at its
+            // natural alignment, named `_0`, `_1`, … (the empty tuple is no
+            // type at all).
+            Kind::Tuple => {
+                if inner.children.is_empty() {
+                    return None;
+                }
+                let full = print_full(node)?.replace(' ', "");
+                if let Some(t) = self.tf.find_by_name(&full).ok().flatten() {
+                    return (t.get_size() as u32 <= hint).then_some(t);
+                }
+                let mut fields: Vec<(i32, String, Rc<Datatype>)> = Vec::new();
+                let mut end = 0u32;
+                let mut align = 1u32;
+                for (i, e) in inner.children.iter().enumerate() {
+                    let ty = e.children.iter().find(|c| c.kind == Kind::Type)?;
+                    let t = self.kuna_type(ty, hint)?;
+                    let size = t.get_size() as u32;
+                    let a = match t.get_metatype() {
+                        type_metatype::TYPE_STRUCT => 8.min(size.max(1)),
+                        _ => size.max(1),
+                    }
+                    .min(8);
+                    let off = end.div_ceil(a) * a;
+                    fields.push((off as i32, format!("_{i}"), t));
+                    end = off + size;
+                    align = align.max(a);
+                }
+                let size = end.div_ceil(align) * align;
+                if size > hint {
+                    return None;
+                }
+                let shell = self.tf.get_type_struct(&full).ok()?;
+                let fields: Vec<TypeField> = fields
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (off, n, t))| TypeField::new(i as i32, off, n, t))
+                    .collect();
+                self.tf.set_fields_struct_raw(&shell, fields, Vec::new(), size as i32, align as i32, 0).ok()
+            }
             _ => None,
         }
     }
@@ -911,6 +958,22 @@ impl<'a> Types<'a> {
         self.interned_struct("swift.class_metadata", &fields, f + 40)
     }
 
+    /// `swift.MetadataResponse`: the metadata and its state, what an
+    /// accessor returns in `x0:x1`.
+    pub fn metadata_response_struct(&self) -> Option<Rc<Datatype>> {
+        let meta = self.metadata_struct()?;
+        let ptr = self.tf.get_type_pointer(self.ptr_size, meta, 1).ok()?;
+        let word = self.tf.get_base(8, type_metatype::TYPE_UINT).ok()?;
+        self.interned_struct("swift.MetadataResponse", &[(0, "metadata", ptr), (8, "state", word)], 16)
+    }
+
+    /// `swift.AsyncContext`: the parent context and the function that
+    /// resumes it; a function's own frame follows.
+    pub fn async_context_struct(&self) -> Option<Rc<Datatype>> {
+        let ptr = self.void_ptr()?;
+        self.interned_struct("swift.AsyncContext", &[(0, "parent", Rc::clone(&ptr)), (8, "resume_parent", ptr)], 16)
+    }
+
     /// `swift.value_witness_table`.
     pub fn witness_table_struct(&self) -> Option<Rc<Datatype>> {
         let ptr = self.void_ptr()?;
@@ -953,6 +1016,7 @@ impl<'a> Types<'a> {
         let class_metadata_t = self.class_metadata_struct();
         let vwt_t = self.witness_table_struct();
         let long = self.tf.get_base(8, type_metatype::TYPE_INT).ok();
+        let response_t = self.metadata_response_struct();
         for addr in addrs {
             let Some(ctx) = self.md.contexts.get(&addr) else {
                 continue;
@@ -1017,8 +1081,10 @@ impl<'a> Types<'a> {
                     });
                 }
             }
-            if let (Some(_), Some(t), Some(long)) = (ctx.accessor, record_t, long.clone()) {
-                if let Ok(ret) = self.tf.get_type_pointer(self.ptr_size, t, 1) {
+            // An accessor returns a `MetadataResponse`: the metadata and its
+            // state, two words.
+            if let (Some(_), Some(_), Some(long), Some(ret)) = (ctx.accessor, record_t, long.clone(), response_t.clone()) {
+                {
                     out.swift_types.prototypes.push(PrototypePieces {
                         name: format!("{path}.type_metadata_accessor"),
                         outtype: Some(ret),

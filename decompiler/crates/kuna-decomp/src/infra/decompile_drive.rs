@@ -1913,7 +1913,7 @@ fn decompile_func_full_with_objects_inner(
                         addr: abi.async_reg.0.clone(),
                         size: abi.async_reg.1,
                         name: "async_context".to_string(),
-                        ct: None,
+                        ct: abi.async_context.clone(),
                     });
                 }
                 fd.kuna_set_input_hints((!hints.is_empty()).then(|| std::rc::Rc::new(hints)));

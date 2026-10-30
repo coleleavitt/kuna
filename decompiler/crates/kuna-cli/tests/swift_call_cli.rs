@@ -3,9 +3,10 @@
 //! `swift_call_elf` is a stripped swiftc build and `swift_call_syms_elf` the
 //! same link with its symbols (fixture README). With `swiftmetadata on` a
 //! class method takes its `self` from the swiftself register, a mutating
-//! struct method found by symbol takes the struct's address, a method hands
-//! its own `self` on to the methods it calls, and a caller that zeroes the
-//! swifterror register before a call keeps the test it makes after it; `--option swiftcall off` restores the C model.
+//! struct method found by symbol takes the struct's address (a non-mutating
+//! one its value), a method hands its own `self` on to the methods it calls,
+//! and a caller that zeroes the swifterror register before a call reads the
+//! error after it as `swift_error()`; `--option swiftcall off` restores the C model.
 
 use crate::common;
 
@@ -29,16 +30,21 @@ fn a_class_method_takes_its_self() {
 #[test]
 fn a_mutating_struct_method_takes_the_struct_address() {
     let out = decompile("swift_call_syms_elf", "0x3660", &[]);
-    assert!(out.contains("callfix.Counter.advance(by:times:)(callfix.Counter *self,long a1,long a2)"), "{out}");
-    assert!(out.contains("self->value = v1 + a2 + self->value;"), "{out}");
+    // Declared from the mangled name; the body reads swiftself first, so
+    // `self` is the struct's address.
+    assert!(out.contains("callfix.Counter.advance(by:times:)(long by,long times,callfix.Counter *self)"), "{out}");
+    assert!(out.contains("self->value = v1 + times + self->value;"), "{out}");
 }
 
 #[test]
 fn a_throwing_call_keeps_its_error_test() {
     let on = decompile("swift_call_syms_elf", "0x3490", &[]);
-    assert!(on.contains("callfix.Counter.advance(by:times:)(a1,a2,3);"), "{on}");
+    assert!(on.contains("callfix.run(_:_:_:)(callfix.Account *a0,callfix.Counter *a1,long a2)"), "{on}");
+    assert!(on.contains("callfix.Counter.advance(by:times:)(a2,3,a1);"), "{on}");
+    assert!(on.contains("v5 = swift_error();"), "{on}");
     assert!(on.contains("swift_release(v5);"), "{on}");
-    assert!(on.contains("callfix.Counter.peek(_:)(a2,a1->field_0x0,a1->field_0x8)"), "{on}");
+    // A non-mutating struct method takes `self` by value.
+    assert!(on.contains("callfix.Counter.peek(_:)(a2,*a1)"), "{on}");
     let off = decompile("swift_call_syms_elf", "0x3490", &["--option", "swiftcall", "off"]);
     assert!(!off.contains("swift_release"), "{off}");
 }
