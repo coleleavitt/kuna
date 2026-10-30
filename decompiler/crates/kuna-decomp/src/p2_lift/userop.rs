@@ -143,6 +143,10 @@ pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
 pub const BUILTIN_BSWAP: uint4 = 0x1000000c;
 /// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
 pub const BUILTIN_ROTL: uint4 = 0x1000000d;
+/// (kuna swiftcall) The error a throwing Swift call left in the error register.
+pub const BUILTIN_SWIFT_ERROR: uint4 = 0x1000000e;
+/// (kuna swiftcall) The error a throwing Swift function hands back.
+pub const BUILTIN_SWIFT_THROW: uint4 = 0x1000000f;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1022,6 +1026,17 @@ impl UserOpManage {
             BUILTIN_EH_EXCEPTION => UserPcodeOp::new_unspecialized(b"eh_exception", BUILTIN_EH_EXCEPTION as int4),
             BUILTIN_EH_SELECTOR => UserPcodeOp::new_unspecialized(b"eh_selector", BUILTIN_EH_SELECTOR as int4),
             BUILTIN_BSWAP => UserPcodeOp::new_unspecialized(b"bswap", BUILTIN_BSWAP as int4),
+            BUILTIN_SWIFT_ERROR | BUILTIN_SWIFT_THROW => {
+                let ptr_size = types.get_size_of_pointer();
+                let word_size = types.get_default_data_space_word_size();
+                let v_type = types.get_type_void();
+                let ptr_type = types.get_type_pointer(ptr_size, v_type, word_size);
+                if i == BUILTIN_SWIFT_ERROR {
+                    UserPcodeOp::new_datatype(b"swift_error", i as int4, Some(ptr_type), &[])
+                } else {
+                    UserPcodeOp::new_datatype(b"swift_throw", i as int4, None, &[Some(ptr_type)])
+                }
+            }
             BUILTIN_ROTL => UserPcodeOp::new_unspecialized(b"rotl", BUILTIN_ROTL as int4),
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };

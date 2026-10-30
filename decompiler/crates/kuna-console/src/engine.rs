@@ -5780,7 +5780,27 @@ fn commit_analysis_output(
         for fact in &out.swift_types.declared {
             let Some(model) = prog.arch().get_model(fact.model).cloned() else { continue };
             let mut pieces = fact.pieces.clone();
-            if let Some(slot) = fact.self_slot {
+            // A struct member's `self` arrives exploded into the argument
+            // registers unless its body reads `swiftself` first (a mutating
+            // member); a body that never touches the register got it exploded.
+            let by_value = fact.exploded_self.clone().filter(|_| {
+                kuna_analysis::analyzers::swift::self_first(
+                    prog.arch().translate(),
+                    code_space,
+                    fact.self_reg,
+                    fact.func_addr,
+                ) != Some(true)
+            });
+            let self_slot = match (by_value, fact.self_slot) {
+                (Some(t), Some(slot)) => {
+                    if let Some(ty) = pieces.intypes.get_mut(slot as usize) {
+                        *ty = t;
+                    }
+                    None
+                }
+                (_, slot) => slot,
+            };
+            if let Some(slot) = self_slot {
                 let Ok(loc) = prog.arch().get_register_varnode(fact.self_reg.as_bytes()) else {
                     continue;
                 };
@@ -5851,6 +5871,13 @@ fn commit_analysis_output(
                     self_reg,
                     error_reg,
                     async_reg,
+                    async_context: prog
+                        .arch()
+                        .types()
+                        .find_by_name("swift.AsyncContext")
+                        .ok()
+                        .flatten()
+                        .and_then(|t| prog.arch().types().get_type_pointer(8, t, 1).ok()),
                     throws,
                     plain,
                     asynccall,

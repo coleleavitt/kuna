@@ -55,6 +55,8 @@ pub struct SwiftAbi {
     pub self_reg: (Address, int4),
     pub error_reg: (Address, int4),
     pub async_reg: (Address, int4),
+    /// `swift.AsyncContext *`, the context's type.
+    pub async_context: Option<Rc<crate::dtype::Datatype>>,
     pub throws: Rc<ProtoModel>,
     /// `__swiftcall`, `__swiftasynccall`, `__swiftasynccall_throws`.
     pub plain: Rc<ProtoModel>,
@@ -474,10 +476,12 @@ fn pentry(storage: Option<&str>, reg: &str) -> Rc<Element> {
     Rc::new(entry)
 }
 
-/// The `<output>` of `proto` with Swift's return rule: two more general
-/// registers after the second one, and the indirect result from 33 bytes
-/// instead of 17 (the rule bounded at 17 or at 16, as the spec words it).
-fn swift_output(output: &Element) -> Element {
+/// A section of `proto` under Swift's aggregate rule: a value of up to four
+/// words travels in registers where C stops at two, so every rule bounded at
+/// 17 or 16 bytes (the indirect result, the conversion of a large struct to
+/// a pointer, the register join) is bounded at 33 or 32; and in the output,
+/// two more general registers after the second one.
+fn swift_section(output: &Element, extra_regs: bool) -> Element {
     let mut out = shell(output);
     let reg_name = |el: &Element| {
         el.get_children()
@@ -493,6 +497,9 @@ fn swift_output(output: &Element) -> Element {
         match c.get_name() {
             "pentry" => {
                 out.add_child(Rc::clone(c));
+                if !extra_regs {
+                    continue;
+                }
                 let Some(name) = reg_name(c) else { continue };
                 if let Some((_, extra)) = EXTRA_RETURN_REGS
                     .iter()
@@ -588,12 +595,12 @@ pub fn derive_model(
                 {
                     input.add_child(pentry(Some("hiddenret"), "RAX"));
                 }
-                for c in child.get_children() {
+                for c in swift_section(child, false).get_children() {
                     input.add_child(Rc::clone(c));
                 }
                 out.add_child(Rc::new(input));
             }
-            ("output", _) => out.add_child(Rc::new(swift_output(child))),
+            ("output", _) => out.add_child(Rc::new(swift_section(child, true))),
             ("unaffected", Some(err)) => {
                 let mut list = shell(child);
                 for c in child.get_children().iter().filter(|c| !names(c, err)) {

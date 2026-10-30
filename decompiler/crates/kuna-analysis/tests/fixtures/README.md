@@ -2207,17 +2207,32 @@ context from what the body calls, with no name to say so). Its source
 three-word struct (`triple`, back in `rcx:rdx:rax`), a five-word struct (`wide`,
 through the indirect result register, rax on x86-64 Swift), a payload-less enum
 (`tint`, `Color`), an `async` method (`slow`, its context in r14) and a plain
-`scaled(_:by:)`, plus a struct method whose by-value `self` stays recovered.
-Built with `swiftc -O -module-name sigfix -parse-as-library swift_sigs_syms_elf.swift
+`scaled(_:by:)`; a struct `Triple` with a non-mutating `sum()` (`self`
+exploded) and a mutating `bump(_:)` (`self` in r13); free functions taking a
+three-word struct by value (`sum3`), a five-word one by address (`sum5`), a
+tuple in and out (`swap2`), and generic ones (`twice<T>`, `hashed<T:
+Hashable>`, the metadata and witness table after their arguments). Built with `swiftc -O -module-name sigfix -parse-as-library swift_sigs_syms_elf.swift
 -o swift_sigs_syms_elf` (not stripped: the signatures are the symbols').
 
-**Pinned VMAs** (`nm`): `Box.triple(_:)`@`0x3be0`, `Box.wide(_:)`@`0x3c10`,
-`Box.scaled(_:by:)`@`0x3c60`, `Box.slow(_:)`@`0x3c80`, `Box.tint(_:)`@`0x3cc0`,
-`Box.color.getter`@`0x3b10`. With `swiftmetadata on` they decompile as
+**Pinned VMAs** (`nm`): `Box.triple(_:)`@`0x3e00`, `Box.wide(_:)`@`0x3e30`,
+`Box.slow(_:)`@`0x3ea0` (resume partial@`0x3110`), `Box.tint(_:)`@`0x3ee0`,
+`Box.color.getter`@`0x3d30`, `Triple.sum()`@`0x4010` (self exploded) and
+`Triple.bump(_:)`@`0x3f20` (mutating, self in r13), `sum3(_:)`@`0x3f70` (a
+three-word struct by value), `sum5(_:)`@`0x3f80` (a five-word struct by
+address), `swap2(_:)`@`0x3f60` (a tuple in and out), `twice<A>(_:_:)`@`0x3f30`
+and `hashed<A: Hashable>(_:_:)`@`0x3f40` (the metadata and witness table
+after the arguments). With `swiftmetadata on` they decompile as
 `sigfix.Triple sigfix.Box.triple(_:)(long a0, sigfix.Box *self)`,
 `sigfix.Wide *sigfix.Box.wide(_:)(sigfix.Wide *rethidden, long a0, sigfix.Box *self)`,
 `void sigfix.Box.slow(_:)(swift.AsyncContext *async_context, sigfix.Box *self, …)`
-and `sigfix.Color sigfix.Box.tint(_:)(…) { … return red; }`.
+(`async_context[1].resume_parent = self;`), `sigfix.Color sigfix.Box.tint(_:)(…)
+{ … return red; }`, `long sigfix.sum3(_:)(sigfix.Triple a0)`, `long
+sigfix.sum5(_:)(sigfix.Wide *a0)`, `(Swift.Int,Swift.Int)
+sigfix.swap2(_:)((Swift.Int,Swift.Int) a0)`, `long sigfix.hashed(_:_:)(void *a0,
+long a1, swift.type_metadata *metadata_A, void *witness_A_Hashable)`, `long
+sigfix.Triple.sum()(sigfix.Triple self)`, `void sigfix.Triple.bump(_:)(long a0,
+sigfix.Triple *self)` and `swift.MetadataResponse
+sigfix.Color.type_metadata_accessor(long request)`.
 
 `$s7callfix7AccountC7deposit_3feeS2i_SitF` (vtable slot 7)@`0x3830`,
 `$s7callfix7AccountC8withdrawyS2iKF` (slot 8, throws)@`0x3870`,
@@ -2233,9 +2248,12 @@ on` (`swiftcall` is on by default) the class method decompiles as
 `callfix.Account.vtable#7.method(callfix.Account *self,long a1,long a2)` and
 passes `self` to the virtual calls it makes on itself, the struct witness
 writes `self->step`, the class witness takes `callfix.Account **self`, and
-`run` passes `a0` to both virtual calls and keeps `if (v5) {
-swift_release(v5); v3 = -1; }`; with symbols, `advance` takes `callfix.Counter
-*self` and `run` passes it `a1`, `peek` gains no `self`, and `settle` hands its
-own `self` to both `fee(for:)` calls. With `swiftcall off` the methods read
+`run` passes `a0` to both virtual calls and reads the throwing call's error
+as `v5 = swift_error(); if (v5) { swift_release(v5); v3 = -1; }`; with
+symbols, `run` is declared `(callfix.Account *a0, callfix.Counter *a1, long
+a2)`, `advance(by:times:)` takes `(long by, long times, callfix.Counter *self)`
+and `run` passes it `a1`, `peek(_:)` takes `self` by value (`peek(_:)(a2,*a1)`),
+`withdraw(_:)` ends in `swift_throw(v5)` with the allocated error, and `settle`
+hands its own `self` to both `fee(for:)` calls. With `swiftcall off` the methods read
 `self` from an unnamed r13, the calls pass none, and `run` returns the throwing
 call's result unchecked.
