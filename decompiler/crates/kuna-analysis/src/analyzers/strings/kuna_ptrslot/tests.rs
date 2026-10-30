@@ -28,7 +28,7 @@ fn a_table_the_string_scan_finds_is_a_slot() {
     let bytes = fixture("ptrslot_gcc_O1_i386");
     let file = object::File::parse(bytes.as_slice()).unwrap();
     let run = StringFact { addr: 0x21414300, len: 13 };
-    assert!(crate::strings::scan_strings(&file, 4).contains(&run));
+    assert!(crate::strings::scan_strings(&file, 4, false).contains(&run));
     assert!(PointerSlots::new(&file).holds_address(run.addr));
 }
 

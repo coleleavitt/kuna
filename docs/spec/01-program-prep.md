@@ -2029,6 +2029,18 @@ from joining two neighbouring runs. The markup passes are untouched: they still
 scan at the ASCII and 2-byte widths only, so no `char[N]` fact and no emitted C
 moves.
 
+- **Strings in code** (`codestrings`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/strings/mod.rs (code_section_string)`):
+  the ASCII pass scans every loaded section, code included, so four printable
+  instruction bytes before a zero byte became a `char[5]` (`D$x%` from x86
+  `mov` encodings, `!@9m!` from AArch64 `ldrb`). Inside a section the object marks
+  as code a run is now kept only at 16 or more visible characters, or at 4 or
+  more right after one to three zero bytes, IDA's final-pass rule for strings
+  among instructions. Data sections are unchanged. Measured: 217 of 234 runs in
+  Lua's AArch64 `.text`, 214 of 215 in a static-pie `ldconfig`, 78 of 78 in
+  `lldb-dap` and 4 of 4 in `ld.so` are dropped, every dropped one instruction
+  bytes.
+
 - **Library prototypes** (`libproto`, the `ApplyDataArchiveAnalyzer` analog,
   `decompiler/crates/kuna-analysis/src/analyzers/protos/mod.rs (LibProtoPass)`):
   Ghidra ships parsed C headers as `.gdt` archives; kuna substitutes a built-in

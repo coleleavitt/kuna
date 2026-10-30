@@ -809,6 +809,9 @@ Three tiers:
 | __imp_exit is not marked no-return | [`nameladder`](#nameladder) |
 | a flirt-named memcpy_0 has no memcpy prototype | [`nameladder`](#nameladder) |
 | a mach-o or coff name with a leading underscore misses its libc prototype | [`nameladder`](#nameladder) |
+| a char array literal appears at an address inside a function's code | [`codestrings`](#codestrings) |
+| instruction bytes print as a four-character string literal | [`codestrings`](#codestrings) |
+| a function pointer argument renders as a short garbage string | [`codestrings`](#codestrings) |
 | a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide) |
 | a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide) |
 | a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide) |
@@ -3099,6 +3102,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default). It changes nothing for a name a table already holds as spelled; it adds the libc/libm prototype and the no-return verdict for decorated spellings such as j_printf, __imp_exit, _strlen@4 or memcpy_0. Flip off when a binary defines its own function whose name only differs from a libc name by such a decoration (sha256_2 is not sha256) and the added prototype is wrong.
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-nameladder
 - **Example:** `--option nameladder off`
+
+### `codestrings` -- on | off, default `on`
+
+- **Symptoms:** a char array literal appears at an address inside a function's code; instruction bytes print as a four-character string literal; a function pointer argument renders as a short garbage string.
+- **What it does:** Apply IDA's final-pass string rule inside executable sections. The ASCII string pass scans every loaded section, code included, and plants a char[N] at any run of four printable bytes followed by a zero byte; in x86 and ARM code that is mostly instruction bytes (D$x%, ?w)=, oF(\r). With this on, a run inside a section the object marks as code is kept only when it is at least 16 visible characters long, or at least 4 when it starts right after one to three zero bytes (the padding a compiler puts before a string it places among instructions). Runs in data sections are unchanged.
+- **When to flip:** On (default). Flip off for firmware that keeps short, unpadded strings in its code section and loses their literals in the decompiled C.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-codestrings
+- **Example:** `--option codestrings off`
 
 ### `aifpoolslide` -- on | off, default `on`
 

@@ -2512,6 +2512,8 @@ pub struct Architecture {
     pub analysis_flirt: bool,
     /// (kuna) Apply libc prototype / no-return to functions a FID or FLIRT rename names (`fidproto`). Default on.
     pub analysis_fidproto: bool,
+    /// (kuna) IDA's string rule inside code sections (`codestrings`). Default on.
+    pub analysis_codestrings: bool,
     /// (kuna) Gate the Go `pclntab` function-name recovery pass (`gopclntab`); the
     /// kuna analog of Ghidra's `GolangSymbolAnalyzer` (name-recovery half). Default
     /// **on**, but the pass is registered ONLY for a Go binary
@@ -3355,6 +3357,7 @@ impl Architecture {
             analysis_nameladder: true,
             analysis_flirt: false,
             analysis_fidproto: true,
+            analysis_codestrings: true,
             analysis_gopclntab: false,
             analysis_gotypes: false,
             analysis_gonoreturn: false,
@@ -3827,6 +3830,7 @@ impl Architecture {
         self.analysis_nameladder = true;
         self.analysis_flirt = false;
         self.analysis_fidproto = true;
+        self.analysis_codestrings = true;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)

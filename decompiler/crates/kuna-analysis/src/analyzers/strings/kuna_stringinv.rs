@@ -591,7 +591,7 @@ mod tests {
         assert!(!inv.from_segments);
 
         // Every ASCII row is one the pass itself emitted — no row is invented here.
-        let facts = scan_strings(&file, 5);
+        let facts = scan_strings(&file, 5, false);
         for row in inv.strings.iter().filter(|s| s.encoding == Encoding::Ascii) {
             assert!(
                 facts.contains(&StringFact { addr: row.addr, len: row.byte_len }),

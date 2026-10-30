@@ -1280,7 +1280,10 @@ kuna_options! { self, p1;
         on_off!(analysis_flirt, "FLIRT signature matching")
     },    "fidproto" => {
         on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
+    },    "codestrings" => {
+        on_off!(analysis_codestrings, "Code-section string acceptance rule")
     },
+
 
 
 
