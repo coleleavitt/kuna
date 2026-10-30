@@ -2596,31 +2596,6 @@ impl ConsoleProgram {
     /// defensively re-gated facts merge into the same `merged` output committed
     /// below. With Listing off, this whole block is skipped.
     pub fn commit_pending_analysis(&mut self) -> KunaResult<()> {
-        if !self.pending_synthetic_entries.is_empty() {
-            // (kuna `rawdiscover`) A headerless image reaches this point holding
-            // only the `--entry` addresses the caller typed, because the
-            // object-file discovery tier below declines without an
-            // `object::File`. Discover the rest first, so the entries it finds
-            // are named and installed by the same loop.
-            if self.container == ProgramContainer::Raw && self.arch().analysis_rawdiscover {
-                self.discover_raw_entries();
-            }
-            let entries = std::mem::take(&mut self.pending_synthetic_entries);
-            let symbols = entries
-                .into_iter()
-                .map(|addr| ProgramSymbol {
-                    name: self.arch().name_function(&addr),
-                    addr,
-                    object_location: None,
-                    binding: None,
-                    provenance: EntryProvenance::Mapped,
-                })
-                .collect::<Vec<_>>();
-            for symbol in symbols {
-                self.symbols.push(symbol);
-            }
-            self.read_loader_symbols()?;
-        }
         // (kuna `entrythumbflow`) The entry-reachable Thumb walk, taken out of
         // the pending slot BEFORE it runs so a failure cannot leave it armed for
         // the next commit. Its paints join the gated stash under their own id.
@@ -2679,16 +2654,40 @@ impl ConsoleProgram {
                 }
             }
         }
-        // A TE image has no `object::File`, so the discovery tier cannot run
-        // over it at all: say so once rather than report an inventory of one in
-        // silence. Stated unconditionally because it is a property of the
-        // container, not of this run's options.
-        if self.container == ProgramContainer::Te {
+        if !self.pending_synthetic_entries.is_empty() {
+            // (kuna `rawdiscover`) A headerless or TE image reaches this point
+            // holding only the `--entry` addresses or the container entry,
+            // because the object-file discovery tier below declines without an
+            // `object::File`. Discover the rest first, after the entry Thumb walk
+            // has painted the decode mode, so the entries it finds are named and
+            // installed by the same loop.
+            if matches!(self.container, ProgramContainer::Raw | ProgramContainer::Te)
+                && self.arch().analysis_rawdiscover
+            {
+                self.discover_raw_entries();
+            }
+            let entries = std::mem::take(&mut self.pending_synthetic_entries);
+            let symbols = entries
+                .into_iter()
+                .map(|addr| ProgramSymbol {
+                    name: self.arch().name_function(&addr),
+                    addr,
+                    object_location: None,
+                    binding: None,
+                    provenance: EntryProvenance::Mapped,
+                })
+                .collect::<Vec<_>>();
+            for symbol in symbols {
+                self.symbols.push(symbol);
+            }
+            self.read_loader_symbols()?;
+        }
+        if self.container == ProgramContainer::Te && !self.arch().analysis_rawdiscover {
             let path = self.image_path();
             kuna_base::notes::say_once(
                 &path,
                 &format!(
-                    "[kuna te] {path}: a UEFI TE image has no object-file view, so function discovery cannot run; the inventory is the container entry plus any declared boundaries"
+                    "[kuna te] {path}: rawdiscover is off, so the inventory is the container entry plus any declared boundaries"
                 ),
             );
         }

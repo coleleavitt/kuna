@@ -935,9 +935,13 @@ metadata (`decompiler/crates/kuna-console/src/engine.rs (ProgramImageMetadata)`)
 populated by the object loader as well, so the project README no longer
 re-parses the input and reports the entry through the inventory on every path.
 A TE image has no `object::File`, so the Listing discovery tier cannot run over
-it: the deferred consumers are skipped and the load says so once on stderr —
-unconditionally, because it is a property of the container rather than of a
-run's options — and the object-view consumers (`strings`, `crypto`, `xrefs`, `decompile-graph`,
+it and the deferred consumers are skipped. Its inventory comes from the same
+headerless-image discovery a `--raw-image` load uses (`rawdiscover`, §below),
+seeded with the container entry over the TE's `CODE` sections; it runs after
+the entry Thumb walk so a mixed-mode ARM image's Thumb code is decoded in the
+mode that walk painted. With `--option rawdiscover off` the inventory is the
+entry plus any declared boundaries and the load says so once on stderr. The
+object-view consumers (`strings`, `crypto`, `xrefs`, `decompile-graph`,
 and the graph-backed `functions`/`decompile-all` filters) report one capability
 error from the shared image read rather than the object crate's parse failure.
 
@@ -5224,8 +5228,10 @@ Because a seed no longer bounds the run, `--entry` seeds a raw load without
 would hide everything found from it. `--addr` continues to do both. What this
 cannot recover is what the input does not record: a function no direct call
 reaches and no seed names stays undiscovered, and `--define-function` remains
-the way to assert it. Raw-container only, so every object-format result is
-byte-identical; `--option rawdiscover off` restores the seeds-only inventory.
+the way to assert it. Raw and TE containers only (a TE seeds the walk with its
+container entry and bounds it by its `CODE` sections), so every object-format
+result is byte-identical; `--option rawdiscover off` restores the seeds-only
+inventory.
 
 Table-derived roots are committed but are deliberately not fed through a
 second recursive walk. Thus the bounded path obtains direct-call closure and
