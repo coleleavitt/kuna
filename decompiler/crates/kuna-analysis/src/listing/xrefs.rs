@@ -113,6 +113,9 @@ pub enum XrefKind {
     Read,
     /// The target is stored to.
     Write,
+    /// (kuna `arm64evcall`) An arm64e virtual call whose vtable slot holds
+    /// the target among several methods.
+    VirtualCall,
 }
 
 impl XrefKind {
@@ -124,6 +127,7 @@ impl XrefKind {
             XrefKind::Data => "data",
             XrefKind::Read => "read",
             XrefKind::Write => "write",
+            XrefKind::VirtualCall => "vcall",
         }
     }
 }
@@ -1136,7 +1140,8 @@ fn descend(
             });
             // Every row this instruction produces carries the same render, and an
             // instruction that produces none needs no render at all.
-            let mut text = if c.flows.is_empty() && drefs.is_empty() && pointer.is_none() {
+            let vcall = arch.kuna_vcall_targets.get(&vma).map(|v| &v.targets);
+            let mut text = if c.flows.is_empty() && drefs.is_empty() && pointer.is_none() && vcall.is_none() {
                 String::new()
             } else {
                 assembly(translate, vma, &code_space)
@@ -1145,8 +1150,18 @@ fn descend(
                 held.push((vma, word, text.clone()));
             }
 
-            if cap.ops().iter().any(|op| op.opcode == OpCode::CPUI_CALLIND) {
+            if vcall.is_none_or(|t| t.len() > 1) && cap.ops().iter().any(|op| op.opcode == OpCode::CPUI_CALLIND) {
                 st.indirect_call_sites.insert(vma);
+            }
+            // (kuna `arm64evcall`) A resolved arm64e virtual call: a call edge to
+            // the one method its slot holds, a `vcall` edge to each of several.
+            for &target in vcall.into_iter().flatten() {
+                let kind = if vcall.is_some_and(|t| t.len() == 1) { XrefKind::Call } else { XrefKind::VirtualCall };
+                st.file(vma, target, kind, &text);
+                if !sections_are_runtime || in_range(&exec_set, target) {
+                    st.funcs.insert(target);
+                    func_queue.push_back(target);
+                }
             }
 
             for &target in &c.flows {

@@ -237,6 +237,15 @@ impl CommentDatabase {
 // Architecture
 // ---------------------------------------------------------------------------
 
+/// (kuna `arm64evcall`) What an arm64e virtual call site's slot can hold.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VcallTargets {
+    /// The general register the call branches through (`blraa x8, x17`: 8).
+    pub register: u8,
+    /// Every method the slot can hold, sorted.
+    pub targets: Vec<u64>,
+}
+
 /// \brief Manager for all the major decompiler subsystems (C++ `class
 /// Architecture : public AddrSpaceManager`, `architecture.hh:165`).
 ///
@@ -1806,7 +1815,7 @@ pub struct Architecture {
     pub analysis_arm64evcall: bool,
     /// (kuna `arm64evcall`) `call site → methods its vtable slot can hold`,
     /// committed from the analysis tier; read when flow builds the CALLIND.
-    pub kuna_vcall_targets: std::collections::BTreeMap<u64, Vec<u64>>,
+    pub kuna_vcall_targets: Rc<std::collections::BTreeMap<u64, VcallTargets>>,
     /// (kuna) Gate the library-prototype pass (`libproto`); default on.
     pub analysis_libproto: bool,
     /// (kuna) Gate the measured libc signature extension (`libcsigs`); default on.
@@ -3449,7 +3458,7 @@ impl Architecture {
             analysis_peimportcall: false,
             analysis_authptrcall: false,
             analysis_arm64evcall: false,
-            kuna_vcall_targets: std::collections::BTreeMap::new(),
+            kuna_vcall_targets: Rc::default(),
             analysis_libproto: false,
             analysis_libcsigs: false,
             analysis_libgccsigs: false,
@@ -4634,6 +4643,7 @@ impl Architecture {
         ctx.x87_empty_storage = crate::p4_calls::kuna_x87emptyreturn::storage(self);
         ctx.x87_depth = self.x87_depth;
         ctx.trap_after_call = self.trap_after_call && self.get_description().starts_with("x86:");
+        ctx.vcall_targets = Rc::clone(&self.kuna_vcall_targets);
         ctx.retsysreg_userops = ids(crate::kuna_retsysreg::STATE_USEROP_NAMES);
         ctx.retsysreg_cop_userops = ids(crate::kuna_retsysreg::COP_USEROP_NAMES);
         // (kuna) carry the terminal-no-return trial gate so `only_op_use` reaches

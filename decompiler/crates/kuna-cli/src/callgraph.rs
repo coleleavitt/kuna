@@ -130,7 +130,7 @@ impl CallGraph {
                         out.push(r.from);
                     }
                 }
-                XrefKind::Data | XrefKind::Read | XrefKind::Write => return None,
+                XrefKind::Data | XrefKind::Read | XrefKind::Write | XrefKind::VirtualCall => return None,
             }
         }
         Some(out)
@@ -224,7 +224,9 @@ impl CallGraph {
     /// import call is silently not an edge.
     fn callee_of(&self, r: &Xref) -> Option<u64> {
         match r.kind {
-            XrefKind::Call | XrefKind::Jump => self.node_at(r.to).or_else(|| self.owner_of(r.to)),
+            XrefKind::Call | XrefKind::Jump | XrefKind::VirtualCall => {
+                self.node_at(r.to).or_else(|| self.owner_of(r.to))
+            }
             XrefKind::Data => self.index.is_function_entry(r.to).then_some(r.to),
             XrefKind::Read | XrefKind::Write => None,
         }
@@ -492,7 +494,8 @@ fn edge_rank(kind: XrefKind) -> u8 {
     match kind {
         XrefKind::Call => 0,
         XrefKind::Jump => 1,
-        _ => 2,
+        XrefKind::VirtualCall => 2,
+        _ => 3,
     }
 }
 

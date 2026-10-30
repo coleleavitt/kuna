@@ -680,3 +680,6 @@ mod dwarf_compressed_sections;
 
 #[path = "addrtable_xrefs.rs"]
 mod addrtable_xrefs;
+
+#[path = "arm64e_vcall_xrefs.rs"]
+mod arm64e_vcall_xrefs;

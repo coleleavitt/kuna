@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use kuna_decomp::kuna_kernelcache::KernelcacheChoice;
 
-use crate::loader::format::macho::resolve_chained_fixups;
+use crate::loader::format::macho::{resolve_chained_fixups, ChainedFixups};
+use crate::rtti::kuna_arm64evcall::SignedImage;
 
 mod merge;
 mod prelink;
@@ -178,7 +179,12 @@ fn select<'a>(all: &'a [FilesetEntry], choice: &KernelcacheChoice) -> Result<&'a
 
 /// Cut the chosen entry out of a kernel collection: rebase every chained-fixup
 /// pointer slot, then copy the entry's header and load commands to offset 0.
-pub(super) fn extract(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<(Vec<u8>, String), String> {
+/// The collection's signed slots come back beside the image, since rebasing
+/// strips their signing context from it.
+pub(super) fn extract(
+    mut bytes: Vec<u8>,
+    choice: &KernelcacheChoice,
+) -> Result<(Vec<u8>, String, SignedImage), String> {
     let all = entries(&bytes).ok_or("malformed MH_FILESET load commands")?;
     if *choice == KernelcacheChoice::Entry("list".into()) {
         let info: HashMap<String, prelink::KextInfo> =
@@ -188,7 +194,7 @@ pub(super) fn extract(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<
         return Err(format!("MH_FILESET entries ({}):\n{}", all.len(), lines.join("\n")));
     }
     let chosen = select_many(&all, choice)?;
-    let applied = apply_fixups(&mut bytes)?;
+    let (applied, signed) = apply_fixups(&mut bytes, &all)?;
     let branch = merge::branch_segments(&bytes).len();
     if chosen.len() > 1 || branch > 0 {
         let ids: Vec<&str> = chosen.iter().map(|&i| all[i].id.as_str()).collect();
@@ -198,7 +204,7 @@ pub(super) fn extract(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<
             "MH_FILESET: loaded {shown} as one image ({applied} chained-fixup pointers rebased, \
              {branch} branch-stub segments mapped)"
         );
-        return Ok((image, note));
+        return Ok((image, note, signed));
     }
     let index = chosen[0];
     let entry = all[index].clone();
@@ -223,7 +229,7 @@ pub(super) fn extract(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<
         index + 1,
         all.len()
     );
-    Ok((bytes, note))
+    Ok((bytes, note, signed))
 }
 
 /// An entry's `LC_SYMTAB` and its `LC_DYSYMTAB` external-defined and undefined
@@ -329,14 +335,16 @@ fn code_ranges(bytes: &[u8], at: usize) -> Option<Vec<std::ops::Range<u64>>> {
 }
 
 /// Write every rebase of the collection's `LC_DYLD_CHAINED_FIXUPS` into its slot,
-/// with the pointer-authentication bits stripped.
-fn apply_fixups(bytes: &mut [u8]) -> Result<usize, String> {
+/// with the pointer-authentication bits stripped. Returns how many were
+/// written and the signed slots they came from.
+fn apply_fixups(bytes: &mut [u8], all: &[FilesetEntry]) -> Result<(usize, SignedImage), String> {
     let mut segs = segments(bytes, 0).ok_or("malformed MH_FILESET segments")?;
     segs.retain(|s| s.filesize > 0);
     segs.sort_by_key(|s| s.vmaddr);
-    let rebases: Vec<(u64, u64)> = {
+    let (rebases, signed): (Vec<(u64, u64)>, SignedImage) = {
         let file = object::File::parse(&*bytes).map_err(|e| format!("MH_FILESET: {e}"))?;
-        resolve_chained_fixups(&file, bytes).rebases().collect()
+        let fixups = resolve_chained_fixups(&file, bytes);
+        (fixups.rebases().collect(), signed_image(bytes, all, &fixups))
     };
     let mut applied = 0;
     for (va, target) in rebases {
@@ -352,7 +360,50 @@ fn apply_fixups(bytes: &mut [u8]) -> Result<usize, String> {
             applied += 1;
         }
     }
-    Ok(applied)
+    Ok((applied, signed))
+}
+
+/// The collection's signed slots for `arm64evcall`, with every entry's
+/// `__const` sections (where vtables live) and the sections read-only once
+/// fixed up: those named `__const` or in a `*CONST` segment. Every entry
+/// counts, so a vtable slot a kext overrides is seen from the kernel too.
+fn signed_image(bytes: &[u8], all: &[FilesetEntry], fixups: &ChainedFixups) -> SignedImage {
+    let mut vtable_ranges = Vec::new();
+    let mut readonly_ranges = Vec::new();
+    for entry in all {
+        let Ok(at) = usize::try_from(entry.fileoff) else { continue };
+        for (cmd, p) in load_commands(bytes, at).unwrap_or_default() {
+            if cmd != LC_SEGMENT_64 {
+                continue;
+            }
+            let nsects = rd_u32(bytes, p + 64).unwrap_or(0) as usize;
+            for k in 0..nsects.min(256) {
+                let s = p + 72 + k * 80;
+                let (Some(name), Some(segment), Some(addr), Some(size), Some(flags)) = (
+                    bytes.get(s..s + 16),
+                    bytes.get(s + 16..s + 32),
+                    rd_u64(bytes, s + 32),
+                    rd_u64(bytes, s + 40),
+                    rd_u32(bytes, s + 64),
+                ) else {
+                    break;
+                };
+                if flags & S_ATTR_SOME_INSTRUCTIONS != 0 {
+                    continue;
+                }
+                let range = (addr, addr.saturating_add(size));
+                let segment = String::from_utf8_lossy(segment.split(|&b| b == 0).next().unwrap_or(&[]));
+                if name.split(|&b| b == 0).next() == Some(b"__const") {
+                    vtable_ranges.push(range);
+                    readonly_ranges.push(range);
+                } else if segment.contains("CONST") {
+                    readonly_ranges.push(range);
+                }
+            }
+        }
+    }
+    let slots = fixups.auth_slots().map(|(va, ctx)| (va, (ctx, fixups.resolved_ptr(va))));
+    SignedImage::new(slots, vtable_ranges, readonly_ranges)
 }
 
 fn rd_u32(b: &[u8], off: usize) -> Option<u32> {

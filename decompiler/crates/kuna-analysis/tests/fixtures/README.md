@@ -1194,6 +1194,39 @@ ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
 python3 macho_arm64e_vcall.py v_arm64 macho_arm64e_vcall
 ```
 
+### `macho_arm64e_vcall_shapes` — arm64e virtual-call shapes
+
+`macho_arm64e_vcall_shapes` (~50 KB) is built the same way by
+`macho_arm64e_vcall_shapes.py`, which signs the slots its `SIGNING` table names
+(symbol, offset -> key, address diversity, diversifier) and leaves every other
+rebase plain:
+
+- `_vtable_C` in `__DATA_CONST,__const`: 32 `_filler` slots (IA, 0x1111) then
+  `_C_m` (IA, 0x3232) at slot 32. `_call_big` (`0x100000458`) reaches it with
+  `mov x17, #256; add x16, x16, x17` and calls at `0x100000480`.
+- `_swift_meta` in `__DATA,__data`: a Swift class metadata whose address point
+  is `0x100008020`, `classSize` 0x78, `classAddressPoint` 0x10, `Description`
+  signed DA/0xAE86 at +0x40, and `_S_m1`/`_S_m2`/`_S_m3` (IA, 0x5151/0x5252/
+  0x5353) at +0x50/+0x58/+0x60. `_call_swift` (`0x100000484`, call at
+  `0x1000004a0`) tail-calls slot +0x58 through `x20`'s isa; `_call_swift_m3`
+  (`0x1000004a4`, call at `0x1000004c4`) calls slot +0x60 with `blraa x8, x17`,
+  and `_S_m3` calls `_filler` before it returns.
+- `_gslot` (IA, address-diversified, 0x6060 -> `_G_f`) and `_cslot` (IA,
+  0x7070, no address diversity -> `_H_f`) in `__DATA_CONST,__const`, reached
+  from an `adrp` by `_call_static` (call at `0x1000004e4`) and `_call_const`
+  (call at `0x10000050c`); `_wslot` (IA, 0x6161 -> `_W_f`) in writable
+  `__DATA,__data`, reached by `_call_writable`.
+
+`_C_m` `0x100000410`, `_S_m2` `0x100000428`, `_S_m3` `0x100000430`, `_G_f`
+`0x100000440`, `_H_f` `0x100000450`.
+
+```bash
+clang -target arm64-apple-macos11 -march=armv8.5-a -c macho_arm64e_vcall_shapes.s -o s.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+         -e _main -o s_arm64 s.o
+python3 macho_arm64e_vcall_shapes.py s_arm64 macho_arm64e_vcall_shapes
+```
+
 ### `macho_arm64_outlined` — the Darwin stack probe and outlined fragments
 
 `macho_arm64_outlined` (plain arm64, ~33 KB) is `macho_arm64_outlined.s` linked
