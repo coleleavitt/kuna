@@ -1827,8 +1827,8 @@ fn raw_image_discovers_called_functions_beyond_its_seeds() {
     assert!(ok, "raw decompile-all failed: {stderr}");
     assert!(stdout.contains("\"count\": 3"), "{stdout}");
     assert!(stdout.contains("return 7;"), "the sweep-only body must decompile:\n{stdout}");
-    // A raw image has no call graph, so the default `protoorder` stays out of the
-    // way silently; naming the option is what makes it say it had nothing to order.
+    // The default `protoorder` stays off on a raw image; named, it orders the
+    // call graph the raw image's ELF view (`objectview`) gives it.
     assert!(!stderr.contains("protoorder"), "the default spoke on a raw image:\n{stderr}");
     let (named, stderr, ok) = run_kuna(&[
         "decompile-all", &binary, "--json", "--raw-image", "--target", target,
@@ -1836,8 +1836,8 @@ fn raw_image_discovers_called_functions_beyond_its_seeds() {
         "--sleighpath", &sp,
     ]);
     assert!(ok, "raw decompile-all --option protoorder types failed: {stderr}");
-    assert!(stderr.contains("--option protoorder: no call graph"), "{stderr}");
-    assert_eq!(named, stdout, "naming protoorder moved a raw image's output");
+    assert!(!stderr.contains("no call graph"), "{stderr}");
+    assert!(named.contains("\"count\": 3") && named.contains("return 7;"), "{named}");
 
     // `--addr` still narrows a raw run to the addresses named.
     let (stdout, stderr, ok) = run_kuna(&[
@@ -2100,10 +2100,6 @@ fn raw_image_rejects_missing_metadata_and_object_only_surfaces() {
            "--addr", ".text+0"], "raw image entries must be numeric"),
         (&["functions", &binary, "--raw-image", "--target", target, "--base", "0",
            "--entry", "0", "--slice", "arm"], "--slice does not apply"),
-        (&["decompile-all", &binary, "--raw-image", "--target", target, "--base", "0",
-           "--entry", "0", "--summary"], "require object-file metadata"),
-        (&["decompile-graph", &binary, "--raw-image", "--target", target, "--base", "0",
-           "--entry", "0"], "not supported by decompile-graph"),
         (&["disassemble", &binary, "0", "--raw-image", "--target", target, "--base", "0"],
          "unknown option --raw-image"),
     ];
@@ -2117,6 +2113,18 @@ fn raw_image_rejects_missing_metadata_and_object_only_surfaces() {
     assert!(!ok, "headerless input without raw flags unexpectedly loaded");
     assert!(stderr.contains("--raw-image") && stderr.contains("--base"),
             "unknown-format diagnostic omitted raw guidance: {stderr}");
+
+    for args in [
+        vec!["decompile-all", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0", "--isa", "thumb", "--summary"],
+        vec!["functions", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0", "--isa", "thumb", "--reachable-from", "0"],
+        vec!["decompile-graph", &binary, "--raw-image", "--target", target, "--base", "0",
+             "--entry", "0", "--isa", "thumb"],
+    ] {
+        let (_stdout, stderr, ok) = run_kuna(&args);
+        assert!(ok, "{args:?} read no ELF view: {stderr}");
+    }
 
     let (_stdout, stderr, ok) = run_kuna(&[
         "decompile", &binary, "main", "--raw-image", "--target", target, "--base", "0",

@@ -554,6 +554,10 @@ pub struct ConsoleProgram {
     /// datatest path (no Listing tier), so the gated build is a structural no-op
     /// there. Empty/`None` when the listing flag is off ⇒ zero cost.
     analysis_image: Option<(String, Vec<u8>)>,
+    /// (kuna `objectview`) The PE view of a TE image or the ELF view of a raw
+    /// one, kept for the CLI's object-file consumers once the commit has taken
+    /// [`Self::analysis_image`].
+    object_view: Option<Rc<[u8]>>,
     /// (kuna `armframes`) The whole-image frame recovery: set before the commit,
     /// it is replayed instead of searched; after it, the record that commit made.
     arm_frames: Option<kuna_analysis::aif::kuna_framereplay::ArmFrameReplay>,
@@ -2644,6 +2648,17 @@ impl ConsoleProgram {
     /// TE or raw bootstrap stashed in [`Self::analysis_image`], so its facts join
     /// the gated commit like an object image's. With the gate off the view is
     /// dropped, and the deferred Listing tier below declines as before.
+    fn set_object_view(&mut self, path: &str, view: Option<Vec<u8>>) {
+        self.object_view = view.as_deref().map(Rc::from);
+        self.analysis_image = view.map(|view| (path.to_string(), view));
+    }
+
+    /// (kuna `objectview`) The PE view of a TE image or the ELF view of a
+    /// byte-addressed raw one; `None` for an object image, which is its own.
+    pub fn object_view(&self) -> Option<&[u8]> {
+        self.object_view.as_deref()
+    }
+
     fn run_object_view_passes(&mut self) {
         if !matches!(self.container, ProgramContainer::Raw | ProgramContainer::Te) {
             return;
@@ -3899,6 +3914,7 @@ fn empty_program(
         libctypes_glibc: false,
         libctypes_refused: false,
         analysis_image: None,
+        object_view: None,
         arm_frames: None,
         loader_data_objects: Vec::new(),
         loader_data_exports: Vec::new(),
@@ -4058,10 +4074,10 @@ pub fn bootstrap_from_raw(
     if word_size == 1 {
         let entry = prog.pending_synthetic_entries.first().map_or(image_base, Address::get_offset);
         let language = prog.arch.arch_id().to_string();
-        prog.analysis_image = std::fs::read(path).ok().and_then(|bytes| {
+        let view = std::fs::read(path).ok().and_then(|bytes| {
             kuna_analysis::loader::kuna_objectview::raw_as_elf(&bytes, image_base, entry, &language)
-                .map(|view| (path.to_string(), view))
         });
+        prog.set_object_view(path, view);
     }
     Ok(prog)
 }
@@ -4283,8 +4299,7 @@ pub fn bootstrap_from_te_bytes(
         entry,
     });
     program.analysis_code_space = Some(code_space);
-    program.analysis_image = kuna_analysis::loader::kuna_objectview::te_as_pe(bytes)
-        .map(|view| (path.to_string(), view));
+    program.set_object_view(path, kuna_analysis::loader::kuna_objectview::te_as_pe(bytes));
     apply_readonly_ranges(&mut program, &readonly_ranges);
     program.arch_mut().litpool_const = Rc::new(litpool_const);
     Ok(program)
