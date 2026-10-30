@@ -528,7 +528,7 @@ fn macho_gopclntab_section_is_found_and_decoded() {
     let file = object::File::parse(&bytes[..]).expect("hand-built Mach-O must parse");
     assert_eq!(file.format(), object::BinaryFormat::MachO);
     assert_eq!(
-        recover_go_functions(&file),
+        no_end(recover_go_functions(&file)),
         vec![
             GoFunc { addr: text_vma + 0x10, name: "main.main".into(), end: None },
             GoFunc { addr: text_vma + 0x80, name: "main.compute".into(), end: None },
@@ -547,7 +547,7 @@ fn zero_text_start_resolves_against_the_text_section() {
     let bytes = build_macho_with_pclntab(text_vma, 0x400, 0x1_0001_0000, &blob);
     let file = object::File::parse(&bytes[..]).expect("hand-built Mach-O must parse");
     assert_eq!(
-        recover_go_functions(&file),
+        no_end(recover_go_functions(&file)),
         vec![
             GoFunc { addr: text_vma, name: "main.main".into(), end: None },
             GoFunc { addr: text_vma + 0x80, name: "main.compute".into(), end: None },
@@ -618,10 +618,16 @@ fn macho_lrodata_gopcln_section_is_found_and_decoded() {
     ]);
     let file = object::File::parse(&bytes[..]).expect("hand-built Mach-O must parse");
     assert_eq!(
-        recover_go_functions(&file),
+        no_end(recover_go_functions(&file)),
         vec![
             GoFunc { addr: text_vma + 0x10, name: "main.main".into(), end: None },
             GoFunc { addr: text_vma + 0x140, name: "main.helper".into(), end: None },
         ]
     );
+}
+
+/// The decoded functions without their `pcsp` ends: these hand-built `_func`
+/// records carry no pcvalue tables.
+fn no_end(funcs: Vec<GoFunc>) -> Vec<GoFunc> {
+    funcs.into_iter().map(|f| GoFunc { end: None, ..f }).collect()
 }

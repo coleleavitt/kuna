@@ -3002,3 +3002,49 @@ For `mulblob`, an isolated dynamic name without a type lock still describes a
 numeric value. Mapping that name does not disable the widened-operand guard when
 the datatype is the fallback array and every reader satisfies the existing
 arithmetic/SUBPIECE checks. Explicit locked array types keep their structuring.
+
+## (kuna) Linear MBA simplification — `option mba`, default off
+
+**`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_mba.rs (RuleMbaSimplify)`,
+in oppool1 after `boolsignshift`.** Obfuscators hide `x + y` as
+`(x ^ y) + 2*(x & y)`, `x | y` as `(x & ~y) + y`, and so on. Each of these is a
+*linear mixed boolean-arithmetic* expression: an integer combination of bitwise
+functions of the same variables. For that class, two expressions are equal at
+every width when they agree on the inputs where each variable is 0 or 1 (the
+result behind SiMBA). IDA 9.5's gooMBA (goomba.so 0x3eb60) evaluates the same
+truth table, but proves every candidate with z3. Here the shape check makes the
+proof unnecessary.
+
+**Collecting.** The rule fires on an `INT_ADD`, `INT_SUB`, `INT_2COMP`,
+`INT_MULT`, `INT_AND`, `INT_OR`, `INT_XOR` or `INT_NEGATE` whose single reader
+is not one of those ops, so it sees each tree once, from the root. A defining op
+of the same set is inlined when its output has one reader; anything else is a
+leaf, up to four distinct leaves and 48 nodes. `INT_XOR` with all ones is read
+as `~`, and `INT_MULT` only by a constant.
+
+**The shape.** The tree must be linear: `+`, `-`, negation and multiplication by
+a constant over bitwise subterms (`&`, `|`, `^`, `~`) that contain only leaves.
+It must also contain at least one arithmetic op and one bitwise op, so plain
+arithmetic and plain bit logic are left to the other rules.
+
+**Coefficients.** The tree is evaluated at the `2^n` points with every leaf 0 or
+1, at the root's width. A Möbius inversion over those values gives the
+coefficients `b_S` of the conjunction basis:
+`f = b_∅ + Σ_{S≠∅} b_S · AND(S)`. The constant term is plain, because a bitwise
+function's empty-set term is all ones, which is -1 at every width.
+
+**Candidates.** The cheapest of three is kept:
+
+- a linear sum of the leaves, when every multi-leaf coefficient is 0
+  (`(x ^ y) + 2*(x & y)` gives `x + y`);
+- `k + c·g(x, y) + Σ c_i·z_i`, when every multi-leaf term lies inside one pair
+  and one of twelve two-variable boolean functions `g` matches it
+  (`(x & ~y) + y + z` gives `(x | y) + z`);
+- the conjunction sum itself.
+
+The replacement is applied only when it has fewer ops than the tree and 64
+pseudo-random full-width evaluations agree with it. The new ops go before the
+root, and the root becomes a `COPY` of the result; dead-code elimination removes
+the old tree. Pinned by `tests/stages/kuna-mba.xml`. Not done: the polynomial
+(non-linear) normalizer and three-variable boolean functions, which need a
+minimal-expression table.

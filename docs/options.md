@@ -427,6 +427,9 @@ Three tiers:
 | no Win32 API names anywhere in a decompiled PE | [`peimportcall`](#peimportcall) |
 | an arm64e call renders as (*dat_<addr>)(...) through an __auth_ptr slot | [`authptrcall`](#authptrcall) |
 | ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall) |
+| obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b | [`mba`](#mba) |
+| xor and and terms combined with additions and multiplications by 2 | [`mba`](#mba) |
+| ollvm or tigress instruction substitution in the output | [`mba`](#mba) |
 | heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
 | dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
 | caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
@@ -2299,6 +2302,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: an arm64e call through __auth_ptr renders by name (___chkstk_darwin(...)) instead of (*dat_<addr>)(...). Flip off to restore the anonymous slot call. Inert on any image without an __auth_ptr bind.
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-apple-authptrcall
 - **Example:** `option authptrcall off`
+
+### `mba` -- on | off, default `off`
+
+- **Symptoms:** obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b; xor and and terms combined with additions and multiplications by 2; ollvm or tigress instruction substitution in the output.
+- **What it does:** Simplify linear mixed boolean-arithmetic (MBA) expressions, the obfuscation that hides `x + y` as `(x ^ y) + 2*(x & y)`. RuleMbaSimplify collects the tree under an arithmetic root (interior ops with one reader inlined, up to 4 distinct leaves), requires the linear-MBA shape (+, -, negation and multiplication by a constant over bitwise subterms of leaves) with at least one arithmetic and one bitwise op, evaluates it on the 2^n points where each leaf is 0 or 1, and Möbius-inverts those values into conjunction-basis coefficients. For a linear MBA, agreement on those points implies equality at every width, so no SMT solver is needed. The replacement is the cheapest of: a linear sum of the leaves, k + c*g(x,y) for one two-variable boolean function g, or the conjunction sum; it is applied only when it has fewer ops and 64 pseudo-random full-width evaluations agree.
+- **When to flip:** Off by default. Turn it on for obfuscated code (Tigress, OLLVM substitution) whose arithmetic reads as xor/and/or soup, such as `(a0 ^ a1) + (a0 & a1) * 2`.
+- **Where / provenance:** P3/simplification-quiescence · kuna · new-analysis · ida95-45
+- **Example:** `--option mba on`
 
 ### `noreturn_disc` -- on | off, default `on`
 

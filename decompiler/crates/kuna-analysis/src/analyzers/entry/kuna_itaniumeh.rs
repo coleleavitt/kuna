@@ -179,7 +179,7 @@ mod tests {
         assert_eq!(
             catch.clauses,
             vec![
-                EhClause::Catch { selector: 1, type_name: Some("std::runtime_error const&".into()) },
+                EhClause::Catch { selector: 1, type_name: Some("std::runtime_error".into()) },
                 EhClause::CatchAll { selector: 2 },
             ]
         );

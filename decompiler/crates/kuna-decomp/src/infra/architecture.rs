@@ -633,6 +633,8 @@ pub struct Architecture {
     /// (kuna GH-1282) Fold `(b<<k) s>> k` boolean sign-extension-mask idioms
     /// (C++ `fold_boolean_mask`).
     pub fold_boolean_mask: bool,
+    /// (kuna `mba`) Simplify linear mixed boolean-arithmetic expressions.
+    pub mba: bool,
     /// Keep mapped global array bases separate from negative element offsets
     /// (option `globalarrayanchor`).
     pub global_array_anchor: bool,
@@ -3033,6 +3035,7 @@ impl Architecture {
             sparc_struct_return: false,
             ov_less_simplify: false,
             fold_boolean_mask: false,
+            mba: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
             simd_lane_fold: false,
@@ -3467,6 +3470,7 @@ impl Architecture {
         self.sparc_struct_return = false; // (kuna) default: upstream byte-identical (GH-6882)
         self.ov_less_simplify = true; // (kuna) DIV-2 default-on (GH-7190)
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
+        self.mba = false;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`
@@ -4357,6 +4361,7 @@ impl Architecture {
         // reads `data.get_arch().<flag>`; the rule is registered `enabled=false`
         // so the live flag drives both the DIV default and the toggle).
         ctx.fold_boolean_mask = self.fold_boolean_mask; // GH-1282 booleanmask
+        ctx.mba = self.mba;
         ctx.global_array_anchor = self.global_array_anchor;
         ctx.cancel_byte_arithmetic = self.cancel_byte_arithmetic; // cancelbytearithmetic
         ctx.simd_lane_fold = self.simd_lane_fold; // simdlane
