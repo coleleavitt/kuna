@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_350() {
-    assert_eq!(kuna_num_settables(), 350);
-    assert_eq!(SETTABLE_TABLE.len(), 350);
+fn settable_count_is_351() {
+    assert_eq!(kuna_num_settables(), 351);
+    assert_eq!(SETTABLE_TABLE.len(), 351);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_95_analysis() {
+fn tier_counts_are_121_core_134_transform_96_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_95_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 95));
+    assert_eq!((core, transform, analysis), (121, 134, 96));
 }
 
 #[test]
@@ -333,6 +333,10 @@ fn option_values_live_value_present_for_156() {
         // (kuna) `.eh_frame` LSDA landing-pad discovery sub-feature of entry_disc
         // (GccExceptionAnalyzer), default-off; analysis-tier, no codegen live reader.
         "eh_frame_full",
+        // (kuna) Mach-O `__unwind_info` function-start discovery — an analysis-pass
+        // gate with no codegen live reader (read console-side via kuna_live_value),
+        // same as `eh_frame_full` above. Default-off.
+        "unwindstarts",
         // (kuna) `.eh_frame` FDE-interior entry suppression — an analysis-pass gate
         // with no codegen live reader (read console-side via kuna_live_value), same
         // as the gates around it. Default-ON (DIV-61).
@@ -1145,7 +1149,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `importdata`.
     // +1 for `cfstrings`.
     // +1 for `kernelcache`; its P1 row sits beside `macho-arm64e`.
-    assert_eq!(json.matches("},\n").count(), 349);
+    // +1 for `unwindstarts`; its P1 row sits beside `eh_frame_full`.
+    assert_eq!(json.matches("},\n").count(), 350);
 }
 
 #[test]
