@@ -811,9 +811,9 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   decodes the generic 64-bit formats and the arm64e family (`ARM64E`,
   `ARM64E_USERLAND`, `ARM64E_USERLAND24`). An arm64e authenticated rebase stores
   a 32-bit offset from the image base plus its signing context (key, address
-  diversity, 16-bit diversifier). The context only matters to the CPU that signs
-  the pointer at load, so the resolver drops it and the slot reads as
-  `imagebase + offset`. A bind entry names an import whose address is
+  diversity, 16-bit diversifier). The slot reads as `imagebase + offset`, and the
+  context is kept beside it (`ChainedFixups::pac_auth`); no consumer reads it
+  yet. A bind entry names an import whose address is
   unknown statically, so it is absent from the pointer overlay — a consumer
   misses and falls back rather than reading a wrong address — but its ordinal is
   resolved through the blob's imports table to the symbol it names
