@@ -87,6 +87,7 @@ enum Specific {
     MipsPc16,
     PpcAddr16 { form: PpcHalf },
     PpcRel14,
+    PcRel32,
     Generic { bits: u8 },
 }
 
@@ -107,6 +108,7 @@ pub struct RelocationSpec {
     specific: Specific,
     width: usize,
     call: bool,
+    got: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -142,6 +144,12 @@ impl RelocationSpec {
 
     pub fn is_call(self) -> bool {
         self.call
+    }
+
+    /// The field addresses the target's GOT slot rather than the target: the
+    /// caller passes the slot's address as the symbol.
+    pub fn via_got(self) -> bool {
+        self.got
     }
 
     /// Refine relocation callness from the instruction field when the ELF
@@ -388,6 +396,26 @@ fn classify_info(
         (Architecture::PowerPc, Some(elf::R_PPC_REL32)) => Some((Specific::PcRelativeData, false)),
         _ => None,
     };
+    let got = match (arch, r_type) {
+        (
+            Architecture::X86_64,
+            Some(elf::R_X86_64_GOTPCREL | elf::R_X86_64_GOTPCRELX | elf::R_X86_64_REX_GOTPCRELX),
+        ) => Some(Specific::PcRel32),
+        (Architecture::Aarch64, Some(elf::R_AARCH64_ADR_GOT_PAGE)) => {
+            Some(Specific::Aarch64AdrPage { checked: true })
+        }
+        (Architecture::Aarch64, Some(elf::R_AARCH64_LD64_GOT_LO12_NC)) => {
+            Some(Specific::Aarch64LdstLo12 { scale: 3 })
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_GOT_HI20)) => {
+            Some(Specific::RiscvPcrelHi20)
+        }
+        (Architecture::Arm, Some(elf::R_ARM_GOT_PREL)) => Some(Specific::PcRelativeData),
+        _ => None,
+    };
+    if let Some(specific) = got {
+        return Ok(Some(RelocationSpec { specific, width: 4, call: false, got: true }));
+    }
 
     if let Some((specific, call)) = specific {
         let width = match specific {
@@ -403,6 +431,7 @@ fn classify_info(
             specific,
             width,
             call,
+            got: false,
         }));
     }
 
@@ -426,6 +455,7 @@ fn classify_info(
         specific: Specific::Generic { bits },
         width: usize::from(bits / 8),
         call: matches!(reloc.kind, RelocationKind::PltRelative),
+        got: false,
     }))
 }
 
@@ -549,6 +579,12 @@ fn apply_info(
         Specific::MipsPc16 => mips_pc16(field, little_endian, reloc, symbol, place),
         Specific::PpcAddr16 { form } => ppc_addr16(field, little_endian, reloc, symbol, form),
         Specific::PpcRel14 => ppc_rel14(field, little_endian, reloc, symbol, place),
+        Specific::PcRel32 => {
+            let value = symbol as i128 + explicit_plus_implicit(reloc, read_signed(field, little_endian)) - place as i128;
+            require_signed(value, 32)?;
+            write_integer(field, little_endian, value as u64);
+            Ok(())
+        }
         Specific::Generic { bits } => generic(field, little_endian, reloc, symbol, place, bits),
     }
 }

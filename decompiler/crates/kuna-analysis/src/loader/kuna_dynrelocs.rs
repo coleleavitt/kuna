@@ -71,6 +71,8 @@ pub struct DynRelocs {
     /// `[start, stop]` **inclusive** byte ranges of the written slots that
     /// `PT_GNU_RELRO` covers — the ones a reader may treat as constant.
     pub const_ranges: Vec<(u64, u64)>,
+    /// `IRELATIVE` resolvers: functions only the dynamic loader calls.
+    pub ifunc_resolvers: Vec<u64>,
 }
 
 /// The `RELATIVE` / `GLOB_DAT` / `JUMP_SLOT` `r_type` triple for `machine`, or
@@ -96,6 +98,46 @@ pub(crate) fn reloc_triple(arch: object::Architecture) -> Option<(u32, u32, u32)
         }
         _ => None,
     }
+}
+
+/// The dynamic relocation types `resolve` applies for one machine.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct DynTypes {
+    pub relative: u32,
+    pub glob_dat: Option<u32>,
+    pub jump_slot: u32,
+    /// The word-sized absolute relocation (`S + A`).
+    pub abs: Option<u32>,
+    pub irelative: Option<u32>,
+}
+
+/// [`DynTypes`] for `arch`, or `None` if kuna does not handle this
+/// architecture's dynamic relocations.
+pub(crate) fn dyn_types(arch: object::Architecture) -> Option<DynTypes> {
+    use object::elf;
+    let (relative, glob_dat, jump_slot) = match reloc_triple(arch) {
+        Some((r, g, j)) => (r, Some(g), j),
+        None => match arch {
+            object::Architecture::PowerPc64 => (elf::R_PPC64_RELATIVE, Some(elf::R_PPC64_GLOB_DAT), elf::R_PPC64_JMP_SLOT),
+            object::Architecture::Riscv64 | object::Architecture::Riscv32 => {
+                (elf::R_RISCV_RELATIVE, None, elf::R_RISCV_JUMP_SLOT)
+            }
+            object::Architecture::S390x => (elf::R_390_RELATIVE, Some(elf::R_390_GLOB_DAT), elf::R_390_JMP_SLOT),
+            _ => return None,
+        },
+    };
+    let (abs, irelative) = match arch {
+        object::Architecture::X86_64 => (elf::R_X86_64_64, elf::R_X86_64_IRELATIVE),
+        object::Architecture::Aarch64 => (elf::R_AARCH64_ABS64, elf::R_AARCH64_IRELATIVE),
+        object::Architecture::I386 => (elf::R_386_32, elf::R_386_IRELATIVE),
+        object::Architecture::Arm => (elf::R_ARM_ABS32, elf::R_ARM_IRELATIVE),
+        object::Architecture::PowerPc64 => (elf::R_PPC64_ADDR64, elf::R_PPC64_IRELATIVE),
+        object::Architecture::Riscv64 => (elf::R_RISCV_64, elf::R_RISCV_IRELATIVE),
+        object::Architecture::Riscv32 => (elf::R_RISCV_32, elf::R_RISCV_IRELATIVE),
+        object::Architecture::S390x => (elf::R_390_64, elf::R_390_IRELATIVE),
+        _ => return None,
+    };
+    Some(DynTypes { relative, glob_dat, jump_slot, abs: Some(abs), irelative: Some(irelative) })
 }
 
 /// ELF `p_type` of the RELRO program header (`PT_GNU_RELRO`).
@@ -205,63 +247,92 @@ pub fn resolve(file: &object::File, bytes: &[u8]) -> DynRelocs {
     if file.kind() == object::ObjectKind::Relocatable {
         return out;
     }
-    let Some((r_relative, r_glob_dat, r_jump_slot)) = reloc_triple(file.architecture()) else {
+    let Some(types) = dyn_types(file.architecture()) else {
         return out;
     };
-    let Some(relocs) = file.dynamic_relocations() else {
-        return out;
-    };
-
     let width: usize = if file.is_64() { 8 } else { 4 };
     let le = file.is_little_endian();
+    let relro = relro_range(bytes);
+    let mask = if width == 8 { u64::MAX } else { u32::MAX as u64 };
+
+    // The run-time loader's view first: `PT_DYNAMIC`'s tables, which also hold
+    // the RELR and Android packed encodings and survive a stripped section
+    // table. An image without `PT_DYNAMIC` falls back to the section walk.
+    let entries: Vec<(u64, u32, Option<(u64, bool)>, Option<i64>)> =
+        match dtable::ElfView::new(bytes).and_then(|view| {
+            let (entries, symtab) = dtable::dynamic_relocations(&view)?;
+            Some(
+                entries
+                    .into_iter()
+                    .map(|e| {
+                        let r_type = if e.r_type == dtable::RELR_RELATIVE { types.relative } else { e.r_type };
+                        let sym = symtab
+                            .filter(|_| e.sym != 0)
+                            .and_then(|table| view.symbol(table, e.sym))
+                            .map(|s| (s.value, !s.defined));
+                        (e.offset, r_type, sym, e.addend)
+                    })
+                    .collect(),
+            )
+        }) {
+            Some(entries) => entries,
+            None => {
+                let Some(relocs) = file.dynamic_relocations() else {
+                    return out;
+                };
+                let mut dynsyms: std::collections::HashMap<usize, (u64, bool)> = std::collections::HashMap::new();
+                for s in file.dynamic_symbols() {
+                    dynsyms.insert(s.index().0, (s.address(), s.is_undefined()));
+                }
+                relocs
+                    .filter_map(|(offset, reloc)| {
+                        let RelocationFlags::Elf { r_type } = reloc.flags() else { return None };
+                        let sym = match reloc.target() {
+                            RelocationTarget::Symbol(idx) => dynsyms.get(&idx.0).copied(),
+                            _ => None,
+                        };
+                        let addend = (!reloc.has_implicit_addend()).then(|| reloc.addend());
+                        Some((offset, r_type, sym, addend))
+                    })
+                    .collect()
+            }
+        };
 
     // kuna maps a linked image at the vaddrs the ELF itself declares, so the load
     // bias every `RELATIVE` relocation adds is zero. Named rather than folded
     // away so the formula stays the ABI's `B + A`.
     let load_bias: u64 = 0;
 
-    // `.dynsym` by index — the index a dynamic relocation's `r_sym` names. The
-    // generic `symbol_by_index` reads `.symtab`, which is a different table (and
-    // is absent from a stripped image), so the map is built here.
-    let mut dynsyms: std::collections::HashMap<usize, (u64, bool)> = std::collections::HashMap::new();
-    for s in file.dynamic_symbols() {
-        dynsyms.insert(s.index().0, (s.address(), s.is_undefined()));
-    }
-
-    let relro = relro_range(bytes);
-    let mask = if width == 8 { u64::MAX } else { u32::MAX as u64 };
-
-    for (offset, reloc) in relocs {
-        let RelocationFlags::Elf { r_type } = reloc.flags() else {
-            continue;
-        };
-        let addend = if reloc.has_implicit_addend() {
-            match implicit_addend(file, offset, width, le) {
+    for (offset, r_type, sym, explicit) in entries {
+        // A REL-style table keeps the addend in the slot being patched.
+        let addend = match explicit {
+            Some(a) => a as u64,
+            None => match implicit_addend(file, offset, width, le) {
                 Some(a) => a,
                 None => continue,
-            }
-        } else {
-            reloc.addend() as u64
+            },
         };
-
-        let value = if r_type == r_relative {
+        let defined = |sym: Option<(u64, bool)>| match sym {
+            Some((addr, false)) => Some(addr),
+            _ => None,
+        };
+        let value = if r_type == types.relative {
             load_bias.wrapping_add(addend)
-        } else if r_type == r_glob_dat || r_type == r_jump_slot {
-            let RelocationTarget::Symbol(idx) = reloc.target() else {
-                continue;
-            };
-            match dynsyms.get(&idx.0) {
-                // An undefined symbol is an import: the value lives in another
-                // image. Nothing to write, and the PLT/import naming already
-                // covers the call — leave the slot exactly as the linker left it.
-                Some(&(_, true)) | None => continue,
-                Some(&(addr, false)) => {
-                    // A `REL`-style GLOB_DAT/JUMP_SLOT ignores the in-place word
-                    // (the ABI is `S`, not `S + A`); only a RELA addend counts.
-                    let a = if reloc.has_implicit_addend() { 0 } else { addend };
-                    addr.wrapping_add(a)
-                }
-            }
+        } else if Some(r_type) == types.irelative {
+            // The slot receives whatever the resolver returns; the resolver itself
+            // is a function the image never names.
+            out.ifunc_resolvers.push(load_bias.wrapping_add(addend) & mask);
+            continue;
+        } else if Some(r_type) == types.glob_dat || r_type == types.jump_slot {
+            // An undefined symbol is an import: the value lives in another
+            // image. Nothing to write, and the PLT/import naming already covers
+            // the call — leave the slot exactly as the linker left it. A
+            // REL-style GLOB_DAT/JUMP_SLOT is `S`, not `S + A`.
+            let Some(addr) = defined(sym) else { continue };
+            addr.wrapping_add(if explicit.is_some() { addend } else { 0 })
+        } else if Some(r_type) == types.abs {
+            let Some(addr) = defined(sym) else { continue };
+            addr.wrapping_add(addend)
         } else {
             continue;
         };
@@ -279,6 +350,8 @@ pub fn resolve(file: &object::File, bytes: &[u8]) -> DynRelocs {
 
     out
 }
+
+mod dtable;
 
 #[cfg(test)]
 mod tests;

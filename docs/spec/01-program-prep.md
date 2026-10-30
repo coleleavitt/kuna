@@ -640,7 +640,16 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   unresolved. GOT-relative MIPS forms (`GOT16`, `CALL16`, `GPREL16`) still need a
   synthesized GOT and `_gp`. 32-bit PowerPC covers `ADDR16`/`_LO`/`_HI`/`_HA`,
   `REL24`/`PLTREL24`/`LOCAL24PC`, `REL14` and its branch-hint forms, and
-  `REL32`. An entry that cannot be encoded is left
+  `REL32`. A relocation that addresses its symbol's GOT slot
+  (x86-64 `GOTPCREL`/`GOTPCRELX`/`REX_GOTPCRELX`, AArch64 `ADR_GOT_PAGE`/
+  `LD64_GOT_LO12_NC`, RISC-V `GOT_HI20`, ARM `GOT_PREL`) gets one: a pre-link
+  object has no GOT, so the layout reserves a synthetic one after the sections,
+  one pointer-sized slot per target holding the target's address, and encodes
+  the field against that slot. The slots are read-only and reported with the
+  `dynrelocs` constant ranges, so a load through one folds to the target and
+  `mov rax, [rip+sym@GOTPCREL]` reads as `&sym`. This is the linker's own
+  GOTPCRELX relaxation reached by folding rather than by rewriting `mov` into
+  `lea` in the image, as IDA does. An entry that cannot be encoded is left
   untouched and classified by reason (unsupported, unresolved target, missing
   TOC, section bounds, required veneer, alignment, range, or invalid encoding).
   The loader reports exact failure totals in at most eight groups with three
@@ -1307,9 +1316,17 @@ funcsym stream:
   target and can never resolve, which is the `(*dat_<addr>)(...)` rendering of a
   callee that is a *named function in the very same image*. Zero is not an
   ambiguity to be judged; it is a byte the run-time image never holds.
-  `decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs.rs (resolve)` walks
-  `.rela.dyn`/`.rel.dyn`/`.rela.plt` and computes the value the dynamic loader
-  would store: for `RELATIVE` the image's load bias plus the addend (kuna maps a
+  `decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs.rs (resolve)` reads
+  the tables the way the run-time loader finds them, through `PT_DYNAMIC`
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs/dtable.rs
+  (dynamic_relocations)`): `DT_RELA`, `DT_REL` and `DT_JMPREL` entries, the
+  `DT_RELR` bitmap (an even word is a `RELATIVE` slot, an odd word marks the
+  next 63 or 31 slots), Android's `DT_ANDROID_RELR`, and Android's `APS2`
+  packed `DT_ANDROID_REL[A]` stream (SLEB128 groups sharing offset delta, info or
+  addend), with symbols read from `DT_SYMTAB`. Section headers are not consulted,
+  so an image whose section table is stripped or forged is still relocated; an
+  image with no `PT_DYNAMIC` falls back to the section walk. For each entry it
+  computes the value the dynamic loader would store: for `RELATIVE` the image's load bias plus the addend (kuna maps a
   linked image at the vaddrs it declares, so the bias is zero and the value is the
   addend); for `GLOB_DAT`/`JUMP_SLOT` the symbol's address, **and only when that
   symbol is defined in this same image**. An undefined one is an import — its
@@ -1317,8 +1334,14 @@ funcsym stream:
   naming above already covers the call — so it is skipped and that path is
   untouched, lazy-binding stub contents included. A `REL` table (32-bit ELF)
   carries no addend field, so the in-place word is read back as the addend, the
-  same in-place convention `relocobjects` uses. Architectures are named by their
-  relocation triple: x86-64, AArch64, i386 and ARM; a machine with no entry
+  same in-place convention `relocobjects` uses; a `RELR` slot always holds its
+  addend in place. The word-sized absolute relocation (`R_X86_64_64`,
+  `R_AARCH64_ABS64`, ...) against a defined symbol writes `S + A`. An
+  `IRELATIVE` slot is left alone, since only running the resolver gives its
+  value, but the resolver is a function no symbol may name: it joins the
+  function symbols as `ifunc_<addr>` unless one is already there (`ifunc_<addr>`
+  is IDA's spelling). Architectures are named by their relocation types: x86-64,
+  AArch64, i386, ARM, PowerPC64, RISC-V and s390x; a machine with no entry
   produces nothing rather than guessing at a number that means something else
   there.
 

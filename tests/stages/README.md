@@ -47,7 +47,9 @@ decompiler/target/release/kuna test --datatests --datatests-dir tests/stages \
 
 `kuna-reloc-families.xml` loads relocatable objects (`fixtures/relocs/`, built by
 `zig cc` as their sources say) for the AArch64, RISC-V, MIPS and PPC32
-instruction relocation families.
+instruction relocation families. `kuna-dynrelocs-dt.xml` covers the synthesized GOT
+of PIC objects and the `PT_DYNAMIC`-driven dynamic relocations of an image
+whose section headers are zeroed.
 
 ## Testcase conventions
 

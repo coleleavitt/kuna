@@ -994,6 +994,14 @@ impl ObjectLoadImage {
         }
         let dynreloc_const: Vec<(u64, u64)> =
             dynrelocs.const_ranges.into_iter().filter(|(lo, _)| applied.contains(lo)).collect();
+        // (kuna `dynrelocs`) An `IRELATIVE` resolver is code only the dynamic
+        // loader calls; name the unnamed ones, as IDA's `ifunc_<addr>` does.
+        for &resolver in &dynrelocs.ifunc_resolvers {
+            let addr = if file.architecture() == object::Architecture::Arm { resolver & !1 } else { resolver };
+            if seen.insert(addr) {
+                funcsyms.push(FuncSym { addr, name: format!("ifunc_{addr:x}").into_bytes() });
+            }
+        }
 
         Ok(ObjectLoadImage {
             filename: filename.to_string(),
@@ -1059,6 +1067,7 @@ impl ObjectLoadImage {
         // the undefined half gets bytes at its synthetic extern slot (which has no
         // backing at all otherwise), and both halves get a foldable range.
         let fpconst = crate::loader::kuna_msvcfpconst::plan(file, &layout);
+        let got_range = layout.got_range;
         for w in &fpconst.warnings {
             kuna_base::notes::say_once(
                 filename,
@@ -1177,7 +1186,11 @@ impl ObjectLoadImage {
             // applied by the layout pass); on this path the entries come from
             // `msvcfpconst`, whose ranges qualify for exactly the same reason —
             // a datum that is known by construction, not by policy.
-            dynreloc_const: fpconst.const_ranges,
+            dynreloc_const: fpconst
+                .const_ranges
+                .into_iter()
+                .chain(got_range.map(|(lo, hi)| (lo, hi - 1)))
+                .collect(),
             // A pre-link object has no Import Address Table: its external calls
             // are relocations, resolved by the layout pass.
             import_slots: Vec::new(),

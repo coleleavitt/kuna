@@ -244,6 +244,8 @@ pub struct RelocLayout {
     pub extern_range: Option<(u64, u64)>,
     /// Half-open extent of allocated ELF COMMON storage, separate from extern slots.
     pub common_range: Option<(u64, u64)>,
+    /// Half-open extent of the synthesized GOT, whose slots are read-only.
+    pub got_range: Option<(u64, u64)>,
     /// Public object-coordinate map for selectors and machine-readable output.
     pub section_info: Vec<RelocSectionInfo>,
     /// Defined and undefined callable symbols with their original provenance.
@@ -333,6 +335,26 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         });
         cursor = vma.wrapping_add(size);
     }
+
+    // A synthesized GOT for the relocations that address a symbol's GOT slot
+    // (`GOTPCREL*`, `ADR_GOT_PAGE`, `GOT_HI20`, ...): a pre-link object has none.
+    // One read-only slot per target holds its address, so a load through the
+    // slot folds to the target. Sized by the number of such relocations.
+    let pointer = if file.is_64() { 8u64 } else { 4 };
+    let got_relocs = laid
+        .iter()
+        .filter_map(|l| file.section_by_index(l.index).ok())
+        .flat_map(|sec| sec.relocations().collect::<Vec<_>>())
+        .filter(|(_, reloc)| {
+            reloc_apply::classify(architecture, reloc).is_ok_and(|spec| spec.is_some_and(|s| s.via_got()))
+        })
+        .count() as u64;
+    let got_base = align_up(cursor, 16);
+    if got_relocs != 0 {
+        cursor = got_base + got_relocs * pointer;
+    }
+    let mut got_slots: HashMap<u64, u64> = HashMap::new();
+    let mut got_order: Vec<u64> = Vec::new();
 
     // Externs (undefined referenced symbols) live in a synthetic area above the
     // laid-out sections — the angr extern-object analog.  Allocated on demand.
@@ -501,6 +523,11 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                         continue;
                     }
                 }
+            } else if spec.via_got() {
+                *got_slots.entry(target.address).or_insert_with(|| {
+                    got_order.push(target.address);
+                    got_base + (got_order.len() as u64 - 1) * pointer
+                })
             } else {
                 target.address
             };
@@ -516,7 +543,7 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
             ) {
                 diagnostics.record(architecture, r_type, reason, sec_vma, offset);
             } else if spec.is_riscv_pcrel_hi() {
-                riscv_hi.insert(place, reloc_apply::riscv_pcrel_hi_value(&reloc, target.address, place));
+                riscv_hi.insert(place, reloc_apply::riscv_pcrel_hi_value(&reloc, symbol, place));
             }
         }
         for (hi_off, _, _) in mips_hi {
@@ -596,6 +623,26 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         }
     }
 
+    let got_range = (!got_order.is_empty()).then(|| {
+        let mut data = Vec::with_capacity(got_order.len() * pointer as usize);
+        for target in &got_order {
+            let bytes = if little_endian { target.to_le_bytes() } else { target.to_be_bytes() };
+            if little_endian {
+                data.extend_from_slice(&bytes[..pointer as usize]);
+            } else {
+                data.extend_from_slice(&bytes[8 - pointer as usize..]);
+            }
+        }
+        let size = data.len() as u64;
+        laid.push(LaidSection {
+            index: SectionIndex(0),
+            vma: got_base,
+            size,
+            flags: kuna_sleigh::loadimage::section_flags::DATA | kuna_sleigh::loadimage::section_flags::READONLY,
+            data,
+        });
+        (got_base, got_base + size)
+    });
     let segments = laid.iter().map(|l| (l.vma, l.data.clone())).collect();
     let sections = laid.iter().map(|l| (l.vma, l.size, l.flags)).collect();
     let extern_range = extern_order
@@ -612,6 +659,7 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         extern_addr: extern_of,
         extern_range,
         common_range: common_allocator.range(),
+        got_range,
         section_info,
         symbol_info,
     }
