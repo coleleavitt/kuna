@@ -917,6 +917,35 @@ fn arm_thumb_pe_functions_and_address_decompile() {
     assert!(stdout.contains("0x401000"), "{stdout}");
 }
 
+/// The entry's direct callees, and theirs, are functions of a TE image too.
+#[test]
+fn te_image_discovers_the_entrys_call_closure() {
+    let code = [
+        0xe8, 0x0b, 0x00, 0x00, 0x00, 0xe8, 0x16, 0x00, 0x00, 0x00, 0xc3, 0xcc, 0xcc, 0xcc,
+        0xcc, 0xcc, 0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc,
+        0xcc, 0xcc, 0xcc, 0xcc, 0xe8, 0xeb, 0xff, 0xff, 0xff, 0x83, 0xc0, 0x01, 0xc3,
+    ];
+    let bytes = kuna_analysis::loadimage_te::synthetic::TeImage::arm(&code)
+        .machine(object::pe::IMAGE_FILE_MACHINE_AMD64)
+        .build();
+    let path = common::scratch_file("cli-calls", "te");
+    std::fs::write(&path, bytes).unwrap();
+    let binary = path.to_string_lossy().into_owned();
+    let sp = specs();
+
+    let (stdout, stderr, ok) = run_kuna(&["functions", &binary, "--sleighpath", &sp]);
+    assert!(ok, "TE functions failed: {stderr}");
+    for entry in ["0x401000", "0x401010", "0x401020"] {
+        assert!(stdout.contains(entry), "{entry} missing:\n{stdout}");
+    }
+
+    let (stdout, stderr, ok) = run_kuna(&[
+        "functions", &binary, "--option", "rawdiscover", "off", "--sleighpath", &sp,
+    ]);
+    assert!(ok, "TE functions without discovery failed: {stderr}");
+    assert_eq!(stdout.lines().count(), 1, "{stdout}");
+}
+
 #[test]
 fn te_image_auto_detects_entry_mapping_and_thumb_context() {
     let path = write_thumb_te();
@@ -931,11 +960,15 @@ fn te_image_auto_detects_entry_mapping_and_thumb_context() {
         stdout.contains("\"address_hex\": \"0x401000\""),
         "{stdout}"
     );
-    // An inventory of one is reported, not left to be inferred — on a plain
-    // run, with no options asking for the discovery tier.
+    assert!(!stderr.contains("[kuna te]"), "{stderr}");
+
+    let (_, stderr, ok) = run_kuna(&[
+        "functions", &binary, "--option", "rawdiscover", "off", "--sleighpath", &sp,
+    ]);
+    assert!(ok, "TE functions without discovery failed: {stderr}");
     assert!(
-        stderr.contains("no object-file view, so function discovery cannot run"),
-        "a TE inventory must say why it is only the entry: {stderr}"
+        stderr.contains("rawdiscover is off"),
+        "a TE inventory without discovery must say why it is only the entry: {stderr}"
     );
 
     let (stdout, stderr, ok) = run_kuna(&[
