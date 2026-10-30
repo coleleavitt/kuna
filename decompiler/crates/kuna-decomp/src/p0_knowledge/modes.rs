@@ -457,8 +457,9 @@ mod tests {
                 "aggressive must enable `{want}`"
             );
         }
-        // Every aggressive override turns its option on.
-        assert!(agg.iter().all(|(_, v)| *v == "on"));
+        // Every aggressive override turns its option on; `itaniumeh` uses its
+        // cheap level (pads with a catch clause only).
+        assert!(agg.iter().all(|(o, v)| *v == "on" || (*o == "itaniumeh" && *v == "catch")));
     }
 
     /// The preset's headline contract, enforced rather than sampled: **every**
