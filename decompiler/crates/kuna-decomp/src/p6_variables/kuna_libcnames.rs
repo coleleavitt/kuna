@@ -32,6 +32,10 @@
 //! carried naming record a local keeps the spelling it printed; a spelling a
 //! rename took or vacated is handed to no other local, and a local whose
 //! spelling a rename took prints its number.
+//!
+//! [`crate::kuna_contextnames`] adds evidence of its own (loop counters, the
+//! returned local) under `option contextnames`; evidence an option prints is
+//! preferred to evidence only a directive may use.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -61,10 +65,18 @@ const ROLE_NAMES: &[&str] = &[
 /// How far evidence follows a value through folded copies and casts.
 const FOLD_DEPTH: usize = 4;
 
-/// One piece of evidence for a local: its kind (0 a return value, 1 an
-/// argument named for what it is, 2 a role name), the call (instruction,
-/// creation time), the slot, and the name.
-type Evidence = (u8, (Address, u32), i32, &'static str);
+/// Evidence kinds, strongest first: the value a library call returns, a loop
+/// counter ([`crate::kuna_contextnames`]), a library argument named for what
+/// it is, a role name, and the value the function returns.
+const RET: u8 = 0;
+pub(crate) const LOOP: u8 = 1;
+const ARG: u8 = 2;
+const ROLE: u8 = 3;
+pub(crate) const RESULT: u8 = 4;
+
+/// One piece of evidence for a local: its kind, the operation (instruction,
+/// creation time), the slot, the name, and whether the output prints it.
+pub(crate) type Evidence = (u8, (Address, u32), i32, &'static str, bool);
 
 fn is_role(name: &str) -> bool {
     ROLE_NAMES.binary_search(&name).is_ok()
@@ -90,7 +102,7 @@ fn folded_into(fd: &Funcdata, mut vn: VarnodeId) -> VarnodeId {
 
 /// The value an argument `vn` prints as: through the implied copies and casts
 /// that write it (`call((T)x)`), else itself.
-fn folded_from(fd: &Funcdata, mut vn: VarnodeId) -> VarnodeId {
+pub(crate) fn folded_from(fd: &Funcdata, mut vn: VarnodeId) -> VarnodeId {
     for _ in 0..FOLD_DEPTH {
         let Some(v) = fd.vbank().get(vn) else { break };
         if !(v.is_implied() && v.is_written()) {
@@ -109,7 +121,7 @@ fn folded_from(fd: &Funcdata, mut vn: VarnodeId) -> VarnodeId {
 /// The local `vn` is an instance of, when it is one this pass may name: a
 /// printed, unmerged-by-speculation variable that is not a function input,
 /// a global or a constant.
-fn local_of(fd: &mut Funcdata, vn: VarnodeId) -> Option<HighVariableId> {
+pub(crate) fn local_of(fd: &mut Funcdata, vn: VarnodeId) -> Option<HighVariableId> {
     let v = fd.vbank().get(vn)?;
     if v.is_constant() || v.is_input() || v.is_persist() || v.is_implied() || v.is_free() {
         return None;
@@ -130,6 +142,7 @@ fn local_of(fd: &mut Funcdata, vn: VarnodeId) -> Option<HighVariableId> {
 /// Every piece of library evidence in `fd`, by local.
 fn evidence(fd: &mut Funcdata) -> BTreeMap<HighVariableId, Vec<Evidence>> {
     let mut found: BTreeMap<HighVariableId, Vec<Evidence>> = BTreeMap::new();
+    let shown = fd.get_arch().libc_names;
     for i in 0..fd.num_calls() {
         let fc = fd.get_call_specs(i);
         let Some(names) = fd.get_arch().callee_library_names(fc.get_entry_address()) else { continue };
@@ -146,7 +159,7 @@ fn evidence(fd: &mut Funcdata) -> BTreeMap<HighVariableId, Vec<Evidence>> {
         if let (Some(ret), Some(out)) = (names.ret, out) {
             let vn = folded_into(fd, out);
             if let Some(high) = local_of(fd, vn) {
-                found.entry(high).or_default().push((0, at.clone(), -1, ret));
+                found.entry(high).or_default().push((RET, at.clone(), -1, ret, shown));
             }
         }
         for (j, name) in names.params.iter().enumerate() {
@@ -156,27 +169,33 @@ fn evidence(fd: &mut Funcdata) -> BTreeMap<HighVariableId, Vec<Evidence>> {
             }
             let vn = folded_from(fd, *arg);
             if let Some(high) = local_of(fd, vn) {
-                let kind = if is_role(name) { 2 } else { 1 };
-                found.entry(high).or_default().push((kind, at.clone(), j as i32, name));
+                let kind = if is_role(name) { ROLE } else { ARG };
+                found.entry(high).or_default().push((kind, at.clone(), j as i32, name, shown));
             }
         }
+    }
+    if fd.get_arch().context_names {
+        crate::kuna_contextnames::evidence(fd, &mut found);
     }
     found
 }
 
-/// The evidence that names a local: the strongest kind, then the earliest
-/// call, then the lowest slot. Results that disagree name nothing, and nor do
-/// role names that disagree; `usable` drops a name the printed code cannot
-/// hold (a type name, a keyword).
+/// The evidence that names a local: printed evidence before evidence only a
+/// directive may use, then the strongest kind, then the earliest call, then
+/// the lowest slot. Results that disagree name nothing, and nor do role names
+/// that disagree; `usable` drops a name the printed code cannot hold (a type
+/// name, a keyword).
 fn decide(mut found: Vec<Evidence>, usable: &dyn Fn(&str) -> bool) -> Option<Evidence> {
     found.retain(|e| usable(e.3));
-    for kind in [0, 2] {
+    for kind in [RET, ROLE] {
         let names: BTreeSet<&str> = found.iter().filter(|e| e.0 == kind).map(|e| e.3).collect();
         if names.len() > 1 {
             found.retain(|e| e.0 != kind);
         }
     }
-    found.into_iter().min_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then(a.2.cmp(&b.2)))
+    found
+        .into_iter()
+        .min_by(|a, b| b.4.cmp(&a.4).then(a.0.cmp(&b.0)).then_with(|| a.1.cmp(&b.1)).then(a.2.cmp(&b.2)))
 }
 
 /// `name` and its numbered spellings, `name`, `name_2`, `name_3`, ...
@@ -218,6 +237,7 @@ pub struct Candidate {
     base: &'static str,
     at: (Address, u32),
     slot: i32,
+    shown: bool,
 }
 
 /// A library name a numbered local answers to.
@@ -239,14 +259,16 @@ pub struct LibraryAlias {
 /// the option is on, or when a directive may name a local by its library name
 /// (a naming record is being taken or replayed).
 pub fn candidates(fd: &mut Funcdata) -> Vec<Candidate> {
-    if !fd.get_arch().libc_names && !fd.kuna_record_names() && fd.kuna_prior_names().is_empty() {
+    let arch = fd.get_arch();
+    if !arch.libc_names && !arch.context_names && !fd.kuna_record_names() && fd.kuna_prior_names().is_empty() {
         return Vec::new();
     }
     let found = evidence(fd);
     let mut out: Vec<Candidate> = found
         .into_iter()
         .filter_map(|(high, found)| {
-            decide(found, &|name| usable(fd, name)).map(|(_, at, slot, base)| Candidate { high, base, at, slot })
+            decide(found, &|name| usable(fd, name))
+                .map(|(_, at, slot, base, shown)| Candidate { high, base, at, slot, shown })
         })
         .collect();
     out.sort_by(|a, b| a.at.cmp(&b.at).then(a.slot.cmp(&b.slot)).then(a.high.cmp(&b.high)));
@@ -260,7 +282,6 @@ pub fn candidates(fd: &mut Funcdata) -> Vec<Candidate> {
 /// carried record a local keeps the spelling it printed, and a spelling a
 /// rename took or vacated, or another local printed, goes to no one else.
 pub fn apply(fd: &mut Funcdata, candidates: &[Candidate]) {
-    let shown = fd.get_arch().libc_names;
     let angr = fd.get_arch().name_style_angr;
     let prior = fd.kuna_prior_names().clone();
     let replay = !prior.is_empty();
@@ -299,10 +320,11 @@ pub fn apply(fd: &mut Funcdata, candidates: &[Candidate]) {
         };
         let Some(alias) = alias else { continue };
         taken.insert(alias.clone());
-        out.push(LibraryAlias { high: c.high, number, alias, shown });
+        out.push(LibraryAlias { high: c.high, number, alias, shown: c.shown });
     }
-    if shown {
-        let rename: BTreeMap<String, String> = out.iter().map(|a| (a.number.clone(), a.alias.clone())).collect();
+    if out.iter().any(|a| a.shown) {
+        let rename: BTreeMap<String, String> =
+            out.iter().filter(|a| a.shown).map(|a| (a.number.clone(), a.alias.clone())).collect();
         let highs: Vec<HighVariableId> = fd.high_bank().iter().map(|(id, _)| id).collect();
         for high in highs {
             let alias = fd.high_bank().get(high).and_then(|h| h.kuna_name()).and_then(|n| rename.get(n)).cloned();
@@ -367,9 +389,9 @@ mod tests {
     fn a_return_value_outranks_an_argument_and_the_earliest_call_wins() {
         let at = |o: u64| (Address::new_invalid(), o as u32);
         let any = |_: &str| true;
-        let e = decide(vec![(1, at(1), 0, "size"), (0, at(5), -1, "len")], &any).unwrap();
+        let e = decide(vec![(ARG, at(1), 0, "size", true), (RET, at(5), -1, "len", true)], &any).unwrap();
         assert_eq!(e.3, "len");
-        let e = decide(vec![(1, at(7), 0, "fd"), (1, at(3), 2, "stream")], &any).unwrap();
+        let e = decide(vec![(ARG, at(7), 0, "fd", true), (ARG, at(3), 2, "stream", true)], &any).unwrap();
         assert_eq!(e.3, "stream");
     }
 
@@ -377,13 +399,13 @@ mod tests {
     fn disagreeing_role_names_or_results_name_nothing() {
         let at = |o: u64| (Address::new_invalid(), o as u32);
         let any = |_: &str| true;
-        assert!(decide(vec![(2, at(1), 0, "dest"), (2, at(2), 1, "src")], &any).is_none());
-        let e = decide(vec![(2, at(1), 0, "s1"), (2, at(2), 1, "s2"), (1, at(3), 0, "s")], &any).unwrap();
+        assert!(decide(vec![(ROLE, at(1), 0, "dest", true), (ROLE, at(2), 1, "src", true)], &any).is_none());
+        let e = decide(vec![(ROLE, at(1), 0, "s1", true), (ROLE, at(2), 1, "s2", true), (ARG, at(3), 0, "s", true)], &any).unwrap();
         assert_eq!(e.3, "s");
-        let e = decide(vec![(2, at(1), 0, "dest"), (2, at(4), 0, "dest")], &any).unwrap();
+        let e = decide(vec![(ROLE, at(1), 0, "dest", true), (ROLE, at(4), 0, "dest", true)], &any).unwrap();
         assert_eq!(e.3, "dest");
-        assert!(decide(vec![(0, at(1), -1, "len"), (0, at(2), -1, "pid")], &any).is_none());
-        let e = decide(vec![(0, at(1), -1, "len"), (0, at(2), -1, "pid"), (1, at(3), 0, "n")], &any).unwrap();
+        assert!(decide(vec![(RET, at(1), -1, "len", true), (RET, at(2), -1, "pid", true)], &any).is_none());
+        let e = decide(vec![(RET, at(1), -1, "len", true), (RET, at(2), -1, "pid", true), (ARG, at(3), 0, "n", true)], &any).unwrap();
         assert_eq!(e.3, "n");
     }
 
@@ -391,8 +413,18 @@ mod tests {
     fn an_unusable_name_gives_way_to_the_next_evidence() {
         let at = |o: u64| (Address::new_invalid(), o as u32);
         let not_tm = |name: &str| name != "tm";
-        let e = decide(vec![(0, at(1), -1, "tm"), (1, at(2), 0, "tp")], &not_tm).unwrap();
+        let e = decide(vec![(RET, at(1), -1, "tm", true), (ARG, at(2), 0, "tp", true)], &not_tm).unwrap();
         assert_eq!(e.3, "tp");
-        assert!(decide(vec![(0, at(1), -1, "tm")], &not_tm).is_none());
+        assert!(decide(vec![(RET, at(1), -1, "tm", true)], &not_tm).is_none());
+    }
+
+    #[test]
+    fn a_loop_counter_outranks_library_evidence_and_printed_evidence_comes_first() {
+        let at = |o: u64| (Address::new_invalid(), o as u32);
+        let any = |_: &str| true;
+        let e = decide(vec![(ARG, at(1), 2, "nbytes", true), (LOOP, at(5), -1, "i", true)], &any).unwrap();
+        assert_eq!(e.3, "i");
+        let e = decide(vec![(RET, at(1), -1, "fd", false), (RESULT, at(9), -1, "result", true)], &any).unwrap();
+        assert_eq!(e.3, "result");
     }
 }

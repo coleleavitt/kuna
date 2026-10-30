@@ -813,6 +813,9 @@ pub struct Architecture {
     /// (kuna `libcnames`) Name locals from the library calls they meet.
     /// See [`crate::kuna_libcnames`].
     pub libc_names: bool,
+    /// (kuna `contextnames`) Name loop counters and the returned local.
+    /// See [`crate::kuna_contextnames`].
+    pub context_names: bool,
     /// (kuna GH-8724) Re-express a strided-induction offset as counter*stride
     /// (C++ `recover_array_stride`).
     pub recover_array_stride: bool,
@@ -2993,6 +2996,7 @@ impl Architecture {
             local_stack_views: true,
             stack_views: false,
             libc_names: false, // (kuna) option libcnames; reset_defaults sets the shipped default
+            context_names: false, // (kuna) option contextnames; reset_defaults sets the shipped default
             recover_array_stride: false,
             recover_lowered_switch: false,
             lowered_switch_labels: false,
@@ -3407,6 +3411,7 @@ impl Architecture {
         self.stack_views = false;
         self.local_stack_views = true;
         self.libc_names = false; // (kuna) option libcnames default-off: six stage assertions of other features spell a `vN` it names; ON in the `aggressive` preset, which `auto` selects under 500 KiB
+        self.context_names = false; // (kuna) option contextnames default-off: it renames loop counters and returned locals that other features' stage assertions and CLI tests spell as `vN`
         self.stack_alias_deadstore = false; // (kuna) default: upstream byte-identical (GH-8500)
         self.recover_array_stride = true; // (kuna) DIV-3 default-on (GH-8724)
         self.recover_lowered_switch = true; // (kuna) default-on (angr port)
@@ -4356,6 +4361,7 @@ impl Architecture {
         ctx.stack_views = self.stack_views;
         ctx.local_stack_views = self.local_stack_views;
         ctx.libc_names = self.libc_names; // libcnames
+        ctx.context_names = self.context_names; // contextnames
         ctx.guarded_read_trim = self.guarded_read_trim;
         ctx.tied_store_keep = self.tied_store_keep; // tiedstorekeep
         ctx.loop_counter_store = self.loop_counter_store; // loopcounterstore

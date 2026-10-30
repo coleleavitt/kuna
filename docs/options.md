@@ -1193,6 +1193,9 @@ Three tiers:
 | a buffer length from strlen named vN | [`libcnames`](#libcnames) |
 | a local passed to a libc function keeps a vN name | [`libcnames`](#libcnames) |
 | kuna names fewer locals than IDA on libc-heavy code | [`libcnames`](#libcnames) |
+| loop counters print as v5, v3, v1 instead of i, j, k | [`contextnames`](#contextnames) |
+| the accumulator a function returns keeps a vN name | [`contextnames`](#contextnames) |
+| nested loops are hard to tell apart in stripped code | [`contextnames`](#contextnames) |
 | a double parameter stored into a global prints as unsigned long and moves ahead of the integer parameters | [`floatglobals`](#floatglobals) |
 | a float parameter copied into a global prints as unsigned int | [`floatglobals`](#floatglobals) |
 | a global passed to a float parameter prints as a union reinterpretation ((union { unsigned int from; float to; }){ .from = dat_10001d78 }).to | [`floatglobals`](#floatglobals) |
@@ -3785,6 +3788,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** Off by default; on under `--mode aggressive`, which `auto` picks for a binary under 500 KiB and the web page runs. With it on a local reads `fd = open(a0,0); n = read(fd,v4,0x200);` where it read `v1 = open(a0,0); v3 = read(v1,v4,0x200);`, and every other local keeps its number. A directive may name such a local `fd` or `v1` in either mode. Set it off for `vN` defaults only; set it on with `--mode reliable` to get the names on the shipped defaults.
 - **Where / provenance:** P6/naming-policy · ida · presentation-default · kuna-libcnames
 - **Example:** `option libcnames on`
+
+### `contextnames` -- on | off, default `off`
+
+- **Symptoms:** loop counters print as v5, v3, v1 instead of i, j, k; the accumulator a function returns keeps a vN name; nested loops are hard to tell apart in stripped code.
+- **What it does:** Name a numbered local from its shape when no declaration names it: a loop counter after its loop's nesting depth (`i`, `j`, `k`, `m`, `n`), and the local the function returns `result`. `kuna_contextnames` finds the loops on the basic-block graph -- a back edge enters a block that dominates its source, and a loop's body is every block that reaches that source without passing the head -- and takes as a counter an integer local that the head's phi joins from outside the loop with an initial value and, on every back edge, with itself plus or minus one (through copies and casts); a pointer that walks a buffer, and a value that steps by anything else (`len -= 12`, `v += a2 * a3`), are not counters. The result is the one local that every `return` of a non-constant value returns. Both are evidence for the `libcnames` alias walk, which numbers every local exactly as with the option off and only then prints the name, so `v4` stays the same variable in every mode, a directive may name the local by either spelling, a clash takes `_2`, `_3`, ... in evidence order (a second loop at the same depth prints `i_2`), and no spelling repeats a name another variable, the scope or a callee holds. A loop counter outranks a library argument name (a counter passed as `read`'s `nbytes` stays `i`), the result of a library call outranks a loop counter (`len = strlen(s)` counted down stays `len`), and `result` is the weakest evidence; evidence an option prints is preferred to library evidence only a directive may use. Naming a local after the parameter it is passed to is upstream's `lookForFuncParamNames` for a locked callee prototype (DWARF, `--assert prototype`) and `libcnames` for the built-in library tables; this option adds neither.
+- **When to flip:** Turn on for readable loops in stripped code: `for (v5 = 0; ...; v5 += 1)` prints `for (i = 0; ...; i += 1)` and the accumulated return value prints `result`. Off by default because it renames locals that other features' stage assertions and CLI tests spell as `vN`.
+- **Where / provenance:** P6/naming-policy · kuna · presentation-default · kuna-contextnames
+- **Example:** `option contextnames on`
 
 ### `floatglobals` -- on | off, default `on`
 

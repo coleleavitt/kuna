@@ -599,7 +599,11 @@ mod tests {
               // `libgccsigs` costs a SPARC32 caller that returns arithmetic on
               // the `__divdi3` quotient its low word or its whole return (see its
               // catalog row), so the preset must not turn it on.
-              "libgccsigs"];
+              "libgccsigs",
+              // `contextnames` renames loop counters and returned locals that the
+              // CLI tests of other features, which run under `auto`, spell as
+              // `vN`; it joins the preset once those are re-pinned.
+              "contextnames"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open
