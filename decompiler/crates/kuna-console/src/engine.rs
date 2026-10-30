@@ -3263,6 +3263,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "funcchunks" => arch.analysis_funcchunks,
         "globalwidth" => arch.analysis_globalwidth,
         "aifdataveto" => arch.analysis_aifdataveto,
+        "calltable" => arch.analysis_calltable,
         "gopclntab" => arch.analysis_gopclntab,
         "gotypes" => arch.analysis_gotypes,
         "gonoreturn" => arch.analysis_gonoreturn,

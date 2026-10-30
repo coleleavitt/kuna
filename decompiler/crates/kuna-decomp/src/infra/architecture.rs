@@ -2646,6 +2646,8 @@ pub struct Architecture {
     pub analysis_aifdataveto: bool,
     /// (kuna) Resume the Listing walk from new callback roots instead of rebuilding it (`incrementalwalk`). Default on.
     pub analysis_incrementalwalk: bool,
+    /// (kuna) Call tables, the call-table vs switch vote and switch-case entry demotion (`calltable`). Default on.
+    pub analysis_calltable: bool,
     /// (kuna) Run `tailcallentry` on AArch64, x86 and RISC-V as well as ARM (`tailcallentryall`). Default off.
     pub analysis_tailcallentryall: bool,
     /// (kuna) Read AArch64 compact (shifted-offset) jump tables in the reference walk (`compacttable`). Default on.
@@ -3572,6 +3574,7 @@ impl Architecture {
             analysis_globalwidth: true,
             analysis_aifdataveto: true,
             analysis_incrementalwalk: true,
+            analysis_calltable: true,
             analysis_tailcallentryall: false,
             analysis_compacttable: true,
             analysis_nameladder: true,
@@ -4104,6 +4107,7 @@ impl Architecture {
         self.analysis_globalwidth = true;
         self.analysis_aifdataveto = true;
         self.analysis_incrementalwalk = true;
+        self.analysis_calltable = true;
         self.analysis_tailcallentryall = false;
         self.analysis_compacttable = true;
         self.analysis_nameladder = true;

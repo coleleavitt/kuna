@@ -7176,6 +7176,20 @@ resume the Listing from the accepted roots instead of rebuilding it, the
 `addrtakenentry` way; on a 300-callback i386 fixture the function set is
 identical either way.
 
+**Call tables** (`calltable`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_calltable.rs (scan)`): the
+tables computed transfers index are read with the `switchtable` register-chain
+fold (`register_targets` now also answers for `CALLIND`, and reads an unchecked
+pointer table up to 256 entries, flagged `unbounded`) and voted as IDA's
+`check_flat_jump_table` does: an indexed call, a jump whose distinct targets are
+40% or more other functions' entries, or on x86 an unchecked table whose targets
+all sit on 16-byte boundaries, is a call table. Its targets become entries (and
+call references in the `kuna xrefs` walk, instead of switch cases); a
+discovered, non-symbol entry on a case of a real switch that no call reaches is
+demoted. On the fixture the two table functions are found and the
+prologue-shaped case is no longer a function; on stripped Lua (x86-64, AArch64),
+ld.so, llvm-nm and llvm-objdump the function lists are unchanged.
+
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
 gives a discovered function a body. The Listing keys a function by its entry,

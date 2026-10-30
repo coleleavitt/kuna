@@ -1360,6 +1360,16 @@ pub fn run_listing_consumers_replaying(
         out.push(("funcchunks", fc_out));
     }
 
+    // (kuna `calltable`) Call tables add their targets as entries; switch
+    // cases that are discovered entries nothing calls are demoted.
+    if arch.analysis_listing && arch.analysis_calltable && listing.has_refs() {
+        let tables = crate::listing::kuna_calltable::scan(&file, &listing, arch, translate);
+        let mut ct_out = AnalysisOutput::default();
+        ct_out.entries = tables.entries;
+        ct_out.data_vetoed = tables.demoted;
+        out.push(("calltable", ct_out));
+    }
+
     // (kuna `globalwidth`) The access width of each symbol-table data object.
     if arch.analysis_listing && arch.analysis_globalwidth {
         if let (Some(code), Some(data)) = (arch.manage().get_default_code_space(), arch.manage().get_default_data_space()) {

@@ -1345,7 +1345,10 @@ kuna_options! { self, p1;
         on_off!(analysis_aifdataveto, "AIF data read/write veto")
     },    "incrementalwalk" => {
         on_off!(analysis_incrementalwalk, "Incremental Listing walk for callback roots")
+    },    "calltable" => {
+        on_off!(analysis_calltable, "Call-table recovery, vote and case demotion")
     },
+
 
 
 

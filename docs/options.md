@@ -924,6 +924,10 @@ Three tiers:
 | a stripped function list contains data the code reads | [`aifdataveto`](#aifdataveto) |
 | function discovery on an i386 binary full of push imm callbacks is slow | [`incrementalwalk`](#incrementalwalk) |
 | each callback round re-decodes the whole program | [`incrementalwalk`](#incrementalwalk) |
+| a function reached only through a table of function pointers is missing | [`calltable`](#calltable) |
+| kuna xrefs shows no caller for a function called through ops[i](x) | [`calltable`](#calltable) |
+| a switch case that opens with push rbp is listed as a function | [`calltable`](#calltable) |
+| a dispatcher's table of tail calls is printed as a switch | [`calltable`](#calltable) |
 | a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
 | a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
 | tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
@@ -3564,6 +3568,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default). Flip off to rebuild the Listing from scratch for every callback round, the old behaviour, if a resumed walk ever disagrees with a fresh one.
 - **Where / provenance:** P1/code-data-partition · kuna · performance · kuna-incrementalwalk
 - **Example:** `--option incrementalwalk off`
+
+### `calltable` -- on | off, default `on`
+
+- **Symptoms:** a function reached only through a table of function pointers is missing; kuna xrefs shows no caller for a function called through ops[i](x); a switch case that opens with push rbp is listed as a function; a dispatcher's table of tail calls is printed as a switch.
+- **What it does:** Read the tables computed transfers index and vote the way IDA does (check_flat_jump_table): an indexed CALL through a pointer table calls every entry; a computed JUMP whose distinct targets are 40% or more other functions' entries, or (on x86) an unchecked pointer table whose targets all sit on 16-byte function boundaries, is a call table of tail calls, not a switch. Call-table targets become function entries and, in the reference walk behind kuna xrefs, call references of the dispatcher instead of its switch cases. The other way round, a discovered entry (not a symbol) that is a case of a real switch and that no call reaches is demoted, IDA's AFL_NOTPROC on switch targets. The tables are read with the switchtable register-chain fold; an indexed call with no range check reads up to 256 entries, stopping at the first word that is not code of the caller's section.
+- **When to flip:** On (default). Flip off if a hand-written dispatcher's table is misread as functions, or to see a prologue-shaped switch case listed as a function again.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-calltable
+- **Example:** `--option calltable off`
 
 ### `tailcallentryall` -- on | off, default `off`
 
