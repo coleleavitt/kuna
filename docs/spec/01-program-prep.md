@@ -969,6 +969,35 @@ sections, and symbols, and is also used when analysis or a CLI inspection
 command reopens the image. It retains the typed reader's header and section
 validation; it does not rewrite the machine bytes to another architecture.
 
+(kuna) **A DEX file is mapped whole at address 0** (`option dexmodel` governs
+what the engine does with it). `decompiler/crates/kuna-analysis/src/loadimage_dex.rs
+(DexLoadImage)` maps the file as one read-only code segment, as Ghidra's
+`DexLoader` maps its `.dex` block; Ghidra also copies each method's
+instructions to a second block, which kuna does not need, so an instruction's
+address is its file offset. The format probe is the `dex\n` magic followed by a
+three-digit version and a NUL. The same dispatcher that routes TE images
+(`decompiler/crates/kuna-console/src/engine.rs (bootstrap_from_image_with_isa)`,
+and `bootstrap_from_file` for the console) routes a DEX file to
+`engine.rs (bootstrap_from_dex_bytes)`, which decodes with
+`Dalvik:LE:32:DEX_Android12` unless `--target` names another Dalvik language,
+installs one function symbol per method with code, named as the DEX model does
+(chapter 00), hands the model to the `Architecture`, and turns on
+`readonlypropagate` for the image. At the analysis commit each method's DEX
+prototype is locked onto its symbol, after the `option` lines, so `dexmodel off`
+also leaves the signatures to recovery. No analysis pass runs over a DEX image:
+the method table is the complete function inventory.
+
+An APK is a zip; `loadimage_dex.rs (is_apk)` claims one whose central directory
+lists a root `classes.dex`. `loadimage_dex.rs (load_dex_models)` inflates
+`classes.dex`, `classes2.dex`, ... in that order (stored or deflated entries;
+zip64 and other methods are refused) and maps each at the next 64 KiB boundary
+after the previous one, one DEX model per file. Index spaces are per file, so
+each function's snapshot carries the model whose mapping holds its entry
+(`architecture.rs (Architecture::build_arch_handle_for_entry)`): a constant-pool
+index resolves in the method's own file. A call into a class defined in another
+file of the APK prints by name through that pool, but the call is not linked to
+the other file's function.
+
 (kuna) **UEFI TE images take a bounded container path of their own.**
 `decompiler/crates/kuna-analysis/src/loadimage_te.rs (TeLoadImage)` parses a
 file the format probe claims. That probe reads more than the `VZ` signature —

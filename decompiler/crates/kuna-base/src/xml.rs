@@ -2131,7 +2131,10 @@ mod tests {
         // and kuna-dedupitetail-gototarget / a goto into an unwrapped if clause keeps its target
         // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
-        assert_eq!(count, 612, "corpus file count drifted");
+        // and kuna-dex / a DEX file's constant pool, entry copies and sparse switches
+        // and kuna-dex-apk / an APK's classes*.dex files mapped one after another
+        // and kuna-dex-javanew / an allocation and its <init> call as new T(args)
+        assert_eq!(count, 615, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

@@ -975,8 +975,8 @@ load file "/home/u/test dir/a.out"
 openfile write "/tmp/out dir/main.c"
 ```
 
-**`--language auto|c|rust`** selects the output language. **`auto` is the
-default and follows the binary**: a Rust binary renders as Rust, because kuna
+**`--language auto|c|rust|java`** selects the output language. **`auto` is the
+default and follows the binary**: a DEX file renders as Java, and a Rust binary renders as Rust, because kuna
 already detects one (`kuna-analysis`'s `sourcelang` pass, the port of Ghidra's
 `SourceLanguageAnalyzer`) and rendering it as C is worse in a way the reader has
 to undo by hand (DIV-80). Detection is high-precision, not heuristic; an
@@ -1113,6 +1113,42 @@ capability error naming the supported commands. `--slice` names a Mach-O fat
 slice and is ignored, as on any thin image. Project exports retain the TE entry
 (reported through the inventory, at its even address) and the named section
 table.
+
+### DEX files
+
+A `.dex` file (Android bytecode, `dex\n035`..`039`) or an `.apk` loads like any
+other image: the file is mapped at address 0, every method with code is a function
+named `pkg::Class::method` (a method name shared by several overloads gets
+`_<addr>` appended), and its DEX prototype is its signature. The output
+language defaults to Java (`--language c` gives C).
+
+```bash
+kuna functions classes.dex | head -3
+#   0x350	demo::Hello::isHello
+#   0x368	demo::Hello::add
+#   0x37c	demo::Hello::callMany
+kuna decompile classes.dex 'demo::Hello::greet'
+#   String greet(String a0)
+#   {
+#     StringBuilder v1; // resultreg | v0 | v2
+#     v1 = new StringBuilder();
+#     v1 = v1.append("Hello, ");
+#     v1 = v1.append(a0);
+#     return v1.toString();
+#   }
+```
+
+Method, field, string and type references resolve through the DEX constant
+pool, a method's arguments are read from its input registers, and
+`sparse-switch` tables are recovered (`--option dexmodel off` and
+`--option jumpassist off` show the raw SLEIGH lifting instead). An allocation
+and the constructor call that initializes it print as one `new T(args)` when
+they sit together in a basic block; `--option javanew off` prints the bytecode's
+two steps, `v = new(T); v.<init>(args);`. The language is `Dalvik:LE:32:DEX_Android12`; `--target` selects another
+`Dalvik:` language. An APK loads directly: its `classes.dex`, `classes2.dex`, ...
+are inflated and mapped one after another, each at a 64 KiB boundary, so one
+run covers the whole app and a call from one file into a class of another
+prints by name. CDEX, ODEX, OAT and VDEX files are not supported.
 
 ### Headerless raw images
 
