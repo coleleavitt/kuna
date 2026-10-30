@@ -1154,6 +1154,10 @@ Three tiers:
 | a local written before a call to a `ret $4` callee reads back undefined after it | [`calleeretpurge`](#calleeretpurge) |
 | stack offsets drift by 4 after every call that returns a struct through a hidden pointer | [`calleeretpurge`](#calleeretpurge) |
 | a stdcall callee's argument bytes are never removed from the caller's stack | [`calleeretpurge`](#calleeretpurge) |
+| kuna decompile of a thunk is void while its callers use the result | [`tailcontract`](#tailcontract) |
+| a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract) |
+| a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract) |
+| return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -3817,6 +3821,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on for i386 code: a caller of a struct-returning function shows locals that change name after the call, or reads a slot the source wrote before the call as an undefined value. Flip OFF to get the prototype model's extrapop back, e.g. to bisect a stack-offset change on an x86 image or when a callee was decoded at a wrong entry.
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-9-callee-ret-purge
 - **Example:** `option calleeretpurge off`
+
+### `tailcontract` -- on | off, default `on`
+
+- **Symptoms:** kuna decompile of a thunk is void while its callers use the result; a tail-calling thunk returns a value in decompile-all but not in a single decompile; a forwarder's tail call drops an argument it passes through unchanged; return helper(a0,a1 + 1) for a helper that takes three arguments.
+- **What it does:** Before a single-function drive (`kuna decompile`) runs its pipeline, decompile each callee the function tail-calls (a CALL the flow followed with its artificial RETURN, at most four) and state its recovered prototype the way protoorder's callee-first decompile-all does. Without it a thunk such as `xor esi,esi; jmp target` decompiled as `void thunk(a0) { target(a0,0); }` -- the tail call's result was dropped because nothing in the thunk reads it, while every caller used it and decompile-all printed `return target(a0,NULL)` -- and a forwarder `add esi,1; jmp helper` dropped the argument it passes through untouched (`return helper(a0,a1 + 1)` for a three-argument helper). The callee's statement is the one protoorder types parks: its recovered parameter types, its arity when sound, and its output, so the tail call passes the callee's arguments and result through. Declared callees and callees already stated are skipped; the nested drives do not recurse. Inert under protoorder off.
+- **When to flip:** On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-extra-tail-thunk
+- **Example:** `option tailcontract off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

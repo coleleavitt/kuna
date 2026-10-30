@@ -947,6 +947,9 @@ pub struct Architecture {
     /// (kuna) Take a direct callee's extrapop from its own `ret imm16`
     /// (option `calleeretpurge`).  See [`crate::p4_calls::kuna_calleeretpurge`].
     pub callee_ret_purge: bool,
+    /// (kuna) A single-function drive states each tail-called callee's prototype
+    /// first (option `tailcontract`).
+    pub tail_contract: bool,
     pub global_call_ranges: bool,
     /// (kuna) Let the callee's decoded body answer for the call's RETURN
     /// register too (option `calleeretpreserves`).  See
@@ -3118,6 +3121,7 @@ impl Architecture {
             zero_call_regs: true,
             callee_preserves: true,
             callee_ret_purge: true,
+            tail_contract: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
             callee_scratch_body: true,
@@ -3542,7 +3546,8 @@ impl Architecture {
         self.zero_fill_return = true; // (kuna) default-on (0/675 ablation): the zero a narrow write leaves in a returned q register's upper half is no part of the value
         self.zero_call_regs = true; // (kuna) default-on (0/675 ablation): a register a -fzero-call-used-regs epilogue clears before the return is no part of the value
         self.global_call_ranges = true;
-        self.callee_ret_purge = true; // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
+        self.callee_ret_purge = true;
+        self.tail_contract = true; // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)
         self.callee_scratch_body = true; // (kuna) DIV-149 default-on: a decoded callee that clobbers only SCRATCH registers still counts as a body for calleepreserves, so the value a caller sets before MSVC's out-of-line stack probe survives it (0/675 ablation)

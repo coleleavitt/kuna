@@ -152,6 +152,7 @@ kuna_options! { self, p1;
     "fastfailnoreturn" => on_off!(fastfail_noreturn, "Windows int 0x29 (__fastfail) no-return"),
     "ptrauthtrap" => on_off!(ptrauth_trap, "arm64e pointer-auth failure-check removal"),
     "calleeretpurge" => on_off!(callee_ret_purge, "Callee `ret imm16` extrapop"),
+    "tailcontract" => on_off!(tail_contract, "Tail-callee prototype bootstrap"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;

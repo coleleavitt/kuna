@@ -4099,6 +4099,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "tailcontract"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P4"
+subphase = "callee-prototype-stack-contract"
+strength = "HARD"
+rewind = "P4"
+issue = "ida95-extra-tail-thunk"
+summary = "Before a single-function drive (`kuna decompile`) runs its pipeline, decompile each callee the function tail-calls (a CALL the flow followed with its artificial RETURN, at most four) and state its recovered prototype the way protoorder's callee-first decompile-all does. Without it a thunk such as `xor esi,esi; jmp target` decompiled as `void thunk(a0) { target(a0,0); }` -- the tail call's result was dropped because nothing in the thunk reads it, while every caller used it and decompile-all printed `return target(a0,NULL)` -- and a forwarder `add esi,1; jmp helper` dropped the argument it passes through untouched (`return helper(a0,a1 + 1)` for a three-argument helper). The callee's statement is the one protoorder types parks: its recovered parameter types, its arity when sound, and its output, so the tail call passes the callee's arguments and result through. Declared callees and callees already stated are skipped; the nested drives do not recurse. Inert under protoorder off."
+use_when = "On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path."
+example = "option tailcontract off"
+source_decompiler = "kuna"
+inspiration = "hexx64.so sub_e7430 (`xor esi,esi; jmp 0xe7130`): project export `return sub_e7130(a0,NULL)`, single decompile a void call; the protoorder single-function bootstrap (decompile_drive bootstrap_split_callees)"
+change_kind = "correctness-fix"
+tier = "core"
+symptoms = "kuna decompile of a thunk is void while its callers use the result|a tail-calling thunk returns a value in decompile-all but not in a single decompile|a forwarder's tail call drops an argument it passes through unchanged|return helper(a0,a1 + 1) for a helper that takes three arguments"
+live_field = "tail_contract"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "calleeretpreserves"
 values = "on|off"
 default = "on"

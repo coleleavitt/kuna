@@ -1305,6 +1305,49 @@ fn bootstrap_split_callees(
     }
 }
 
+/// How many tail-called callees a single-function drive decompiles first.
+const MAX_TAIL_CONTRACTS: usize = 4;
+
+/// (kuna `tailcontract`) State the recovered prototype of every callee `root`
+/// tail-calls (a CALL the flow followed with its artificial RETURN), so the tail
+/// call passes through the callee's arguments and result the way a callee-first
+/// `decompile-all` sees them. Inert under `protoorder off` and `tailcontract off`.
+fn bootstrap_tail_callees(arch: &mut Architecture, root: &Funcdata) {
+    if !arch.tail_contract || !arch.protoorder.is_on() || root.num_calls() == 0 {
+        return;
+    }
+    let returns: Vec<Address> = root
+        .obank()
+        .iter_all()
+        .filter_map(|(_, op)| root.obank().get(op).filter(|o| o.code() == OpCode::CPUI_RETURN).map(|o| o.get_addr().clone()))
+        .collect();
+    let tails: Vec<Address> = (0..root.num_calls())
+        .filter_map(|i| {
+            let fc = root.get_call_specs(i);
+            let at = root.obank().get(fc.get_op())?.get_addr().clone();
+            returns.contains(&at).then(|| fc.get_entry_address().clone())
+        })
+        .collect();
+    let entries = eligible_callees(arch, tails, root.get_address());
+    if entries.is_empty() {
+        return;
+    }
+    let prior = std::mem::take(&mut arch.kuna_protoorder_types);
+    let mut stated = Vec::new();
+    for entry in entries.into_iter().take(MAX_TAIL_CONTRACTS) {
+        if deadline_passed() {
+            break;
+        }
+        if let Some((Some(types), _)) = recover_one_contract(arch, &prior, &entry) {
+            if let Some(key) = crate::p4_calls::kuna_protoorder::stated_key(&entry) {
+                stated.push((key, types));
+            }
+        }
+    }
+    arch.kuna_protoorder_types = prior;
+    arch.kuna_protoorder_types.extend(stated);
+}
+
 /// Decompile one callee far enough to state its recovered parameter types, then
 /// restore the caller's drive state.  The restored state is the per-drive
 /// switches the callee drive rewrites; the statements are handed back explicitly
@@ -1823,6 +1866,11 @@ fn decompile_func_full_with_objects_inner(
                 && arch.protoorder.is_on()
                 && arch.has_split_records(),
         );
+        // (kuna `tailcontract`) A single-function drive has no callee-first run
+        // behind it, so it states the prototype of each tail-called callee first.
+        if purpose == DrivePurpose::SingleFunction && CONTRACT_DEPTH.with(|d| d.get()) == 0 {
+            bootstrap_tail_callees(arch, &fd);
+        }
         // (kuna `protoorder types`) The parameter types callees decompiled earlier stated.
         crate::p4_calls::kuna_protoorder::seed_protoorder_types(arch, &mut fd);
         // (kuna `callrettype`) And the return types they stated.

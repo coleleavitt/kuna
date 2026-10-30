@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3375,
-    3375
+    3379,
+    3379
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -990,7 +990,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 358 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 359 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1871,6 +1871,10 @@
     "data:TAILCALLSAVED #2: the false call is attributed to the rule that made it, in that pass only",
     "data:TAILCALLSAVED #3: only the default pass keeps the join block's own arithmetic inside the function",
     "data:TAILCALLSAVED #4: both passes keep the cdecl call whose arguments the add esp,8 discards, so the sole difference is the tail-call boundary",
+    "data:TAILCONTRACT #1: off, the thunk's tail call result is dropped",
+    "data:TAILCONTRACT #2: on, the thunk returns the tail call's result",
+    "data:TAILCONTRACT #3: off, the forwarder drops the argument it passes through",
+    "data:TAILCONTRACT #4: on, the forwarder passes its third argument through",
     "data:TERMDUP #4: at the shipped bound 2 a three-term expression is forced explicit and gets its own statement",
     "data:TERMDUP #5: the explicit sum is then read at both multiplicand positions by name",
     "data:TERMDUP #6: `option termdup 3` drops the statement and duplicates the three-term sum at both uses",

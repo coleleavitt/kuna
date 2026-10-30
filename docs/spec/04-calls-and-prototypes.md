@@ -3361,6 +3361,24 @@ with no reachable return (a PLT stub, a no-return function), whose returns
 disagree, or whose return writes the stack pointer in any other way keeps the
 prototype's answer. `option calleeretpurge off` restores the model's extrapop.
 
+### (kuna) `tailcontract` — a single decompile states its tail callees first
+
+`kuna decompile` of one function has no callee-first run behind it. For a
+thunk that is all tail call (`xor esi,esi; jmp target`) that cost the result:
+nothing in the thunk reads `RAX` after the call, so the call kept no output and
+the thunk printed `void thunk(a0) { target(a0,0); }`, while every caller used
+the value and `decompile-all` printed `return target(a0,NULL)`. A forwarder
+(`add esi,1; jmp helper`) lost the third argument it passes through untouched
+in `EDX` the same way. Before the pipeline runs, the single-function drive now
+finds each CALL that the flow turned from a tail jump (a CALL with an artificial
+`RETURN` at its own address), decompiles up to four such callees in a nested
+drive (`decompile_drive.rs (bootstrap_tail_callees)`), and states each one's
+recovered prototype exactly as `protoorder` parks it in a callee-first run:
+types, the arity where it is sound, the output and the forwarded inputs. The
+nested drives do not recurse, and declared or already-stated callees are
+skipped. `option tailcontract off`, or `protoorder off`, decompiles the thunk
+from its own body alone.
+
 ### (kuna) `swiftcall` — Swift's `self` and error registers
 
 Swift's convention adds registers the C model has no row for: `swiftself` (x20
