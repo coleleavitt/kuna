@@ -224,6 +224,8 @@ enum ProgramContainer {
     Raw,
     /// A UEFI TE image through its own bounded parser.
     Te,
+    /// A DEX file mapped whole at address 0.
+    Dex,
 }
 
 /// A mixed-ARM container entry with the Thumb bit set, awaiting the
@@ -632,6 +634,8 @@ pub struct ConsoleProgram {
     /// the decompile loop, because the drive rebuilds the `Funcdata` and the
     /// symbol-table prototype link does not survive that rebuild.
     pending_prototypes: BTreeMap<String, kuna_decomp::fspec::PrototypePieces>,
+    /// (kuna `dexmodel`) The DEX method prototypes wait for the analysis commit.
+    pending_dex_prototypes: bool,
     /// Raw-input address-unit width and whether bit zero is an ARM state bit.
     raw_address_units: Option<(u64, bool)>,
     /// (kuna) The loader's **import pointer slots** as half-open `[lo, hi)` VMA
@@ -2169,6 +2173,29 @@ impl ConsoleProgram {
         Ok(())
     }
 
+    /// (kuna `dexmodel`) Lock each method's declared prototype onto its symbol:
+    /// `this` and the parameters in the input registers, the DEX types, the
+    /// `__thiscall` model for an instance method.
+    fn lock_dex_prototypes(&mut self) {
+        let models = self.arch().dex_models().to_vec();
+        let Some(space) = self.arch().manage().get_default_code_space().cloned() else { return };
+        for (model, function) in models.iter().flat_map(|m| m.functions().into_iter().map(move |f| (m, f))) {
+            let Ok((pieces, name)) =
+                model.method_prototype(function.method_idx, function.is_static, false, self.arch().types())
+            else {
+                continue;
+            };
+            let mut pieces = pieces;
+            let proto_model = self.arch().get_model(name).cloned();
+            let target = crate::assertions::ProtoTarget::At(
+                Address::new(Rc::clone(&space), function.addr),
+                function.name.clone(),
+            );
+            crate::assertions::park_prototype(self, &target, &mut pieces, proto_model.as_ref());
+            self.set_pending_prototype(&function.name, pieces);
+        }
+    }
+
     /// Register a console-created function symbol (the `map function` hook): make
     /// `name`->`addr` resolvable by `load function <name>`.  C++ `Scope::addFunction`
     /// installs the symbol in the symbol table; the kuna console additionally needs
@@ -2654,6 +2681,9 @@ impl ConsoleProgram {
                     self.pending_analysis.push(("entrythumbflow", output));
                 }
             }
+        }
+        if std::mem::take(&mut self.pending_dex_prototypes) {
+            self.lock_dex_prototypes();
         }
         if !self.pending_synthetic_entries.is_empty() {
             // (kuna `rawdiscover`) A headerless or TE image reaches this point
@@ -3798,6 +3828,7 @@ fn empty_program(
         assertions: Vec::new(),
         assertion_outcomes: Vec::new(),
         pending_prototypes: BTreeMap::new(),
+        pending_dex_prototypes: false,
         raw_address_units: None,
         import_slots: Vec::new(),
         symbol_underscore_prefix: false,
@@ -3958,6 +3989,11 @@ pub fn bootstrap_from_image_with_isa(
 ) -> KunaResult<ConsoleProgram> {
     if file_is_te_image(path) {
         bootstrap_from_te(path, target, spec_roots, isa)
+    } else if file_is_dex(path) {
+        let bytes = std::fs::read(path).map_err(|error| {
+            KunaError::lowlevel(format!("Unable to open DEX file: {path}: {error}"))
+        })?;
+        bootstrap_from_dex_bytes(path, bytes, target, spec_roots)
     } else {
         bootstrap_from_object_with_isa(path, target, spec_roots, isa)
     }
@@ -3995,6 +4031,70 @@ fn reader_is_te_image(reader: &mut impl std::io::Read) -> std::io::Result<bool> 
         Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => Ok(false),
         Err(error) => Err(error),
     }
+}
+
+fn file_is_dex(path: &str) -> bool {
+    use std::io::Read;
+    let mut prefix = [0u8; 0x70];
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    if file.read_exact(&mut prefix).is_err() {
+        return false;
+    }
+    kuna_analysis::loadimage_dex::is_dex(&prefix)
+        || (prefix.starts_with(b"PK\x03\x04")
+            && std::fs::read(path).is_ok_and(|bytes| kuna_analysis::loadimage_dex::is_apk(&bytes)))
+}
+
+/// (kuna `dexmodel`) Bootstrap a DEX file, or an APK's `classes*.dex` files:
+/// each mapped read-only for the Dalvik spec, one function per method with
+/// code, and a [`kuna_decomp::kuna_dex::DexModel`] per file that the engine
+/// asks for constant-pool records and register payloads. The method
+/// prototypes are locked at the analysis commit, after the `option` lines.
+pub fn bootstrap_from_dex_bytes(
+    path: &str,
+    bytes: Vec<u8>,
+    target: &str,
+    spec_roots: &[String],
+) -> KunaResult<ConsoleProgram> {
+    let target = kuna_analysis::loadimage_object::explicit_language_target(target).unwrap_or("");
+    let registry = build_registry();
+    let models = kuna_analysis::loadimage_dex::load_dex_models(bytes)?;
+    let mut loader = kuna_analysis::loadimage_dex::DexLoadImage::new(path, models.clone());
+    let mut sleigh = build_sleigh_for_loader(
+        path,
+        target,
+        spec_roots,
+        &registry,
+        kuna_analysis::loadimage_dex::DEX_LANGUAGE,
+        None,
+    )?;
+    let code_space = default_code_space(&sleigh)?;
+    loader.attach_to_space(Rc::clone(&code_space));
+    let readonly_ranges = loader_readonly_ranges(&loader, sleigh.base().unwrap().manage());
+    let symbols = models
+        .iter()
+        .flat_map(|model| model.functions())
+        .map(|function| ProgramSymbol {
+            name: function.name,
+            addr: Address::new(Rc::clone(&code_space), function.addr),
+            object_location: None,
+            binding: None,
+            provenance: EntryProvenance::Mapped,
+        })
+        .collect();
+    let arch = sleigh.base_mut().unwrap();
+    arch.set_loader(Box::new(loader));
+    arch.dex = models;
+    // The file is immutable at run time, so a switch payload's key and size
+    // fold to the constants a jump-table model needs.
+    arch.readonlypropagate = true;
+    let description = arch.get_description().to_string();
+    let mut program = empty_program(sleigh, registry, ProgramContainer::Dex, description);
+    program.symbols = SymbolStream::from_loader(symbols);
+    apply_readonly_ranges(&mut program, &readonly_ranges);
+    program.read_loader_symbols()?;
+    program.pending_dex_prototypes = true;
+    Ok(program)
 }
 
 /// Bootstrap a UEFI TE image without converting it to PE or ELF.
@@ -5752,6 +5852,9 @@ pub fn bootstrap_from_file(
             .map_err(KunaError::lowlevel)?
             .flatten();
         return bootstrap_from_te_bytes(path, &bytes, target, spec_roots, isa);
+    }
+    if kuna_analysis::loadimage_dex::is_dex(&bytes) || kuna_analysis::loadimage_dex::is_apk(&bytes) {
+        return bootstrap_from_dex_bytes(path, bytes, target, spec_roots);
     }
     if is_object_binary(&bytes) || is_apple_container(&bytes) {
         // Real object-format binary (ELF / PE / Mach-O / COFF): drive the

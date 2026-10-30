@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_355() {
-    assert_eq!(kuna_num_settables(), 355);
-    assert_eq!(SETTABLE_TABLE.len(), 355);
+fn settable_count_is_358() {
+    assert_eq!(kuna_num_settables(), 358);
+    assert_eq!(SETTABLE_TABLE.len(), 358);
 }
 
 #[test]
-fn tier_counts_are_121_core_135_transform_99_analysis() {
+fn tier_counts_are_122_core_136_transform_100_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_135_transform_99_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 135, 99));
+    assert_eq!((core, transform, analysis), (122, 136, 100));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_156() {
+fn option_values_live_value_present_for_159() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -936,7 +936,9 @@ fn option_values_live_value_present_for_156() {
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
     // 156 -> 157: +1 for `importdata`.
     // 154 -> 155: +1 for `relronoreturn` (live_field = relro_noreturn).
-    assert_eq!(with_live, 158);
+    // 154 -> 156: +2 for `dexmodel` and `jumpassist` (dex_model, jump_assist).
+    // 156 -> 157: +1 for `javanew` (java_new).
+    assert_eq!(with_live, 161);
 }
 
 #[test]
@@ -1160,7 +1162,9 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
     // +1 for `relronoreturn`; its P2 row sits beside `fastfailnoreturn`.
-    assert_eq!(json.matches("},\n").count(), 354);
+    // +2 for `dexmodel` and `jumpassist`; their rows sit beside `constselectjump`.
+    // +1 for `javanew`; its row sits beside them.
+    assert_eq!(json.matches("},\n").count(), 357);
 }
 
 #[test]

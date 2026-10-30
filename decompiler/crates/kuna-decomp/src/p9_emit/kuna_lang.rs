@@ -6,8 +6,8 @@
 //! `PrintLanguage` (the RPN driver and the mod/scope stacks) → `PrintC` →
 //! `PrintJava : public PrintC` — selected through a `PrintLanguageCapability`
 //! registry. The port flattened all of it into one concrete `PrintC`
-//! (`p9_emit/printc.rs`), and `p9_emit/printjava.rs` is the stub that records
-//! the loss. This module re-erects the seam, in the shape kuna actually needs.
+//! (`p9_emit/printc.rs`). This module re-erects the seam, in the shape kuna
+//! actually needs; `PrintJava` returns as [`OutLang::Java`].
 //!
 //! # The shape, and why it is not a trait object over the whole printer
 //!
@@ -49,6 +49,8 @@ pub enum OutLang {
     C,
     /// The rust-language back-end.
     Rust,
+    /// The java-language back-end (`printjava.cc`'s successor).
+    Java,
 }
 
 impl OutLang {
@@ -58,13 +60,14 @@ impl OutLang {
         match name {
             "c-language" | "c" => Some(OutLang::C),
             "rust-language" | "rust" => Some(OutLang::Rust),
+            "java-language" | "java" => Some(OutLang::Java),
             _ => None,
         }
     }
 
     /// Every language kuna can emit, by `option setlanguage` name.
     pub fn names() -> Vec<&'static str> {
-        [OutLang::C, OutLang::Rust].iter().map(|l| l.print_name()).collect()
+        [OutLang::C, OutLang::Rust, OutLang::Java].iter().map(|l| l.print_name()).collect()
     }
 
     /// The `option setlanguage` name this language answers to.
@@ -72,6 +75,7 @@ impl OutLang {
         match self {
             OutLang::C => "c-language",
             OutLang::Rust => "rust-language",
+            OutLang::Java => "java-language",
         }
     }
 
@@ -80,13 +84,14 @@ impl OutLang {
         match self {
             OutLang::C => &LANG_C,
             OutLang::Rust => &crate::kuna_langrust::LANG_RUST,
+            OutLang::Java => &crate::kuna_langjava::LANG_JAVA,
         }
     }
 
     /// How this language renders a recovered calling convention.
     pub fn abi(self) -> &'static dyn crate::kuna_langabi::LangAbi {
         match self {
-            OutLang::C => &crate::kuna_langabi::C_ABI,
+            OutLang::C | OutLang::Java => &crate::kuna_langabi::C_ABI,
             OutLang::Rust => &crate::kuna_langabi::RUST_ABI,
         }
     }
@@ -96,6 +101,7 @@ impl OutLang {
         match self {
             OutLang::C => &crate::kuna_langc::C_SPELLER,
             OutLang::Rust => &crate::kuna_rusttypes::RUST_SPELLER,
+            OutLang::Java => &crate::kuna_langjava::JAVA_SPELLER,
         }
     }
 }
@@ -345,6 +351,9 @@ pub enum StringEscape {
     /// single quote inside a double-quoted string must NOT be escaped -- `\'` is
     /// only an escape in a character literal, so `"PCRE\'s"` does not tokenize.
     RustEscapes,
+    /// Java's set (`PrintJava::printUnicode`): no `\a`/`\v`, and `\uXXXX`
+    /// for anything else that needs escaping.
+    JavaEscapes,
 }
 
 /// How a conversion is written.
