@@ -7868,7 +7868,7 @@ int main(void) {
                 "(unsigned int)hash_of(a0) % 7",
                 "  mark(a0);\n",
                 "unsigned long cached(long *a0,unsigned long a1)",
-                "        return 0xffffffffffffffff;",
+                "      return 0xffffffffffffffff;",
                 "    a1 = lookup((long *)*a0,a1);",
                 "unsigned short use_s16_as_u(",
                 "unsigned int use_neg_as_unsigned(",

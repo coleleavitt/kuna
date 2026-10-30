@@ -472,7 +472,7 @@ fn byte_index_past_a_short_map_keeps_index_labels() {
         "selector is in a different domain: {c}"
     );
     assert!(
-        c.contains("case 9:\n      return 0x640;"),
+        c.contains("case 9:\n        return 0x640;"),
         "lost index9/1600: {c}"
     );
     assert!(
