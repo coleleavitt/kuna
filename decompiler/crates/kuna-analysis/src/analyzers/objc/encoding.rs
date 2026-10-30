@@ -427,6 +427,9 @@ impl<'a> Parser<'a> {
             b'[' => {
                 let start = self.pos;
                 self.skip_balanced(b'[', b']');
+                if self.pos == start || self.bytes[self.pos - 1] != b']' {
+                    return None;
+                }
                 let inner = std::str::from_utf8(&self.bytes[start..self.pos - 1]).ok()?;
                 let digits = inner.bytes().take_while(u8::is_ascii_digit).count();
                 let count: i32 = inner[..digits].parse().ok()?;
@@ -635,6 +638,8 @@ mod tests {
         assert_eq!(decode_ivar_type("{?=ii}", &tctx).unwrap().get_metatype(), type_metatype::TYPE_VOID);
         assert_eq!(decode_ivar_type("(u=id)", &tctx).unwrap().get_metatype(), type_metatype::TYPE_VOID);
         assert!(decode_ivar_type("[0i]", &tctx).is_none());
+        assert!(decode_ivar_type("[", &tctx).is_none(), "an unterminated array");
+        assert!(decode_ivar_type("[4", &tctx).is_none());
     }
 
     #[test]
