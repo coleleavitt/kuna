@@ -917,6 +917,8 @@ Three tiers:
 | boolean shifted into the sign bit tested with a less-than-zero compare | [`flagcompare`](#flagcompare) |
 | N==V signed-overflow branch idiom rendered as raw flag arithmetic | [`flagcompare`](#flagcompare) |
 | want the explicit condition-flag math visible (flip off) | [`flagcompare`](#flagcompare) |
+| Java output prints v = new(T); followed by v.<init>(args); | [`javanew`](#javanew) |
+| a constructor call prints as a method named <init> | [`javanew`](#javanew) |
 | &pxVar[-0x1000] page-probe noise in a large-frame function | [`stackprobeloop`](#stackprobeloop) |
 | calls rendered argument-less because the stack pointer never resolved to a constant offset | [`stackprobeloop`](#stackprobeloop) |
 | gcc stack-clash probe loop leaves the frame layout unrecovered | [`stackprobeloop`](#stackprobeloop) |
@@ -3294,6 +3296,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default (DIV-3): cleans flag-as-bit comparisons on architectures that model condition flags explicitly (8051, PIC24, etc.); flip off to restore the upstream raw flag-arithmetic rendering.
 - **Where / provenance:** P3/simplification-quiescence · ghidra-upstream · correctness-fix · GH-1276/8777
 - **Example:** `option flagcompare on`
+
+### `javanew` -- on | off, default `on`
+
+- **Symptoms:** Java output prints v = new(T); followed by v.<init>(args);; a constructor call prints as a method named <init>.
+- **What it does:** In java-language output, print an allocation and the `<init>` call that initializes it as one `new T(args)` expression. Dalvik allocates with `new-instance` and initializes with a separate `invoke-direct` of `<init>`, which upstream's Java output keeps as two statements (`v = new(T); v.<init>(args);`). The pair folds only when the object reaches nothing but that call before it, in the same basic block; the arguments keep their own statements and order.
+- **When to flip:** On by default; it changes only java-language output. Turn OFF to see the bytecode's two steps, or to diff against upstream Ghidra's Java output.
+- **Where / provenance:** P9/readability-rewrites · kuna · presentation-default · kuna-dex-loader
+- **Example:** `option javanew off`
 
 ### `stackprobeloop` -- on | off, default `on`
 

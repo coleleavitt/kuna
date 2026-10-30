@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_342() {
-    assert_eq!(kuna_num_settables(), 342);
-    assert_eq!(SETTABLE_TABLE.len(), 342);
+fn settable_count_is_343() {
+    assert_eq!(kuna_num_settables(), 343);
+    assert_eq!(SETTABLE_TABLE.len(), 343);
 }
 
 #[test]
-fn tier_counts_are_120_core_131_transform_91_analysis() {
+fn tier_counts_are_121_core_131_transform_91_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_120_core_131_transform_91_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (120, 131, 91));
+    assert_eq!((core, transform, analysis), (121, 131, 91));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_156() {
+fn option_values_live_value_present_for_157() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -903,7 +903,8 @@ fn option_values_live_value_present_for_156() {
     // 152 -> 153: +1 for `callwide` (live_field = call_wide).
     // 153 -> 154: +1 for `pairrefine` (live_field = pair_refine).
     // 154 -> 156: +2 for `dexmodel` and `jumpassist` (dex_model, jump_assist).
-    assert_eq!(with_live, 156);
+    // 156 -> 157: +1 for `javanew` (java_new).
+    assert_eq!(with_live, 157);
 }
 
 #[test]
@@ -1114,7 +1115,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `gobool`; its P4 row sits beside `sourcelang`.
     // +1 for `swiftdemangle`; its P1 row sits beside `sourcelang`.
     // +2 for `dexmodel` and `jumpassist`; their rows sit beside `constselectjump`.
-    assert_eq!(json.matches("},\n").count(), 341);
+    // +1 for `javanew`; its row sits beside them.
+    assert_eq!(json.matches("},\n").count(), 342);
 }
 
 #[test]

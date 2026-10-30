@@ -2116,7 +2116,8 @@ mod tests {
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-dex / a DEX file's constant pool, entry copies and sparse switches
         // and kuna-dex-apk / an APK's classes*.dex files mapped one after another
-        assert_eq!(count, 594, "corpus file count drifted");
+        // and kuna-dex-javanew / an allocation and its <init> call as new T(args)
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

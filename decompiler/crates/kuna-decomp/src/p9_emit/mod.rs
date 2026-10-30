@@ -66,6 +66,7 @@ pub mod kuna_langc; // (kuna) the c-language policy objects (CSpeller)
 pub mod kuna_langrust; // (kuna) the rust-language policy objects (profile + caps)
 pub mod kuna_rusttypes; // (kuna) the rust-language type speller
 pub mod kuna_langjava; // (kuna) the java-language profile and type speller
+pub mod kuna_javanew; // (kuna) `new T(args)` from an allocation and its <init> call
 pub mod kuna_ctypes; // (kuna) valid per-architecture C spelling of the core types
 pub mod coreaction_render;
 pub mod kuna_srcmap; // (kuna) the token-level source map of a rendered function

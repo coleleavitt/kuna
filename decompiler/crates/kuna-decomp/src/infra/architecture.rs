@@ -2596,6 +2596,9 @@ pub struct Architecture {
     pub dex: Vec<Rc<crate::kuna_dex::DexModel>>,
     /// (kuna) Hand [`Self::dex`] to the engine (option `dexmodel`).
     pub dex_model: bool,
+    /// (kuna) Print an allocation and its `<init>` call as `new T(args)` in
+    /// Java (option `javanew`).
+    pub java_new: bool,
     /// Comments for this architecture (C++ `commentdb`).  // STUB(comment.cc)
     pub commentdb: CommentDatabase,
 
@@ -3293,6 +3296,7 @@ impl Architecture {
             jump_assist: true,
             dex: Vec::new(),
             dex_model: true,
+            java_new: true,
             commentdb: CommentDatabase::new(),
             // C++ ctor leaves types/print/defaultfp null; init() fills them.
             types: Rc::new(TypeFactoryImpl::new()),
@@ -3434,6 +3438,7 @@ impl Architecture {
         self.end_ptr_bound = true; // (kuna) DIV-177 default-on: a pointer walk's end bound renders on its own buffer (0/675 ablation)
         self.cookie_scramble = true; // (kuna) DIV-126 default-on: an `xor rax,rsp` cookie mix no longer collapses the local-alias boundary to the bottom of the frame (0/675 ablation)
         self.jump_assist = true; // (kuna) option jumpassist default-on: only the Dalvik and JVM specs declare a <jumpassist>, and no datatest uses either
+        self.java_new = true; // (kuna) option javanew default-on: changes java-language output only
         self.dex_model = true; // (kuna) option dexmodel default-on: only a DEX image carries a model, so no other input changes
         self.call_mechanism_effects = false; // (kuna) option callmechanisms default-off: ppc_64_le.cspec's uponreturn stores r2Save at the ELFv1 TOC slot 0x28(r1), an ordinary frame slot under ELFv2
         self.callee_proto_stack = true; // (kuna) default-on (0/675 ablation): a locked callee prototype states how much it pops and how much of the caller's stack it can reach

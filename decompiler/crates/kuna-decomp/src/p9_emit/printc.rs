@@ -1575,6 +1575,8 @@ pub struct PrintC {
     /// [`emit_function_body`](PrintC::emit_function_body) and cleared after, so it
     /// is live only for that function's emission.
     void_tail_return: Option<OpId>,
+    /// (kuna `javanew`) This function's `<init>` calls that print as `new T(args)`.
+    java_new: std::collections::HashMap<OpId, crate::kuna_javanew::NewInit>,
     /// (kuna) Resolved `realtypes` rendering context for the function currently
     /// being printed — the `Architecture::realtypes` gate plus the data-model fact
     /// (`long` is 8 bytes) needed to relabel residual `TYPE_UNKNOWN` (`xunknownN`)
@@ -1657,6 +1659,7 @@ impl PrintC {
             pending: 0,
             commsorter: crate::comment::CommentSorter::new(),
             void_tail_return: None,
+            java_new: std::collections::HashMap::new(),
             rt_ctx: RealTypeCtx::OFF,
             out_lang: crate::kuna_lang::OutLang::C,
             eol_warns: Vec::new(),
@@ -4180,8 +4183,12 @@ impl PrintC {
         } else {
             None
         };
+        if self.out_lang == crate::kuna_lang::OutLang::Java && arch.java_new {
+            self.java_new = crate::kuna_javanew::pairs(fd);
+        }
         self.emit_block_graph(fd, arch, sroot);
         self.void_tail_return = None;
+        self.java_new.clear();
     }
 
     /// C++ `PrintC::emitBlockGraph` (printc.cc:2895): emit each component block.
@@ -4917,6 +4924,9 @@ impl PrintC {
             && !(self.out_lang == crate::kuna_lang::OutLang::C
                 && crate::kuna_stackbytes::assignment(fd, op).is_some())
         {
+            return true;
+        }
+        if operation.code() == OpCode::CPUI_NEW && self.java_new.values().any(|pair| pair.new_op == op) {
             return true;
         }
         crate::p9_emit::kuna_stackmarkers::nonprinting(fd, op)

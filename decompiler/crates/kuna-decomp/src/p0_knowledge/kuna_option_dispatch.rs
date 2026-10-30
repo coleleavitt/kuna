@@ -824,6 +824,7 @@ kuna_options! { self, p1;
     "callmechanisms" => on_off!(call_mechanism_effects, "compiler prototype call mechanisms"),
     "dexmodel" => on_off!(dex_model, "DEX constant pool and register payloads"),
     "jumpassist" => on_off!(jump_assist, "jump-assist switch recovery"),
+    "javanew" => on_off!(java_new, "Java new T(args) from an allocation and its <init> call"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
     "castimplied" => on_off!(cast_implied, "C-implied cast elision"),
