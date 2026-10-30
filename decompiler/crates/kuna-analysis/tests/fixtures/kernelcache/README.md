@@ -13,3 +13,10 @@ Inputs for the `kernelcache` option (`loader/kuna_kernelcache`), and for
 
 All of the fileset files are written by `gen_fileset.py` (Python 3 plus the
 reference `lzfse` CLI on `PATH`); the arm64 instructions are hand-encoded there.
+
+`iokit_kext.macho` (written by `gen_iokit.py`, plain Python 3) is a stripped arm64
+`MH_KEXT_BUNDLE` for the `iokitclasses` pass: one `__mod_init_func` initializer
+registers `Base` and `Derived` through an unnamed constructor and stores their
+metaclass vtables; each class has a vtable with its `getMetaClass()`; `Derived`
+overrides `Base::m2` and adds one method. Only `meta_of_derived`, `Base::m1` and
+`Base::m2` have symbols, and pointers are plain absolute words.

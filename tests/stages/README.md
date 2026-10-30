@@ -340,3 +340,8 @@ bare MH_FILESET with `kernelcache off` (one image, no symbols), its kext out of 
 IMG4(IM4P(LZFSE)) wrapper, and its kernel out of a bare IM4P(complzss). The
 fixtures and their generator live in
 `decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/`.
+
+`kuna-iokitclasses.xml` decompiles a stripped synthetic kext
+(`decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/gen_iokit.py`) with
+`iokitclasses` off and on: the OSMetaClass constructor, the metaclass objects and
+a vtable-only override gain their names.

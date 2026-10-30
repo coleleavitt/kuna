@@ -860,6 +860,10 @@ Three tiers:
 | swift struct mutating methods write through an untyped register | [`swiftcall`](#swiftcall) |
 | core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings) |
 | a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings) |
+| a stripped kext shows sub_<addr> for every IOKit method | [`iokitclasses`](#iokitclasses) |
+| gMetaClass objects render as dat_<addr> | [`iokitclasses`](#iokitclasses) |
+| methods reachable only through a vtable are missing from kuna functions | [`iokitclasses`](#iokitclasses) |
+| a kext's vtables are unnamed data | [`iokitclasses`](#iokitclasses) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
 | pdb symbol names not applied to a pe | [`pdb`](#pdb) |
 | a .pdb beside the exe is ignored | [`pdb`](#pdb) |
@@ -3199,6 +3203,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default; a __cfstring reference renders dat_<addr> and there is zero behavior change). Flip on for a Mach-O (Core Foundation / Objective-C / Swift) binary to render its CFString constants -- a call that passed dat_<addr> renders its text such as "Setup New Coffee Kiosk".
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-cfstrings
 - **Example:** `option cfstrings on`
+
+### `iokitclasses` -- on | off, default `on`
+
+- **Symptoms:** a stripped kext shows sub_<addr> for every IOKit method; gMetaClass objects render as dat_<addr>; methods reachable only through a vtable are missing from kuna functions; a kext's vtables are unnamed data.
+- **What it does:** Recover IOKit C++ classes on an arm64 XNU kernel or kext (an MH_KEXT_BUNDLE, or an image with a __KLD segment). The pass traces each __mod_init_func / __init_offsets initializer with a small AArch64 register tracker and collects every direct call whose x1 is a class-name C string: the callee most of those calls share is OSMetaClass::OSMetaClass (found by vote, no symbol needed), and each such call gives a class name, its X::gMetaClass object (x0), its superclass's metaclass (x2) and the instance size (w3). The store the initializer makes into X::gMetaClass right after the call is the X::MetaClass vtable. A class's own vtable is a run of code pointers in a data section, behind two zero header words, whose first twelve slots hold X::getMetaClass() const, a leaf that returns &X::gMetaClass within five instructions. Emits data symbols X::gMetaClass, vtable for X and vtable for X::MetaClass where the image has none; renames placeholder functions OSMetaClass::OSMetaClass, X::getMetaClass, X::MetaClass::~MetaClass / X::MetaClass::alloc, and every vtable method by its owner (the nearest class that is an ancestor of every class whose vtable holds it) and the symbol name of that slot in the owner's nearest named ancestor, else X::vfn_<offset>; and adds every vtable slot as a function entry, so methods reachable only through a vtable are discovered.
+- **When to flip:** On (default): a kernel or kext gains class-qualified names for metaclass objects, vtables and virtual methods even when stripped, and its vtable-only methods become functions. Flip off to see only what the symbol table names, or if a non-XNU arm64 image is misdetected.
+- **Where / provenance:** P1/external-refinement · ida · new-analysis · kuna-iokitclasses
+- **Example:** `option iokitclasses off`
 
 ### `pdb` -- on | off, default `on`
 

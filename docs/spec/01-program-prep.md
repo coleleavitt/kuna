@@ -3999,6 +3999,46 @@ every other binary's pass list is byte-identical to before the pass existed):
   marked read-only (a CFString constant is immutable), which the route requires on
   the historical writable `__DATA,__cfstring` layout (`__DATA_CONST` is already
   read-only).
+- **IOKit classes** (kuna, `iokitclasses`, Mach-O arm64 XNU images only,
+  default-on; `decompiler/crates/kuna-analysis/src/analyzers/iokit/mod.rs`): every
+  libkern class registers itself from a static initializer that calls
+  `OSMetaClass::OSMetaClass(&X::gMetaClass, "X", &Super::gMetaClass, sizeof(X))`
+  and then stores the `X::MetaClass` vtable into `X::gMetaClass`. The pass runs
+  only on a kext (`MH_KEXT_BUNDLE`) or a kernel (a `__KLD` segment). It follows
+  each `__mod_init_func` / `__init_offsets` initializer with a forward register
+  tracker (`decompiler/crates/kuna-analysis/src/analyzers/iokit/a64.rs (trace)`)
+  that models `ADRP`/`ADD`/`ADR`/`MOV`/`MOVZ`, loads from a constant slot, the
+  PAC sign/strip instructions as no-ops, and calls (which clear the
+  caller-saved registers, except that a constructor returns its `this`); any
+  other instruction that writes a register makes it unknown. The constructor
+  is the callee most calls share whose `x1` is a class-name C string and whose
+  `w3` is a plausible size, so no symbol is needed. Each such call gives a
+  class (name, metaclass object, superclass metaclass, instance size); the
+  first store into the metaclass object after the call is the metaclass
+  vtable. A class's own vtable is a run of code pointers in a data section,
+  behind two zero header words, whose first twelve slots hold
+  `X::getMetaClass() const`: a leaf that returns `&X::gMetaClass` within five
+  instructions. For a kext cut out of a collection a slot may point outside the
+  image, at the kernel or another kext, so a run also accepts aligned pointers
+  into unmapped addresses of the same 4 GiB region. Every unnamed vtable method
+  is named after its owner, the nearest class that is an ancestor of every
+  class whose vtable holds it, and the method the same slot has in the owner's
+  nearest ancestor with a symbol there (`Derived::m2` for an override of a
+  named `Base::m2`), else `X::vfn_<offset>`. A function found at two different
+  slots (the pure-virtual trap, folded stubs) is not named. The metaclass
+  vtable's destructors and its `alloc` (the slot past them whose function
+  differs between the most metaclass vtables) are named too. Output: sized data
+  objects `X::gMetaClass` (the gap between consecutive metaclass objects),
+  `vtable for X` and `vtable for X::MetaClass` where the image has no symbol,
+  placeholder-only function names, and every vtable slot as a function entry,
+  which is what discovers methods reachable only through a vtable. Measured
+  against the symbols of the iOS 16.4.1 kernelcache while ignoring them: all
+  149 kernel classes, 22/22 IOSurface and 85/85 AGXG12P classes have the right
+  metaclass object; every metaclass vtable and every class vtable with a symbol
+  is found at that symbol's address; method names are right or a class-right
+  `vfn_` wherever no ancestor slot is named, except where an abstract class has
+  no vtable in the image (AGXG12P: 627 of 1,979 methods are credited to the one
+  concrete subclass instead). The pass takes 13 ms on the kernel.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the
