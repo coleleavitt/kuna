@@ -75,6 +75,22 @@ struct Binding {
     conflicted: bool,
 }
 
+/// A Swift argument label as a C identifier: a label that is a C keyword
+/// (`for`, `default`, `while`) gets a trailing underscore.
+fn c_identifier(label: &str) -> String {
+    const C_KEYWORDS: &[&str] = &[
+        "auto", "break", "case", "char", "const", "continue", "default", "do", "double", "else", "enum",
+        "extern", "float", "for", "goto", "if", "inline", "int", "long", "register", "restrict", "return",
+        "short", "signed", "sizeof", "static", "struct", "switch", "typedef", "union", "unsigned", "void",
+        "volatile", "while",
+    ];
+    if C_KEYWORDS.contains(&label) {
+        format!("{label}_")
+    } else {
+        label.to_string()
+    }
+}
+
 /// A symbol-named member's declared signature, for the prototype: the
 /// regular parameters, the trailing ones a witness takes (the `Self`
 /// metadata and the witness table), the return type, and the `self` that
@@ -343,7 +359,7 @@ impl Binder<'_, '_> {
                     let label = labels
                         .and_then(|l| l.child(i))
                         .filter(|l| l.kind == Kind::Identifier)
-                        .map(|l| l.get_text().to_string())
+                        .map(|l| c_identifier(l.get_text()))
                         .unwrap_or_else(|| format!("a{i}"));
                     out.push((label, any(p)?));
                 }
