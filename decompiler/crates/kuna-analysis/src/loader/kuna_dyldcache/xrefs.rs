@@ -302,7 +302,8 @@ impl<'a> Names<'a> {
                 continue;
             };
             let Some(&dep) = self.by_path.get(dep.as_str()) else { continue };
-            let Some(target) = self.export_target(dep, &String::from_utf8_lossy(&sym.name), 0) else {
+            let mut visited = std::collections::HashSet::new();
+            let Some(target) = self.export_target(dep, &String::from_utf8_lossy(&sym.name), 0, &mut visited) else {
                 continue;
             };
             imports
@@ -317,11 +318,13 @@ impl<'a> Names<'a> {
     }
 
     /// Where `name` lives when imported from image `index`: its export, else a
-    /// re-export followed to the dylib that defines it.
-    fn export_target(&self, index: usize, name: &str, depth: usize) -> Option<u64> {
+    /// re-export followed to the dylib that defines it. `visited` holds the
+    /// images this lookup already searched, so umbrella cycles and fan-out
+    /// cost each image at most one search.
+    fn export_target(&self, index: usize, name: &str, depth: usize, visited: &mut std::collections::HashSet<usize>) -> Option<u64> {
         const MH_NO_REEXPORTED_DYLIBS: u32 = 0x0010_0000;
         const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
-        if depth > MAX_REEXPORT_DEPTH {
+        if depth > MAX_REEXPORT_DEPTH || !visited.insert(index) {
             return None;
         }
         let trie = self.trie(index);
@@ -334,13 +337,14 @@ impl<'a> Names<'a> {
                 let deps = deps();
                 let (_, dep) = deps.get(usize::try_from(*ordinal).ok()?.checked_sub(1)?)?;
                 let dep = *self.by_path.get(dep.as_str())?;
-                self.export_target(dep, other.as_deref().unwrap_or(name), depth + 1)
+                visited.clear();
+                self.export_target(dep, other.as_deref().unwrap_or(name), depth + 1, visited)
             }
             None if layout.header_flags() & MH_NO_REEXPORTED_DYLIBS == 0 => deps()
                 .iter()
                 .filter(|(cmd, _)| *cmd == LC_REEXPORT_DYLIB)
                 .filter_map(|(_, path)| self.by_path.get(path.as_str()))
-                .find_map(|&dep| self.export_target(dep, name, depth + 1)),
+                .find_map(|&dep| self.export_target(dep, name, depth + 1, visited)),
             None => None,
         }
     }

@@ -8,8 +8,9 @@
 //! from and the name it has there (empty for the same name). A child count
 //! byte and `(edge string, child offset)` pairs follow (`mach-o/loader.h`).
 //!
-//! The walk is iterative and visits each node offset once, so a cyclic or
-//! hostile trie terminates; names longer than [`MAX_NAME`] are dropped.
+//! The walk is iterative and queues each node offset once, so a cyclic or
+//! shared-node hostile trie terminates in time and memory linear in its size;
+//! names longer than [`MAX_NAME`] are dropped.
 
 const EXPORT_SYMBOL_FLAGS_KIND_MASK: u64 = 0x03;
 const EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE: u64 = 0x02;
@@ -66,11 +67,11 @@ fn cstr<'a>(data: &'a [u8], p: &mut usize) -> Option<&'a [u8]> {
 /// Every export in `trie`; a malformed node ends its branch, never the walk.
 pub fn parse_export_trie(trie: &[u8]) -> Vec<TrieExport> {
     let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    let mut seen = std::collections::HashSet::from([0usize]);
     let mut stack: Vec<(usize, Vec<u8>)> = vec![(0, Vec::new())];
     while let Some((node, prefix)) = stack.pop() {
-        if out.len() >= MAX_EXPORTS || !seen.insert(node) {
-            continue;
+        if out.len() >= MAX_EXPORTS {
+            break;
         }
         let mut p = node;
         let Some(terminal) = uleb(trie, &mut p) else { continue };
@@ -86,7 +87,7 @@ pub fn parse_export_trie(trie: &[u8]) -> Vec<TrieExport> {
         for _ in 0..count {
             let Some(edge) = cstr(trie, &mut p) else { break };
             let Some(child) = uleb(trie, &mut p) else { break };
-            if prefix.len() + edge.len() > MAX_NAME || child as usize >= trie.len() {
+            if prefix.len() + edge.len() > MAX_NAME || child as usize >= trie.len() || !seen.insert(child as usize) {
                 continue;
             }
             let mut name = prefix.clone();
