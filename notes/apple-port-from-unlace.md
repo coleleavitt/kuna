@@ -140,3 +140,10 @@ pub fn binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
 ```
 
 `analyzers/swift` needs no change. Catalog and stage counts need +1 on top of whichever lands first.
+
+### Combined branch
+
+`apple/all` (5717e6cd) merges every PR branch onto cb2279ca in this order: objc-types, arm64e-pac,
+swift-types, elf-gotdata, cfstring, img4-kernelcache, compact-unwind, dyld-cache (plus 6808d6d6, the
+kuna-swiftdemangle.xml expectation under the objcivars default). Final counts: 353 settables
+(121 core / 134 transform / 98 analysis), stage corpus 607.
