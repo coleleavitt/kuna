@@ -2128,7 +2128,8 @@ mod tests {
         // and kuna-kernelcache / IMG4 + MH_FILESET kernelcache loading
         // and kuna-unwindstarts / a stripped Mach-O's __unwind_info starts join the inventory
         // and kuna-dyldcrossrefs / a dyld shared cache image names its calls into other images
-        assert_eq!(count, 607, "corpus file count drifted");
+        // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
+        assert_eq!(count, 608, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

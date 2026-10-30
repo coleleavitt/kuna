@@ -230,21 +230,22 @@ impl<'a> TypeCtx<'a> {
     }
 
     /// A pointer to the named struct (`objc_object*` for `id`, `objc_class*` for
-    /// `Class`, `objc_selector*` for `SEL`, `Foo*` for `@"Foo"`): the struct of
-    /// that name when one exists, else a declared record so a pointer built
+    /// `Class`, `objc_selector*` for `SEL`, `Foo*` for `@"Foo"`, a Swift class
+    /// under its shown name): the struct of that name when one exists, else a declared record so a pointer built
     /// before the class's layout lands (`kuna_objcivars`) reads the completion
     /// afterwards; a plain `void*` if the record cannot be created.
     pub(super) fn opaque_ptr(&self, struct_name: &str) -> Option<Rc<Datatype>> {
         if let Some(t) = self.opaque.borrow().get(struct_name) {
             return Some(Rc::clone(t));
         }
+        let shown = super::display_class_name(struct_name);
         let pointee = self
             .types
-            .find_by_name(struct_name)
+            .find_by_name(&shown)
             .ok()
             .flatten()
             .filter(|t| t.get_metatype() == type_metatype::TYPE_STRUCT)
-            .or_else(|| self.types.kuna_declare_record(struct_name, false).ok())
+            .or_else(|| self.types.kuna_declare_record(&shown, false).ok())
             .or_else(|| self.types.get_type_void().ok())?;
         let ptr = self.types.get_type_pointer(self.ptr_size, pointee, self.word_size).ok()?;
         self.opaque.borrow_mut().insert(struct_name.to_string(), Rc::clone(&ptr));

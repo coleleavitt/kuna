@@ -96,7 +96,8 @@ impl Structs {
             return None;
         }
         let types = tctx.types;
-        let existing = types.find_by_name(name).ok().flatten();
+        let shown = super::display_class_name(name);
+        let existing = types.find_by_name(&shown).ok().flatten();
         let shell = match existing {
             Some(t) if t.get_metatype() == type_metatype::TYPE_STRUCT && t.is_incomplete() => t,
             // A complete struct of that name (DWARF, a user typedef) is the class.
@@ -105,7 +106,7 @@ impl Structs {
                 return Some(t);
             }
             Some(_) => return None,
-            None => types.kuna_declare_record(name, false).ok()?,
+            None => types.kuna_declare_record(&shown, false).ok()?,
         };
         // Interned before the fields so a self-referential ivar (`Node *next`) can
         // name it; a declared record's pointers read the completion afterwards.

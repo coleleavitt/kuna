@@ -1253,6 +1253,32 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
 `$s4main10countWords2ofS2i_tF`. The `_OBJC_CLASS_$__TtC4main7Greeter` data
 symbol keeps the linker's spelling either way.
 
+### `macho_swift_classnames_arm64` — Swift runtime class names in the types (`swiftdemangle` + `objcivars`)
+
+`macho_swift_classnames_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-swiftclassnames.xml`: the types the ObjC pass builds for a
+Swift class — the instance struct, the embedded superclass, a `@"_TtC…"` ivar
+pointer, the typed `self` — under the class's demangled name. No Swift toolchain
+is needed: `macho_swift_classnames.m` gives three root-or-derived ObjC classes
+the runtime names swiftc would (`objc_runtime_name("_TtC4main3Car")` …), so
+`main.Car : main.Vehicle` carries an `Engine *` ivar and
+`-[main.Car loadPerSeat:]` reads the inherited `wheels`, `engine` and `seats`.
+Same recipe as `macho_swift_names_arm64`:
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O1 -c macho_swift_classnames.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_swift_classnames_arm64 m.o
+```
+
+**Pinned VMAs:** IMP `-[main.Car loadPerSeat:]`@`0x1000006f8`,
+`-[main.Engine perCylinder]`@`0x1000006e0`. With `--option objc on` (default
+`swiftdemangle`, `objcivars`) it decompiles as
+`-[main.Car loadPerSeat:](main.Car *self, …)` with `main.Engine *v2 = self->engine`
+and `(self->super).wheels`; with `--option swiftdemangle off` every one of those
+types spells `_TtC4main3Car` / `_TtC4main6Engine`.
+
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 
 `swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture
