@@ -1112,6 +1112,15 @@ Different sources, changed low slices, wider floats, incompatible types and
 other unary operations decline. These are strict value-correctness repairs
 with no inference option; they add no floating-status or exception model.
 
+**One-destination switches.** `decompiler/crates/kuna-decomp/src/p3_dataflow/ruleaction_4.rs
+(RuleSwitchSingle)` rewrites a BRANCHIND whose block has one out-edge and
+whose recovered jump table is labelled into a BRANCH to the table's first
+address, then drops the table and the structured-block graph so no `switch`
+is emitted. A header warning (`Switch with 1 destination removed at <addr>`,
+plus `: N cases all go to same destination` when every entry matches) is
+added unless the table has one entry and the switch value is a constant
+(`tests/stages/kuna-switchsingle.xml`).
+
 **Ordered floating-point condition negation.** The shared
 `decompiler/crates/kuna-num/src/opcodes.rs (get_booleanflip)` table returns no
 single-opcode complement for `FLOAT_LESS` or `FLOAT_LESSEQUAL`: when either

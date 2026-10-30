@@ -747,10 +747,10 @@ spec, and input recovery marks a trial on it unused
 (`funcdata_callsite.rs (check_input_trial_use)`): its value is the callee's
 own address, never an argument.
 
-In every other case the old behaviour stays: the follower walks into the
-callee as a one-case `switch`, because `RuleSwitchSingle`, which upstream
-uses to collapse that switch, is a stub here. That copied-in body is wrong in
-structure, but it still shows the callee's return value and the arguments it
+In every other case the follower walks into the callee through the one-entry
+table, and `RuleSwitchSingle` (03 §3.2) then turns the jump into a direct
+branch, so the callee's body is copied in as straight-line code. That
+copied-in body stands in for a call, but it still shows the callee's return value and the arguments it
 reads, which a call with no stated prototype would lose: kuna cannot recover
 a tail call's arguments or return value without one, and a whole-binary
 `decompile-all` does not recover them later either, because `protoorder`
