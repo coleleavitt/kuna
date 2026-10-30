@@ -26,6 +26,10 @@ Three tiers:
 | a vectorised reduction is followed by a second copy of the loop over the remainder | [`devectorize`](#devectorize) |
 | an array sum is guarded by if (8 <= length) with a stride-eight do-while behind it | [`devectorize`](#devectorize) |
 | a line like v8 + v12 + v6 + v10 + v7 + v11 + v5 + v9 follows a loop | [`devectorize`](#devectorize) |
+| an inner test that an outer test already decides is printed | [`rangefold`](#rangefold) |
+| if (x < 10) { if (x > 20) ... } keeps the dead branch | [`rangefold`](#rangefold) |
+| x & 0xff kept on a value an earlier range check bounds below 256 | [`rangefold`](#rangefold) |
+| a range check repeated inside the branch of the same check | [`rangefold`](#rangefold) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -1361,6 +1365,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Turn ON when an -O2/-O3 loop that sums the elements of an array comes out as a guard `if (8 <= length)`, a do-while adding `v2 & 0xff`, `v2 >> 8 & 0xff`, ... into eight separate accumulators, a line summing those accumulators, and a second do-while over `bytes[v4]` for the remainder -- and you want the source loop `v1 += bytes[v2]` instead. OFF (the default) keeps the compiler's shape, which shows the stride, the alignment of the handoff and the duplicated body. Inert on a function with no loop of that shape.
 - **Where / provenance:** P3/simplification-quiescence · kuna · structure-recovery · wide-ssa-slices
 - **Example:** `option devectorize on`
+
+### `rangefold` -- on | off, default `on`
+
+- **Symptoms:** an inner test that an outer test already decides is printed; if (x < 10) { if (x > 20) ... } keeps the dead branch; x & 0xff kept on a value an earlier range check bounds below 256; a range check repeated inside the branch of the same check.
+- **What it does:** Fold a comparison, and an `& (2^k - 1)` mask, whose outcome the ranges dominating branches establish already fixes. A conditional branch on `V cmp K` bounds `V` in every block one of its out-edges controls -- the edge's target dominates the block and is entered only through that edge (`FlowBlock::restrictedByConditional`, the test `ActionConditionalConst` uses). Upstream propagates only the `V == K` case, as a constant. `kuna_rangefold` keeps a `CircleRange` per such edge, pulled back through the comparison and then through up to three `COPY`, `INT_ZEXT`, `INT_SEXT`, `INT_ADD`/`INT_SUB`-constant ops that defined `V`, and intersects every range whose edge controls a block. In that block a comparison of `V` against a constant that is true (or false) on the whole range becomes the constant, and `ActionDeterminedBranch` removes a branch on it; `V & M` with `M = 2^k - 1` and the range inside `[0, M]` becomes `V`. `V` is an SSA value, so the range holds at every read in the block. Runs right after `ActionConditionalConst`, in the action group `unreachable` with `ActionDeterminedBranch`, so the reduced jump-table pipeline never sees a guard folded away.
+- **When to flip:** On by default: 0/675 datatest assertions move and the speed is unchanged (lua -O0: user time within run-to-run noise). Flip off to see a test that an enclosing test already decides, e.g. to compare against a listing. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 builds of Lua 5.4.8 and bzip2 1.0.8, -O2 zlib 1.3.2, system libexpat and libyaml): 71 functions change; `if` statements 22,188 -> 22,043, gotos 9,853 -> 9,840, lines 184,891 -> 184,573. Most folds are -O0 binary-search switch ladders (`if (v != 0x31) { if (0x31 < v) ...` after `!(0x32 < v)`), retests of the same value after a short-circuit, and repeated null checks. Four functions gain one goto: a test the compiler duplicated into two predecessors is decided in one copy only, so the copies no longer merge.
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-rangefold
+- **Example:** `option rangefold off`
 
 ### `strlenscan` -- on | off, default `on`
 
