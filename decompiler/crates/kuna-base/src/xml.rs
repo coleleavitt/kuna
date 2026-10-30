@@ -2129,7 +2129,7 @@ mod tests {
         // and kuna-unwindstarts / a stripped Mach-O's __unwind_info starts join the inventory
         // and kuna-dyldcrossrefs / a dyld shared cache image names its calls into other images
         // and kuna-dedupitetail-gototarget / a goto into an unwrapped if clause keeps its target
-        assert_eq!(count, 608, "corpus file count drifted");
+        assert_eq!(count, 609, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
