@@ -19,7 +19,6 @@ rustc-demangle.workspace = true
 msvc-demangler.workspace = true
 undname.workspace = true
 gimli.workspace = true
-flate2.workspace = true
 ruzstd.workspace = true
 pdb.workspace = true
 lzma-rs.workspace = true
