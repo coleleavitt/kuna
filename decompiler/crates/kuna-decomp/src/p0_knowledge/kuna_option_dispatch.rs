@@ -1198,6 +1198,7 @@ kuna_options! { self, p1;
         self.analysis_formatstring = mode;
         Ok(msg)
     },
+    "formatcallees" => on_off!(analysis_format_callees, "format-string typing of undeclared format functions"),
     "listing" => on_off!(analysis_listing, "Listing/xref disassembly tier"),
     "fast_funcdisc" => {
         on_off!(analysis_fast_funcdisc, "Fast whole-project function discovery")
