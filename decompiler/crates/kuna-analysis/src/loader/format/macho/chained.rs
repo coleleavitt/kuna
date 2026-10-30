@@ -569,6 +569,35 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
     }
 }
 
+/// The import ordinal and inline addend of a **bind** word, or `None` for a
+/// rebase. The arm64e variants differ in the ordinal width (16 bits, 24 for
+/// `_USERLAND24`); an authenticated bind carries its PAC context where the plain
+/// bind carries a 19-bit signed addend. `DYLD_CHAINED_PTR_64` packs an 8-bit
+/// addend above its 24-bit ordinal.
+fn bind_entry(raw: u64, pointer_format: u16) -> Option<(usize, i64)> {
+    match pointer_format {
+        ptr_format::PTR_64 | ptr_format::PTR_64_OFFSET => {
+            ((raw >> 63) & 1 == 1).then_some(((raw & 0xFF_FFFF) as usize, ((raw >> 24) & 0xFF) as i64))
+        }
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24 => {
+            if (raw >> 62) & 1 == 0 {
+                return None;
+            }
+            let ordinal_mask = if pointer_format == ptr_format::ARM64E_USERLAND24 { 0xFF_FFFF } else { 0xFFFF };
+            let addend = if (raw >> 63) & 1 == 1 { 0 } else { ((((raw >> 32) & 0x7_FFFF) << 45) as i64) >> 45 };
+            Some(((raw & ordinal_mask) as usize, addend))
+        }
+        _ => None,
+    }
+}
+
+/// `dyld_chained_ptr_64_kernel_cache_rebase` (`PTR_64_KERNEL_CACHE`,
+/// `X86_64_KERNEL_CACHE`): `(next, cacheLevel, target)` — a 30-bit target
+/// offset, the 2-bit level in bits 30..31, `next` in bits 51..62. `None` for any
+/// other format.
+fn kernel_cache_rebase(raw: u64, pointer_format: u16) -> Option<(u64, u8, u64)> {
+    matches!(pointer_format, ptr_format::PTR_64_KERNEL_CACHE | ptr_format::X86_64_KERNEL_CACHE)
+        .then(|| ((raw >> 51) & 0xFFF, ((raw >> 30) & 3) as u8, raw & 0x3FFF_FFFF))
 }
 
 /// Map a VMA to its file offset via the segment table (the inverse of the load
