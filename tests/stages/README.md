@@ -5,6 +5,10 @@ four-byte OFF result against the proved eight-byte result and high-piece callers
 Its CLI companion executes the original bytes and untouched emitted C/header
 under MIPS QEMU at O0/O2, including selected exports, workers and streaming.
 
+`kuna-extrapop-function.xml` checks that `option extrapop 12 g` makes a caller
+of the `ret 8` function g see both pushed arguments popped, so a later `[esp+4]`
+reads the caller's own argument.
+
 `kuna-stack-byte-copy.xml` checks pushed scratch bytes, partial reads and a
 saved snapshot with `stackstoreguard` off and on. Its CLI companion compiles
 and executes the exact C at O2 in default, stackviews and stackalias modes, and checks
