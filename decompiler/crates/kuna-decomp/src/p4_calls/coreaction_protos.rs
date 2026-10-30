@@ -698,7 +698,7 @@ impl Action for ActionExtraPopSetup {
         let sb_size = point.size as int4;
 
         for i in 0..data.num_calls() {
-            let extrapop = data.get_call_specs(i).get_extra_pop();
+            let extrapop = crate::p4_calls::kuna_calleeretpurge::effective_extra_pop(data, i);
             if extrapop == 0 {
                 continue;
             }

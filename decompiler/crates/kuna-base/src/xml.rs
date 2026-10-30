@@ -2158,7 +2158,10 @@ mod tests {
         // and kuna-objcresolve / a message send typed and resolved by its receiver
         // and kuna-objcstructs / by-value aggregates in ObjC encodings and global blocks
         // and kuna-objcblocks / a stack block's invoke named after its creator and typed
-        assert_eq!(count, 668, "corpus file count drifted");
+        // and kuna-calleeretpurge / a callee's `ret imm16` is the call's extrapop
+        // and kuna-switchtrim / an unguarded jump table is read until its layout ends
+        // and kuna-tailcontract / a tail-calling thunk sees its callee's prototype in a single decompile
+        assert_eq!(count, 671, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

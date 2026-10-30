@@ -98,6 +98,7 @@ pub mod kuna_machoehframe;
 pub mod kuna_pemain;
 pub mod kuna_cortexmvectors;
 pub mod kuna_coldentry;
+pub mod kuna_ehcold;
 pub mod kuna_fdeinterior;
 pub mod kuna_pdatainterior;
 pub mod kuna_pereloccode;
@@ -311,7 +312,15 @@ impl AnalysisPass for FuncStartPatternPass {
         ) {
             return out;
         }
-        out.entries = full_pattern_starts(ctx.file);
+        let starts = full_pattern_starts_with_mode(ctx.file);
+        let explicit_isa = ctx.arch.input_arm_isa_override;
+        out.context_paints = starts
+            .iter()
+            .filter(|_| !explicit_isa)
+            .filter(|&&(_, mode)| mode == Some(1))
+            .map(|&(addr, _)| crate::pass::ContextPaint { addr, end: None, var: "TMode", value: 1 })
+            .collect();
+        out.entries = starts.into_iter().map(|(vma, _)| vma).collect();
         out
     }
 }
@@ -324,6 +333,12 @@ impl AnalysisPass for FuncStartPatternPass {
 /// This is the testable seam (drive it over fixture bytes); it parallels
 /// [`collect_entries`] but is the *full-pattern* superset, gated default-off.
 pub fn full_pattern_starts(file: &object::File) -> Vec<u64> {
+    full_pattern_starts_with_mode(file).into_iter().map(|(vma, _)| vma).collect()
+}
+
+/// [`full_pattern_starts`], with the `TMode` value the matching ARM pattern
+/// pair sets (`<setcontext name="TMode">`), so a Thumb start decodes as Thumb.
+pub fn full_pattern_starts_with_mode(file: &object::File) -> Vec<(u64, Option<u32>)> {
     let Some(set) =
         patterns::for_arch(file.architecture(), file.is_little_endian())
     else {
@@ -333,26 +348,17 @@ pub fn full_pattern_starts(file: &object::File) -> Vec<u64> {
     let funcsyms = existing_function_addrs_for_file(file);
 
     // Sweep every executable section with the full pattern set.
-    let mut cand: Vec<u64> = Vec::new();
+    let mut cand: Vec<(u64, Option<u32>)> = Vec::new();
     for (addr, _hi, data) in &execs {
-        cand.extend(set.scan(*addr, data));
+        cand.extend(set.scan_with_mode(*addr, data));
     }
 
-    let mut out: Vec<u64> = Vec::new();
-    for vma in cand {
-        if vma == 0 {
-            continue;
-        }
-        if !in_executable_section(&execs, vma) {
-            continue;
-        }
-        if funcsyms.binary_search(&vma).is_ok() {
-            continue;
-        }
-        out.push(vma);
-    }
-    out.sort_unstable();
-    out.dedup();
+    let mut out: Vec<(u64, Option<u32>)> = cand
+        .into_iter()
+        .filter(|&(vma, _)| vma != 0 && in_executable_section(&execs, vma) && funcsyms.binary_search(&vma).is_err())
+        .collect();
+    out.sort_unstable_by_key(|&(vma, _)| vma);
+    out.dedup_by_key(|&mut (vma, _)| vma);
     out
 }
 
@@ -1867,6 +1873,24 @@ pub fn scan_eh_frame_landing_pads(file: &object::File) -> Vec<u64> {
     out
 }
 
+/// Every LSDA landing pad as `(owning FDE's pcBegin, pad)`.
+pub fn scan_eh_frame_landing_pads_owned(file: &object::File) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    let Some(gcc) = file.section_by_name(".gcc_except_table") else {
+        return out;
+    };
+    let gcc_vma = gcc.address();
+    let Ok(gcc_data) = gcc.data() else {
+        return out;
+    };
+    for_each_fde_lsda(file, 8, &mut |pc_begin, lsda_ptr| {
+        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, 8) {
+            out.extend(lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| (pc_begin, cs.pad)));
+        }
+    });
+    out
+}
+
 /// Call `on_lsda(pc_begin, lsda_ptr)` for every `.eh_frame` FDE that carries a
 /// non-null LSDA pointer.
 pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &mut dyn FnMut(u64, u64)) {
@@ -2781,6 +2805,18 @@ mod tests {
         let main = libc_start_main_target(&file, file.entry());
         // lea rdi at 0x1178, disp 0x286 → 0x117f + 0x286 = 0x1405 = main.
         assert_eq!(main, Some(0x1405), "libc-start idiom should recover main at 0x1405");
+    }
+
+    /// A stripped Thumb-2 image: the ARM pattern pairs that set `TMode` 1 carry
+    /// that mode with the start, so the pass paints the start Thumb.
+    #[test]
+    fn thumb_pattern_starts_carry_their_mode() {
+        let bytes = fixture("funcstart_thumb_arm");
+        let file = object::File::parse(bytes.as_slice()).expect("parse funcstart_thumb_arm");
+        let starts = full_pattern_starts_with_mode(&file);
+        assert!(starts.contains(&(0x101ec, Some(1))), "a2 is a Thumb start: {starts:x?}");
+        assert!(starts.contains(&(0x101fc, Some(1))), "a3 is a Thumb start: {starts:x?}");
+        assert!(starts.iter().all(|&(_, mode)| mode == Some(1)), "{starts:x?}");
     }
 
     /// Non-PIE x86-64: `_start` hands `main` over as `mov rdi,imm32`

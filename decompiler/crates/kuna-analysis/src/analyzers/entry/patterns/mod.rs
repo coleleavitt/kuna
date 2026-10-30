@@ -239,6 +239,9 @@ fn hex_val(c: char) -> Option<u32> {
 struct PatternPairs {
     pre: Vec<Ditted>,
     post: Vec<Ditted>,
+    /// The `TMode` value the pair's `<setcontext name="TMode">` gives the start
+    /// (ARM: 1 = Thumb, 0 = A32), when it sets one.
+    tmode: Option<u32>,
 }
 
 /// The compiled function-start pattern set for one architecture.
@@ -251,6 +254,10 @@ pub struct FuncStartPatterns {
     /// Instruction alignment for the arch (`FunctionStartAnalyzer.applyActionToSet`
     /// rejects an unaligned mark: `addr % getInstructionAlignment() != 0`).
     align: u64,
+    /// The byte values any pattern accepts at the candidate offset (a post's
+    /// first byte, a bare pattern's marked byte); every other offset is skipped
+    /// without trying a pattern.
+    first: [bool; 256],
 }
 
 impl FuncStartPatterns {
@@ -266,15 +273,21 @@ impl FuncStartPatterns {
     ///
     /// Returns absolute VMAs (`sec_addr + offset`), sorted/deduped.
     pub fn scan(&self, sec_addr: u64, data: &[u8]) -> Vec<u64> {
-        let mut out: Vec<u64> = Vec::new();
+        self.scan_with_mode(sec_addr, data).into_iter().map(|(vma, _)| vma).collect()
+    }
+
+    /// [`Self::scan`], with the `TMode` value the matching pair sets.
+    pub fn scan_with_mode(&self, sec_addr: u64, data: &[u8]) -> Vec<(u64, Option<u32>)> {
+        let mut out: Vec<(u64, Option<u32>)> = Vec::new();
         let n = data.len();
         for off in 0..n {
             let vma = sec_addr + off as u64;
-            if vma % self.align != 0 {
+            if vma % self.align != 0 || !self.first[data[off] as usize] {
                 continue;
             }
             let here = &data[off..];
             let mut hit = false;
+            let mut mode = None;
             // Bare <funcstart/> patterns. A pattern may carry a `*` mark: the bytes
             // before the mark are *context* that must precede the candidate, and the
             // candidate is the marked byte. So the full sequence must match starting
@@ -300,6 +313,7 @@ impl FuncStartPatterns {
                             let pre_slice = &data[off - plen..off];
                             if pre.matches(pre_slice) {
                                 hit = true;
+                                mode = pp.tmode;
                                 break 'pairs;
                             }
                         }
@@ -307,11 +321,9 @@ impl FuncStartPatterns {
                 }
             }
             if hit {
-                out.push(vma);
+                out.push((vma, mode));
             }
         }
-        out.sort_unstable();
-        out.dedup();
         out
     }
 
@@ -382,11 +394,19 @@ fn parse_patternpairs(block: &str, pairs: &mut Vec<PatternPairs>) {
         if post_has_funcstart(post_block) {
             let post = collect_data(post_block);
             if !pre.is_empty() && !post.is_empty() {
-                pairs.push(PatternPairs { pre: pre.clone(), post });
+                pairs.push(PatternPairs { pre: pre.clone(), post, tmode: tmode_of(post_block) });
             }
         }
         rest = &after[b + "</postpatterns>".len()..];
     }
+}
+
+/// The value of a `<setcontext name="TMode" value="N"/>` in a post block.
+fn tmode_of(body: &str) -> Option<u32> {
+    let at = body.find("<setcontext name=\"TMode\"")?;
+    let tag = &body[at..at + body[at..].find('>')?];
+    let v = tag.split("value=\"").nth(1)?;
+    v[..v.find('"')?].trim().parse().ok()
 }
 
 /// True if a `<postpatterns>`/`<pattern>` body carries an unconditional
@@ -470,7 +490,19 @@ fn compile(xmls: &[&str], align: u64) -> FuncStartPatterns {
     for xml in xmls {
         parse_patternlist(xml, &mut pairs, &mut bare);
     }
-    FuncStartPatterns { pairs, bare, align }
+    let mut first = [false; 256];
+    let mut accept = |d: &Ditted, k: usize| {
+        if let (Some(&bits), Some(&dits)) = (d.bits.get(k), d.dits.get(k)) {
+            for (v, slot) in first.iter_mut().enumerate() {
+                *slot |= (v as u8) & dits == bits;
+            }
+        }
+    };
+    for pp in &pairs {
+        pp.post.iter().for_each(|d| accept(d, 0));
+    }
+    bare.iter().for_each(|d| accept(d, d.mark));
+    FuncStartPatterns { pairs, bare, align, first }
 }
 
 /// Return the compiled full pattern set for `arch` (little/big-endian aware), or
@@ -539,6 +571,30 @@ pub fn for_arch(
             None
         }
     }
+}
+
+/// [`for_arch`] keyed by a SLEIGH language id (`x86:LE:64:default`,
+/// `ARM:LE:32:v7`, ...), for an image with no object header to name its
+/// architecture.
+pub fn for_language(language_id: &str) -> Option<&'static FuncStartPatterns> {
+    use object::Architecture as A;
+    let mut parts = language_id.split(':');
+    let processor = parts.next()?;
+    let little = parts.next()? == "LE";
+    let size = parts.next().unwrap_or("");
+    let arch = match (processor, size) {
+        ("x86", "64") => A::X86_64,
+        ("x86", "32") => A::I386,
+        ("AARCH64", _) => A::Aarch64,
+        ("ARM", _) => A::Arm,
+        ("RISCV", _) => A::Riscv64,
+        ("MIPS", "64") => A::Mips64,
+        ("MIPS", _) => A::Mips,
+        ("PowerPC", "64") => A::PowerPc64,
+        ("PowerPC", _) => A::PowerPc,
+        _ => return None,
+    };
+    for_arch(arch, little)
 }
 
 #[cfg(test)]

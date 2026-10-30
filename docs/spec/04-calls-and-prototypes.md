@@ -3351,6 +3351,48 @@ pointer that is still an unresolved frame-derived expression keeps the INDIRECT
 too, until the merge resolves. Elsewhere such a pointer is usually a cursor into
 a local buffer, and it defers to the mark.
 
+### (kuna) `calleeretpurge` — the callee's own `ret imm16`
+
+A model that states an extrapop states it for every call. `x86gcc.cspec` says 4,
+yet an i386 SysV function that returns a struct through a hidden pointer ends
+`ret $4`: it pops the pointer too. `ActionExtraPopSetup` planted `ESP = ESP + 4`
+after such a call, the caller's own `sub esp,4` that re-reserves the popped slot
+was then taken at face value, and every stack reference after the call moved by
+4. One local split into two variables, and the half read after the call had no
+definition.
+
+The driver now decodes each direct callee once per image, while the translator
+is still reachable (`kuna_calleeretpurge.rs (probe_return_purge)`). The walk
+follows fall-through, direct branches and direct calls from the entry; a path
+ends at a `RETURN` or at an indirect branch. For every `RETURN` instruction it
+reaches it sums the constant adds to the stack pointer inside that instruction:
+`ret` gives 4 (8 on x86-64) and `ret N` gives 4 + N. When every reached return
+agrees, `ActionExtraPopSetup` uses that value as the call's extrapop, exactly,
+in place of the prototype's, and in place of an unknown model's guess. A callee
+with no reachable return (a PLT stub, a no-return function), whose returns
+disagree, or whose return writes the stack pointer in any other way keeps the
+prototype's answer. The probe runs on 32-bit x86 only: x86-64 code does not pop
+arguments, and the decode is not free when a Ghidra host serves the
+instructions. `option calleeretpurge off` restores the model's extrapop.
+
+### (kuna) `tailcontract` — a single decompile states its tail callees first
+
+`kuna decompile` of one function has no callee-first run behind it. For a
+thunk that is all tail call (`xor esi,esi; jmp target`) that cost the result:
+nothing in the thunk reads `RAX` after the call, so the call kept no output and
+the thunk printed `void thunk(a0) { target(a0,0); }`, while every caller used
+the value and `decompile-all` printed `return target(a0,NULL)`. A forwarder
+(`add esi,1; jmp helper`) lost the third argument it passes through untouched
+in `EDX` the same way. Before the pipeline runs, the single-function drive now
+finds each CALL that the flow turned from a tail jump (a CALL with an artificial
+`RETURN` at its own address), decompiles up to four such callees in a nested
+drive (`decompile_drive.rs (bootstrap_tail_callees)`), and states each one's
+recovered prototype exactly as `protoorder` parks it in a callee-first run:
+types, the arity where it is sound, the output and the forwarded inputs. The
+nested drives do not recurse, and declared or already-stated callees are
+skipped. `option tailcontract off`, or `protoorder off`, decompiles the thunk
+from its own body alone.
+
 ### (kuna) `swiftcall` — Swift's `self` and error registers
 
 Swift's convention adds registers the C model has no row for: `swiftself` (x20

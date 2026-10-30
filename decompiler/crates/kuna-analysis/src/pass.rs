@@ -443,6 +443,10 @@ pub struct AnalysisOutput {
     /// fragment. Added after the [`Self::fde_bodies`] suppression. Produced only by
     /// [`crate::entry::kuna_coldentry`] (`coldentry`).
     pub fde_interior_entries: Vec<u64>,
+    /// (kuna) FDE bodies that are another function's exception-cleanup cold
+    /// part; every entry inside one is dropped at the commit. Produced only by
+    /// [`crate::entry::kuna_ehcold`] (`ehcold`).
+    pub eh_cold: Vec<(u64, u64)>,
     /// (kuna) PDB procedure extents that describe exactly one function, as
     /// `[start, end)`, sorted and disjoint. Applied after [`Self::fde_bodies`],
     /// only where a function is committed at `start` (a `static` function has an
@@ -566,6 +570,10 @@ pub struct AnalysisOutput {
     /// emits them here instead. The libc and Win32 signature passes all use this
     /// stream for concrete resolver entries. See [`crate::protos`].
     pub prototypes_at: Vec<(u64, kuna_decomp::fspec::PrototypePieces)>,
+    /// (kuna `dwarfnocall`) DWARF subprograms marked `DW_CC_nocall`, as
+    /// `(entry, name, parameter indices with no location)`: the compiler changed
+    /// their calling convention and those parameters are no longer passed.
+    pub dwarf_nocall: Vec<(u64, String, Vec<usize>)>,
     /// Library prototypes declaring a `float` or `double` that an ARM image
     /// holds back, by name (`None`) or by entry address: whether the image
     /// returns a `double` whole depends on `armfloatreturn`, which is set after
@@ -693,6 +701,30 @@ impl AnalysisOutput {
     /// alone deliberately: it is emitted inside a `/* … */` by the printer, and
     /// escaping THAT belongs with the printer's comment emission, not with a
     /// symbol-name gate.
+    /// (kuna `dwarfnocall`) Drop the parameters a `DW_CC_nocall` subprogram no
+    /// longer receives from its DWARF prototype, by name and by entry address.
+    pub fn apply_dwarf_nocall(&mut self) {
+        fn drop_params(p: &mut kuna_decomp::fspec::PrototypePieces, dropped: &[usize]) {
+            if dropped.iter().any(|&i| i >= p.intypes.len()) {
+                return;
+            }
+            for &i in dropped.iter().rev() {
+                p.intypes.remove(i);
+                if i < p.innames.len() {
+                    p.innames.remove(i);
+                }
+            }
+            if p.first_var_arg_slot >= 0 {
+                p.first_var_arg_slot -= dropped.iter().filter(|&&i| (i as i32) < p.first_var_arg_slot).count() as i32;
+            }
+        }
+        let unique: std::collections::BTreeSet<_> = self.dwarf_nocall.iter().collect();
+        for (addr, name, dropped) in unique {
+            self.prototypes.iter_mut().filter(|p| &p.name == name).for_each(|p| drop_params(p, dropped));
+            self.cpp_dwarf.prototypes.iter_mut().filter(|(a, _)| a == addr).for_each(|(_, p)| drop_params(p, dropped));
+        }
+    }
+
     pub fn sanitize_names(&mut self, mode: NameChars) {
         if mode == NameChars::Off {
             return;
@@ -722,6 +754,7 @@ impl AnalysisOutput {
         self.fid_names.iter_mut().for_each(|f| fix(&mut f.name));
         self.prototypes.iter_mut().for_each(fix_proto);
         self.prototypes_at.iter_mut().for_each(|(_, p)| fix_proto(p));
+        self.dwarf_nocall.iter_mut().for_each(|(_, n, _)| fix(n));
         self.arm_float_prototypes.iter_mut().for_each(|(_, p)| fix_proto(p));
         self.main_decl_at.iter_mut().for_each(|(_, p)| fix_proto(p));
         self.cpp_dwarf.symbols.iter_mut().for_each(|s| fix(&mut s.name));
@@ -818,6 +851,7 @@ impl AnalysisOutput {
         self.entries.extend(other.entries);
         self.fde_bodies.extend(other.fde_bodies);
         self.fde_interior_entries.extend(other.fde_interior_entries);
+        self.eh_cold.extend(other.eh_cold);
         self.pdb_bodies.extend(other.pdb_bodies);
         self.entry_names.extend(other.entry_names);
         self.noreturn.extend(other.noreturn);
@@ -840,6 +874,7 @@ impl AnalysisOutput {
         self.cfstrings.extend(other.cfstrings);
         self.prototypes.extend(other.prototypes);
         self.prototypes_at.extend(other.prototypes_at);
+        self.dwarf_nocall.extend(other.dwarf_nocall);
         self.arm_float_prototypes.extend(other.arm_float_prototypes);
         self.main_decl_at.extend(other.main_decl_at);
         self.c_runtime_imports.extend(other.c_runtime_imports);

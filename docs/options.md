@@ -167,6 +167,9 @@ Three tiers:
 | image-base-relative switch whose bound guard is duplicated across multiple predecessors renders as a computed call | [`switchmultipred`](#switchmultipred) |
 | 'Too many branches' where the dispatch block has several guarded incoming paths | [`switchmultipred`](#switchmultipred) |
 | msvc memmove small-count tail dispatch truncated to an indirect call | [`switchmultipred`](#switchmultipred) |
+| a switch with an unreachable default renders as a computed jump-as-call through a table | [`switchtrim`](#switchtrim) |
+| `*(code **)(a0 * 8 + table)` called instead of a switch | [`switchtrim`](#switchtrim) |
+| Too many branches on a table indexed with no range check | [`switchtrim`](#switchtrim) |
 | one switch recovered but sibling interleaved jump tables degrade to computed calls | [`unrolledguard`](#unrolledguard) |
 | 'Could not find op at target address' during recovery of an msvc optimized memcpy dispatch | [`unrolledguard`](#unrolledguard) |
 | duff's-device tail dispatch rendered as 'Treating indirect jump as call' | [`unrolledguard`](#unrolledguard) |
@@ -596,6 +599,9 @@ Three tiers:
 | functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry) |
 | a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry) |
 | gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry) |
+| many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold) |
+| a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold) |
+| a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold) |
 | spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
 | a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
 | function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
@@ -751,6 +757,10 @@ Three tiers:
 | Foo *this renders as void * | [`cppproto`](#cppproto) |
 | a namespaced or templated function loses its dwarf prototype | [`cppproto`](#cppproto) |
 | one unmappable parameter type discards the whole dwarf signature | [`cppproto`](#cppproto) |
+| a clang -O2 static function's dwarf prototype names a parameter the body never reads | [`dwarfnocall`](#dwarfnocall) |
+| a parameter renders under the name of the one before it | [`dwarfnocall`](#dwarfnocall) |
+| callers of an optimized static function pass an undefined extra argument | [`dwarfnocall`](#dwarfnocall) |
+| a constant argument folded away by the compiler still appears in the prototype | [`dwarfnocall`](#dwarfnocall) |
 | a dwarf-typed local or parameter renders void * despite -g debug info | [`typedepth`](#typedepth) |
 | const char ** or char *const [] loses its element type | [`typedepth`](#typedepth) |
 | a typedef'd struct pointer degrades to void * | [`typedepth`](#typedepth) |
@@ -1253,6 +1263,14 @@ Three tiers:
 | a get-PC thunk or PIE GOT-base helper eats a live register | [`calleepreserves`](#calleepreserves) |
 | an argument register that provably crosses a helper renders as `unsigned int v1; // edx` with no definition | [`calleepreserves`](#calleepreserves) |
 | the recovered return of a call is sourced from a register the callee never writes | [`calleepreserves`](#calleepreserves) |
+| an i386 caller of a struct-returning function splits one local into two after the call | [`calleeretpurge`](#calleeretpurge) |
+| a local written before a call to a `ret $4` callee reads back undefined after it | [`calleeretpurge`](#calleeretpurge) |
+| stack offsets drift by 4 after every call that returns a struct through a hidden pointer | [`calleeretpurge`](#calleeretpurge) |
+| a stdcall callee's argument bytes are never removed from the caller's stack | [`calleeretpurge`](#calleeretpurge) |
+| kuna decompile of a thunk is void while its callers use the result | [`tailcontract`](#tailcontract) |
+| a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract) |
+| a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract) |
+| return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -1835,6 +1853,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Set on PER PROGRAM when an image-base-relative switch (e.g. an MSVC memmove/memcpy small-count tail dispatch) reports 'Could not recover jumptable ... Too many branches' and renders as a computed (code *)() call AND the dispatch block has multiple predecessors each with its own bound guard (vs the single-guard form switchguardbound handles); DESTRUCTIVE as a global default (it unions per-path guard prefixes across a MULTIEQUAL and re-binds the table from a heuristic max bound, so it may over-bind an unrelated multi-entry indirect jump).
 - **Where / provenance:** P2/switch-model · angr · opt-in-tool · angr-abnormal-switch-case-case3
 - **Example:** `option switchmultipred on`
+
+### `switchtrim` -- on | off, default `on`
+
+- **Symptoms:** a switch with an unreachable default renders as a computed jump-as-call through a table; `*(code **)(a0 * 8 + table)` called instead of a switch; Too many branches on a table indexed with no range check.
+- **What it does:** Recover a jump table that no guard bounds, and end it where its layout ends. A switch whose default is unreachable (`__builtin_unreachable()`, an enum the compiler trusts) indexes its table with no range check, so JumpBasic sees the full width of the index, the range exceeds jumptablemax, and the BRANCHIND stays a computed jump-as-call -- `v1 = *(code **)(a0 * 8 + 0x402000); return (*v1)();`. The upstream sanity check (JumpBasic::sanityCheck, kept as reasonable_rows) only stops at a zero row or a far row with no image bytes, which is no help once the range is unbounded. With the option on, after every guard-based extension has declined, a table whose path holds exactly one LOAD is opened to [0, jumptablemax); emulation stops at the first row it cannot read, and the sanity check keeps the rows before the first one that points into the table's own bytes (the entries read, first to last) or, on an object load, outside the image's executable memory -- IDA's trim_jtable stop rules. Fewer than two surviving rows is no table, and the computed jump stays. Bounded tables are untouched.
+- **When to flip:** On by default. Keep it on when a switch renders as `(*v1)()` through a table read with an unbounded index -- typically a switch with an unreachable default. Flip OFF if a recovered switch carries cases that are not really part of it (a table followed directly by another code-pointer table with no gap), or to restore the computed jump.
+- **Where / provenance:** P2/switch-model · kuna · structure-recovery · ida95-18-switch-trim
+- **Example:** `option switchtrim off`
 
 ### `unrolledguard` -- on | off, default `off` (destructive opt-in)
 
@@ -2808,6 +2834,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-coldentry
 - **Example:** `--option coldentry off`
 
+### `ehcold` -- on | off, default `on`
+
+- **Symptoms:** many sub_<addr> functions that end in _Unwind_Resume(); a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely; a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume.
+- **What it does:** Withhold an exception-cleanup .cold fragment from the function list. GCC moves a function's landing-pad cleanups into its .cold partition: each landing pad inside the owner's FDE is a stub (`mov rbx,rax; jmp <cold>`), and the cold fragment, which has its own FDE, is a ladder of `free; call _Unwind_Resume` rungs. The FDE oracle listed the fragment as a function and coldentry added one more per rung; each decompiled from an undefined rbx and ended in _Unwind_Resume() (193 of 657 functions on IDA's objc.so). IDA attaches the fragment to its owner as a function tail (eh_parse append_func_tail). kuna has no tails, so the fragment is withheld instead: an FDE body with no function symbol at its start, entered by direct jmp/jcc rel32 only from ONE other FDE body (its owner), targeted by no direct call, and jumped to from the first 16 bytes of a landing pad the owner's LSDA lists, contributes no entries -- the commit drops every discovered entry inside it, its start included. x86/x86-64 ELF only.
+- **When to flip:** On by default. Keep it on for gcc -O2 C++ binaries, where cleanup ladders otherwise flood the function list with sub_<addr> fragments that start from an undefined register and end in _Unwind_Resume(). Flip OFF to list and decompile the cold cleanup code on its own (to read what a destructor chain frees).
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-22-ehcold
+- **Example:** `--option ehcold off`
+
 ### `fdeinterior` -- on | off, default `on`
 
 - **Symptoms:** spurious sub_<addr> functions inside a c++ function that uses try/catch; a decompiled function body dereferences an uninitialised frame pointer so every local is garbage; function count inflated by unwinder-only landing pads; a function entry lands in the middle of an instruction; extra entries between two real functions in a binary built with exceptions.
@@ -3103,6 +3137,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default) gives a -g C++ binary its real signatures: Account::deposit(Account *this,int amount) instead of Account::deposit(int4 *a0,int4 a1). Flip off to restore the name-only DWARF walk (every out-of-line member function loses its parameter names, types and stack locals).
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-cppproto
 - **Example:** `option cppproto off`
+
+### `dwarfnocall` -- on | off, default `on`
+
+- **Symptoms:** a clang -O2 static function's dwarf prototype names a parameter the body never reads; a parameter renders under the name of the one before it; callers of an optimized static function pass an undefined extra argument; a constant argument folded away by the compiler still appears in the prototype.
+- **What it does:** Drop the parameters a DW_CC_nocall DWARF subprogram no longer receives before its prototype is locked. A DWARF prototype is applied locked, so its parameter list decides which registers the function reads. clang's dead-argument elimination rewrites an internal function's convention -- an unused or constant parameter is removed and the remaining ones move into the earlier argument slots -- and marks the subprogram DW_AT_calling_convention DW_CC_nocall, but still lists every source parameter. The removed ones carry no DW_AT_location (a constant one carries DW_AT_const_value instead). Locking the source list put `work(int *p,int unused,int k)` on a body that reads k from ESI: the loop bound printed as `unused`, and every caller passed an undefined third argument. With the option on (default) the commit removes the location-less parameters of a DW_CC_nocall subprogram from both DWARF prototype streams (by name and by entry address), so the body reads `work(int *p,int k)` and callers pass two arguments. GCC's IPA clones (`.constprop`, `.isra`, `.part`) are concrete instances linked by DW_AT_abstract_origin, which neither DWARF arm follows, so they never get a source prototype to begin with. The return type is kept: DWARF does not say whether the return value was removed too.
+- **When to flip:** On by default. Keep it on for clang -O2 -g binaries: a static function whose debug-info prototype names a parameter the body never reads while the real argument renders under the wrong name, or calls that pass an undefined extra argument. Flip OFF to see the source-level DWARF prototype unchanged.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · ida95-14-dwarf-nocall
+- **Example:** `option dwarfnocall off`
 
 ### `typedepth` -- on | off, default `on`
 
@@ -4187,6 +4229,22 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when a value that provably crosses a call in the disassembly renders as an undefined local -- the standard shape is an i386 PIE where an argument is loaded into EDX/ECX before a call to a two-byte get-PC thunk and reappears as `v1` with no assignment, while a second argument loaded after the same call is recovered. Same shape on any hand-written or compiler-emitted helper that preserves more registers than its ABI promises. It only ever fires against a fully decoded callee whose paths end at returns or known unconditional no-return calls, and only ever KEEPS a value, so it cannot invent one. Flip OFF to get the convention-only answer back: the way this could be wrong is a callee decoded in the wrong instruction mode (an ARM/Thumb boundary), where the bytes read are not the instructions that run, or to bisect whether this pass rather than trial scoring changed a call's surroundings.
 - **Where / provenance:** P3/call-guard · kuna · correctness-fix · repipe-get-pc-helper-loses
 - **Example:** `option calleepreserves off`
+
+### `calleeretpurge` -- on | off, default `on`
+
+- **Symptoms:** an i386 caller of a struct-returning function splits one local into two after the call; a local written before a call to a `ret $4` callee reads back undefined after it; stack offsets drift by 4 after every call that returns a struct through a hidden pointer; a stdcall callee's argument bytes are never removed from the caller's stack.
+- **What it does:** Take a direct callee's extrapop from its own `ret imm16` instead of the prototype model. An x86 callee that ends `ret N` pops N argument bytes on top of the return address: i386 SysV does it for every function that returns a struct through a hidden pointer (`ret $4`), and every callee-cleans convention does it for its parameter area. x86gcc.cspec states extrapop=4 for every call, so ActionExtraPopSetup planted `ESP = ESP + 4` after the call, the caller's own `sub esp,4` that re-reserves the popped slot was taken at face value, and every stack reference after the call drifted by N -- one local split into two variables and the read half had no definition. The driver decodes each direct callee once per image (fall-through, direct branches and calls; a path ends at a RETURN or an indirect branch) and records the net stack-pointer change of every RETURN instruction it reaches. When they all agree, ActionExtraPopSetup uses that change as the call's extrapop, exact, in place of the model's or of an unknown model's guess. 32-bit x86 only (x86-64 code does not pop arguments). A callee with no reachable return (a PLT stub, a no-return function), or whose returns disagree, keeps the prototype's answer.
+- **When to flip:** On by default. Keep it on for i386 code: a caller of a struct-returning function shows locals that change name after the call, or reads a slot the source wrote before the call as an undefined value. Flip OFF to get the prototype model's extrapop back, e.g. to bisect a stack-offset change on an x86 image or when a callee was decoded at a wrong entry.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-9-callee-ret-purge
+- **Example:** `option calleeretpurge off`
+
+### `tailcontract` -- on | off, default `on`
+
+- **Symptoms:** kuna decompile of a thunk is void while its callers use the result; a tail-calling thunk returns a value in decompile-all but not in a single decompile; a forwarder's tail call drops an argument it passes through unchanged; return helper(a0,a1 + 1) for a helper that takes three arguments.
+- **What it does:** Before a single-function drive (`kuna decompile`) runs its pipeline, decompile each callee the function tail-calls (a CALL the flow followed with its artificial RETURN, at most four) and state its recovered prototype the way protoorder's callee-first decompile-all does. Without it a thunk such as `xor esi,esi; jmp target` decompiled as `void thunk(a0) { target(a0,0); }` -- the tail call's result was dropped because nothing in the thunk reads it, while every caller used it and decompile-all printed `return target(a0,NULL)` -- and a forwarder `add esi,1; jmp helper` dropped the argument it passes through untouched (`return helper(a0,a1 + 1)` for a three-argument helper). The callee's statement is the one protoorder types parks: its recovered parameter types, its arity when sound, and its output, so the tail call passes the callee's arguments and result through. Declared callees and callees already stated are skipped; the nested drives do not recurse. Inert under protoorder off.
+- **When to flip:** On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-extra-tail-thunk
+- **Example:** `option tailcontract off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

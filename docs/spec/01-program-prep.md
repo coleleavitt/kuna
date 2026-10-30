@@ -3173,6 +3173,25 @@ moves.
   recovery is the name-only walk, byte for byte. (Struct/class **fields** are the
   sibling `dwarfstructs` increment below; before it, a class stayed a named opaque
   and `this->balance` printed as an offset.)
+- **Changed-convention prototypes** (`dwarfnocall`, default-on,
+  `decompiler/crates/kuna-analysis/src/pass.rs (apply_dwarf_nocall)`). A DWARF
+  prototype is applied locked, so its parameter list decides which registers a
+  function reads. Clang's dead-argument elimination rewrites an internal
+  function's convention: an unused or constant parameter is removed, the
+  remaining ones move into the earlier argument slots, and the subprogram is
+  marked `DW_AT_calling_convention DW_CC_nocall`. The DWARF still lists every
+  source parameter; a removed one has no `DW_AT_location` (a constant one has
+  `DW_AT_const_value` instead). Both DWARF arms record, for a `DW_CC_nocall`
+  subprogram, the positions of its location-less parameters, and the commit
+  removes those parameters from the by-name and the by-address prototype before
+  either is parked. `work(int *p,int unused,int k)` then decompiles as
+  `work(int *p,int k)` with the loop bound read as `k`, and its callers pass two
+  arguments instead of an undefined third. The return type is kept, because
+  DWARF does not say whether the return value was removed too. GCC's IPA clones
+  (`.constprop`, `.isra`, `.part`) need no such rule: they are concrete instances
+  linked by `DW_AT_abstract_origin`, which neither arm follows, so a clone never
+  receives the source prototype. With `dwarfnocall off` the source list is
+  applied unchanged.
 - **Aggregate layout** (`dwarfstructs`, default-on,
   `decompiler/crates/kuna-analysis/src/analyzers/dwarf/kuna_dwarfstructs.rs`) is
   what turns a recovered aggregate from a *name* into a *type*. The mapper used to
@@ -5276,6 +5295,21 @@ paint, the pattern scan and the recursive-descent promotion (§1.6) lift betafli
 STM32F405 from 1 to ~1830 discovered functions (and libopencm3 `button` from 1 to
 31, with `main` decoding as a real Thumb body rather than A32 garbage).
 
+An ARM pair's `<setcontext name="TMode" value="1"/>` travels with the start it
+finds (`patterns/mod.rs (scan_with_mode)`), and the pass paints `TMode=1` at
+each such start, so a Thumb prologue found in a stripped image decodes as Thumb
+instead of A32 garbage. A pair that sets `TMode` 0 (A32) paints nothing, because
+A32 is the image default. An explicit `--isa` names the mode itself, so the pass
+paints nothing then. Before any
+pattern is tried at an offset, its byte must be one some post pattern (or a bare
+pattern's marked byte) accepts; the skip is exact and makes the scan about 4x
+faster (52 ms vs 216 ms over git's 3.1 MB `.text`, identical hits). On a
+headerless image (`--raw-image`), where the object-file passes cannot run, the
+same option sweeps the image's executable bytes with the pattern set of the
+target's language id (`patterns/mod.rs (for_language)`) and seeds `rawdiscover`'s
+call-target walk with the starts it finds, so a function reached only through a
+pointer table is in the inventory too.
+
 **LSDA landing pads** (`eh_frame_full`, default-off): the deeper
 `GccExceptionAnalyzer` markup — follow each FDE's CIE `L` augmentation to its
 `.gcc_except_table` LSDA, decode the call-site table, and emit each landing pad as
@@ -5344,6 +5378,25 @@ the engine `Translate`, so it runs as a
 deferred entry pass at the commit point, and its entries join the inventory *after*
 the `fdeinterior` filter (which would otherwise reject every one of them by
 construction). x86/x86-64 ELF only; inert without `.eh_frame`.
+
+**(kuna) Unless the fragment is an exception cleanup** (`ehcold`,
+default-**on**; `decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_ehcold.rs`).
+GCC also moves a function's landing-pad cleanups into its `.cold` partition. Each
+landing pad inside the owner's FDE is a stub (`mov rbx,rax; jmp <cold>`), and the
+cold fragment is a ladder of `free; call _Unwind_Resume` rungs with its own FDE.
+The FDE oracle listed it as a function and `coldentry` added one per rung, each
+decompiling from an undefined `rbx` into `_Unwind_Resume()`: 193 of the 657
+functions of IDA's `objc.so`. IDA attaches such a fragment to its owner as a
+function tail. kuna has no tails, so it withholds the fragment instead. An FDE
+body is an EH cold part when no function symbol names its start, every direct
+`jmp`/`jcc rel32` into it comes from one other FDE body (its owner), no direct
+`call rel32` targets it, and at least one of those jumps sits in the first 16
+bytes of a landing pad that the owner's LSDA lists
+(`entry/mod.rs (scan_eh_frame_landing_pads_owned)` pairs every pad with its
+FDE). The commit drops every discovered entry inside such a body, its start
+included, after the `coldentry` entries are added. A cold throw path reached by
+an ordinary branch (`may_throw.cold`) is not a landing-pad target and stays a
+function. x86/x86-64 ELF only.
 
 **(kuna) `.pdata` interiors are not function starts either** (`pdatainterior`,
 default-**on**, DIV-155;

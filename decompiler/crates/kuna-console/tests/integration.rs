@@ -67,6 +67,9 @@ mod verify_coff_object;
 #[path = "verify_coldentry.rs"]
 mod verify_coldentry;
 
+#[path = "verify_ehcold.rs"]
+mod verify_ehcold;
+
 #[path = "verify_cortexmvectors.rs"]
 mod verify_cortexmvectors;
 
@@ -78,6 +81,9 @@ mod verify_cppcallnames;
 
 #[path = "verify_cppproto.rs"]
 mod verify_cppproto;
+
+#[path = "verify_dwarfnocall.rs"]
+mod verify_dwarfnocall;
 
 #[path = "verify_cppsig.rs"]
 mod verify_cppsig;

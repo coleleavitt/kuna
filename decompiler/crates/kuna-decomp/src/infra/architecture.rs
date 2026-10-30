@@ -823,6 +823,9 @@ pub struct Architecture {
     /// lifting the common guard onto the MULTIEQUAL output so the table bounds
     /// (C++ `switch_multi_pred`).
     pub switch_multi_pred: bool,
+    /// (kuna) Recover an unbounded single-LOAD jump table by reading until its
+    /// layout ends (option `switchtrim`).  See [`crate::p2_lift::kuna_switchtrim`].
+    pub switch_trim: bool,
     /// (kuna, angr `test_decompiling_optimized_memcpy`) Recover the interleaved
     /// jump tables of an MSVC optimized memcpy/memmove (Duff's device).  When a
     /// function holds several jump tables whose case bodies are reachable only as
@@ -994,6 +997,12 @@ pub struct Architecture {
     /// decode of the callee's own body proves it writes (option
     /// `calleepreserves`).  See [`crate::p4_calls::kuna_calleepreserves`].
     pub callee_preserves: bool,
+    /// (kuna) Take a direct callee's extrapop from its own `ret imm16`
+    /// (option `calleeretpurge`).  See [`crate::p4_calls::kuna_calleeretpurge`].
+    pub callee_ret_purge: bool,
+    /// (kuna) A single-function drive states each tail-called callee's prototype
+    /// first (option `tailcontract`).
+    pub tail_contract: bool,
     pub global_call_ranges: bool,
     /// (kuna) Let the callee's decoded body answer for the call's RETURN
     /// register too (option `calleeretpreserves`).  See
@@ -1658,6 +1667,9 @@ pub struct Architecture {
         (int4, uintb),
         std::rc::Rc<crate::kuna_rustabi::CalleeReturnWrites>,
     >,
+    /// (kuna `calleeretpurge`) Per-image cache of each direct callee's decoded
+    /// return purge, keyed by `(space index, entry offset)`.
+    pub kuna_callee_purge_cache: std::collections::HashMap<(int4, uintb), Option<int4>>,
     /// (kuna `bejoin evidence`) Per-image cache of the wide-return proof
     /// ([`crate::kuna_bejoin::seed_wide_returns`]): the model's pair, each
     /// function's verdict, keyed by its `(space index, entry offset)` so a
@@ -2008,6 +2020,9 @@ pub struct Architecture {
     /// follows a no-fall-through instruction, is a function of its own. Off
     /// restores the previous discovery set exactly; x86/x86-64 ELF only.
     pub analysis_coldentry: bool,
+    /// (kuna) Withhold an exception-cleanup `.cold` fragment from the function
+    /// list (option `ehcold`).  See `kuna_analysis::entry::kuna_ehcold`.
+    pub analysis_ehcold: bool,
     /// (kuna) Reject a discovered function entry that falls strictly inside a
     /// single-function `.pdata` `RUNTIME_FUNCTION` body (`pdatainterior`);
     /// default **on**. The PE half of [`Self::analysis_fdeinterior`] and the same
@@ -2267,6 +2282,9 @@ pub struct Architecture {
     /// entry ADDRESS instead of by name. Off restores the name-only walk, which
     /// drops the signature of every out-of-line C++ member function.
     pub analysis_cppproto: bool,
+    /// (kuna) Drop the parameters a `DW_CC_nocall` DWARF subprogram no longer
+    /// receives (option `dwarfnocall`).
+    pub analysis_dwarfnocall: bool,
     /// (kuna) Gate full-depth DWARF type resolution (`typedepth`); default
     /// **on**. The type mapper's recursion guard becomes upstream's per-DIE
     /// re-entry counter (`DWARFDataTypeImporter.trackRecursion`) instead of a
@@ -3222,6 +3240,7 @@ impl Architecture {
             switch_guard_bound: false,
             switch_shared_case: false,
             switch_multi_pred: false,
+            switch_trim: false,
             unrolled_guard: false,
             jumptable_share_partial: true,
             noreturn_extern_match: true, // (kuna) DIV-13 default-on (angr incorrect-duplication-chcon)
@@ -3265,6 +3284,8 @@ impl Architecture {
             zero_fill_return: true,
             zero_call_regs: true,
             callee_preserves: true,
+            callee_ret_purge: true,
+            tail_contract: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
             callee_scratch_body: true,
@@ -3380,6 +3401,7 @@ impl Architecture {
             kuna_fn_budget: None,   // (kuna) decompile-all watchdog: no budget by default
             kuna_fn_deadline: None, // (kuna) set per drive from kuna_fn_budget
             kuna_callee_write_cache: std::collections::HashMap::new(),
+            kuna_callee_purge_cache: std::collections::HashMap::new(),
             kuna_wide: crate::kuna_bejoin::WideCache::default(),
             kuna_callwide: crate::p4_calls::kuna_callwide::ProofSlot::default(),
             kuna_callee_dead_cache: std::collections::HashMap::new(),
@@ -3448,6 +3470,7 @@ impl Architecture {
             analysis_machobinds: false,
             analysis_fdeinterior: false,
             analysis_coldentry: false,
+            analysis_ehcold: false,
             analysis_pdatainterior: false,
             analysis_pdbinterior: false,
             analysis_funcstart_patterns: false,
@@ -3483,6 +3506,7 @@ impl Architecture {
             analysis_panicloc: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
+            analysis_dwarfnocall: false,
             analysis_typedepth: false,
             analysis_dwarfstructs: false,
             analysis_dwarfvariants: false,
@@ -3700,6 +3724,7 @@ impl Architecture {
         self.const_select_jump = false; // (kuna) default: upstream byte-identical (constant-select indirect branch)
         self.switch_guard_bound = false; // (kuna) default: upstream byte-identical (angr opt-in)
         self.switch_shared_case = true; // (kuna) DIV-14 default-on (angr loop-carried-guard PIC switch recovery; slower on the functions it recovers, kept on for quality; 0/675 byte-identical)
+        self.switch_trim = true; // (kuna) default-on: a jump table no guard bounds is read until its layout ends
         self.switch_multi_pred = true; // (kuna) DIV-13 default-on (angr multi-predecessor unrolled-guard jump-table; 0/675 ablation)
         self.unrolled_guard = false; // (kuna) default: upstream byte-identical (angr opt-in)
         self.jumptable_share_partial = true; // (kuna) DIV: the upstream stageJumpTable shape
@@ -3737,6 +3762,8 @@ impl Architecture {
         self.zero_fill_return = true; // (kuna) default-on (0/675 ablation): the zero a narrow write leaves in a returned q register's upper half is no part of the value
         self.zero_call_regs = true; // (kuna) default-on (0/675 ablation): a register a -fzero-call-used-regs epilogue clears before the return is no part of the value
         self.global_call_ranges = true;
+        self.callee_ret_purge = true;
+        self.tail_contract = true; // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)
         self.callee_scratch_body = true; // (kuna) DIV-149 default-on: a decoded callee that clobbers only SCRATCH registers still counts as a body for calleepreserves, so the value a caller sets before MSVC's out-of-line stack probe survives it (0/675 ablation)
@@ -3962,6 +3989,7 @@ impl Architecture {
         // (kuna) DIV-61 `.eh_frame` FDE-interior entry suppression — default-ON.
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;
+        self.analysis_ehcold = true; // (kuna) an EH cleanup .cold part reached only from its owner's landing pads is not a function
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — default-ON.
         self.analysis_pdatainterior = true;
         // (kuna) PDB-procedure-interior entry suppression — default-ON.
@@ -4001,6 +4029,7 @@ impl Architecture {
         self.analysis_dwarfstructs = true; // (kuna) DIV: DWARF aggregate-layout import default-ON (a zero-size aggregate is not conservative -- the ABI classifier acts on it; real-ELF DWARF path only, so every parity gate is byte-identical)
         self.analysis_dwarfvariants = true; // (kuna) DIV-87: DWARF variant-part import default-ON (the compiler states the discriminant; real-ELF DWARF path only, so every parity gate is byte-identical)
         self.analysis_variantnames = true; // (kuna) discriminant-value naming default-ON (acts only where a variant part was imported, so the parity gates cannot see it)
+        self.analysis_dwarfnocall = true; // (kuna) a DW_CC_nocall function's DWARF prototype loses the parameters with no location; real-ELF DWARF path only
         self.analysis_cppproto = true; // (kuna) DIV: DWARF C++ prototype arm default-ON (recovers ground truth the name-only walk drops; real-ELF DWARF path only, so every parity gate is byte-identical)
         // (kuna) DIV: demangled C++ signatures default to the PROVEN tier — only
         // the prototypes the mangling entails (ctor/dtor/cv-qualified member/
@@ -4902,6 +4931,7 @@ impl Architecture {
         // (kuna, angr) carry the multi-predecessor unrolled-guard jump-table gate
         // (`option switchmultipred`) so `JumpBasic::checkUnrolledGuard` reaches it.
         ctx.switch_multi_pred = self.switch_multi_pred;
+        ctx.switch_trim = self.switch_trim;
         // (kuna, angr) carry the interleaved unrolled-guard partial-flow gate
         // (`option unrolledguard`) so `FlowInfo::collectEdges` reaches it.
         ctx.unrolled_guard = self.unrolled_guard;

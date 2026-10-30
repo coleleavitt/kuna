@@ -2605,9 +2605,24 @@ impl ConsoleProgram {
             .filter(|(_, _, flags)| flags & section_flags::CODE != 0)
             .map(|(addr, size, _)| (addr, addr.saturating_add(size)))
             .collect();
-        let seeds: Vec<u64> =
+        let mut seeds: Vec<u64> =
             self.pending_synthetic_entries.iter().map(|addr| addr.get_offset()).collect();
-        let known: BTreeSet<u64> = seeds.iter().copied().collect();
+        // (kuna `funcstart_patterns`) The prologue patterns of the target's
+        // language, swept over the same executable bytes, seed the walk too.
+        if self.arch().analysis_funcstart_patterns {
+            if let Some(set) = kuna_analysis::entry::patterns::for_language(self.arch().get_description()) {
+                for &(lo, hi) in &exec {
+                    let Ok(size) = usize::try_from(hi - lo) else { continue };
+                    if let Some(bytes) = self.read_bytes(lo, size) {
+                        seeds.extend(set.scan(lo, &bytes));
+                    }
+                }
+                seeds.sort_unstable();
+                seeds.dedup();
+            }
+        }
+        let mut known: BTreeSet<u64> =
+            self.pending_synthetic_entries.iter().map(|addr| addr.get_offset()).collect();
         let found = {
             let arch = self.arch();
             kuna_analysis::listing::kuna_rawdiscover::discover(
@@ -2618,11 +2633,10 @@ impl ConsoleProgram {
                 &seeds,
             )
         };
-        for vma in found {
-            if known.contains(&vma) {
-                continue;
+        for vma in found.into_iter().chain(seeds) {
+            if known.insert(vma) {
+                self.pending_synthetic_entries.push(Address::new(Rc::clone(&code_space), vma));
             }
-            self.pending_synthetic_entries.push(Address::new(Rc::clone(&code_space), vma));
         }
     }
 
@@ -2807,7 +2821,7 @@ impl ConsoleProgram {
         // load it swept the whole image on every binary and was discarded whenever
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
-        let want_coldentry = self.arch().analysis_coldentry;
+        let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
         if (want_listing
             || want_fast_funcdisc
             || want_operand_refs
@@ -2931,6 +2945,11 @@ impl ConsoleProgram {
         // fragment is jumped into at, added past the suppression above.
         let cold_entries = std::mem::take(&mut merged.fde_interior_entries);
         merged.entries.extend(cold_entries);
+        // (kuna, `ehcold`) An exception-cleanup cold part is its owner's, not a
+        // function: drop every entry inside one, its start included.
+        let mut eh_cold = std::mem::take(&mut merged.eh_cold);
+        eh_cold.sort_unstable();
+        kuna_analysis::entry::kuna_ehcold::suppress_eh_cold_entries(&mut merged.entries, &eh_cold);
         // (kuna, `pdbinterior`) The same rejection inside PDB procedures, on its own
         // terms: see `suppress_pdb_interior_entries`.
         suppress_pdb_interior_entries(self.arch(), &code_space, &mut merged);
@@ -3132,6 +3151,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // dropped here and the discovery set is exactly what it was before.
         "fdeinterior" => arch.analysis_fdeinterior,
         "coldentry" => arch.analysis_coldentry,
+        "ehcold" => arch.analysis_ehcold,
         "pdatainterior" => arch.analysis_pdatainterior,
         // (kuna) PDB-procedure-interior entry suppression — the extents come out of
         // the `.pdb`, so switching `pdb` off withdraws them too.
@@ -4682,6 +4702,9 @@ fn commit_analysis_output(
     //    off, they are dropped and the DWARF recovery is the name-only walk,
     //    byte-identical to before this arm existed.
     let mut out = out;
+    if prog.arch().analysis_dwarfnocall {
+        out.apply_dwarf_nocall();
+    }
     if prog.arch().analysis_cppproto {
         let cpp = std::mem::take(&mut out.cpp_dwarf);
         out.symbols.extend(cpp.symbols);

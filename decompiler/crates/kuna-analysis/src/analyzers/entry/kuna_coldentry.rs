@@ -213,7 +213,7 @@ fn source_instructions(
 
 /// Every `(source, target)` of a byte pattern that decodes as `jmp rel32` (`E9`)
 /// or `jcc rel32` (`0F 80`..`0F 8F`) in a section mapped at `vma`.
-fn rel32_branches(vma: u64, data: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
+pub(super) fn rel32_branches(vma: u64, data: &[u8]) -> impl Iterator<Item = (u64, u64)> + '_ {
     (0..data.len()).filter_map(move |i| {
         let (op_len, rel_at) = match data[i] {
             0xE9 => (5, i + 1),
@@ -241,7 +241,7 @@ fn ends_without_fallthrough(vma: u64, data: &[u8], target: u64) -> bool {
 }
 
 /// The body that holds `vma`, if any.
-fn containing_body(bodies: &[(u64, u64)], vma: u64) -> Option<(u64, u64)> {
+pub(super) fn containing_body(bodies: &[(u64, u64)], vma: u64) -> Option<(u64, u64)> {
     let idx = bodies.partition_point(|&(start, _)| start <= vma);
     let body = *bodies.get(idx.checked_sub(1)?)?;
     (vma < body.1).then_some(body)

@@ -368,7 +368,7 @@ pub fn detect_compiler_pe(file: &object::File, bytes: &[u8]) -> Compiler {
         toolchain.extend_from_slice(rdata);
     }
 
-    if comment_indicates_rust(&toolchain) || symbols_indicate_rust(file) {
+    if comment_indicates_rust(&toolchain) || symbols_indicate_rust(file) || rodata_indicates_rust(file) {
         return Compiler::Rustc;
     }
     if swift_indicated(file) {
@@ -415,7 +415,7 @@ pub fn detect_compiler_macho(file: &object::File, bytes: &[u8]) -> Compiler {
         .map(<[u8]>::to_vec)
         .unwrap_or_default();
 
-    if comment_indicates_rust(&toolchain) || symbols_indicate_rust(file) {
+    if comment_indicates_rust(&toolchain) || symbols_indicate_rust(file) || rodata_indicates_rust(file) {
         return Compiler::Rustc;
     }
     // Swift — before the Apple-platform fallback: every Swift Mach-O carries
@@ -568,15 +568,23 @@ fn is_rust_legacy(name: &str) -> bool {
     hex.len() == 16 && hex.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
-/// `true` if the `.rodata` section carries any [`RUST_SIGNATURES`] byte signature
-/// (`RustSourceLanguage.isRust` fallback path). A plain substring scan — the kuna
+/// `true` if a read-only data section carries any [`RUST_SIGNATURES`] byte
+/// signature (`RustSourceLanguage.isRust` fallback path): ELF `.rodata`, PE
+/// `.rdata`, Mach-O `__const` and `__cstring` (rustc puts its panic-location
+/// paths in either, depending on the target). A plain substring scan — the kuna
 /// analog of `MemoryBytePatternSearcher` over literal byte sequences (no pattern
 /// engine needed; the LOSS vs Ghidra's searcher is none for literals).
 fn rodata_indicates_rust(file: &object::File) -> bool {
-    let Some(data) = file.section_by_name(".rodata").and_then(|s| s.data().ok()) else {
-        return false;
+    let names: &[&str] = match file.format() {
+        BinaryFormat::Elf => &[".rodata"],
+        BinaryFormat::Pe => &[".rdata"],
+        BinaryFormat::MachO => &["__const", "__cstring"],
+        _ => &[],
     };
-    RUST_SIGNATURES.iter().any(|sig| contains_subslice(data, sig))
+    file.sections()
+        .filter(|s| s.name().is_ok_and(|n| names.contains(&n)))
+        .filter_map(|s| s.data().ok())
+        .any(|data| RUST_SIGNATURES.iter().any(|sig| contains_subslice(data, sig)))
 }
 
 /// `true` if any section name in the iterator is a Golang marker section
@@ -1149,6 +1157,18 @@ mod tests {
             // the load-command fingerprint is what fires.
             assert!(macho_build_version_is_apple(&bytes), "{f}: LC_BUILD_VERSION present");
         }
+    }
+
+    /// Mach-O: a stripped Rust image has no mangled symbol and no toolchain
+    /// record; rustc's `/rustc/<hash>/` panic paths in `__cstring` still name it.
+    #[test]
+    fn detects_rustc_from_macho_cstring_signature() {
+        let bytes = fixture("macho_rust_panicloc_arm64.o");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O fixture");
+        assert_eq!(file.format(), BinaryFormat::MachO);
+        assert!(!symbols_indicate_rust(&file));
+        assert!(rodata_indicates_rust(&file));
+        assert_eq!(detect_compiler(&file, &bytes), Compiler::Rustc);
     }
 
     /// The Mach-O `macho_min.o` object also carries `LC_BUILD_VERSION`.

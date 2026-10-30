@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_401() {
-    assert_eq!(kuna_num_settables(), 401);
-    assert_eq!(SETTABLE_TABLE.len(), 401);
+fn settable_count_is_406() {
+    assert_eq!(kuna_num_settables(), 406);
+    assert_eq!(SETTABLE_TABLE.len(), 406);
 }
 
 #[test]
-fn tier_counts_are_125_core_151_transform_123_analysis() {
+fn tier_counts_are_127_core_152_transform_125_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_151_transform_123_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 152, 124));
+    assert_eq!((core, transform, analysis), (127, 153, 126));
 }
 
 #[test]
@@ -365,6 +365,7 @@ fn option_values_live_value_present_for_168() {
         // (kuna) Multi-entry `.cold` fragment entries — an analysis-pass gate with
         // no codegen live reader. Default-ON.
         "coldentry",
+        "ehcold",
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — the PE half
         // of `fdeinterior`, an analysis-pass gate with no codegen live reader.
         // Default-ON.
@@ -597,6 +598,9 @@ fn option_values_live_value_present_for_168() {
         // analysis COMMIT boundary (console-side via kuna_live_value), like the
         // analysis-pass gates above. Default-on.
         "cppproto",
+        // (kuna) DWARF DW_CC_nocall parameter drop -- the same commit-boundary
+        // gate as `cppproto`, read console-side. Default-on.
+        "dwarfnocall",
         // (kuna) Demangled C++ signature application — an analysis-tier gate read
         // at the analysis COMMIT boundary (console-side via kuna_live_value), like
         // `cppproto` above. Three-valued, default `proven`.
@@ -987,7 +991,10 @@ fn option_values_live_value_present_for_168() {
     // 157 -> 158: +1 for `bitidioms` (live_field = bit_idioms).
     // 157 -> 158: +1 for `objcarc` (live_field = objc_arc).
     // 158 -> 160: +2 for `objcrettype`/`objcresolve` (live_field = objc_rettype/objc_resolve).
-    assert_eq!(with_live, 181);
+    // 157 -> 158: +1 for `calleeretpurge` (live_field).
+    // 158 -> 159: +1 for `switchtrim` (live_field).
+    // 159 -> 160: +1 for `tailcontract` (live_field).
+    assert_eq!(with_live, 184);
 }
 
 #[test]
@@ -1232,7 +1239,12 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
     // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `codestrings`; +1 `protomerge`; +1 `bitidioms`; +1 `canaryglobal`.
-    assert_eq!(json.matches("},\n").count(), 400);
+    // +1 for `calleeretpurge`.
+    // +1 for `dwarfnocall`.
+    // +1 for `switchtrim`.
+    // +1 for `ehcold`.
+    // +1 for `tailcontract`.
+    assert_eq!(json.matches("},\n").count(), 405);
 }
 
 #[test]
