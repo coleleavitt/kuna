@@ -58,8 +58,8 @@ impl<'a> ImageBytes<'a> {
         ImageBytes { sections }
     }
 
-    /// Build from explicit `(vma, bytes)` spans (test-only).
-    #[cfg(test)]
+    /// Build from explicit `(vma, bytes)` spans: a test image, or sections whose
+    /// pointer slots the caller has already resolved (a chained-fixup Mach-O).
     pub fn from_spans(mut sections: Vec<(u64, &'a [u8])>) -> Self {
         sections.sort_by_key(|&(a, _)| a);
         ImageBytes { sections }

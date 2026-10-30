@@ -429,6 +429,7 @@ pub fn retain_in_image(out: &mut AnalysisOutput, view: &RebasedView) {
         }
     }
     out.no_fallthru_calls.retain(|&a| keep(a));
+    out.eh_call_sites.retain(|s| keep(s.start) && keep(s.pad));
     out.readonly.retain(keep_range);
     out.externref.retain(keep_range);
     out.strings.retain(|s| keep(s.addr));

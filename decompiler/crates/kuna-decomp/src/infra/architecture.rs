@@ -392,6 +392,12 @@ pub struct Architecture {
     /// (kuna `callerreads`) Every direct call the Listing walked, as `(callee
     /// entry, address the call returns to)`, sorted. Empty without the Listing.
     pub kuna_call_returns: Vec<(u64, u64)>,
+    /// (kuna `itaniumeh`) Give each call covered by a `.gcc_except_table`
+    /// call-site record an exceptional edge to its landing pad.
+    pub itanium_eh: bool,
+    /// (kuna `itaniumeh`) The image's Itanium call-site table, installed by the
+    /// analysis commit from `AnalysisOutput::eh_call_sites`. Empty without it.
+    pub eh_table: Rc<crate::kuna_itaniumeh::EhTable>,
     /// (kuna `boolbyte`) Offer `bool` as a `getLocalType` candidate for a byte
     /// whose every read is a truth test.  Implementation:
     /// [`kuna_boolbyte`](crate::p5_types::kuna_boolbyte).
@@ -634,6 +640,10 @@ pub struct Architecture {
     /// (kuna GH-1282) Fold `(b<<k) s>> k` boolean sign-extension-mask idioms
     /// (C++ `fold_boolean_mask`).
     pub fold_boolean_mask: bool,
+    /// (kuna `mba`) Simplify linear mixed boolean-arithmetic expressions.
+    pub mba: bool,
+    /// (kuna `avxintrinsics`) Print SLEIGH AVX user-ops as Intel intrinsics.
+    pub avx_intrinsics: bool,
     /// Keep mapped global array bases separate from negative element offsets
     /// (option `globalarrayanchor`).
     pub global_array_anchor: bool,
@@ -2201,6 +2211,8 @@ pub struct Architecture {
     /// (`stderr`, `optind`) renders by name instead of `dat_<addr>`. Off drops
     /// the stream at the commit and restores the previous rendering exactly.
     pub analysis_datasyms: bool,
+    /// (kuna `panicloc`) Type and name Rust panic `Location` records.
+    pub analysis_panicloc: bool,
     /// (kuna) Gate the DWARF `.debug_line` source-line comment pass (`dwarf_lines`);
     /// default **off** — it changes the decompiled output (adds `/* file:line */`
     /// comments). The kuna analog of Ghidra's `DWARFLineInfoCommentScript`.
@@ -3041,6 +3053,8 @@ impl Architecture {
             kuna_float_scan_batch: false,
             caller_reads: true, // (kuna) option callerreads; reset_defaults sets the shipped default
             kuna_call_returns: Vec::new(),
+            itanium_eh: false,
+            eh_table: Rc::new(crate::kuna_itaniumeh::EhTable::default()),
             bool_byte: true, // (kuna) option boolbyte; reset_defaults sets the shipped default
             float_bits: false, // (kuna) option floatbits; reset_defaults sets the shipped default
             partial_concat: true,
@@ -3094,6 +3108,8 @@ impl Architecture {
             sparc_struct_return: false,
             ov_less_simplify: false,
             fold_boolean_mask: false,
+            mba: false,
+            avx_intrinsics: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
             simd_lane_fold: false,
@@ -3385,6 +3401,7 @@ impl Architecture {
             analysis_mips_isa: false,
             analysis_dwarf: false,
             analysis_datasyms: false,
+            analysis_panicloc: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
             analysis_typedepth: false,
@@ -3552,6 +3569,8 @@ impl Architecture {
         self.sparc_struct_return = false; // (kuna) default: upstream byte-identical (GH-6882)
         self.ov_less_simplify = true; // (kuna) DIV-2 default-on (GH-7190)
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
+        self.mba = false;
+        self.avx_intrinsics = true; // (kuna) presentation only; 0/675 datatest assertions move
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`
@@ -3722,6 +3741,7 @@ impl Architecture {
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
+        self.itanium_eh = false;
         self.caller_reads = true; // (kuna) option callerreads default-on: inert without the Listing, so 0/675 datatest assertions move
         self.call_target_type = false; // (kuna) option calltargettype: default-OFF in the catalog because the XML datatest corpus pins the upstream `code *` spellings and applies no mode; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for every real binary
         self.ptrdepthcap = false; // (kuna) DIV-108: default-OFF in the catalog because it changes INFERRED types and the datatest corpus pins the upstream spellings; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so the cap is the default rendering for every real binary
@@ -3874,6 +3894,7 @@ impl Architecture {
         self.analysis_msvcfpconst = true; // (kuna) DIV-96 MSVC `__real@` FP-constant recovery default-ON (the mangled name IS the datum)
         self.analysis_mips_isa = true;
         self.analysis_dwarf = true;
+        self.analysis_panicloc = true; // (kuna) Rust-only; inert on the datatest corpus, which loads no ELF
         self.analysis_datasyms = true; // (kuna) DIV-76 ELF data-symbol naming default-ON (the DIV-26 arm, now gated)
         self.analysis_dwarf_lines = false; // (kuna) source-line comments default-OFF (output-changing, opt-in)
         self.analysis_typedepth = true; // (kuna) DIV: full-depth DWARF type resolution default-ON (the depth budget truncated ordinary C declarations to void; real-ELF DWARF path only, so every parity gate is byte-identical)
@@ -4478,6 +4499,7 @@ impl Architecture {
         // reads `data.get_arch().<flag>`; the rule is registered `enabled=false`
         // so the live flag drives both the DIV default and the toggle).
         ctx.fold_boolean_mask = self.fold_boolean_mask; // GH-1282 booleanmask
+        ctx.mba = self.mba;
         ctx.global_array_anchor = self.global_array_anchor;
         ctx.cancel_byte_arithmetic = self.cancel_byte_arithmetic; // cancelbytearithmetic
         ctx.simd_lane_fold = self.simd_lane_fold; // simdlane
@@ -4748,6 +4770,7 @@ impl Architecture {
         // slots so `ActionVarnodeProps` folds those loads with global read-only
         // propagation still off. `Rc` clone: the list is built once at load.
         ctx.dynreloc_const = Rc::clone(&self.dynreloc_const);
+        ctx.eh_table = self.itanium_eh.then(|| Rc::clone(&self.eh_table));
         ctx.litpool_const = Rc::clone(&self.litpool_const);
         ctx.litpoolconst = self.litpoolconst; // litpoolconst (in-code literal-pool folding)
         // Carry the data-type-splitting toggle bits (C++ `glb->split_datatype_config`)
@@ -5610,6 +5633,14 @@ impl Architecture {
             userops.register_builtin(BUILTIN_SYSCALL_ERROR, &adapter)?;
             // (kuna strlenscan) the length an inline `repnz scasb` computes.
             userops.register_builtin(BUILTIN_STRLEN, &adapter)?;
+            // (kuna itaniumeh) the exceptional-edge test and the two pad values.
+            for id in [
+                crate::userop::BUILTIN_EH_UNWINDING,
+                crate::userop::BUILTIN_EH_EXCEPTION,
+                crate::userop::BUILTIN_EH_SELECTOR,
+            ] {
+                userops.register_builtin(id, &adapter)?;
+            }
             Ok(())
         })();
         self.userops = userops;
@@ -7960,6 +7991,9 @@ impl crate::userop::UseropTypeArchitecture for BuiltinTypeArch {
         self.types
             .get_type_char(self.types.get_size_of_wchar())
             .expect("builtin: getTypeChar(wchar)")
+    }
+    fn get_type_bool(&self) -> Rc<crate::dtype::Datatype> {
+        self.types.get_base(1, type_metatype::TYPE_BOOL).expect("builtin: getBase(BOOL)")
     }
 }
 

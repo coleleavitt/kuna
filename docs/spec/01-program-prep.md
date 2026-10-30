@@ -232,6 +232,69 @@ go1.22 pclntab carries no `.abi0` names and the canonical entry inventory
 collapses the unstripped symtab aliases, so no `.abi0` spelling reaches the
 engine — alias-aware symbol plumbing has to come first.
 
+(kuna) **The default model follows the image's Go version**
+(`decompiler/crates/kuna-analysis/src/loader/gobuildinfo.rs
+(go_uses_stack_abi)`, applied in the object bootstrap right after the
+architecture is built). The register ABI reached amd64 in go1.17 and arm64 in
+go1.18; 386 never got it, and its golang cspec already defaults to `abi0`. An
+older image passes every argument on the stack, so under `abi-internal` its
+calls lost all their arguments (`main.add3();` in a go1.16 build). IDA 9.5's
+golang plugin makes the same choice from the version (golang.so 0x7570). The
+version comes from the build-info blob, in either form: the inline strings of
+go1.18+, or the older pair of pointers to Go string headers, which is read
+through the image's sections. Without a blob the pclntab magic gives a range:
+`0xfffffffb` (go1.2-1.15) is stack, `0xfffffff0`/`0xfffffff1` (go1.18+) is
+register, and `0xfffffffa` (go1.16-1.17) is stack on arm64 and undecided on
+amd64, which keeps the cspec default. A stack-ABI image then takes `abi0` as
+its default model (`set_default_model("abi0")`). The cspec's `abi0` has no
+output, because a Go stack result sits after the arguments at an offset the
+model cannot state, so the callee's result is still not shown. Measured on a
+stripped go1.16.15 build: `main.main` went from `main.add3(); os.Exit();` to
+`main.add3(dat_4e7748,2,7); os.Exit(v1);`. The same version decides `goreg`:
+before the register ABI `g` lived in thread-local storage and R14/x28 were
+ordinary registers, so `kuna_goreg::goroutine_register` returns `None` for an
+image the bootstrap's `KUNA_GOVERSION` places before go1.17 (amd64) or go1.18
+(arm64); that variable is now set from either build-info form
+(`go_version_any`). In the same go1.16 build, a function at 0x404140 used R14
+as scratch and printed `g = a4;`; it now prints a plain local.
+
+(kuna) **Function ends come from the `pcsp` table**
+(`decompiler/crates/kuna-analysis/src/analyzers/pclntab/mod.rs
+(pcvalue_span)`). Each `_func` points at its `pcsp` pcvalue table; the sum of
+the table's pc deltas (in `minLC` quanta) is the length of the function's own
+code. The `fde_bodies` extent the pass reports is that end, bounded by the
+next functab entry, so the `int3` padding between functions is outside it
+(IDA golang.so 0x23950 takes the end the same way). On a go1.26 build the
+first function, `internal/cpu.Initialize`, ends at `+0x5e` rather than at the
+next entry's `+0x60`.
+
+(kuna) **Rust panic `Location` records are typed and named**
+(`decompiler/crates/kuna-analysis/src/analyzers/strings/kuna_panicloc.rs
+(PanicLocationPass)`, option `panicloc on|off`, default on, registered for
+rustc-detected images only). Every Rust panic site passes
+`&'static core::panic::Location { file: &str, line: u32, col: u32 }`, so a
+bounds check read `panic_bounds_check(a2,a1,0x51150)`. The pass scans
+read-only data (and `.data.rel.ro`) at pointer alignment for the record's
+shape, the test IDA 9.5's rust plugin uses (rust.so 0x70a0): the `file`
+pointer reaches read-only text of `1..=0x1000` bytes that ends in `.rs`,
+`1 <= line <= 0xffffff` and `col <= 0xfff`. On a PIE the pointer word is an
+`R_*_RELATIVE` slot, so its value is the relocation addend. Each record
+becomes a `TypedDataFact` typed `core::panic::Location` (built once: a
+`&str { data_ptr, length }` field, then `line` and `col`) and named from the
+last two path components and the position (`panic_loc_src_main_rs_10_5`).
+The file name becomes a bounded string of exact length. A rustc 1.101 `-O`
+build of a three-function program has 196 such records. Pinned by
+`tests/stages/kuna-panicloc.xml`.
+
+(kuna) **A bounded literal ends the NUL-scan row it starts inside**
+(`decompiler/crates/kuna-console/src/engine.rs (commit_analysis_output)`,
+under the `fatstr` gate). rustc packs literals back to back without
+terminators, so the NUL scan glues a literal to the next one. When a bounded
+fact (a `&str` record or a `Location` file name) starts strictly inside a
+NUL-scan row, the row is cut at that start before the strings are planted.
+IDA's rust plugin splits at every referenced byte (rust.so 0x6e60); kuna
+splits at the starts it has evidence for.
+
 (kuna) **With the golang cspec active, the goroutine register becomes the
 named, typed global `g`** (option `goreg on|off`, default on, carried as the
 `KUNA_GOREG` loadtime environment gate;
@@ -3748,7 +3811,7 @@ every other binary's pass list is byte-identical to before the pass existed):
   i-th table and made `kuna functions` report hundreds of bytes of executable
   `std::basic_stringbuf` code as vtable objects. Only the table itself wears a
   `vftable` name, and it is unindexed.
-- **(kuna) Itanium RTTI** (`itaniumrtti`, ELF-only, default-off;
+- **(kuna) Itanium RTTI** (`itaniumrtti`, ELF and Mach-O, default-off;
   `decompiler/crates/kuna-analysis/src/analyzers/rtti/kuna_itaniumrtti.rs`): the
   GCC/Clang counterpart of the pass above, and a capability with **no Ghidra
   equivalent at all** — upstream's `RttiAnalyzer` is a Microsoft-PE analyzer and its
@@ -3817,6 +3880,26 @@ every other binary's pass list is byte-identical to before the pass existed):
   so no anchor exists and the output is empty. Independent code-pointer-run scanning
   — which would find such vtables heuristically — is deliberately **not** part of
   this pass.
+
+  **On Mach-O** the same walk runs over a copy of the sections in which every
+  `LC_DYLD_CHAINED_FIXUPS` slot holds what dyld writes there
+  (`kuna_itaniumrtti.rs (MachoSlots)`, over
+  `loader/format/macho/chained.rs (resolve_chained_fixups)`): a rebase's
+  target, or 0 for a bind, which is the shape an ELF import slot has in the
+  file. The bind slots are the "relocated" set the slot walk steps over. The
+  exact anchor is a bind to `__ZTVN10__cxxabiv1…_type_infoE` (the Mach-O
+  spelling, one more `_`) with addend `2 × ptr`; `__ZTI…` symbols are the
+  second source. Apple's arm64 ABI sets bit 63 of a typeinfo's name pointer
+  when the type may be duplicated across images and must be compared by
+  string, so the name pointer is read with that bit cleared (IDA 9.5 rtti.so
+  does the same, 0xd9b2). On a `-fixup_chains` dylib whose `Circle` and
+  `Square` typeinfos are local, `make()` changes from `v1 = 0x40a8;` to
+  `v1 = Square_vptr;`. A classic `LC_DYLD_INFO` image already has the ELF
+  shape (rebased pointers in the file, zeros in bind slots); only its bind
+  names are needed, and they come from replaying the bind opcodes
+  (`loader/format/macho/dyldinfo.rs (resolve_dyld_info_binds)`), which carry
+  no addend, so the anchor is accepted on the name alone. Pinned by
+  `tests/stages/kuna-itaniumrtti-macho.xml` and its `-classic` twin.
 - **Objective-C** (`objc`, Mach-O-only, default-off;
   `decompiler/crates/kuna-analysis/src/analyzers/objc/mod.rs`): walk
   `__objc_classlist` → `class_t` → `class_ro_t` → method lists (both absolute and

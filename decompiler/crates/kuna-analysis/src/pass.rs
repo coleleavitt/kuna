@@ -463,6 +463,9 @@ pub struct AnalysisOutput {
     /// flow-follower walks past the call into the NEXT function and absorbs it
     /// (the boundary-overrun class, ~50% of kuna's Ghidra GED gap).
     pub no_fallthru_calls: Vec<u64>,
+    /// (kuna `itaniumeh`) The `.gcc_except_table` call-site records that have a
+    /// landing pad, with each pad's clauses. Committed only under `itaniumeh`.
+    pub eh_call_sites: Vec<kuna_decomp::kuna_itaniumeh::EhCallSite>,
     /// (kuna `callerreads`) Every direct call of the Listing walk as `(callee
     /// entry, return address)`; the decompile step decodes a `void` function's
     /// callers from there.
@@ -794,6 +797,7 @@ impl AnalysisOutput {
         self.entry_names.extend(other.entry_names);
         self.noreturn.extend(other.noreturn);
         self.no_fallthru_calls.extend(other.no_fallthru_calls);
+        self.eh_call_sites.extend(other.eh_call_sites);
         self.call_returns.extend(other.call_returns);
         self.readonly.extend(other.readonly);
         self.const_ranges.extend(other.const_ranges);

@@ -699,6 +699,9 @@ pub struct FlowInfo<'a, E: FlowEnvironment> {
     /// the SAME entry must `cancel_inject_id` so the injection does not recurse.
     /// `None` outside a call-fixup injection (the user-op path passes NULL `fc`).
     injecting_entry: Option<Address>,
+    /// (kuna `itaniumeh`) Instructions of a landing-pad stub: the pad and its
+    /// fall-through successors, up to the stub's first branch.
+    eh_pad_stub: std::collections::BTreeSet<Address>,
 }
 
 /// Apply explicit-flow and declared-extent precedence before consulting either
@@ -770,6 +773,7 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
             overlap_watch: None,
             overlap_cbranch_target: None,
             injecting_entry: None,
+            eh_pad_stub: std::collections::BTreeSet::new(),
         }
     }
 
@@ -1695,6 +1699,11 @@ following this call as a branch"
             .get(op)
             .expect("tail_call_kind: stale op")
             .get_addr();
+        // (kuna itaniumeh) A jump out of a landing-pad stub enters the pad's
+        // `.cold` code, which belongs to this function.
+        if self.eh_pad_stub.contains(site) {
+            return None;
+        }
         select_inferred_tail_call(
             self.applied_branch_overrides.contains(site),
             self.is_inside_declared_extent(dest),
@@ -1785,6 +1794,14 @@ following this call as a branch"
         } else {
             crate::overrides::flow_type::NONE
         };
+
+        let eh_table = self.data.get_arch().eh_table.clone();
+        if let Some(table) = eh_table.as_deref() {
+            if table.is_pad(curaddr.get_offset()) && !self.is_flow_for_inline() {
+                crate::kuna_itaniumeh::define_pad_registers(&mut self.data, table, curaddr)?;
+                self.eh_pad_stub.insert(curaddr.clone());
+            }
+        }
 
         let mode = self.arm_context.then(|| self.env.arm_decode_mode(curaddr)).flatten();
         if curaddr == self.data.get_address() {
@@ -1921,6 +1938,20 @@ truncating the fall-through here"
                 stat.seqnum = seq;
             }
             self.op_mark_start_instruction(firstop);
+            if let Some(site) = eh_table.as_deref().and_then(|t| t.site_at(curaddr.get_offset())) {
+                if !self.is_flow_for_inline() {
+                    let pad = Address::new(curaddr.get_space().expect("eh: code space").clone(), site.pad);
+                    let mut cursor = Some(firstop);
+                    while let Some(op) = cursor {
+                        cursor = self.dead_next(op);
+                        let code = self.data.obank().get(op).map(|o| o.code());
+                        if matches!(code, Some(OpCode::CPUI_CALL | OpCode::CPUI_CALLIND)) {
+                            crate::kuna_itaniumeh::insert_unwind_edge(&mut self.data, op, &pad)?;
+                            break;
+                        }
+                    }
+                }
+            }
             if flowoverride != crate::overrides::flow_type::NONE {
                 // (kuna) A refused override is a rejected caller assertion, not a
                 // dead function.  `override_flow` refuses before it mutates
@@ -2013,6 +2044,9 @@ truncating the fall-through here"
                 self.outofbounds.insert(next);
                 isfallthru = false;
             } else {
+                if self.eh_pad_stub.contains(curaddr) {
+                    self.eh_pad_stub.insert(next.clone());
+                }
                 self.addrlist.push(next);
             }
         }
@@ -2787,7 +2821,8 @@ truncating the fall-through here"
                 .get_addr()
                 .clone();
             let haltop = self.artificial_halt(&addr, pcodeop_flags::noreturn)?;
-            self.data.op_dead_insert_after(haltop, op);
+            let anchor = self.unwind_edge_end(op);
+            self.data.op_dead_insert_after(haltop, anchor);
             if !is_inline {
                 self.data.warning("Subroutine does not return", &addr);
             }
@@ -2804,6 +2839,22 @@ truncating the fall-through here"
     /// when an override turns the indirect call into a direct one).  The call op's
     /// in0 stays the indirect target Varnode, which the printer renders as the
     /// `(*funcptr)(...)` callee.
+    /// The op a no-return halt planted after the call `op` must follow: the
+    /// CBRANCH of its `itaniumeh` unwind edge when it has one, else `op` itself.
+    fn unwind_edge_end(&self, op: OpId) -> OpId {
+        let Some(test) = self.dead_next(op) else { return op };
+        let is_edge = self.data.obank().get(test).is_some_and(|o| {
+            o.code() == OpCode::CPUI_CALLOTHER
+                && o.get_in(0).and_then(|v| self.data.vbank().get(v)).is_some_and(|v| {
+                    v.is_constant() && v.get_offset() == crate::userop::BUILTIN_EH_UNWINDING as u64
+                })
+        });
+        match self.dead_next(test) {
+            Some(branch) if is_edge => branch,
+            _ => op,
+        }
+    }
+
     fn setup_callind_specs(&mut self, op: OpId) -> KunaResult<bool> {
         // C++ `data.getOverride().applyIndirect(data,*res)` (flow.cc:729): an
         // indirect-call destination override (planted by `FuncCallSpecs::deindirect`

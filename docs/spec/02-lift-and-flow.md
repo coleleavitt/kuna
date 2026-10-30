@@ -2900,3 +2900,79 @@ documented. An iOS kernelcache function that used to stop at its first
 `GENTER` with a bad-instruction halt now decodes through it. These are
 decode-table corrections with no option. Pinned by
 `tests/stages/kuna-a64-sysregs.xml`.
+
+
+## 2.12 Itanium exception edges
+
+**(kuna) `option itaniumeh on|off`, default off,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_itaniumeh.rs`, fed by
+`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_itaniumeh.rs
+(ItaniumEhPass)`.** An Itanium landing pad is reached only by the unwinder, so
+normal flow never gets to it: catch bodies, destructor calls on the exception
+path and `_Unwind_Resume` are dropped from the pseudocode. Upstream Ghidra and
+IDA 9.5 both do this for ELF and Mach-O. IDA's `eh34` plugin shows try/catch
+only for MSVC x64. Its design is a helper call on each control-flow edge where
+the exception state changes, which the structurer then reads. This option
+applies that design to the Itanium call-site table.
+
+**The table.** The analysis pass decodes every `.eh_frame` FDE's LSDA in
+`.gcc_except_table`. The header and call-site records are decoded as for
+`eh_frame_full`, but the walk also reads the action table and the type table.
+A call-site record with a landing pad becomes one `EhCallSite`: the covered
+range (relative to the FDE start), the pad (relative to `LPStart`) and the
+pad's clauses, in action-chain order. A clause is one of four kinds:
+
+- filter 0: a cleanup;
+- a positive filter: a `catch (T)`, named from the type-table entry. A pcrel
+  entry, an absolute entry and an indirect entry through a relocated slot all
+  resolve. A typeinfo symbol `_ZTI…` demangles to the type. An entry of 0 is
+  `catch (...)`;
+- a negative filter: an exception specification.
+
+The positive filter is also the selector value the pad's own code compares
+against. The commit installs the table on the architecture with the two
+registers the unwinder fills: RAX/RDX on x86-64, EAX/EDX on x86, x0/x1 on
+AArch64 and r0/r1 on ARM.
+
+**Flow.** In `FlowInfo::process_instruction`:
+
+- A CALL or CALLIND in an instruction inside a covered range is followed, in
+  the same instruction, by `t = eh_unwinding(); CBRANCH pad, t`. The CBRANCH is
+  an ordinary branch, so the pad is decoded and becomes a successor block.
+- A no-return halt that `check_for_flow_modification` plants after a covered
+  call goes after the CBRANCH (`unwind_edge_end`). This keeps the edge when
+  the callee is no-return, as with `__cxa_throw` inside a `try`.
+- Before the pad's instruction is decoded, `eh_exception()` defines the
+  exception register. If the pad has a clause other than cleanup,
+  `eh_selector()` defines the selector register. A cleanup pad does not get
+  the selector, because a live RDX would read as an extra argument of the
+  cleanup's calls.
+- The pad gets an instruction comment that lists its clauses, for example
+  `landing pad: catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`.
+
+The three helpers are builtin user-ops (`BUILTIN_EH_UNWINDING` returns
+`bool`). They have no side effects, so they live only as long as something
+reads them. The result is structured C, not a `try` statement:
+
+```c
+v2 = risky(a0);
+if (!eh_unwinding())
+  return v2;
+/* landing pad: catch (std::runtime_error) when selector == 1; catch (...) when selector == 2 */
+if (eh_selector() == 1) {
+  v3 = __cxa_begin_catch(eh_exception());
+```
+
+- GCC's default hot/cold partitioning puts the handler code in a separate
+  `.cold` FDE, and the pad is a stub that jumps there. That FDE is also a
+  function entry, so the jump would read as a tail call. Flow records the pad
+  and its fall-through successors (`FlowInfo::eh_pad_stub`), and
+  `tail_call_kind` does not classify a branch from those instructions, so the
+  cold code is decoded as part of the function.
+
+A `try` region kind in `p8_structure` would be the next step. The edges and
+helpers are what it would read. **Limits.** SjLj and ARM EHABI tables are not
+read. Pinned by
+`tests/stages/kuna-itaniumeh.xml` (two passes over the `itaniumeh/eh_x86_64.elf`
+fixture), `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build) and
+`tests/stages/kuna-itaniumeh-a64.xml` (AArch64, x0/x1).

@@ -94,6 +94,12 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
                 return t;
             }
         }
+        // (kuna itaniumeh) the exceptional-edge test is a `bool`.
+        if in0_off == crate::userop::BUILTIN_EH_UNWINDING as u64 {
+            if let Some(Ok(t)) = arch.types().map(|t| t.get_base(out_size, type_metatype::TYPE_BOOL)) {
+                return t;
+            }
+        }
     }
     // C++ `TypeOpCpoolref::getOutputLocal` (typeop.cc:2453): the record's type,
     // or a boolean for an `instanceof` test.

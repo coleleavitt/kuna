@@ -2149,7 +2149,7 @@ mod tests {
         // and kuna-machobinds / a Mach-O pointer slot filled by a bind is named for its import
         // and kuna-exporttrie / Mach-O export tries name stripped exports and cross-image imports through re-exports
         // and kuna-dyldcompanion / companion images join a dyld cache rebuild
-        assert_eq!(count, 641, "corpus file count drifted");
+        assert_eq!(count, 649, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

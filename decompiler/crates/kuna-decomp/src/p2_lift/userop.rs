@@ -132,6 +132,13 @@ pub const BUILTIN_SYSCALL_ERROR: uint4 = 0x10000007;
 /// (kuna) Built-in id for `strlen`, the length an inline `repnz scasb` scan
 /// computes (`strlenscan`).
 pub const BUILTIN_STRLEN: uint4 = 0x10000008;
+/// (kuna) Built-in id for `eh_unwinding`, the opaque "this call threw" test on an
+/// Itanium exceptional edge (`itaniumeh`).
+pub const BUILTIN_EH_UNWINDING: uint4 = 0x10000009;
+/// (kuna) Built-in id for `eh_exception`, the exception pointer at a landing pad.
+pub const BUILTIN_EH_EXCEPTION: uint4 = 0x1000000a;
+/// (kuna) Built-in id for `eh_selector`, the catch-clause selector at a landing pad.
+pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -789,6 +796,8 @@ pub trait UseropTypeArchitecture {
     fn get_type_char(&self) -> Rc<crate::dtype::Datatype>;
     /// C++ `glb->types->getTypeChar(glb->types->getSizeOfWChar())`.
     fn get_type_wchar(&self) -> Rc<crate::dtype::Datatype>;
+    /// C++ `glb->types->getBase(1,TYPE_BOOL)`.
+    fn get_type_bool(&self) -> Rc<crate::dtype::Datatype>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1003,6 +1012,11 @@ impl UserOpManage {
                 let len_type = types.get_base_int(ptr_size);
                 UserPcodeOp::new_datatype(b"strlen", BUILTIN_STRLEN as int4, Some(len_type), &[Some(ptr_type)])
             }
+            BUILTIN_EH_UNWINDING => {
+                UserPcodeOp::new_datatype(b"eh_unwinding", BUILTIN_EH_UNWINDING as int4, Some(types.get_type_bool()), &[])
+            }
+            BUILTIN_EH_EXCEPTION => UserPcodeOp::new_unspecialized(b"eh_exception", BUILTIN_EH_EXCEPTION as int4),
+            BUILTIN_EH_SELECTOR => UserPcodeOp::new_unspecialized(b"eh_selector", BUILTIN_EH_SELECTOR as int4),
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };
         self.builtinmap.insert(i, res);

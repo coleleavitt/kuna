@@ -367,6 +367,7 @@ pub fn universal_sched(
         rrow!("concatshift", "analysis", crate::ruleaction_2::RuleConcatShift),
         rrow!("leftright", "analysis", crate::ruleaction_2::RuleLeftRight),
         rrow!("boolsignshift", "analysis", crate::kuna_booleanmask::RuleBoolSignShift::with_group(false, "analysis")),
+        rrow!("mba", "analysis", crate::kuna_mba::RuleMbaSimplify::new("analysis")),
         rrow!("simdshufflelane", "analysis", crate::kuna_simdlane::RuleSimdShuffleLane::with_group(false, "analysis")),
         rrow!("constspaceload", "analysis", crate::kuna_constspaceload::RuleConstSpaceLoad::with_group(false, "analysis")),
         rrow!("x87truncate", "analysis", crate::kuna_x87truncate::RuleX87Truncate::new("analysis")),

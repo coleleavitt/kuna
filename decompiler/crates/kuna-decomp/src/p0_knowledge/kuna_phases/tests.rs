@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_376() {
-    assert_eq!(kuna_num_settables(), 376);
-    assert_eq!(SETTABLE_TABLE.len(), 376);
+fn settable_count_is_380() {
+    assert_eq!(kuna_num_settables(), 380);
+    assert_eq!(SETTABLE_TABLE.len(), 380);
 }
 
 #[test]
-fn tier_counts_are_123_core_142_transform_111_analysis() {
+fn tier_counts_are_124_core_143_transform_113_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_142_transform_111_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 142, 111));
+    assert_eq!((core, transform, analysis), (124, 143, 113));
 }
 
 #[test]
@@ -964,7 +964,7 @@ fn option_values_live_value_present_for_163() {
     // 154 -> 155: +1 for `whilecontinue`.
     // +1 for `arm64evcall` (live_field = analysis_arm64evcall).
     // +2 for `chkstkdarwin` and `outlinedinline`.
-    assert_eq!(with_live, 168);
+    assert_eq!(with_live, 172);
 }
 
 #[test]
@@ -1203,7 +1203,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `machobinds`; its P1 row follows `dyldcrossrefs`.
     // +1 for `exporttrie`; its P1 row follows `machobinds`.
     // +5 for `uefi`, `storetype`, `dwarfscopes`, `dwarfglobaltypes` and `tlsnames`.
-    assert_eq!(json.matches("},\n").count(), 375);
+    assert_eq!(json.matches("},\n").count(), 379);
 }
 
 #[test]

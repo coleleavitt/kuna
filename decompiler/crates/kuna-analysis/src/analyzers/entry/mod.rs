@@ -101,6 +101,7 @@ pub mod kuna_coldentry;
 pub mod kuna_fdeinterior;
 pub mod kuna_pdatainterior;
 pub mod kuna_pereloccode;
+pub mod kuna_itaniumeh;
 mod macho_entry;
 pub mod patterns;
 mod pe_entry;
@@ -1848,26 +1849,7 @@ struct CieAug {
 /// raw decode (NOT exec-section/funcsym filtered — see
 /// [`collect_landing_pad_entries`] for the filtered entry set).
 pub fn scan_eh_frame_landing_pads(file: &object::File) -> Vec<u64> {
-    scan_eh_frame_landing_pads_sized(file, 8)
-}
-
-fn scan_eh_frame_landing_pads_sized(file: &object::File, ptr_size: usize) -> Vec<u64> {
     let mut out: Vec<u64> = Vec::new();
-    if !matches!(file.format(), object::BinaryFormat::Elf) {
-        return out;
-    }
-    let Some(sec) = file.section_by_name(".eh_frame") else {
-        return out;
-    };
-    let sec_vma = sec.address();
-    let Ok(data) = sec.data() else {
-        return out;
-    };
-    if data.is_empty() {
-        return out;
-    }
-    // The `.gcc_except_table` bytes, read by VMA (the LSDA + call-site table live
-    // here, not in `.eh_frame`). Absent ⇒ no landing pads.
     let Some(gcc) = file.section_by_name(".gcc_except_table") else {
         return out;
     };
@@ -1875,6 +1857,35 @@ fn scan_eh_frame_landing_pads_sized(file: &object::File, ptr_size: usize) -> Vec
     let Ok(gcc_data) = gcc.data() else {
         return out;
     };
+    for_each_fde_lsda(file, 8, &mut |pc_begin, lsda_ptr| {
+        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, 8) {
+            out.extend(lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| cs.pad));
+        }
+    });
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+/// Call `on_lsda(pc_begin, lsda_ptr)` for every `.eh_frame` FDE that carries a
+/// non-null LSDA pointer.
+pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &mut dyn FnMut(u64, u64)) {
+    if !matches!(file.format(), object::BinaryFormat::Elf) {
+        return;
+    }
+    let Some(sec) = file.section_by_name(".eh_frame") else {
+        return;
+    };
+    let sec_vma = sec.address();
+    let Ok(data) = sec.data() else {
+        return;
+    };
+    if data.is_empty() {
+        return;
+    }
+    if file.section_by_name(".gcc_except_table").is_none() {
+        return;
+    }
     let le = file.is_little_endian();
 
     // CIE-offset -> decoded augmentation (FDE encoding + LSDA encoding). A flat Vec
@@ -1969,126 +1980,94 @@ fn scan_eh_frame_landing_pads_sized(file: &object::File, ptr_size: usize) -> Vec
             }
             // Decode the `.gcc_except_table` LSDA at `lsda_ptr`. lpStart defaults to
             // the FDE's pcBegin when the LSDA omits its own lpStart.
-            decode_lsda_landing_pads(
-                gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size, &mut out,
-            );
+            on_lsda(pc_begin, lsda_ptr);
         }
         o = next;
     }
-
-    out.sort_unstable();
-    out.dedup();
-    out
 }
 
-/// Decode the `.gcc_except_table` LSDA at VMA `lsda_vma` and push each non-zero
-/// landing pad (`lpStart + cs_landing_pad`) into `out`. `func_pc_begin` is the
+/// One decoded LSDA call-site record: `[start, start + len)` unwinds to `pad`
+/// (0 = no landing pad) with the 1-based action-table index `action` (0 =
+/// cleanup only).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LsdaCallSite {
+    pub start: u64,
+    pub len: u64,
+    pub pad: u64,
+    pub action: u64,
+}
+
+/// A decoded `.gcc_except_table` LSDA: the call-site records plus where the
+/// action table starts and where the type table ends (both section offsets).
+#[derive(Clone, Debug)]
+pub(crate) struct Lsda {
+    pub call_sites: Vec<LsdaCallSite>,
+    pub action_table: usize,
+    /// `(encoding, section offset of the type table's end)`; `None` when omitted.
+    pub ttype: Option<(u8, usize)>,
+}
+
+/// Decode the `.gcc_except_table` LSDA at VMA `lsda_vma`. `func_pc_begin` is the
 /// FDE's pcBegin — the default `lpStart` when the LSDA's `lpStartEncoding` is
 /// `omit`. Faithful to `LSDAHeader.create` + `LSDACallSiteRecord.create`.
-fn decode_lsda_landing_pads(
+pub(crate) fn decode_lsda(
     gcc_data: &[u8],
     gcc_vma: u64,
     lsda_vma: u64,
     func_pc_begin: u64,
     ptr_size: usize,
-    out: &mut Vec<u64>,
-) {
-    // Section-relative offset of the LSDA header.
-    let Some(base) = lsda_vma.checked_sub(gcc_vma) else {
-        return;
-    };
-    let base = base as usize;
+) -> Option<Lsda> {
+    let base = lsda_vma.checked_sub(gcc_vma)? as usize;
     if base >= gcc_data.len() {
-        return;
+        return None;
     }
     let mut p = base;
-
-    // lpStartEncoding (1 byte). When omit, lpStart = func_pc_begin; else decode a
-    // pointer of that encoding (the rebased landing-pad base).
-    let Some(&lp_enc) = gcc_data.get(p) else {
-        return;
-    };
+    let lp_enc = *gcc_data.get(p)?;
     p += 1;
     let lp_start: u64 = if lp_enc == DW_EH_PE_OMIT {
         func_pc_begin
     } else {
         let field_vma = gcc_vma + p as u64;
-        let Some(v) = decode_eh_pointer(lp_enc, field_vma, gcc_vma, gcc_data, p, ptr_size) else {
-            return;
-        };
+        let v = decode_eh_pointer(lp_enc, field_vma, gcc_vma, gcc_data, p, ptr_size)?;
         p += encoded_size(lp_enc, ptr_size, gcc_data.get(p..).unwrap_or(&[]));
         v
     };
-
-    // ttypeEncoding (1 byte) + ttypeOffset (uleb) iff not omit. We do not consume
-    // the types table (only the call-site landing pads matter for code discovery),
-    // but we must SKIP the ttypeOffset uleb to reach the call-site header.
-    let Some(&tt_enc) = gcc_data.get(p) else {
-        return;
-    };
+    let tt_enc = *gcc_data.get(p)?;
     p += 1;
+    let mut ttype = None;
     if tt_enc != DW_EH_PE_OMIT {
-        let Some((_tt_off, np)) = read_uleb128(gcc_data, p) else {
-            return;
-        };
+        let (tt_off, np) = read_uleb128(gcc_data, p)?;
         p = np;
+        ttype = Some((tt_enc, p + tt_off as usize));
     }
-
-    // callSiteEncoding (1 byte) + callSiteTableLength (uleb).
-    let Some(&cs_enc) = gcc_data.get(p) else {
-        return;
-    };
+    let cs_enc = *gcc_data.get(p)?;
     p += 1;
-    let Some((cs_table_len, np)) = read_uleb128(gcc_data, p) else {
-        return;
-    };
+    let (cs_table_len, np) = read_uleb128(gcc_data, p)?;
     p = np;
-    let table_end = match p.checked_add(cs_table_len as usize) {
-        Some(e) if e <= gcc_data.len() => e,
-        _ => return,
-    };
+    let table_end = p.checked_add(cs_table_len as usize).filter(|&e| e <= gcc_data.len())?;
 
-    // Call-site records: [cs_start][cs_len][cs_landing_pad] (all `cs_enc`-encoded),
-    // then [cs_action] (uleb). cs_landing_pad == 0 ⇒ no landing pad.
-    let mut guard = 0usize;
-    while p < table_end {
-        // Bound the loop: each record consumes ≥4 bytes; cap iterations defensively.
-        guard += 1;
-        if guard > 1 << 20 {
-            break;
-        }
-        // cs_start (skipped — the try-block start, not a code entry we emit).
-        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else {
-            break;
-        };
+    let mut call_sites = Vec::new();
+    while p < table_end && call_sites.len() < 10_000 {
+        let field = |p: usize| decode_eh_pointer(cs_enc, gcc_vma + p as u64, gcc_vma, gcc_data, p, ptr_size);
+        let Some(start) = field(p) else { break };
+        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else { break };
         p = np;
-        // cs_len (skipped — try-block length).
-        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else {
-            break;
-        };
+        let Some(len) = field(p) else { break };
+        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else { break };
         p = np;
-        // cs_landing_pad (the offset from lpStart). Decoded as a DW_EH_PE value —
-        // in practice `udata4`/`uleb128` with `appl == absptr`, so this is a plain
-        // offset; `decode_eh_pointer` applies any `appl` exactly as for a pointer.
-        let lp_field_vma = gcc_vma + p as u64;
-        let Some(cs_lp) = decode_eh_pointer(cs_enc, lp_field_vma, gcc_vma, gcc_data, p, ptr_size)
-        else {
-            break;
-        };
-        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else {
-            break;
-        };
+        let Some(cs_lp) = field(p) else { break };
+        let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else { break };
         p = np;
-        // cs_action (uleb, skipped — index into the action table).
-        let Some((_action, np)) = read_uleb128(gcc_data, p) else {
-            break;
-        };
+        let Some((action, np)) = read_uleb128(gcc_data, p) else { break };
         p = np;
-
-        if cs_lp != 0 {
-            out.push(lp_start.wrapping_add(cs_lp));
-        }
+        call_sites.push(LsdaCallSite {
+            start: func_pc_begin.wrapping_add(start),
+            len,
+            pad: if cs_lp == 0 { 0 } else { lp_start.wrapping_add(cs_lp) },
+            action,
+        });
     }
+    Some(Lsda { call_sites, action_table: table_end, ttype })
 }
 
 /// Parse a CIE record's augmentation and return its decoded [`CieAug`] (the FDE
@@ -2693,9 +2672,9 @@ mod tests {
             0x8b, 0x01, 0x19, 0x00, 0x00, // record 5 (5) → none (cs_start uleb 0x8b,0x01)
         ];
         let func_pc_begin = 0x4012d6u64;
-        let mut out: Vec<u64> = Vec::new();
         // gcc_vma=0, lsda_vma=0 (section offset 0), ptr_size 8.
-        decode_lsda_landing_pads(gcc, 0, 0, func_pc_begin, 8, &mut out);
+        let lsda = decode_lsda(gcc, 0, 0, func_pc_begin, 8).expect("lsda");
+        let mut out: Vec<u64> = lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| cs.pad).collect();
         out.sort_unstable();
         out.dedup();
         assert_eq!(

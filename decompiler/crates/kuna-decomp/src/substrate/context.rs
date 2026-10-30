@@ -818,6 +818,8 @@ pub struct ArchContext {
     /// (C++ `fold_boolean_mask`, DIV-2 default-on).  Read by
     /// [`RuleBoolSignShift`](crate::kuna_booleanmask::RuleBoolSignShift).
     pub fold_boolean_mask: bool,
+    /// (kuna `mba`) Read by [`RuleMbaSimplify`](crate::kuna_mba::RuleMbaSimplify).
+    pub mba: bool,
     /// Keep mapped global array bases separate from negative element offsets.
     pub global_array_anchor: bool,
     /// (kuna) Fold an exact one-byte modular cancellation around a bounded
@@ -1701,6 +1703,9 @@ pub struct ArchContext {
     /// every hand-built fixture and every XML `<binaryimage>` load, which is why
     /// the datatest parity oracle cannot see this field.
     pub dynreloc_const: Rc<Vec<(u64, u64)>>,
+    /// (kuna `itaniumeh`) The image's Itanium call-site table when the option is
+    /// on; `None` otherwise (see [`crate::kuna_itaniumeh`]).
+    pub eh_table: Option<Rc<crate::kuna_itaniumeh::EhTable>>,
     /// (kuna `litpoolconst`) `[start, stop]` (inclusive) offsets of the image's
     /// executable, non-writable, file-backed regions — the instruction stream, and
     /// so the literal pools embedded in it. A read entirely inside one is foldable
@@ -1903,6 +1908,7 @@ impl ArchContext {
             // registered `enabled=false` is inert there — matching the gate-off
             // unit tests (and the `infer_funcentry` stub-default convention).
             fold_boolean_mask: false,    // GH-1282 booleanmask
+            mba: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)
             ret_split_global: false,     // retsplitglobal (the ArchSeam carries the real default)
@@ -2134,6 +2140,7 @@ impl ArchContext {
             // (kuna) No dynamic-relocation const slots until a real ELF load
             // installs them (see `Architecture::dynreloc_const`).
             dynreloc_const: Rc::new(Vec::new()),
+            eh_table: None,
             // (kuna) No executable read-only ranges until a real object load
             // installs them (see `Architecture::litpool_const`).
             litpool_const: Rc::new(Vec::new()),

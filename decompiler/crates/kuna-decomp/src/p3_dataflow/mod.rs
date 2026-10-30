@@ -28,6 +28,7 @@ pub mod kuna_intfloatround;
 pub mod kuna_floatquiet;
 pub mod kuna_mulblob; // (kuna) keep a widened multiply operand a value, not an aggregate
 pub mod kuna_booleanmask;
+pub mod kuna_mba; // (kuna `mba`) linear mixed boolean-arithmetic simplification
 pub mod kuna_ovlesssimplify;
 pub mod kuna_flagcompare;
 pub mod kuna_arraystride;

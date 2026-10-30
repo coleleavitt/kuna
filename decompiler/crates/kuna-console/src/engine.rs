@@ -3063,6 +3063,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // option mode the engine's (ptr,len) literal rule reads, so one option
         // governs both recognizers; `off` (0) drops the bounded facts here.
         "fatstrrecords" => arch.fat_str != 0,
+        "panicloc" => arch.analysis_panicloc,
         "entry_disc" => arch.analysis_entry_disc,
         // (kuna) `.eh_frame` LSDA landing-pad discovery (GccExceptionAnalyzer) — a
         // standalone stashed pass whose facts (the exception landing pads) are
@@ -3070,6 +3071,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (output-changing: adds entries), so a default run never commits them and
         // the discovery set is byte-identical to FDE-pcBegin-only.
         "eh_frame_full" => arch.analysis_eh_frame_full,
+        "itaniumeh" => arch.itanium_eh,
         // (kuna) Mach-O `__unwind_info` function-start discovery — facts computed
         // at LOAD, COMMITTED only when this gate is on. Default-off (output-
         // changing: adds entries), so a default run is byte-identical and an image
@@ -4322,7 +4324,7 @@ pub fn bootstrap_from_object_with_isa(
     // by release (go1.23's g.syscallbp, go1.25's dropped gobuf.ret). Carry it
     // on the loadtime-env tier; a non-Go image clears the variable so a stale
     // value from an earlier load in this process cannot leak in.
-    match kuna_analysis::loader::gobuildinfo::go_toolchain_version(&bytes) {
+    match kuna_analysis::loader::gobuildinfo::go_version_any(&bytes) {
         Some((maj, min)) => {
             std::env::set_var(kuna_decomp::kuna_goreg::GOVERSION_ENV, format!("{maj}.{min}"))
         }
@@ -4510,6 +4512,15 @@ pub fn bootstrap_from_object_with_isa(
     // datatest corpus by construction.
     let compiler = kuna_analysis::sourcelang::effective_compiler_bytes(&bytes);
     sleigh.base_mut().unwrap().source_lang_detected = compiler.to_source_lang();
+    // (kuna `goabi`) A golang cspec defaults to the register ABI; a Go image
+    // built before the register ABI reached its CPU passes on the stack.
+    let go_stack_abi = {
+        let archid = &sleigh.base().unwrap().archid;
+        archid.contains(":golang")
+            && !archid.starts_with("x86:LE:32")
+            && kuna_analysis::loader::gobuildinfo::go_uses_stack_abi(&bytes, archid.starts_with("AARCH64"))
+                == Some(true)
+    };
     // (kuna `pebnames`) The same kind of one-bit image fact: is this a Windows
     // GUI/console PE, whose segment base holds a user-mode TEB?  `option pebnames
     // auto` acts only when it is.
@@ -4605,6 +4616,11 @@ pub fn bootstrap_from_object_with_isa(
 
     // (kuna `globalref`) ... and the sections a program's data objects live in.
     prog.arch_mut().globalref_ranges = std::rc::Rc::new(globalref_ranges);
+
+    if go_stack_abi {
+        use kuna_decomp::options::ArchOptionContext as _;
+        let _ = prog.arch_mut().set_default_model("abi0");
+    }
 
     // NB: the analysis-pass facts are committed later, gated, in
     // `commit_analysis_passes` (called from `IfcReadSymbols`), after the per-pass
@@ -5024,6 +5040,28 @@ fn commit_analysis_output(
         prog.arch_mut().error_noreturn_callsites = sites;
     }
 
+    // (kuna `itaniumeh`) Park the call-site table and the two registers the
+    // unwinder fills at a pad. Empty unless the gate is on.
+    if !out.eh_call_sites.is_empty() {
+        let mut table = kuna_decomp::kuna_itaniumeh::EhTable::new(out.eh_call_sites.clone());
+        let arch = prog.arch();
+        let reg = |names: &[&str]| {
+            names.iter().find_map(|n| arch.get_register_varnode(n.as_bytes()).ok()).map(|v| (v.get_addr(), v.size as i32))
+        };
+        let (exc, sel): (&[&str], &[&str]) = if arch.archid.starts_with("x86:LE:64") {
+            (&["RAX"], &["RDX"])
+        } else if arch.archid.starts_with("x86") {
+            (&["EAX"], &["EDX"])
+        } else if arch.archid.starts_with("AARCH64") {
+            (&["x0"], &["x1"])
+        } else {
+            (&["r0"], &["r1"])
+        };
+        table.exception_reg = reg(exc);
+        table.selector_reg = reg(sel);
+        prog.arch_mut().eh_table = std::rc::Rc::new(table);
+    }
+
     // (kuna `callerreads`) Park where each direct call returns to. Empty without
     // the Listing, so the datatest/console parity paths are unaffected.
     if !out.call_returns.is_empty() {
@@ -5173,13 +5211,35 @@ fn commit_analysis_output(
     } else {
         Vec::new()
     };
+    //    A bounded literal that starts inside a NUL-scan row ends the row there:
+    //    rustc packs literals back to back, so the row glues the literal before
+    //    it to this one (IDA 9.5 rust.so splits at every referenced byte the
+    //    same way).
+    let narrow: Vec<kuna_analysis::pass::StringFact> = if prog.arch().fat_str != 0 {
+        let mut starts: Vec<u64> = out.bounded_strings.iter().map(|f| f.addr).collect();
+        starts.sort_unstable();
+        out.strings
+            .iter()
+            .map(|f| {
+                let i = starts.partition_point(|&s| s <= f.addr);
+                match starts.get(i) {
+                    Some(&s) if s < f.addr + u64::from(f.len) => {
+                        kuna_analysis::pass::StringFact { addr: f.addr, len: (s - f.addr) as u32 }
+                    }
+                    _ => *f,
+                }
+            })
+            .collect()
+    } else {
+        out.strings.clone()
+    };
     for (fact, char_size) in out
         .bounded_strings
         .iter()
         .map(|f| (f, 1u32))
         .chain(wide32.iter().map(|f| (f, 4u32)))
         .chain(wide.iter().map(|f| (f, 2u32)))
-        .chain(out.strings.iter().map(|f| (f, 1u32)))
+        .chain(narrow.iter().map(|f| (f, 1u32)))
     {
         let addr = Address::new(Rc::clone(code_space), fact.addr);
         // Conservative guard: skip an address that already carries a symbol (an
