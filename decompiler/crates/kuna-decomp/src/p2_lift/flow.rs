@@ -3112,6 +3112,15 @@ truncating the fall-through here"
         // Carry any warnings the nested flow buffered back to the top-level
         // function's comment store (the C++ `inline_head`/`data` reach the same
         // `glb->commentdb`).  This includes nested "Could not inline here".
+        // (kuna `outlinedinline`) A fragment whose flow leaves the image (a
+        // dyld-cache extract tail-calling into another library) stays a call.
+        if inlineflow.has_unmapped_target()
+            && self.data.get_arch().outlined_inline
+            && crate::kuna_outlinedinline::is_outlined_name(inlineflow.data.get_name())
+        {
+            *inlinefd = inlineflow.data;
+            return Ok(-1);
+        }
         let nested_comments = inlineflow.data.drain_pending_comments();
         for (tp, ad, txt) in nested_comments {
             self.data.push_raw_comment(tp, ad, txt);
@@ -3225,6 +3234,9 @@ truncating the fall-through here"
         retaddr: &mut Address,
     ) -> KunaResult<bool> {
         if !inlineflow.data.get_func_proto().is_no_return() {
+            if self.ends_without_return_site(inlineflow, op) {
+                return Ok(true);
+            }
             let nextop = match self.dead_next(op) {
                 Some(n) => n,
                 None => {
@@ -3244,6 +3256,25 @@ truncating the fall-through here"
             self.op_mark_start_basic(nextop);
         }
         Ok(true)
+    }
+
+    /// (kuna `outlinedinline`) Does the call `op` to a MachineOutliner fragment
+    /// end its function, so the fragment's own RETURN is the caller's? That is
+    /// the case for a tail call (`b OUTLINED_FUNCTION_n`, a CALL with a RETURN at
+    /// its own address) and for a call nothing follows (the fragment ends the
+    /// caller by tail-calling a no-return routine). Upstream refuses both; the
+    /// clone then keeps the fragment's RETURN as is.
+    fn ends_without_return_site(&self, inlineflow: &FlowInfo<'a, E>, op: OpId) -> bool {
+        if !self.data.get_arch().outlined_inline
+            || !crate::kuna_outlinedinline::is_outlined_name(inlineflow.data.get_name())
+        {
+            return false;
+        }
+        let Some(next) = self.dead_next(op) else { return true };
+        let (Some(call), Some(next)) = (self.data.obank().get(op), self.data.obank().get(next)) else {
+            return false;
+        };
+        next.code() == OpCode::CPUI_RETURN && next.get_addr() == call.get_addr()
     }
 
     /// If the given injected op is a CALL, CALLIND, or BRANCHIND, add references to

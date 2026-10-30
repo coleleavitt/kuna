@@ -732,6 +732,12 @@ pub struct Architecture {
     /// (kuna) `option ptrauthtrap`: cut the branch into each arm64e
     /// pointer-auth failure trap.  Default on.
     pub ptrauth_trap: bool,
+    /// (kuna) `option chkstkdarwin`: delete the `___chkstk_darwin` stack-probe
+    /// calls.  Default on.
+    pub chkstk_darwin: bool,
+    /// (kuna) `option outlinedinline`: inline the MachineOutliner's
+    /// `OUTLINED_FUNCTION_<n>` fragments.  Default on.
+    pub outlined_inline: bool,
     /// (kuna GH-9203) Decline placing a const COPY in a loop block
     /// (C++ `condexe_block_placement`).
     pub condexe_block_placement: bool,
@@ -3055,7 +3061,9 @@ impl Architecture {
             go_morestack: 0, // (kuna) option gomorestack; reset_defaults sets the shipped default (auto)
             go_bool: 0, // (kuna) option gobool; reset_defaults sets the shipped default (auto)
             go_write_barrier: 0, // (kuna) option gowritebarrier; reset_defaults sets the shipped default (auto)
-            ptrauth_trap: false, // (kuna) option ptrauthtrap; reset_defaults sets the shipped default (on)
+            ptrauth_trap: false,
+            chkstk_darwin: false, // (kuna) option chkstkdarwin; reset_defaults sets the shipped default (on)
+            outlined_inline: false, // (kuna) option outlinedinline; reset_defaults sets the shipped default (on) // (kuna) option ptrauthtrap; reset_defaults sets the shipped default (on)
             condexe_block_placement: false,
             dynamic_hash_maxdup_high: false,
             model_stack_probe_loop: false,
@@ -3490,6 +3498,8 @@ impl Architecture {
         self.go_bool = crate::kuna_gobool::GoBoolMode::Auto.as_u8(); // (kuna) narrow Go boolean returns on Go images
         self.go_write_barrier = crate::kuna_gowritebarrier::GoWriteBarrierMode::Auto.as_u8(); // (kuna) fold the Go write barrier on Go images
         self.ptrauth_trap = true; // (kuna) drop arm64e pointer-auth failure checks; inert without a SoftwareBreakpoint brk #0xc47x trap, 0/675 datatests
+        self.outlined_inline = true; // (kuna) inline OUTLINED_FUNCTION_<n> fragments; name-gated, 0/675 datatests
+        self.chkstk_darwin = true; // (kuna) drop the Darwin stack probe; inert without a ___chkstk_darwin callee, 0/675 datatests
         self.dynamic_hash_maxdup_high = true; // (kuna) DIV-3 default-on (GH-8467)
         self.fold_flag_compare = true; // (kuna) DIV-3 default-on (GH-1276/8777)
         self.switch_modulo_bound = false; // (kuna) default: upstream byte-identical (GH-9191)
@@ -4326,6 +4336,8 @@ impl Architecture {
         ctx.go_morestack = self.go_morestack;
         ctx.go_bool = self.go_bool;
         ctx.go_write_barrier = self.go_write_barrier;
+        ctx.chkstk_darwin = self.chkstk_darwin;
+        ctx.outlined_inline = self.outlined_inline;
         ctx.ptrauth_trap_userop = self
             .ptrauth_trap
             .then(|| self.userops.get_op_by_name(crate::kuna_ptrauthtrap::BREAKPOINT_USEROP))

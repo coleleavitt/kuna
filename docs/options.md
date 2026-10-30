@@ -460,6 +460,10 @@ Three tiers:
 | (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap) |
 | a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap) |
 |  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap) |
+| a __chkstk_darwin() or ___chkstk_darwin() call in an apple function | [`chkstkdarwin`](#chkstkdarwin) |
+| a value kept in a caller-saved register across the stack probe prints as an undefined local | [`chkstkdarwin`](#chkstkdarwin) |
+| an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense | [`outlinedinline`](#outlinedinline) |
+| a function body is a string of OUTLINED_FUNCTION calls | [`outlinedinline`](#outlinedinline) |
 | go function returning bool prints v = CONCAT71((undefined7)(v >> 8), a == b) instead of returning the comparison | [`gobool`](#gobool) |
 | return value masked with 0xffffffff around a boolean | [`gobool`](#gobool) |
 | undefined7 casts feeding a concatenation at every boolean return | [`gobool`](#gobool) |
@@ -2373,6 +2377,22 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Leave on: an arm64e function's tail call reads as the call alone. Flip off to audit where the compiler checks an authenticated pointer. Inert on any image without a brk #0xc470-0xc473 trap.
 - **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-apple-ptrauthtrap
 - **Example:** `option ptrauthtrap off`
+
+### `chkstkdarwin` -- on | off, default `on` (destructive opt-in)
+
+- **Symptoms:** a __chkstk_darwin() or ___chkstk_darwin() call in an apple function; a value kept in a caller-saved register across the stack probe prints as an undefined local.
+- **What it does:** Delete the ___chkstk_darwin stack-probe calls. Apple's compilers probe every page of a frame larger than a page (or of a variable-length one) before allocating it: the size goes in x9 and ___chkstk_darwin touches each page below sp, preserving every register. The default call model has the call clobber x0-x18 like any other, which cuts the data flow of the live argument registers across it (a value kept in x8 across the probe prints as an undefined local), and the call itself is runtime machinery the source never wrote; IDA drops it from its stack-probe list. The CALL is deleted pre-SSA (the cleanupcode window), so heritage never sees the clobber and the size computation dies to dead-code elimination; a call through __auth_ptr that ActionDeindirect resolves later restarts the function once to reach that window.
+- **When to flip:** Leave on: a function with a large or variable-length frame reads without the probe call and keeps the values that live across it. Flip off to see where the compiler probes the stack. Inert on any image without a ___chkstk_darwin callee.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · kuna-apple-chkstkdarwin
+- **Example:** `option chkstkdarwin off`
+
+### `outlinedinline` -- on | off, default `on`
+
+- **Symptoms:** an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense; a function body is a string of OUTLINED_FUNCTION calls.
+- **What it does:** Inline clang's MachineOutliner fragments into their callers. At -Oz, and in much Swift and Apple system code, the outliner moves instruction sequences that repeat across functions into shared OUTLINED_FUNCTION_<n> fragments and calls them with bl, or ends a caller with b. A fragment is not a function of the source: it has no frame, reads and writes the caller's registers, and a caller split across fragments reads as opaque calls that hide its data flow. IDA marks them outlined by name and Hex-Rays inlines them. On: every function symbol named OUTLINED_FUNCTION_<n> is flagged inline (what option inline <name> does), so flow splices the fragment into each caller; a tail call to a fragment, or a call nothing follows, keeps the fragment's own RETURN instead of being refused as upstream's inliner does.
+- **When to flip:** Leave on: a caller reads as one body, with the fragment's arithmetic and its tail call in place. Flip off to see the fragments as calls. Name based, like IDA: a stripped image keeps its fragments as calls.
+- **Where / provenance:** P2/inline-inject · kuna · structure-recovery · kuna-apple-outlinedinline
+- **Example:** `option outlinedinline off`
 
 ### `gobool` -- off | auto | always, default `auto` (destructive opt-in)
 

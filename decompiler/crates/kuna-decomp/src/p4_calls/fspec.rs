@@ -7471,6 +7471,15 @@ impl FuncCallSpecs {
         let site = self.op_addr(data);
         data.get_override_mut().insert_indirect_override(site, newfd_entry);
 
+        // (kuna `chkstkdarwin`) The stack probe is deleted pre-SSA, so a call
+        // that only becomes direct here restarts to reach that window.
+        if data.get_arch().chkstk_darwin && crate::kuna_chkstkdarwin::is_chkstk_darwin(newfd_name) {
+            data.set_restart_pending(true);
+            let site = self.op_addr(data);
+            restartlog.record_at(data, KunaRestartReason::ProtoDeindirect, &site);
+            return Ok(());
+        }
+
         // Try our best to merge existing prototype with the one just handed.
         let mut newinput: Vec<Option<VarnodeId>> = Vec::new();
         let mut newoutput: Vec<VarnodeId> = Vec::new();

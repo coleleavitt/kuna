@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_355() {
-    assert_eq!(kuna_num_settables(), 355);
-    assert_eq!(SETTABLE_TABLE.len(), 355);
+fn settable_count_is_357() {
+    assert_eq!(kuna_num_settables(), 357);
+    assert_eq!(SETTABLE_TABLE.len(), 357);
 }
 
 #[test]
-fn tier_counts_are_121_core_135_transform_99_analysis() {
+fn tier_counts_are_121_core_137_transform_99_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_135_transform_99_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 135, 99));
+    assert_eq!((core, transform, analysis), (121, 137, 99));
 }
 
 #[test]
@@ -936,7 +936,8 @@ fn option_values_live_value_present_for_156() {
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
     // 156 -> 157: +1 for `importdata`.
     // +1 for `arm64evcall` (live_field = analysis_arm64evcall).
-    assert_eq!(with_live, 158);
+    // +2 for `chkstkdarwin` and `outlinedinline`.
+    assert_eq!(with_live, 160);
 }
 
 #[test]
@@ -1160,7 +1161,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
     // +1 for `arm64evcall`; its P1 row sits beside `authptrcall`.
-    assert_eq!(json.matches("},\n").count(), 354);
+    // +2 for `chkstkdarwin` and `outlinedinline`, beside `ptrauthtrap`.
+    assert_eq!(json.matches("},\n").count(), 356);
 }
 
 #[test]
