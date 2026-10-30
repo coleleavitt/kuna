@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3685,
-    3685
+    3690,
+    3690
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -508,6 +508,11 @@
     "data:DWARFVARIANTS #7: on, and so does variant B, so three variants are not two",
     "data:DWARFVARIANTS #8: a plain C-shaped struct in the same image renders identically in BOTH passes",
     "data:DWARFVARIANTS #9: and so does a fieldless enum, which rustc emits as an enumeration type this pass never sees",
+    "data:DYLDCACHEOBJC #1: objc off, the stripped image's IMP has no name",
+    "data:DYLDCACHEOBJC #2: direct selectors and relative types name and type the method (header selector base, then the objc_opt_t fallback)",
+    "data:DYLDCACHEOBJC #3: the body under the declared parameter name, both caches",
+    "data:DYLDCACHEOBJC #3b: the body under the generic parameter name, objc off",
+    "data:DYLDCACHEOBJC #4: the second method of the list-of-lists' one list",
     "data:ELFALIASNAMES #1: the exported name no longer selects the PLT stub",
     "data:ELFALIASNAMES #2: the exported name decompiles the definition",
     "data:ELFALIASNAMES #3: both names reach the same body",

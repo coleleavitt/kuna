@@ -4329,6 +4329,33 @@ every other binary's pass list is byte-identical to before the pass existed):
     `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
     run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
 
+  - **A dyld shared cache image**
+    (`decompiler/crates/kuna-analysis/src/loader/kuna_dyldcache.rs (objc_selector_base)`,
+    `decompiler/crates/kuna-analysis/src/analyzers/objc/sections.rs (MachoImage::with_cache)`,
+    kuna, no option — it rides `objc`): an image rebuilt out of a cache has
+    its classes but, read as a standalone Mach-O, no methods. A cache's small
+    method lists hold their selectors as offsets from the cache's *selector
+    base* (`entsizeAndFlags & 0x40000000`) and, under `0x20000000`, their type
+    strings too; the strings live in libobjc's `__OBJC_RO` region, outside the
+    image; and `class_ro_t.baseMethods` with its low bit set names a relative
+    list-of-lists (`entsize 8`, each `i64 >> 16` the list's offset from the
+    entry; the low 16 bits an image index) — the preattached-category shape.
+    When the ObjC pass runs on a cache (`ctx.image_path` opens it), the image
+    reads every address outside its own sections through the cache
+    (`DyldCache::read_slid`, pointers unslid; `read_cstr` scans a bounded
+    window there), `methods.rs` resolves the two flags from the base, and
+    `classt.rs (method_lists)` walks the list-of-lists; an IMP outside the
+    image's sections — another image's preattached category — is dropped. The
+    base is read from the cache header's ObjCOptimizationHeader
+    (`objcOptsOffset`, an offset from the cache base, dyld 1042+;
+    `relativeMethodSelectorBaseAddressOffset` at +0x30), else from libobjc's
+    `objc_opt_t` (`__objc_opt_ro`, version 16, the base at +0x28 relative to the
+    record) for an older cache. Foundation out of an iOS 17 arm64e cache: 643
+    classes, 3,516 methods decoded, 448 method names the `.symbols` file lacked,
+    3,979 `objc_msgSend$<sel>` stubs named, `self` typed. The stage test
+    `tests/stages/kuna-dyldcacheobjc.xml` runs the two synthetic caches of
+    `dyld_cache_objc.py` — one with the header, one with only the `objc_opt_t`.
+
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of
   every type it holds; with thousands of class structs interned that scan is no

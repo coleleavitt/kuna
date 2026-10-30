@@ -999,6 +999,33 @@ Regenerate with:
 python3 dyld_cache_arm64e.py
 ```
 
+### A dyld shared cache image with Objective-C metadata (`dyld_cache_objc/`, `dyld_cache_objc_v16/`)
+
+`dyld_cache_objc/` and `dyld_cache_objc_v16/` (28 KB each, one file) are the
+fixtures for `tests/stages/kuna-dyldcacheobjc.xml`: a two-image arm64e cache
+whose stripped `libgreeter.dylib` carries ObjC metadata the way a cache lays it
+out. The selector strings (`greet:`, `count`) and type strings (`i24@0:8i16`,
+`i16@0:8`) live in `libobjc.A.dylib`'s `__OBJC_RO` region at `0x180030100`,
+outside every libgreeter segment; the small method list in `__objc_methlist`
+carries `0x40000000` (selectors as offsets from the selector base) and
+`0x20000000` (type strings too); `class_ro_t.baseMethods` has its low bit set
+and names a relative list-of-lists (`entsize 8, count 1`) whose one entry
+reaches the list. The first cache's header names an ObjCOptimizationHeader
+(`objcOptsOffset` at 464, the dyld-1042+ shape) with
+`relativeMethodSelectorBaseAddressOffset`; the `_v16` cache's header ends at
+`0x1D0`, before that field, so only libobjc's `objc_opt_t` (`__objc_opt_ro`,
+version 16, the base at +0x28 relative to the record) can say where the
+selectors are. Regenerate both with:
+
+```bash
+python3 dyld_cache_objc.py
+```
+
+**Pinned VMAs:** `-[Greeter greet:]`@`0x180001800` (`n * 3 + 7`),
+`-[Greeter count]`@`0x180001810` (`42`), method list@`0x180001900`,
+`class_t`@`0x180010100`, list-of-lists@`0x180010300`, `objc_opt_t`@`0x180030000`,
+ObjCOptimizationHeader@`0x180030800`.
+
 `macho_ehframe_only_arm64` (arm64, 16 KB) is the `machoehframe` witness: three
 uncalled `eh_*` functions whose only start records are `__TEXT,__eh_frame` FDEs
 (and `__unwind_info`), in an image linked with `-no_function_starts -x`. Built
