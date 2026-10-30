@@ -142,13 +142,15 @@ enum Held {
     Isa,
 }
 
-/// The stack blocks of every arm64 function: `(creator pc, invoke, descriptor)`.
-fn stack_block_sites(text: &[(u64, &[u8])], isa_slots: &[u64]) -> Vec<(u64, u64, Option<u64>)> {
+/// The stack blocks of every arm64 function: `(pc of the isa store, invoke,
+/// descriptor, pc of the last `ret` before the store)`.
+fn stack_block_sites(text: &[(u64, &[u8])], isa_slots: &[u64]) -> Vec<(u64, u64, Option<u64>, u64)> {
     let mut out = Vec::new();
     for &(base, data) in text {
         let mut regs: [Option<Held>; 32] = [None; 32];
         let mut isa_at: Vec<(u64, u64)> = Vec::new();
         let mut found: Vec<(u64, u64, Option<u64>)> = Vec::new();
+        let mut last_ret = 0u64;
         for (i, c) in data.chunks_exact(4).enumerate() {
             let w = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
             let pc = base + 4 * i as u64;
@@ -190,9 +192,11 @@ fn stack_block_sites(text: &[(u64, &[u8])], isa_slots: &[u64]) -> Vec<(u64, u64,
             } else if w == 0xD65F_03C0 {
                 regs = [None; 32];
                 isa_at.clear();
+                out.extend(found.drain(..).map(|(at, inv, desc)| (at, inv, desc, last_ret)));
+                last_ret = pc;
             }
         }
-        out.extend(found);
+        out.extend(found.drain(..).map(|(at, inv, desc)| (at, inv, desc, last_ret)));
     }
     out
 }
@@ -253,13 +257,17 @@ pub fn stack_blocks(img: &MachoImage, file: &object::File, tctx: &TypeCtx, creat
     creators.sort();
     let mut layout = None;
     let mut per_creator: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-    for (pc, invoke, desc) in stack_block_sites(&text, &isa_slots) {
-        if img.read(invoke, 4).is_none() {
+    let mut named: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    for (pc, invoke, desc, last_ret) in stack_block_sites(&text, &isa_slots) {
+        // The linker folds identical invoke bodies: the first creator names it.
+        if img.read(invoke, 4).is_none() || !named.insert(invoke) {
             continue;
         }
+        // The creator is the nearest label at or before the store, unless a
+        // `ret` lies between them: then the store is in an unlabelled function.
         let creator = match creators.iter().rev().find(|(start, _)| *start <= pc) {
-            Some((_, name)) => name.clone(),
-            None => format!("sub_{pc:x}"),
+            Some((start, name)) if *start > last_ret => name.clone(),
+            _ => format!("block_{invoke:x}"),
         };
         let n = per_creator.entry(creator.clone()).or_default();
         *n += 1;
@@ -297,7 +305,7 @@ mod tests {
         ];
         let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
         let sites = stack_block_sites(&[(0x1000, &bytes)], &[0x1010]);
-        assert_eq!(sites, vec![(0x1008, 0x1020, Some(0x1040))]);
+        assert_eq!(sites, vec![(0x1008, 0x1020, Some(0x1040), 0)]);
         assert!(stack_block_sites(&[(0x1000, &bytes)], &[0x9999]).is_empty(), "another slot is not the isa");
     }
 
