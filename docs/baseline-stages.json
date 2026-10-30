@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3383,
-    3383
+    3389,
+    3389
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1435,6 +1435,12 @@
     "data:OBJCSDK #7: a CGRect argument is spread over its members",
     "data:OBJCSDK #8: a two-argument method keeps both",
     "data:OBJCSDK #9: the stub itself returns the struct",
+    "data:OBJCSTRUCTS #1: objc off, the block invoke is an anonymous function",
+    "data:OBJCSTRUCTS #2: the struct ivar reads by field",
+    "data:OBJCSTRUCTS #3: the by-value struct argument is a CGRect",
+    "data:OBJCSTRUCTS #4: the struct argument is copied field by field",
+    "data:OBJCSTRUCTS #5: the array ivar indexes by element",
+    "data:OBJCSTRUCTS #6: the global block's invoke is named and typed from the descriptor signature",
     "data:OBJCTYPES #1: off reads the inner object's field through casts",
     "data:OBJCTYPES #2: the property's class types the getter's return, in both arms",
     "data:OBJCTYPES #3: the stub of a property getter returns the class, in both arms",

@@ -3824,6 +3824,30 @@ every other binary's pass list is byte-identical to before the pass existed):
     this does not). The stage test `tests/stages/kuna-objcresolve.xml` runs
     both fixtures with the options off and on.
 
+  - **By-value aggregates and global blocks**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (struct_leaves)`,
+    `decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcblocks.rs (emit)`,
+    kuna, no option — a strict fix): a struct by value in an encoding
+    (`{CGRect={CGPoint=dd}{CGSize=dd}}`) used to decode to a void placeholder,
+    so a `CGRect frame` ivar read `*(double *)&self->frame[0x10]`, an `int
+    counts[4]` ivar (`[4i]`) was indexed by hand, and an IMP taking a `CGRect`
+    lost its prototype altogether. The decoder now builds the struct the
+    encoding spells through the same `struct_type` the stub returns use, with
+    the member names an ivar encoding quotes (`"origin"{CGPoint="x"d"y"d}`,
+    nested structs flattened to `x, y, width, height`) and the CoreGraphics
+    table for a method encoding that quotes none, and `[n T]` as an array; an
+    unnamed struct (`{?=ii}`) or a union stays opaque. The IMP then reads
+    `-[Shape setFrame:](Shape *self, SEL _cmd, CGRect arg1)` with `arg1` placed
+    by the model (`d0..d3`). A global block literal — `isa =
+    _NSConcreteGlobalBlock, flags, reserved, invoke, descriptor` in `__const`,
+    found by the isa slot's bind name — is typed `Block_layout`
+    (`block_literal_<addr>`), its invoke is named `block_invoke_<addr>` and,
+    when `BLOCK_HAS_SIGNATURE` is set, typed from the descriptor's signature
+    with the block itself first (`long block_invoke_10000071c(Block_layout *block, long arg1)`).
+    A stack block is built by its creator at run time and is not recognized
+    (Hex-Rays reads the creator's microcode for the isa store). The stage test
+    `tests/stages/kuna-objcstructs.xml` runs `macho_objc_structs_arm64`.
+
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of
   every type it holds; with thousands of class structs interned that scan is no

@@ -56,6 +56,7 @@ pub mod encoding;
 pub mod kuna_objccats;
 pub mod kuna_objcivars;
 mod kuna_objcruntime;
+mod kuna_objcblocks;
 mod kuna_swiftclassnames;
 use kuna_swiftclassnames::display_class_name;
 pub mod kuna_objcprops;
@@ -247,6 +248,7 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
         let refs = kuna_objcrefs::emit(&img, ctx.file, ctx.arch, &tctx, &mut selectors, &mut out);
+        kuna_objcblocks::emit(&img, ctx.file, &tctx, &mut out);
         if let Some(table) = out.objc_classes.as_mut() {
             table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
             table.selref_at.extend(selectors.slots.iter().map(|(va, s)| (*va, s.clone())));

@@ -120,11 +120,11 @@ pub fn struct_type(encoding: &str, tctx: &TypeCtx) -> Option<Rc<Datatype>> {
         Some(_) => return None,
         None => types.kuna_declare_record(name, false).ok()?,
     };
-    let members = struct_members(encoding)?;
+    let members = struct_leaves(encoding)?;
     let names = member_names(name);
     let mut fields = Vec::new();
     let mut offset = 0i32;
-    for (k, code) in members.iter().enumerate() {
+    for (k, (quoted, code)) in members.iter().enumerate() {
         let ty = Parser::new(&code.to_string()).next_type(tctx)?;
         let size = ty.get_size();
         if size <= 0 {
@@ -132,7 +132,10 @@ pub fn struct_type(encoding: &str, tctx: &TypeCtx) -> Option<Rc<Datatype>> {
         }
         let align = size.min(tctx.ptr_size);
         offset = (offset + align - 1) / align * align;
-        let field = names.get(k).map(|n| n.to_string()).unwrap_or_else(|| format!("field_{k}"));
+        let field = quoted
+            .clone()
+            .or_else(|| names.get(k).map(|n| n.to_string()))
+            .unwrap_or_else(|| format!("field_{k}"));
         fields.push(TypeField::new(offset, offset, field, ty));
         offset += size;
     }
@@ -153,12 +156,29 @@ pub fn struct_name(encoding: &str) -> Option<&str> {
 /// The leaf member codes of a struct encoding, nested structs flattened:
 /// `{CGRect={CGPoint=dd}{CGSize=dd}}` → `dddd`. `None` for a malformed layout.
 pub fn struct_members(encoding: &str) -> Option<Vec<char>> {
+    Some(struct_leaves(encoding)?.into_iter().map(|(_, c)| c).collect())
+}
+
+/// The leaf members of a struct encoding with the names an ivar encoding
+/// quotes (`{CGRect="origin"{CGPoint="x"d"y"d}…}` → `[(x, d), (y, d), …]`),
+/// nested structs flattened; a method encoding quotes none.
+pub fn struct_leaves(encoding: &str) -> Option<Vec<(Option<String>, char)>> {
     let body = encoding.strip_prefix('{')?.strip_suffix('}')?;
     let (_, members) = body.split_once('=')?;
     let mut out = Vec::new();
     let (mut depth, mut start) = (0usize, 0usize);
+    let mut name: Option<String> = None;
+    let mut quote: Option<usize> = None;
     for (i, c) in members.char_indices() {
+        if let Some(q) = quote {
+            if c == '"' {
+                name = Some(members[q + 1..i].to_string());
+                quote = None;
+            }
+            continue;
+        }
         match c {
+            '"' if depth == 0 => quote = Some(i),
             '{' => {
                 if depth == 0 {
                     start = i;
@@ -168,14 +188,16 @@ pub fn struct_members(encoding: &str) -> Option<Vec<char>> {
             '}' => {
                 depth = depth.checked_sub(1)?;
                 if depth == 0 {
-                    out.extend(struct_members(&members[start..=i])?);
+                    let inner = struct_leaves(&members[start..=i])?;
+                    let outer = name.take();
+                    out.extend(inner.into_iter().map(|(n, c)| (n.or_else(|| outer.clone()), c)));
                 }
             }
-            c if depth == 0 => out.push(c),
+            c if depth == 0 => out.push((name.take(), c)),
             _ => {}
         }
     }
-    (depth == 0 && !out.is_empty()).then_some(out)
+    (depth == 0 && quote.is_none() && !out.is_empty()).then_some(out)
 }
 
 /// The leaf member names of the CoreGraphics / Foundation geometry structs,
@@ -388,19 +410,31 @@ impl<'a> Parser<'a> {
             // bitfield: name-level-opaque — skip the body and yield a void* / void
             // placeholder (the dwarf recursion-cap posture). Reconstructing the
             // nested layout is the deferred field-level scope.
+            // A struct by value is the struct the encoding spells
+            // (`{CGRect={CGPoint=dd}{CGSize=dd}}` → `CGRect {x, y, width, height}`);
+            // an unnamed or malformed one stays an opaque void.
             b'{' => {
+                let start = self.pos - 1;
                 self.skip_balanced(b'{', b'}');
-                // A struct value passed/returned by value is opaque here; model it
-                // as void (size unknown without field reconstruction).
-                types.get_type_void().ok()?
+                let text = std::str::from_utf8(&self.bytes[start..self.pos]).ok()?;
+                struct_type(text, tctx).or_else(|| types.get_type_void().ok())?
             }
             b'(' => {
                 self.skip_balanced(b'(', b')');
                 types.get_type_void().ok()?
             }
+            // `[<n><type>]`: an array of n elements.
             b'[' => {
+                let start = self.pos;
                 self.skip_balanced(b'[', b']');
-                types.get_type_void().ok()?
+                let inner = std::str::from_utf8(&self.bytes[start..self.pos - 1]).ok()?;
+                let digits = inner.bytes().take_while(u8::is_ascii_digit).count();
+                let count: i32 = inner[..digits].parse().ok()?;
+                let elem = Parser::new(&inner[digits..]).next_type(tctx)?;
+                if count <= 0 || elem.get_size() <= 0 || count.checked_mul(elem.get_size()).is_none_or(|n| n > 1 << 20) {
+                    return None;
+                }
+                types.get_type_array(count, elem).ok()?
             }
             b'b' => {
                 // bitfield `b<width>`: consume the width digits, model as uint.
@@ -579,6 +613,28 @@ mod tests {
         let deep = format!("{}i", "^".repeat(MAX_POINTER_DEPTH + 1));
         assert!(decode_ivar_type(&deep, &tctx).is_none());
         assert!(decode_ivar_type("^^i", &tctx).is_some());
+    }
+
+    /// A struct by value is the struct the encoding spells; an array is an array;
+    /// an unnamed struct and a union stay opaque.
+    #[test]
+    fn by_value_aggregates_are_types() {
+        let f = factory();
+        let tctx = TypeCtx::new(&f, 8, 1);
+        let t = decode_ivar_type("{CGRect={CGPoint=dd}{CGSize=dd}}", &tctx).unwrap();
+        assert_eq!(t.get_name(), "CGRect");
+        assert_eq!(t.get_size(), 32);
+        let leaves = struct_leaves("{Pair=\"lo\"{Half=\"a\"i\"b\"i}\"hi\"q}").unwrap();
+        assert_eq!(leaves, vec![(Some("a".into()), 'i'), (Some("b".into()), 'i'), (Some("hi".into()), 'q')]);
+        assert_eq!(struct_members("{CGRect=\"origin\"{CGPoint=\"x\"d\"y\"d}\"size\"{CGSize=\"width\"d\"height\"d}}").unwrap(), vec!['d'; 4]);
+        let a = decode_ivar_type("[4i]", &tctx).unwrap();
+        assert_eq!(a.get_metatype(), type_metatype::TYPE_ARRAY);
+        assert_eq!(a.get_size(), 16);
+        let p = decode_method("-[C setFrame:]", "v48@0:8{CGRect=dddd}16", &tctx, None).unwrap();
+        assert_eq!(p.intypes[2].get_name(), "CGRect");
+        assert_eq!(decode_ivar_type("{?=ii}", &tctx).unwrap().get_metatype(), type_metatype::TYPE_VOID);
+        assert_eq!(decode_ivar_type("(u=id)", &tctx).unwrap().get_metatype(), type_metatype::TYPE_VOID);
+        assert!(decode_ivar_type("[0i]", &tctx).is_none());
     }
 
     #[test]

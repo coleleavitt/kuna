@@ -2133,7 +2133,8 @@ mod tests {
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
         // and kuna-objcarc / Objective-C ARC bookkeeping hidden behind call-fixups
         // and kuna-objcresolve / a message send typed and resolved by its receiver
-        assert_eq!(count, 613, "corpus file count drifted");
+        // and kuna-objcstructs / by-value aggregates in ObjC encodings and global blocks
+        assert_eq!(count, 614, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

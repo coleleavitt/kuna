@@ -1305,6 +1305,31 @@ With `--option objc on` (default `objcarc`) `-total:` is
 `v1 = objc_msgSend(arg1,sel_count); v2 = objc_msgSend(arg1,sel_inner); return objc_msgSend(v2,sel_count) + v1;`;
 with `--option objcarc off` the five ARC calls are shown with their arguments.
 
+### `macho_objc_structs_arm64` — by-value aggregates and a global block
+
+`macho_objc_structs_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-objcstructs.xml`: `macho_objc_structs.m` has a root class
+`Shape` with a `CGRect frame` ivar (encoding
+`{CGRect="origin"{CGPoint="x"d"y"d}"size"{CGSize="width"d"height"d}}`), an
+`int counts[4]` ivar (`[4i]`), a `long total`, `-setFrame:(CGRect)` (argument
+encoding `{CGRect={CGPoint=dd}{CGSize=dd}}`), `-area` and `-countAt:`; plus a
+file-scope global block `scale` (`_NSConcreteGlobalBlock`, descriptor with a
+`q16@?0q8` signature) and `apply()` calling through it. Same recipe as
+`macho_objc_arc_arm64` without `-objc_stubs_fast`, at `-O1`:
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O1 -c macho_objc_structs.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_objc_structs_arm64 m.o
+```
+
+**Pinned VMAs:** `-[Shape setFrame:]`@`0x1000006e0`, `-[Shape area]`@`0x1000006f8`,
+`-[Shape countAt:]`@`0x100000704`, block invoke@`0x10000071c`, `apply`@`0x100000724`.
+With `--option objc on`: `(self->frame).width * (self->frame).height`,
+`-[Shape setFrame:](Shape *self, objc_selector *_cmd, CGRect arg1)`,
+`self->counts[arg1 & 3]`, `long block_invoke_10000071c(Block_layout *block, long arg1)`.
+
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 
 `swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture
