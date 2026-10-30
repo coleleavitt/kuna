@@ -8213,6 +8213,7 @@ user-op that produced it (`vector_result_type`, following COPYs). Result:
 `__m512 madd(__m512 a0,__m512 a1,__m512 a2,unsigned short a3) { return
 _mm512_mask_add_ps(a0,a3,a1,a2); }`.
 
-Limit: legacy-SSE integer and two-lane double intrinsic code (`paddd`,
-`mulpd` without VEX) keeps its lanes (see `lanefuse` in chapter 02), so such
-a function's 16-byte arguments still read as 8-byte lane pieces.
+Legacy-SSE integer and two-lane double code (`paddd`, `mulpd` without VEX)
+keeps its lanes at the default `lanefuse on` (chapter 02), so such a
+function's 16-byte arguments read as 8-byte lane pieces; `lanefuse all` gives
+it `__m128i`/`__m128d` arguments and returns.

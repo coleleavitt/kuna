@@ -1959,7 +1959,7 @@ truncating the fall-through here"
                 });
                 let fetched = has_lanes && self.data.get_arch().loader_fill(&mut head, curaddr).is_ok();
                 if has_lanes {
-                let vex = fetched && matches!(head[0], 0xc4 | 0xc5 | 0x62);
+                let vex = fetched && matches!(head[0], 0xc4 | 0xc5 | 0x62) || self.data.get_arch().lane_fuse_all;
                 if !self.data.kuna_vector_code && crate::kuna_lanefuse::has_vector_run(&self.data, &ops) {
                     self.data.kuna_vector_code = true;
                 }

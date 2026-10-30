@@ -166,6 +166,8 @@ pub fn has_vector_run(data: &Funcdata, ops: &[OpId]) -> bool {
     })
 }
 
+/// `vex` also stands for `lanefuse all`, which fuses legacy-SSE runs as if
+/// they were VEX-encoded.
 pub fn fuse(data: &mut Funcdata, ops: &[OpId], vex: bool) -> KunaResult<bool> {
     let mut changed = false;
     let mut i = 0;

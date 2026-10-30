@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3694,
-    3694
+    3698,
+    3698
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3615,9 +3615,13 @@
     "data:varsources #7: address-tied stack storage stays visible",
     "data:varsources #8: every angr local declaration has a source",
     "data:varsources #9: Ghidra naming still omits sources",
-    "data:vectorabi #10: on, a VEX.128 add is __m128 in and out",
+    "data:vectorabi #10: on, a VEX.128 add and a legacy SSE addps are __m128 in and out (one VEX, one SSE)",
+    "data:vectorabi #11: the 128-bit float adds fuse to _mm_add_ps",
+    "data:vectorabi #12: legacy SSE paddd keeps its lanes at the default",
+    "data:vectorabi #13: lanefuse all fuses SSE2 integer code",
+    "data:vectorabi #14: lanefuse all fuses two-lane doubles",
     "data:vectorabi #1: off, addv takes and returns 8-byte scalars",
-    "data:vectorabi #2: off, the VADDPS lanes print as scalar floats packed into a CONCAT44",
+    "data:vectorabi #2: off, the VADDPS lanes print as scalar lanes packed into a CONCAT44 (and the default legacy paddd)",
     "data:vectorabi #3: off, ymm0 is read back out of the widened zmm0",
     "data:vectorabi #4: on, the lane run is one intrinsic with __m256 in and out",
     "data:vectorabi #5: on, addv returns the fused add",

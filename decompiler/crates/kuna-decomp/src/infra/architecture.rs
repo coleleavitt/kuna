@@ -403,6 +403,8 @@ pub struct Architecture {
     pub vector_abi: bool,
     /// (kuna `lanefuse`) Re-fuse per-lane vector p-code (`kuna_lanefuse`).
     pub lane_fuse: bool,
+    /// (kuna `lanefuse all`) Also fuse legacy-SSE integer and two-lane double runs.
+    pub lane_fuse_all: bool,
     /// (kuna `vectorabi`) The widened models, built once per default model.
     pub vector_models: std::cell::RefCell<Vec<(Rc<crate::fspec::ProtoModel>, Rc<crate::fspec::ProtoModel>)>>,
     /// (kuna `vectorabi`) The vector user-ops and their element kinds, built once.
@@ -3167,6 +3169,7 @@ impl Architecture {
             vex_zero_upper: false,
             vector_abi: false,
             lane_fuse: false,
+            lane_fuse_all: false,
             vector_models: std::cell::RefCell::new(Vec::new()),
             vector_userop_kinds: std::cell::OnceCell::new(),
             eh_table: Rc::new(crate::kuna_itaniumeh::EhTable::default()),
@@ -3909,6 +3912,7 @@ impl Architecture {
         self.vex_zero_upper = true;
         self.vector_abi = true;
         self.lane_fuse = true;
+        self.lane_fuse_all = false;
         self.caller_reads = true; // (kuna) option callerreads default-on: inert without the Listing, so 0/675 datatest assertions move
         self.call_target_type = false; // (kuna) option calltargettype: default-OFF in the catalog because the XML datatest corpus pins the upstream `code *` spellings and applies no mode; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for every real binary
         self.ptrdepthcap = false; // (kuna) DIV-108: default-OFF in the catalog because it changes INFERRED types and the datatest corpus pins the upstream spellings; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so the cap is the default rendering for every real binary
@@ -4995,6 +4999,7 @@ impl Architecture {
         ctx.eh_table = self.itanium_eh.then(|| Rc::clone(&self.eh_table));
         ctx.vex_zero_upper = self.vex_zero_upper && self.archid.starts_with("x86:LE:64");
         ctx.lane_fuse = self.lane_fuse && self.archid.starts_with("x86:LE:64");
+        ctx.lane_fuse_all = self.lane_fuse_all;
         ctx.vector_fp = if self.vector_abi && self.archid == "x86:LE:64:default:gcc" {
             ctx.defaultfp.as_ref().map(|model| {
                 let mut built = self.vector_models.borrow_mut();

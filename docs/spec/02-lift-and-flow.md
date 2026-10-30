@@ -3107,10 +3107,13 @@ generated built-in (`BUILTIN_LANE_BASE`) named for the intrinsic:
 `_mm256_add_ps`, `_mm_sub_pd`, `_mm256_add_epi32`. Which runs fuse:
 
 - `FLOAT_ADD/SUB/MULT/DIV` and `INT_ADD/SUB/MULT` always under VEX/EVEX;
-- under legacy SSE encoding, only four-lane float runs (`addps`). Legacy SSE
-  integer lanes and two-lane double runs are what compilers emit for
-  auto-vectorised and SLP-paired scalar code, and `devectorize`, `wideslice`,
-  `simdlane` and the float-precision rules read them back as scalars;
+- under legacy SSE encoding, only four-lane float runs (`addps`) at the
+  default `on`. Legacy SSE integer lanes and two-lane double runs are what
+  compilers emit for auto-vectorised and SLP-paired scalar code, and
+  `devectorize`, `wideslice`, `simdlane` and the float-precision rules read
+  them back as scalars. `lanefuse all` fuses them too, for hand-written SSE2
+  intrinsic code (`__m128i add128i(__m128i a0,__m128i a1) { return
+  _mm_add_epi32(a0,a1); }`);
 - never lane-wise `AND/OR/XOR`, which carry scalar idioms (`xorps x,x`,
   `andps` with a sign mask for `fabs`).
 

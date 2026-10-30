@@ -1737,6 +1737,8 @@ pub struct ArchContext {
     pub vex_zero_upper: bool,
     /// (kuna `lanefuse`) See [`crate::kuna_lanefuse`].
     pub lane_fuse: bool,
+    /// (kuna `lanefuse all`) See [`crate::kuna_lanefuse`].
+    pub lane_fuse_all: bool,
     /// (kuna `vectorabi`) The vector user-ops (AVX SLEIGH ops with an intrinsic
     /// name, and the `lanefuse` built-ins) with their element kind; their
     /// operands and results take the Intel vector types.
@@ -2193,6 +2195,7 @@ impl ArchContext {
             eh_table: None,
             vex_zero_upper: false,
             lane_fuse: false,
+            lane_fuse_all: false,
             vector_userops: Rc::new(Vec::new()),
             vector_fp: None,
             // (kuna) No executable read-only ranges until a real object load

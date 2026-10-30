@@ -877,7 +877,16 @@ kuna_options! { self, p1;
     "itaniumeh" => on_off!(itanium_eh, "Itanium exception edges to landing pads"),
     "vexzeroupper" => on_off!(vex_zero_upper, "VEX zero-upper writes split at the result width"),
     "vectorabi" => on_off!(vector_abi, "SysV x86-64 vector arguments and returns"),
-    "lanefuse" => on_off!(lane_fuse, "Per-lane vector p-code re-fused into one intrinsic"),
+    "lanefuse" => {
+        let v = p1.trim().to_ascii_lowercase();
+        let (on, all) = match v.as_str() {
+            "all" => (true, true),
+            _ => (on_or_off(p1)?, false),
+        };
+        self.lane_fuse = on;
+        self.lane_fuse_all = all;
+        Ok(format!("Per-lane vector p-code re-fused into one intrinsic turned {}", if all { "all" } else if on { "on" } else { "off" }))
+    },
     "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
     "mba" => on_off!(mba, "Linear MBA simplification"),
     "avxintrinsics" => on_off!(avx_intrinsics, "Intel intrinsic names for AVX user-ops"),

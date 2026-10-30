@@ -1,1 +1,2 @@
 gcc -O2 -mavx2 -mfma -mavx512f -c vec.c -o vec.o && ld -shared -o vec_x86_64.so vec.o
+gcc -O2 -fno-asynchronous-unwind-tables -c sse.c -o sse.o && ld -shared --build-id=none -o sse_x86_64.so sse.o
