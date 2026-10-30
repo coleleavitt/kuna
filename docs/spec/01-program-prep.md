@@ -4236,6 +4236,67 @@ every other binary's pass list is byte-identical to before the pass existed):
     265 stub calls change shape (`setTransitioningDelegate:(v3, delegate)`,
     `presentViewController:animated:completion:(vc, (UIViewController *)v10, 1, NULL)`).
 
+  - **Message sends typed and resolved by their receiver**
+    (`decompiler/crates/kuna-decomp/src/p5_types/kuna_objcrettype.rs (instancetype)`,
+    options **`objcrettype`** and **`objcresolve`**, kuna, default-on, inert
+    unless `objc` is on): the names above are per entry point, so a send still
+    read `objc_msgSend(v1, sel_setInner_, v2)` with `v1` an `objc_object *`
+    from `objc_alloc_init(_OBJC_CLASS_$_Base)`. Hex-Rays walks the receiver
+    instead, and so does this: the analysis hands the engine its class table
+    (every class's own methods by selector — categories included — its
+    superclass, the `class_t` address a class reference folds to, every selector
+    string and selector-reference slot). At P5, `TypeOpCall::getOutputLocal`
+    answers for a send before the stub's locked `id` does: `alloc`,
+    `allocWithZone:`, `new` and the runtime's `objc_alloc`/`objc_alloc_init`/
+    `objc_opt_new` on a class reference return `Base *`; `init…`, `self`,
+    `retain`, `autorelease`, `copy`, `mutableCopy` return their receiver's class
+    pointer, a receiver that is itself a send being asked first so an alloc/init
+    chain types through (`objcrettype`). A method's own locked `id` return still
+    wins where the two meet (`return (objc_object *)v1;`). At P9 the printed
+    callee of a send whose receiver's class is known — a folded class reference,
+    a pointer to a class struct, or a value the P5 walk resolves — is the IMP
+    found along the superclass chain: `-[Base setInner:](v1, sel_setInner_, …)`,
+    `-[Base count](self->inner, sel_count)`, `-[Holder inner](self)` for the
+    `objc_msgSend$inner` stub (`objcresolve`). A selector no class of the chain
+    declares keeps the runtime entry point; the prototype, arguments and the
+    listing's call graph are unchanged (Hex-Rays also adds a code xref, which
+    this does not). The stage test `tests/stages/kuna-objcresolve.xml` runs
+    both fixtures with the options off and on.
+
+  - **By-value aggregates and global blocks**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (struct_leaves)`,
+    `decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcblocks.rs (emit)`,
+    kuna, no option — a strict fix): a struct by value in an encoding
+    (`{CGRect={CGPoint=dd}{CGSize=dd}}`) used to decode to a void placeholder,
+    so a `CGRect frame` ivar read `*(double *)&self->frame[0x10]`, an `int
+    counts[4]` ivar (`[4i]`) was indexed by hand, and an IMP taking a `CGRect`
+    lost its prototype altogether. The decoder now builds the struct the
+    encoding spells through the same `struct_type` the stub returns use, with
+    the member names an ivar encoding quotes (`"origin"{CGPoint="x"d"y"d}`,
+    nested structs flattened to `x, y, width, height`) and the CoreGraphics
+    table for a method encoding that quotes none, and `[n T]` as an array; an
+    unnamed struct (`{?=ii}`) or a union stays opaque. The IMP then reads
+    `-[Shape setFrame:](Shape *self, SEL _cmd, CGRect arg1)` with `arg1` placed
+    by the model (`d0..d3`). A global block literal — `isa =
+    _NSConcreteGlobalBlock, flags, reserved, invoke, descriptor` in `__const`,
+    found by the isa slot's bind name — is typed `Block_layout`
+    (`block_literal_<addr>`), its invoke is named `block_invoke_<addr>` and,
+    when `BLOCK_HAS_SIGNATURE` is set, typed from the descriptor's signature
+    with the block itself first (`long block_invoke_10000071c(Block_layout *block, long arg1)`).
+    A stack block is built by its creator at run time; `stack_blocks` finds
+    the build in each arm64 function the way Hex-Rays reads the creator's
+    microcode: the isa's GOT slot load (`adrp; ldr`, or the linker's `ldr
+    <literal>`) stored to `sp`, then the `adr` / `adrp; add` addresses stored
+    16 and 24 bytes after it (`str`/`stp`), state cleared at every `ret`. The
+    invoke is named `<creator>_block_invoke` (`_2`, `_3` for the next blocks
+    of one creator; the creator is the nearest IMP label or symbol at or before
+    the store), typed from the descriptor's signature, and its first argument
+    is `Block_layout_<invoke> *` — `Block_layout` then one word per captured
+    value up to the descriptor's `size` — so `return block->capture_0 * arg1;`.
+    `__block` byref cells are not modelled. The stage tests
+    `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
+    run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
+
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of
   every type it holds; with thousands of class structs interned that scan is no

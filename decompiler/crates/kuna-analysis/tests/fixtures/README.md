@@ -1398,6 +1398,77 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
 and `(self->super).wheels`; with `--option swiftdemangle off` every one of those
 types spells `_TtC4main3Car` / `_TtC4main6Engine`.
 
+### `macho_objc_arc_arm64` — ARC bookkeeping (`objcarc`)
+
+`macho_objc_arc_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-objcarc.xml`: `macho_objc_arc.m` compiled with `-fobjc-arc
+-O2`, so the runtime calls are the compiler's own — `objc_retain`,
+`objc_release`, `objc_retainAutoreleasedReturnValue`,
+`objc_autoreleaseReturnValue`, `objc_storeStrong`, `objc_alloc_init`. Two root
+classes: `Base` (`count`, `inner`) and `Holder` (`slot`) with `-make` (two
+alloc/init chains), `-total:` (two message sends whose autoreleased result is
+retained and released) and `-keep:` (an ivar store). Same recipe as
+`macho_objc_refs_arm64` (chained fixups, fast stubs, `-x`):
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O2 -c macho_objc_arc.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+       -undefined dynamic_lookup -x -e _main -o macho_objc_arc_arm64 m.o
+```
+
+**Pinned VMAs:** IMP `-[Holder make]`@`0x100000798`, `-[Holder total:]`@`0x1000007ec`,
+`-[Holder keep:]`@`0x100000870`; stubs `objc_release`@`0x1000008b0`,
+`objc_retain`@`0x1000008bc`, `objc_retainAutoreleasedReturnValue`@`0x1000008f8`.
+With `--option objc on` (default `objcarc`) `-total:` is
+`v1 = objc_msgSend(arg1,sel_count); v2 = objc_msgSend(arg1,sel_inner); return objc_msgSend(v2,sel_count) + v1;`;
+with `--option objcarc off` the five ARC calls are shown with their arguments.
+
+### `macho_objc_structs_arm64` — by-value aggregates and a global block
+
+`macho_objc_structs_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-objcstructs.xml`: `macho_objc_structs.m` has a root class
+`Shape` with a `CGRect frame` ivar (encoding
+`{CGRect="origin"{CGPoint="x"d"y"d}"size"{CGSize="width"d"height"d}}`), an
+`int counts[4]` ivar (`[4i]`), a `long total`, `-setFrame:(CGRect)` (argument
+encoding `{CGRect={CGPoint=dd}{CGSize=dd}}`), `-area` and `-countAt:`; plus a
+file-scope global block `scale` (`_NSConcreteGlobalBlock`, descriptor with a
+`q16@?0q8` signature) and `apply()` calling through it. Same recipe as
+`macho_objc_arc_arm64` without `-objc_stubs_fast`, at `-O1`:
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O1 -c macho_objc_structs.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_objc_structs_arm64 m.o
+```
+
+**Pinned VMAs:** `-[Shape setFrame:]`@`0x1000006e0`, `-[Shape area]`@`0x1000006f8`,
+`-[Shape countAt:]`@`0x100000704`, block invoke@`0x10000071c`, `apply`@`0x100000724`.
+With `--option objc on`: `(self->frame).width * (self->frame).height`,
+`-[Shape setFrame:](Shape *self, objc_selector *_cmd, CGRect arg1)`,
+`self->counts[arg1 & 3]`, `long block_invoke_10000071c(Block_layout *block, long arg1)`.
+
+### `macho_objc_blocks_arm64` — a stack block
+
+`macho_objc_blocks_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-objcblocks.xml`: `macho_objc_blocks.m` has a root class
+`Runner` whose `-maker:` builds a block capturing a local on its frame
+(`_NSConcreteStackBlock`; at `-O2` the linker relaxes the isa load to
+`ldr x9, <literal>` and the invoke/descriptor to `adr`) and sends it to
+`-run:with:`. Same recipe as `macho_objc_structs_arm64` at `-O2`:
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O2 -c macho_objc_blocks.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_objc_blocks_arm64 m.o
+```
+
+**Pinned VMAs:** `-[Runner maker:]`@`0x1000007b4`, block invoke@`0x100000814`,
+`_NSConcreteStackBlock` slot@`0x100004008`. With `--option objc on` the invoke is
+`long -[Runner maker:]_block_invoke(Block_layout_100000814 *block, long arg1) { return block->capture_0 * arg1; }`.
+
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 
 `swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture

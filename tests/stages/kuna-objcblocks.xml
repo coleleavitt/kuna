@@ -1,0 +1,51 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    Stack blocks: the invoke function named after its creator and typed.
+
+    Issue: a block built on a method's frame (`isa = _NSConcreteStackBlock`, the
+    invoke and descriptor addresses stored after it) left its invoke function a
+    `sub_` with an untyped first argument, so a captured variable read as an
+    offset off an unknown pointer.
+
+    Fix: `analyzers/objc/kuna_objcblocks.rs (stack_blocks)` scans each arm64
+    function for the isa's GOT load (`adrp; ldr`, or the linker's `ldr literal`),
+    its store to `sp`, and the `adr`/`adrp; add` addresses stored 16 and 24
+    bytes after it (`str`/`stp`); the invoke is named `<creator>_block_invoke`,
+    typed from the descriptor's signature, with `Block_layout_<invoke>` carrying
+    one word per captured value up to the descriptor's size.
+
+    Pass 1 (`objc off`): `sub_100000814`. Pass 2 (`objc on`):
+    `long -[Runner maker:]_block_invoke(Block_layout_100000814 *block,long arg1)
+    { return block->capture_0 * arg1; }`.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c0035fd6
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_objc_blocks_arm64</com>
+  <com>option objc off</com>
+  <com>read symbols</com>
+  <com>load addr 0x100000814</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_objc_blocks_arm64</com>
+  <com>option objc on</com>
+  <com>read symbols</com>
+  <com>load addr 0x100000814</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load addr 0x1000007b4</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="OBJCBLOCKS #1: objc off, the invoke is an anonymous function" min="1" max="1">sub_100000814\(</stringmatch>
+<stringmatch name="OBJCBLOCKS #2: the invoke is named after its creator and typed from the descriptor" min="1" max="1">-\[Runner maker:\]_block_invoke\(Block_layout_100000814 \*block,int8 arg1\)</stringmatch>
+<stringmatch name="OBJCBLOCKS #3: the captured variable is a field" min="1" max="1">return block->capture_0 \* arg1;</stringmatch>
+<stringmatch name="OBJCBLOCKS #4: the creator stores the named invoke" min="1" max="1">= -\[Runner maker:\]_block_invoke;</stringmatch>
+</decompilertest>

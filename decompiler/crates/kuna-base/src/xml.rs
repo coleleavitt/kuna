@@ -2154,7 +2154,11 @@ mod tests {
         // and kuna-arithhelpers / 32-bit arithmetic runtime helpers print as C operators
         // and kuna-contextnames / loop counters and returned locals are named
         // and kuna-formatcallees / undeclared format functions are typed from their formats
-        assert_eq!(count, 664, "corpus file count drifted");
+        // and kuna-objcarc / Objective-C ARC bookkeeping hidden behind call-fixups
+        // and kuna-objcresolve / a message send typed and resolved by its receiver
+        // and kuna-objcstructs / by-value aggregates in ObjC encodings and global blocks
+        // and kuna-objcblocks / a stack block's invoke named after its creator and typed
+        assert_eq!(count, 668, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

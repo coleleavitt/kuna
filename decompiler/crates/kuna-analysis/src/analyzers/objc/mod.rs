@@ -55,6 +55,8 @@ pub mod classt;
 pub mod encoding;
 pub mod kuna_objccats;
 pub mod kuna_objcivars;
+mod kuna_objcruntime;
+mod kuna_objcblocks;
 mod kuna_swiftclassnames;
 use kuna_swiftclassnames::display_class_name;
 pub mod kuna_objcprops;
@@ -110,7 +112,20 @@ impl AnalysisPass for ObjcMetadataPass {
         } else {
             crate::loader::format::macho::resolve_dyld_info_binds(ctx.file, ctx.bytes)
         };
-        let img = MachoImage::with_fixups(ctx.file, fixups).with_binds(binds);
+        let mut img = MachoImage::with_fixups(ctx.file, fixups).with_binds(binds);
+        // An image of a dyld shared cache: its selector strings, class
+        // references and method names live in the cache's shared regions, and
+        // its method lists offset their selectors from the cache's base.
+        let cache = ctx
+            .image_path
+            .filter(|p| crate::loader::kuna_dyldcache::is_dyld_cache_file(p))
+            .and_then(|p| crate::loader::kuna_dyldcache::DyldCache::open(p).ok())
+            .map(Rc::new);
+        if let Some(cache) = cache {
+            let base = cache.objc_selector_base();
+            let reader = Rc::clone(&cache);
+            img = img.with_cache(Rc::new(move |va, n| reader.read_slid(va, n).ok()), base);
+        }
         let architecture = ctx.file.architecture();
 
         // The type-mapping context for IMP/ivar prototypes (PR-O2).
@@ -121,6 +136,7 @@ impl AnalysisPass for ObjcMetadataPass {
             None => HashMap::new(),
         };
         let mut selectors = kuna_objcrefs::Selectors::with_sdk(sdk);
+        out.prototypes_at.extend(kuna_objcruntime::prototypes(ctx.file, ctx.bytes, ctx.arch, &tctx));
 
         // Walk `__objc_classlist`: an array of `class_t*` (stride = ptr size). The
         // classes are read first so every instance layout is known before any
@@ -160,7 +176,7 @@ impl AnalysisPass for ObjcMetadataPass {
         for (class, name) in &classes {
             let meta_ro = classt::metaclass_ro(&img, class.isa);
             for ro in [Some(class.ro), meta_ro].into_iter().flatten() {
-                if let Some(list) = classt::base_methods(&img, ro) {
+                for list in classt::method_lists(&img, ro) {
                     for m in methods::walk_method_list(&img, list, architecture) {
                         selectors.record(&m.selector, m.types.as_deref());
                     }
@@ -197,6 +213,14 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
 
+        let mut table = kuna_decomp::kuna_objcrettype::ObjcClassTable::default();
+        for (class, name) in &classes {
+            let shown = display_class_name(name);
+            table.class_at.insert(class.addr, shown.clone());
+            table.classes.entry(shown).or_default().superclass =
+                classt::superclass_name(&img, class.addr).map(|s| display_class_name(&s));
+        }
+        out.objc_classes = Some(table);
         for (class, name) in &classes {
             out.symbols.push(SymFact {
                 addr: class.addr,
@@ -204,10 +228,10 @@ impl AnalysisPass for ObjcMetadataPass {
                 kind: SymKind::Data,
             });
             let self_type = objcivars.then(|| structs.self_type(&tctx, name)).flatten();
-            if let Some(list) = classt::base_methods(&img, class.ro) {
+            for list in classt::method_lists(&img, class.ro) {
                 self.emit_methods(&img, &tctx, architecture, name, '-', list, self_type.as_ref(), &mut selectors, &mut out);
             }
-            if let Some(list) = classt::metaclass_ro(&img, class.isa).and_then(|ro| classt::base_methods(&img, ro)) {
+            for list in classt::metaclass_ro(&img, class.isa).map(|ro| classt::method_lists(&img, ro)).unwrap_or_default() {
                 self.emit_methods(&img, &tctx, architecture, name, '+', list, None, &mut selectors, &mut out);
             }
             if let Some(ivar_list) = classt::base_ivars(&img, class.ro) {
@@ -237,6 +261,19 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
         let refs = kuna_objcrefs::emit(&img, ctx.file, ctx.arch, &tctx, &mut selectors, &mut out);
+        kuna_objcblocks::emit(&img, ctx.file, &tctx, &mut out);
+        {
+            use object::ObjectSymbol;
+            let mut creators: Vec<(u64, String)> = out.fid_names.iter().map(|f| (f.addr, f.name.clone())).collect();
+            creators.extend(ctx.file.symbols().filter(|s| s.kind() == object::SymbolKind::Text && s.address() != 0).filter_map(|s| {
+                Some((s.address(), s.name().ok()?.trim_start_matches('_').to_string()))
+            }));
+            kuna_objcblocks::stack_blocks(&img, ctx.file, &tctx, &creators, &mut out);
+        }
+        if let Some(table) = out.objc_classes.as_mut() {
+            table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
+            table.selref_at.extend(selectors.slots.iter().map(|(va, s)| (*va, s.clone())));
+        }
 
         // A chained slot holds its packed fixup word until `dynrelocs` unpacks it
         // at load; with that gate off the slots are named but never folded.
@@ -296,6 +333,10 @@ impl ObjcMetadataPass {
             // own sub_*/FUN_* placeholder with the ObjC method name, never a real
             // symbol.
             out.fid_names.push(FidMatch { addr: m.imp, name: label.clone() });
+            if let Some(table) = out.objc_classes.as_mut() {
+                let shown_owner = display_class_name(owner);
+                table.classes.entry(shown_owner).or_default().methods.insert((kind == '+', m.selector.clone()), label.clone());
+            }
 
             // The typed prototype from the ObjC type encoding (PR-O2): `i20@0:8i16`
             // → `int -[Greeter greet:](id self, SEL _cmd, int n)`. Keyed by the

@@ -5542,6 +5542,13 @@ fn commit_analysis_output(
     //    struct takes `self` as `Class *` instead of the encoding's `id`.
     let self_types: std::collections::HashMap<String, Rc<kuna_decomp::dtype::Datatype>> =
         if prog.arch().analysis_objcivars { out.objc_self_types.into_iter().collect() } else { Default::default() };
+    // (kuna `objcrettype`/`objcresolve`) The ObjC class table the engine types
+    // and resolves message sends with; it rides the `objc` gate like the labels.
+    if let Some(table) = out.objc_classes {
+        if prog.arch().analysis_objc {
+            prog.arch_mut().kuna_objc_classes = Rc::new(table);
+        }
+    }
     for mut pieces in out.prototypes {
         if let Some(st) = self_types.get(&pieces.name) {
             if let Some(first) = pieces.intypes.first_mut() {
@@ -5877,6 +5884,31 @@ fn commit_analysis_output(
                 if prog.arch().symboltab.function_inject_id_for_symbol(sid) < 0 {
                     prog.arch_mut().symboltab.set_function_inject_id(sid, injectid);
                 }
+            }
+        }
+        // A fact with an address names the FunctionSymbol there too: a Mach-O
+        // import stub keeps its `sub_` name under an alias.
+        for fact in &out.call_fixups {
+            let Some(addr) = fact.addr else { continue };
+            let Some(fixup_name) =
+                kuna_analysis::callfixup::call_fixup_name_for_function(&fact.func_name, &map)
+            else {
+                continue;
+            };
+            let injectid = prog
+                .arch()
+                .pcodeinjectlib
+                .base
+                .get_payload_id(kuna_decomp::pcodeinject::CALLFIXUP_TYPE, fixup_name.as_bytes());
+            if injectid < 0 {
+                continue;
+            }
+            let a = Address::new(Rc::clone(code_space), addr);
+            let arch = prog.arch();
+            let Some(scope) = arch.symboltab.get_global_scope() else { continue };
+            let Some(sid) = arch.symboltab.find_function(scope, &a) else { continue };
+            if prog.arch().symboltab.function_inject_id_for_symbol(sid) < 0 {
+                prog.arch_mut().symboltab.set_function_inject_id(sid, injectid);
             }
         }
     }

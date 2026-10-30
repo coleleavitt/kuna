@@ -40,6 +40,9 @@ const HDR_SUBCACHES: usize = 392;
 const HDR_SYMBOL_FILE_UUID: usize = 400;
 const HDR_IMAGES_OFFSET: usize = 448;
 const HDR_CACHE_SUBTYPE: usize = 456;
+const HDR_OBJC_OPTS: usize = 464;
+/// `ObjCOptimizationHeader.relativeMethodSelectorBaseAddressOffset`.
+const OBJC_OPTS_SELECTOR_BASE: usize = 0x30;
 
 /// Does `prefix` (the first bytes of a file) open a dyld shared cache?
 pub fn is_dyld_cache(prefix: &[u8]) -> bool {
@@ -155,6 +158,7 @@ pub struct DyldCache {
     locals: Option<LocalSymbols>,
     slides: RefCell<HashMap<usize, Option<slide::SlideInfo>>>,
     layouts: RefCell<HashMap<usize, Option<std::rc::Rc<extract::ImageLayout>>>>,
+    objc_selector_base: Option<u64>,
 }
 
 fn u32_at(b: &[u8], off: usize) -> u32 {
@@ -292,7 +296,7 @@ impl DyldCache {
         let images = Self::read_images(&files[0], &h)?;
         let arch = h.arch();
         let wide = !(arch == "arm64_32" || arch.starts_with("armv") || arch == "i386");
-        Ok(DyldCache {
+        let mut cache = DyldCache {
             files,
             wide,
             mappings,
@@ -301,7 +305,30 @@ impl DyldCache {
             locals,
             slides: RefCell::default(),
             layouts: RefCell::default(),
-        })
+            objc_selector_base: None,
+        };
+        cache.objc_selector_base = cache.read_objc_selector_base(&h);
+        Ok(cache)
+    }
+
+    /// The base every direct-selector method list of the cache offsets its
+    /// selectors from: the `ObjCOptimizationHeader` the header names
+    /// (`objcOptsOffset`, an offset from the cache base, dyld 1042+) carries it
+    /// as another offset from the base.
+    fn read_objc_selector_base(&self, h: &Header) -> Option<u64> {
+        let off = h.u64(HDR_OBJC_OPTS).filter(|&o| o != 0)?;
+        let opts = self.read_va(self.base.wrapping_add(off), OBJC_OPTS_SELECTOR_BASE + 8).ok()?;
+        if u32_at(&opts, 0) == 0 {
+            return None;
+        }
+        let rel = u64_at(&opts, OBJC_OPTS_SELECTOR_BASE);
+        (rel != 0).then(|| self.base.wrapping_add(rel))
+    }
+
+    /// See [`Self::read_objc_selector_base`]; `None` on a cache without the
+    /// ObjC optimization header.
+    pub fn objc_selector_base(&self) -> Option<u64> {
+        self.objc_selector_base
     }
 
     fn open_local_symbols(

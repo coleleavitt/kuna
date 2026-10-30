@@ -547,6 +547,21 @@ pub struct Architecture {
     /// `__aeabi_uldivmod`, `_alldiv`, ... prints as the C operator it implements.
     /// Read by the analysis-tier call-fixup installer, like `msvc_ftol`.
     pub arith_helpers: bool,
+    /// (kuna `objcarc`) Install the Objective-C ARC call-fixups
+    /// (`p2_lift/kuna_objcarc.rs`): retain/autorelease pass-throughs become
+    /// copies, releases vanish, `objc_storeStrong` is its store. Default on;
+    /// read by the analysis-tier call-fixup installer like `msvc_ftol`.
+    pub objc_arc: bool,
+    /// (kuna `objcrettype`) Type a message send's result by its receiver:
+    /// `[Foo alloc]` is a `Foo *`, `init…`/`self`/`retain`/`copy` return their
+    /// receiver's class (`p5_types/kuna_objcrettype.rs`). Default on.
+    pub objc_rettype: bool,
+    /// (kuna `objcresolve`) Render a message send whose receiver's class is
+    /// known as the method it reaches (`-[Foo bar:]`). Default on.
+    pub objc_resolve: bool,
+    /// (kuna) The image's Objective-C classes, methods and selector strings,
+    /// handed over by the ObjC analysis commit; empty on every other image.
+    pub kuna_objc_classes: Rc<crate::kuna_objcrettype::ObjcClassTable>,
     /// (kuna tee-O2 tail-jumps) Recover a direct `jmp` to another function's
     /// entry (e.g. `jmp setlocale@plt`) as a tail call (CALL + RETURN) instead of
     /// flowing into the callee (`option tailcalljump on|direct`).
@@ -3141,6 +3156,10 @@ impl Architecture {
             decode_halt: false, // (kuna) option decodehalt; reset_defaults sets the shipped default
             msvc_ftol: false, // (kuna) option msvcftol; reset_defaults sets the shipped default
             arith_helpers: false, // (kuna) option arithhelpers; reset_defaults sets the shipped default
+            objc_arc: false, // (kuna) option objcarc; reset_defaults sets the shipped default
+            objc_rettype: false, // (kuna) option objcrettype; reset_defaults sets the shipped default
+            objc_resolve: false, // (kuna) option objcresolve; reset_defaults sets the shipped default
+            kuna_objc_classes: Rc::new(Default::default()),
             tail_call_jumps: false,
             tail_call_tables: false, // (kuna) option tailcalljump; reset_defaults sets the shipped default
             tail_call_frame: false, // (kuna) option tailcallframe; reset_defaults sets the shipped default
@@ -3621,6 +3640,9 @@ impl Architecture {
         self.relro_noreturn = false; // (kuna) option relronoreturn: default off, a speed trade (see its catalog row)
         self.msvc_ftol = true; // (kuna) DIV-74 default-on: x86-32-only, and inert unless the binary imports an `__ftol`/`__ftol2`/`__ftol2_sse` symbol. Byte-identical (0/675) — no corpus function carries one of those names. Restore the un-fixed `__ftol()` rendering with `option msvcftol off`
         self.arith_helpers = true; // (kuna) default-on: x86-32 and ARM32 only, inert unless the binary names a helper; 0/675 datatests name one
+        self.objc_arc = true; // (kuna) default-on: inert unless the image names an ObjC ARC runtime entry point (0/675 datatests carry one); `option objcarc off` shows the calls again
+        self.objc_rettype = true; // (kuna) default-on: inert unless the ObjC analysis handed over a class table (0/675 datatests)
+        self.objc_resolve = true; // (kuna) default-on: inert unless the ObjC analysis handed over a class table (0/675 datatests)
         self.tail_call_jumps = true; // (kuna) DIV-13 default-on (angr tail-call recovery; per-test opt-out on Long double #1/#2)
         self.tail_call_tables = true; // (kuna) GH-781 default `tailcalljump on`: a veneer whose one destination is another function's entry is a tail call when the destination is outside a declared extent, or the callee's prototype is stated and its return value (if any) reaches a stated output. 0/675 byte-identical on the datatest corpus; `option tailcalljump direct` restores the flow into the destination
         self.tail_call_frame = true; // (kuna) DIV-109 default-on: REMOVES CODE. A direct jmp preceded by a teardown of exactly the entry block's frame is a tail call even when the callee was never discovered. Byte-identical (0/675) on the datatest corpus; restore the flow-into-the-callee decode with `option tailcallframe off`
@@ -4607,6 +4629,9 @@ impl Architecture {
         // (kuna) carry the merged-local declaration-type gate so any per-function
         // ArchContext read site sees `option declhightype`.
         ctx.decl_high_type = self.decl_high_type;
+        ctx.objc_rettype = self.objc_rettype;
+        ctx.objc_resolve = self.objc_resolve;
+        ctx.kuna_objc_classes = Rc::clone(&self.kuna_objc_classes);
         // (kuna GH-558) carry the comparison-presentation gate so the
         // `compareform canonical|original` option reaches
         // `ActionPresentCompareForm` via `glb` (the ArchContext read site).
@@ -5506,9 +5531,10 @@ impl Architecture {
         Ok(())
     }
 
-    /// (kuna `msvcftol`, `arithhelpers`) Register the synthesized MSVC
-    /// `__ftol`-family call-fixup (`p2_lift::kuna_msvcftol`) and the arithmetic
-    /// runtime-helper fixups (`p2_lift::kuna_arithhelpers`) alongside the cspec's
+    /// (kuna `msvcftol`, `arithhelpers`, `objcarc`) Register the synthesized MSVC
+    /// `__ftol`-family call-fixup (`p2_lift::kuna_msvcftol`), the arithmetic
+    /// runtime-helper fixups (`p2_lift::kuna_arithhelpers`) and the ObjC ARC
+    /// fixups (`p2_lift::kuna_objcarc`) alongside the cspec's
     /// own `<callfixup>` elements, so `parse_inject_all` compiles them with the rest.
     ///
     /// Registration is unconditional on x86-32 rather than gated on the option:
@@ -5537,7 +5563,8 @@ impl Architecture {
         let resolve = |nm: &[u8]| self.translate.probe_register_varnode(nm).is_some();
         let ftol = crate::kuna_msvcftol::language_is_x86_32(resolve, code_addr_size);
         let helpers = crate::kuna_arithhelpers::helper_abi(resolve, code_addr_size, big_endian);
-        if !ftol && helpers.is_none() {
+        let objc_arc = crate::kuna_objcarc::payload_xml(resolve, code_addr_size);
+        if !ftol && helpers.is_none() && objc_arc.is_none() {
             return Ok(());
         }
         let manager = self.translate.manager_rc();
@@ -5553,6 +5580,9 @@ impl Architecture {
             )?;
             Ok(())
         };
+        if let Some(xml) = objc_arc {
+            crate::kuna_objcarc::decode_payload(&xml, &mut register)?;
+        }
         if ftol {
             crate::kuna_msvcftol::decode_payload(&mut register)?;
         }

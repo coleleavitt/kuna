@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_398() {
-    assert_eq!(kuna_num_settables(), 398);
-    assert_eq!(SETTABLE_TABLE.len(), 398);
+fn settable_count_is_401() {
+    assert_eq!(kuna_num_settables(), 401);
+    assert_eq!(SETTABLE_TABLE.len(), 401);
 }
 
 #[test]
-fn tier_counts_are_125_core_148_transform_123_analysis() {
+fn tier_counts_are_125_core_151_transform_123_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_148_transform_123_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 149, 124));
+    assert_eq!((core, transform, analysis), (125, 152, 124));
 }
 
 #[test]
@@ -985,7 +985,9 @@ fn option_values_live_value_present_for_168() {
     // 154 -> 155: +1 for `contextnames` (live_field = context_names).
     // 154 -> 155: +1 for `formatcallees` (live_field = analysis_format_callees).
     // 157 -> 158: +1 for `bitidioms` (live_field = bit_idioms).
-    assert_eq!(with_live, 178);
+    // 157 -> 158: +1 for `objcarc` (live_field = objc_arc).
+    // 158 -> 160: +2 for `objcrettype`/`objcresolve` (live_field = objc_rettype/objc_resolve).
+    assert_eq!(with_live, 181);
 }
 
 #[test]
@@ -1230,7 +1232,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
     // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `codestrings`; +1 `protomerge`; +1 `bitidioms`; +1 `canaryglobal`.
-    assert_eq!(json.matches("},\n").count(), 397);
+    assert_eq!(json.matches("},\n").count(), 400);
 }
 
 #[test]
