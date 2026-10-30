@@ -1,5 +1,6 @@
 //! Firmware front end: a raw Cortex-M dump, or a firmware container (U-Boot
-//! uImage, Intel HEX, S-record, ESP image, bFLT, Qualcomm MBN), gets the
+//! uImage, Intel HEX, S-record, ESP image, bFLT, Qualcomm MBN, MediaTek
+//! md1img, PC BIOS image), gets the
 //! `--raw-image --target --base --entry` arguments it would otherwise need by
 //! hand (`kuna_analysis::loader::firmware`). `--svd FILE` adds a CMSIS-SVD
 //! device's peripherals as typed volatile globals and its interrupt names.
@@ -18,12 +19,12 @@ const DEVICE_REGIONS: [&str; 2] = ["0x40000000+0x20000000", "0xe0000000+0x200000
 /// The rewritten arguments and the temporary image they name, if any.
 pub struct Prepared {
     pub args: Vec<String>,
-    temp: Option<std::path::PathBuf>,
+    temp: Vec<std::path::PathBuf>,
 }
 
 impl Drop for Prepared {
     fn drop(&mut self) {
-        if let Some(t) = &self.temp {
+        for t in &self.temp {
             let _ = std::fs::remove_file(t);
         }
     }
@@ -32,7 +33,7 @@ impl Drop for Prepared {
 /// The arguments with the firmware layout filled in; `args` unchanged when
 /// nothing applies. An unreadable `--svd` file is an error.
 pub fn prepare(sub: &str, args: &[String]) -> Result<Prepared, String> {
-    let mut prepared = Prepared { args: args.to_vec(), temp: None };
+    let mut prepared = Prepared { args: args.to_vec(), temp: Vec::new() };
     let svd_file = take_flag(&mut prepared.args, "--svd");
     if !RAW_COMMANDS.contains(&sub) {
         return match svd_file {
@@ -59,10 +60,17 @@ pub fn prepare(sub: &str, args: &[String]) -> Result<Prepared, String> {
                 std::fs::write(&path, &inner).map_err(|e| format!("could not write {}: {e}", path.display()))?;
                 eprintln!("[kuna firmware] {format}: loading the ELF it wraps ({} bytes)", inner.len());
                 out[0] = path.display().to_string();
-                prepared.temp = Some(path);
+                prepared.temp.push(path);
                 return Ok(prepared);
             }
-            Some(containers::Container::Flat(flat)) => {
+            Some(containers::Container::Flat(mut flat)) => {
+                let wants_flash = value(out, "--target").is_some_and(|t| t.starts_with("x86:LE:32") || t.starts_with("x86:LE:64"));
+                if flat.format == "PC BIOS image" && wants_flash {
+                    flat = containers::bios_flash(&bytes).unwrap_or(flat);
+                }
+                if let Some(note) = &flat.note {
+                    eprintln!("[kuna firmware] {}: {note}", flat.format);
+                }
                 let path = temp_path(&binary, "bin");
                 std::fs::write(&path, &flat.bytes).map_err(|e| format!("could not write {}: {e}", path.display()))?;
                 eprintln!(
@@ -74,8 +82,18 @@ pub fn prepare(sub: &str, args: &[String]) -> Result<Prepared, String> {
                     flat.entries
                 );
                 out[0] = path.display().to_string();
-                prepared.temp = Some(path);
+                prepared.temp.push(path);
                 out.push("--raw-image".into());
+                for directive in &flat.asserts {
+                    out.extend(["--assert".into(), directive.clone()]);
+                }
+                if !flat.symbols.is_empty() {
+                    let list = temp_path(&binary, "functions");
+                    let text: String = flat.symbols.iter().map(|(a, n)| format!("{a:#x}={n}\n")).collect();
+                    std::fs::write(&list, text).map_err(|e| format!("could not write {}: {e}", list.display()))?;
+                    out.extend(["--define-function".into(), format!("@{}", list.display())]);
+                    prepared.temp.push(list);
+                }
                 if !has(out, "--target") {
                     if let Some(t) = &flat.target {
                         out.extend(["--target".into(), t.clone()]);

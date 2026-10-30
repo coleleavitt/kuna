@@ -16,6 +16,7 @@ pub mod kuna_switchmodbound;
 pub mod kuna_switchguardbound;
 pub mod kuna_switchguardrange;
 pub mod kuna_switchsharedcase;
+pub mod kuna_segmentops; // (kuna) <segmentop> definitions for ActionSegmentize / RuleSegment
 pub mod kuna_jumpassist; // (kuna) the JumpAssisted model: switches computed by a <jumpassist> user-op
 pub mod kuna_constselectjump; // (kuna) recover a BRANCHIND whose destination is selected between constants
 pub mod kuna_sparcstructret;

@@ -85,6 +85,13 @@ impl JumpAssists {
 }
 
 impl Script {
+    /// The compiled script of inject payload `id`.
+    pub(crate) fn compile(lib: &PcodeInjectLibrarySleigh, id: int4) -> Option<Script> {
+        let tpl = lib.get_tpl(id)?.clone();
+        let payload = lib.injection.get(usize::try_from(id).ok()?)?.clone();
+        Some(Script { payload, tpl })
+    }
+
     fn num_inputs(&self) -> usize {
         self.payload.as_payload().core().size_input() as usize
     }

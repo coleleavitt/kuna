@@ -412,39 +412,51 @@ impl Action for ActionSegmentize {
     fn reset(&mut self, _data: &mut Funcdata) {
         self.localcount = 0;
     }
-    fn apply(&mut self, _data: &mut Funcdata, _ctx: &mut ActionContext) -> ApplyResult {
-        // C++ coreaction.cc:639 — ActionSegmentize::apply
-        //   numops = getArch()->userops.numSegmentOps();
-        //   if (numops == 0) return 0;
-        //   if (localcount > 0) return 0;   // Only perform once
-        //   localcount = 1;
-        //   bindlist = [null, null];
-        //   for (i = 0; i < numops; ++i):
-        //       segdef = userops.getSegmentOp(i); if (!segdef) continue;
-        //       spc = segdef->getSpace(); uindex = segdef->getIndex();
-        //       for (segroot in beginOp(CPUI_CALLOTHER)..endOp(CPUI_CALLOTHER)):
-        //           if (segroot->isDead()) continue;
-        //           if (segroot->getIn(0)->getOffset() != uindex) continue;
-        //           if (!segdef->unify(data,segroot,bindlist)) throw "Segment op in wrong form";
-        //           if (segdef->getNumVariableTerms()==1) bindlist[0] = newConstant(4,0);
-        //           opSetOpcode(segroot, CPUI_SEGMENTOP);
-        //           opSetInput(segroot, newVarnodeSpace(spc), 0);
-        //           opSetInput(segroot, bindlist[0], 1);
-        //           opSetInput(segroot, bindlist[1], 2);
-        //           for (j = numInput()-1; j > 2; --j) opRemoveInput(segroot, j);
-        //           count += 1;
-        //   return 0;
-        //
-        // The `userops.numSegmentOps()==0` / `localcount>0` early-outs would gate
-        // the body; without `getArch()->userops` here, the *first*-pass guard
-        // (`localcount`) is the only realizable part and is left to the stub since
-        // the body it gates cannot run.
-        //
-        // STUB(W8-funcdata): the `SegmentOp` user-op table (`getArch()->userops`),
-        // `SegmentOp::unify`, and the CALLOTHER->SEGMENTOP rewrite
-        // (`opSetOpcode`/`opSetInput`/`newVarnodeSpace`/`opRemoveInput`) are not
-        // present.  Body transcribed; no change applied (count stays 0).
-        0
+    /// C++ `coreaction.cc:639` `ActionSegmentize::apply` with `SegmentOp::unify`:
+    /// every live `segment(base, inner)` CALLOTHER becomes
+    /// `SEGMENTOP(space, base, inner)`, constant inputs resized to the op's
+    /// declared widths.
+    fn apply(&mut self, data: &mut Funcdata, _ctx: &mut ActionContext) -> ApplyResult {
+        let defs = std::rc::Rc::clone(&data.get_arch().segment_defs);
+        if defs.defs.is_empty() || self.localcount > 0 {
+            return 0;
+        }
+        self.localcount = 1;
+        let mut count = 0;
+        for def in &defs.defs {
+            let roots: Vec<OpId> = data.obank().iter_code(OpCode::CPUI_CALLOTHER).collect();
+            for root in roots {
+                let Some(op) = data.obank().get(root) else { continue };
+                if op.is_dead() || op.num_input() != 3 {
+                    continue;
+                }
+                let index = op.get_in(0).and_then(|v| data.vbank().get(v)).map(|v| v.get_offset());
+                if index != Some(def.index as u64) {
+                    continue;
+                }
+                let (Some(mut base), Some(mut inner)) = (op.get_in(1), op.get_in(2)) else { continue };
+                let constant = |data: &Funcdata, vn| data.vbank().get(vn).filter(|v| v.is_constant()).map(|v| v.get_offset());
+                if def.baseinsize == 0 {
+                    inner = base;
+                    base = data.new_constant(4, 0);
+                } else if let Some(off) = constant(data, base) {
+                    base = data.new_constant(def.baseinsize, off);
+                }
+                if let Some(off) = constant(data, inner) {
+                    inner = data.new_constant(def.innerinsize, off);
+                }
+                data.op_set_opcode(root, crate::typeop::seam_type_op_for(OpCode::CPUI_SEGMENTOP));
+                let space = data.new_varnode_space(&def.spc);
+                if data.op_set_input(root, space, 0).is_err()
+                    || data.op_set_input(root, base, 1).is_err()
+                    || data.op_set_input(root, inner, 2).is_err()
+                {
+                    continue;
+                }
+                count += 1;
+            }
+        }
+        count
     }
 }
 

@@ -1030,6 +1030,9 @@ Three tiers:
 | a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes) |
 | a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes) |
 | a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes) |
+| an -O2 variable kept in a register is an anonymous vN although DWARF names it | [`dwarfscopes`](#dwarfscopes) |
+| an inlined function's locals have no names | [`dwarfscopes`](#dwarfscopes) |
+| a regparm function reads registers it never names and its callers pass stack values | [`dwarfscopes`](#dwarfscopes) |
 | a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes) |
 | a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes) |
 | a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes) |
@@ -1564,6 +1567,9 @@ Three tiers:
 | large global initializer exhausts memory during heritage | [`globalcallranges`](#globalcallranges) |
 | tiny constructors cause a quadratic number of global call guards | [`globalcallranges`](#globalcallranges) |
 | a function with many global assignments uses gigabytes before emitting C | [`globalcallranges`](#globalcallranges) |
+| 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x... | [`segmentize`](#segmentize) |
+| segment(0x1000,0x10) instead of a folded address | [`segmentize`](#segmentize) |
+| every stack access of 16-bit code is a segment(...) expression | [`segmentize`](#segmentize) |
 
 ## Toggleable transforms
 
@@ -3799,9 +3805,9 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 
 ### `dwarfscopes` -- on | off, default `on`
 
-- **Symptoms:** a variable declared inside a loop or if block of a -g binary is an anonymous vN; a clang -O0 binary names the wrong stack slot after a DWARF local; a -O1 spilled variable has no name although DWARF describes its slot.
-- **What it does:** Import DWARF stack locals from nested lexical blocks and from location lists, not only from a subprogram's direct children with a single DW_OP_fbreg expression. A local declared inside a loop body or an if block (DW_TAG_lexical_block, at any depth) is a fixed stack object exactly like a function-scope one, and a variable whose DW_AT_location is a location list takes the stack slot when every frame-relative entry of the list names the same one (a value spilled to one slot for part of its life); register-only entries are left to inference. Independently of this option, a DW_OP_fbreg offset is now taken relative to the subprogram's DW_AT_frame_base: gcc's DW_OP_call_frame_cfa as before, and clang's frame-pointer bases (RBP on x86-64, EBP on i386, x29 on AArch64, s0 on RISC-V) at the distance the standard prologue leaves them below the CFA; any other register frame base places no locals, where it used to place every one of them 16 bytes off and name the wrong slot. A load-time env bridge (KUNA_DWARFSCOPES): set it before the image is loaded.
-- **When to flip:** On by default: `char scratch[32]` declared in a loop body is named and typed instead of `char v1 [31]`, and clang -O0 binaries name the right slot. Flip off to compare against direct-children-only import, or when nested locals that share one slot across sibling scopes make a function harder to read.
+- **Symptoms:** a variable declared inside a loop or if block of a -g binary is an anonymous vN; a clang -O0 binary names the wrong stack slot after a DWARF local; a -O1 spilled variable has no name although DWARF describes its slot; an -O2 variable kept in a register is an anonymous vN although DWARF names it; an inlined function's locals have no names; a regparm function reads registers it never names and its callers pass stack values.
+- **What it does:** Import DWARF locals and parameter storage beyond a subprogram's direct children with a single DW_OP_fbreg expression. Locals nested in lexical blocks (DW_TAG_lexical_block) and inlined subroutines (DW_TAG_inlined_subroutine, named through DW_AT_abstract_origin; a repeated name is suffixed _2, _3) are collected at any depth. A stack slot comes from a single frame-relative expression, from a location list whose frame-relative entries all name one slot, or from a composite whose DW_OP_piece parts are consecutive frame slots. A local held in a register (a whole-function DW_OP_reg, or the longest single-register entry of its location list) is mapped at the use point the register's value has where its range starts (the block-start phi when the range starts a basic block, else the defining instruction at most 16 bytes earlier), so the merged variable takes the DWARF name. A parameter whose location at the function entry is one register is locked there, in the function's own decompile and in the prototype its callers read, which is what a regparm or IPA-optimized callee needs. Independently of this option, a DW_OP_fbreg offset is taken relative to the subprogram's DW_AT_frame_base: gcc's DW_OP_call_frame_cfa as before, and clang's frame-pointer bases (RBP on x86-64, EBP on i386, x29 on AArch64, s0 on RISC-V) at the distance the standard prologue leaves them below the CFA; any other register frame base places no stack locals. A load-time env bridge (KUNA_DWARFSCOPES): set it before the image is loaded.
+- **When to flip:** On by default: `char scratch[32]` declared in a loop body is named and typed instead of `char v1 [31]`, clang -O0 binaries name the right slot, a -O2 accumulator kept in EAX reads `h`, and a regparm callee reads `return (a * 7 + b * 3) - c;` with its callers passing the registers. Flip off to compare against direct-children-only import, or when a DWARF location is wrong for the code.
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-57
 - **Example:** `option dwarfscopes off`
 
@@ -4864,6 +4870,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on for initializers that write many globals and call small constructors at distinct constant destinations. Flip off to compare the original all-globals-at-every-call guard placement. Unknown callee bodies and unresolved or overlapping actual pointers retain their existing guards.
 - **Where / provenance:** P3/call-guard · kuna · performance · gh-1034
 - **Example:** `option globalcallranges off`
+
+### `segmentize` -- on | off, default `on`
+
+- **Symptoms:** 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x...; segment(0x1000,0x10) instead of a folded address; every stack access of 16-bit code is a segment(...) expression.
+- **What it does:** Port of Ghidra's ActionSegmentize and RuleSegment for a language whose processor spec declares a <segmentop> (x86 16-bit real and protected mode). Every segment(base, inner) user-op the SLEIGH semantics emit for a segment-relative address becomes the internal SEGMENTOP, which the stack analysis and the LOAD/STORE rules already understood: a segment over the stack pointer is a stack access (the base is ignored, as upstream does), and a segment of two constants folds to the address the spec's own p-code body computes (`(zext(base) << 4) + zext(inner)` in real mode). The pspec <segmentop> element is now decoded and its body compiled; both halves used to be stubs, so every stack push read as `*(unsigned short *)segment(v2,v1) = 0xe062` and a DS-relative store as `*(unsigned short *)segment(0x1000,0x10) = 0x1234`. Every other language has no segment op and is unchanged.
+- **When to flip:** On by default: a BIOS or DOS real-mode routine reads `dat_10010 = 0x1234;` and calls without the pushed return address. Flip off to see the raw segment(base, inner) user-ops, for example to check which segment register an access used.
+- **Where / provenance:** P3/simplification-quiescence · ghidra · correctness-fix · ida95-56
+- **Example:** `option segmentize off`
 
 ## Programmatic use
 

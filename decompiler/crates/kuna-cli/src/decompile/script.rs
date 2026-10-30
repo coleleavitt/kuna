@@ -77,7 +77,7 @@ pub(super) fn build_script_for_input(
     if *raw_image {
         let language = bfd_target.expect("raw parser requires --target");
         let base = base.expect("raw parser requires --base");
-        lines.push(format!("load raw {language} 0x{base:x} {target} {image}"));
+        lines.push(format!("load raw {} 0x{base:x} {target} {image}", language.replace(' ', "_")));
     } else {
         match bfd_target {
             Some(t) if !t.is_empty() => lines.push(format!("load file {t} {image}")),

@@ -3113,9 +3113,32 @@ moves.
   `DW_TAG_lexical_block` scopes at any depth are collected in document order
   like direct children, and a variable whose location is a location list takes
   the stack slot when every frame-relative entry of the list names the same one;
-  register entries stay with inference. Inlined-subroutine locals and composite
-  (`DW_OP_piece`) locations remain a documented loss, and parameter storage
-  is still the calling convention's. (ida) The
+  a composite whose `DW_OP_piece` parts are consecutive frame slots is the
+  first slot (`kuna_dwarfscopes.rs (piece_frame_offset)`). Inlined subroutines
+  are walked like lexical blocks, their variables named through
+  `DW_AT_abstract_origin`, a repeated name in one function suffixed `_2`, `_3`
+  (`scope_vars`, `LocalNames`). A variable held in one register (a whole-function
+  `DW_OP_reg<n>`/`DW_OP_regx`, or the longest single-register entry of its
+  location list, `register_location`) becomes a `pass.rs (RegLocalFact)`; the
+  DWARF register number is turned into the SLEIGH name by the psABI tables in
+  `register_name` (x86-64, i386, AArch64, ARM, RISC-V, MIPS, PowerPC). The
+  commit parks them on the architecture by function entry, and the decompile
+  (`decompiler/crates/kuna-decomp/src/substrate/funcdata.rs (seed_dwarf_register_locals)`)
+  maps each as a namelocked, typelocked local at the use point its value will
+  have after heritage: the range's start when it begins a basic block (a
+  loop-carried value's phi), otherwise the last raw write covering the storage
+  strictly before the start and at most 16 bytes earlier (the defining
+  instruction); the matching raw varnodes have their properties refreshed, as
+  for a console `type varnode`. A parameter whose location at the entry PC is a
+  single register (`entry_storage`) is locked to that register when the
+  default model would put some parameter of the function elsewhere and gives it
+  no hidden return pointer (the commit asks the model with
+  `assign_parameter_storage`): locked twice, as a `map param` lock for the
+  function's own decompile and as explicit input storage on the prototype its
+  callers read, so a `regparm(3)` callee and its call sites agree. A function the
+  model already describes keeps its model-derived storage. A composite held in several registers (a struct split
+  across RDI:RSI) is not mapped; it would need a local symbol at a join-space
+  address. (ida) The
   data-global fix (DIV-24): a global used to be mapped with a size-1 type, so any
   multi-byte access queried `queryContainer(addr, 4)` past it and rendered
   `dat_<addr>`; the pass now resolves `DW_AT_type` to a byte size
@@ -8735,12 +8758,21 @@ alignment, erase polarity from the volume attributes), sections (4-byte
 alignment, extended sizes), nested volumes in `FIRMWARE_VOLUME_IMAGE` sections
 and RAW files, compression sections stored uncompressed, and GUID-defined
 sections for EDK2 LZMA (`lzma-rs`, the 13-byte LZMA-alone header), LZMA with
-the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Brotli
-(`brotli-decompressor`, after EDK2's 16-byte size header) and CRC32. Every
+the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Tiano
+(`tiano.rs (decompress)`, a port of EDK2 `BaseTools/Source/C/Common/Decompress.c`
+with the 5-bit position set), Brotli (`brotli-decompressor`, after EDK2's
+16-byte size header) and CRC32; a standard compression section of type 1 is
+decoded as EFI 1.1 (4-bit position set) and retried as Tiano. Every
 PE32/TE section is a module named by the file's UI section. `containers.rs (detect)` reads U-Boot
 legacy images, Intel HEX, Motorola S-records, ESP32/ESP8266 application images,
 uClinux bFLT v4 (rebasing GOT entries and relocations past the 64-byte header,
-as `binfmt_flat` does) and Qualcomm MBN/SBL wrappers, and returns either one
+as `binfmt_flat` does), Qualcomm MBN/SBL wrappers, MediaTek `md1img` (the
+`md1rom` section at 0x90000000 as MIPS32 LE, the LZMA `md1_dbginfo` symbol
+records as function names, a nanoMIPS ROM reported because no SLEIGH spec
+decodes it) and PC BIOS images (the reset-vector test of IDA's
+`bios_image.py`; the last 128 KiB mapped below 1 MiB with `register CS`
+assertions for segments E000 and F000, or with a 32-bit target the whole flash
+ending at 4 GiB), and returns either one
 flat image (lowest to highest loaded address, gaps filled, at most 256 MiB;
 an ESP image whose segments span more keeps the segments in the entry's
 16 MiB window) with the processor, base and entries its header states, or the

@@ -291,6 +291,20 @@ pub fn parse_directive(spec: &str) -> Result<Directive, String> {
                 Body::Volatile { addr, size }
             }
         }
+        "register" => {
+            let (name, rest) = take_token(rest);
+            let (value, range) = take_token(rest);
+            let value = parse_vma(value).ok_or_else(|| bad("register needs <name> <hex value> [<addr>+<size>]"))?;
+            if name.is_empty() {
+                return Err(bad("register needs <name> <hex value> [<addr>+<size>]"));
+            }
+            let range = if range.trim().is_empty() {
+                None
+            } else {
+                Some(parse_range(range).ok_or_else(|| bad("register range needs <addr>+<size>"))?)
+            };
+            Body::Register { name: name.to_string(), value, range }
+        }
         "bytes" => {
             let (addr, payload) = take_token(rest);
             let addr = parse_vma(addr).ok_or_else(|| bad("bytes needs a hex <addr>"))?;

@@ -5,9 +5,9 @@
 //! its `_FVH` signature at offset 0x28 of an 8-byte-aligned header anywhere in
 //! the input, so a whole SPI flash image, a capsule body or a bare `.fv` all
 //! work. GUID-defined sections are decoded for EDK2's LZMA (and its x86 BCJ
-//! variant), Brotli and CRC32 GUIDs; standard compression sections are read
-//! when they are stored uncompressed. A Tiano/EFI-compressed section is
-//! reported, not decoded.
+//! variant), Tiano, Brotli and CRC32 GUIDs, and standard compression sections
+//! for the EFI 1.1 format (Tiano as a fallback, which some firmware stores
+//! there) or no compression.
 
 use std::io::Read;
 
@@ -37,6 +37,7 @@ pub struct Walk {
 const LZMA: [u8; 16] = guid(0xEE4E5898, 0x3914, 0x4259, [0x9D, 0x6E, 0xDC, 0x7B, 0xD7, 0x94, 0x03, 0xCF]);
 const LZMA_F86: [u8; 16] = guid(0xD42AE6BD, 0x1352, 0x4BFB, [0x90, 0x9A, 0xCA, 0x72, 0xA6, 0xEA, 0xE8, 0x89]);
 const BROTLI: [u8; 16] = guid(0x3D532050, 0x5CDA, 0x4FD0, [0x87, 0x9E, 0x0F, 0x7F, 0x63, 0x0D, 0x5A, 0xFB]);
+const TIANO: [u8; 16] = guid(0xA31280AD, 0x481E, 0x41B6, [0x95, 0xE8, 0x12, 0x7F, 0x4C, 0x98, 0x47, 0x79]);
 const CRC32: [u8; 16] = guid(0xFC1BCDB0, 0x7D31, 0x49AA, [0x93, 0x6A, 0xA4, 0x60, 0x0D, 0x9D, 0xD0, 0x83]);
 const MAX_DEPTH: usize = 8;
 const MAX_OUTPUT: usize = 256 << 20;
@@ -181,7 +182,11 @@ fn sections(mut data: &[u8], file: &File, depth: usize, w: &mut Walk, found: &mu
         match kind {
             0x01 if depth < MAX_DEPTH => match (u32_at(body, 0), body.get(4)) {
                 (Some(_), Some(0)) => sections(&body[5..], file, depth + 1, w, found),
-                _ => w.undecoded.push(format!("{}: EFI/Tiano standard compression", file.guid)),
+                (Some(_), Some(1)) => match super::tiano::decompress_either(&body[5..], super::tiano::Variant::Efi) {
+                    Ok(out) => sections(&out, file, depth + 1, w, found),
+                    Err(reason) => w.undecoded.push(format!("{}: {reason}", file.guid)),
+                },
+                _ => w.undecoded.push(format!("{}: unknown compression type", file.guid)),
             },
             0x02 if depth < MAX_DEPTH => guided(body, file, depth, w, found),
             0x10 => found.images.push((false, body.to_vec())),
@@ -211,6 +216,7 @@ fn guided(body: &[u8], file: &File, depth: usize, w: &mut Walk, found: &mut Foun
             out
         }),
         Some(BROTLI) => brotli(payload),
+        Some(TIANO) => super::tiano::decompress_either(payload, super::tiano::Variant::Tiano),
         Some(CRC32) => Ok(payload.to_vec()),
         _ => Err(format!("GUID-defined section {}", guid_string(g))),
     };
@@ -373,6 +379,17 @@ mod tests {
         let w = walk(&volume_with(&section(0x02, &guided_body)));
         assert_eq!(w.modules.len(), 1, "{:?}", w.undecoded);
         assert_eq!(w.modules[0].image, b"MZ-inner-image");
+        assert_eq!(w.modules[0].name.as_deref(), Some("DiskIoDxe"));
+    }
+
+    #[test]
+    fn standard_and_tiano_compressed_files_are_decoded() {
+        let fv = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uefi_tiano_efi_compressed.fv")).unwrap();
+        let plain = std::fs::read(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/uefi_diskio_x64.efi")).unwrap();
+        let w = walk(&fv);
+        assert!(w.undecoded.is_empty(), "{:?}", w.undecoded);
+        assert_eq!(w.modules.len(), 2);
+        assert!(w.modules.iter().all(|m| m.image == plain));
         assert_eq!(w.modules[0].name.as_deref(), Some("DiskIoDxe"));
     }
 

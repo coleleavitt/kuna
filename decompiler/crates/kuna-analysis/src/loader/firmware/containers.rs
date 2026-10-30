@@ -19,6 +19,13 @@ pub struct Flat {
     pub entries: Vec<u64>,
     /// 32-bit ARM code starts in Thumb state.
     pub thumb: bool,
+    /// `--assert` directives the layout implies (segment registers of a
+    /// real-mode image).
+    pub asserts: Vec<String>,
+    /// Function names the container carries.
+    pub symbols: Vec<(u64, String)>,
+    /// Why the processor is not stated although the container was recognized.
+    pub note: Option<String>,
 }
 
 /// What a container holds.
@@ -50,10 +57,16 @@ pub fn detect(bytes: &[u8]) -> Result<Option<Container>, String> {
             return Ok(Some(c));
         }
     }
+    if let Some(c) = md1img(bytes)? {
+        return Ok(Some(c));
+    }
     if let Some(c) = esp(bytes) {
         return Ok(Some(c));
     }
-    Ok(mbn(bytes))
+    if let Some(c) = mbn(bytes) {
+        return Ok(Some(c));
+    }
+    Ok(bios(bytes))
 }
 
 fn be32(b: &[u8], at: usize) -> Option<u32> {
@@ -121,6 +134,7 @@ fn uimage(b: &[u8]) -> Result<Container, String> {
         bytes,
         entries: vec![ep & !u64::from(arch == 2)],
         thumb: arch == 2 && ep & 1 == 1,
+        ..Flat::default()
     }))
 }
 
@@ -255,6 +269,7 @@ fn esp(b: &[u8]) -> Option<Container> {
         bytes,
         entries: vec![entry],
         thumb: false,
+        ..Flat::default()
     }))
 }
 
@@ -297,6 +312,7 @@ fn bflt(b: &[u8]) -> Result<Container, String> {
         bytes: image,
         entries: vec![u64::from(entry)],
         thumb: false,
+        ..Flat::default()
     }))
 }
 
@@ -318,6 +334,171 @@ fn mbn(b: &[u8]) -> Option<Container> {
         let machine = u16::from_le_bytes([e[18], e[19]]);
         (e.starts_with(b"\x7fELF") && e[4] == 1 && e[5] == 1 && matches!(machine, 0x28 | 0xa4 | 0xb7))
             .then(|| Container::Embedded { format: "Qualcomm MBN", bytes: b[at..].to_vec() })
+    })
+}
+
+const MD1_MAGIC: u32 = 0x5888_1688;
+const MD1_EXT_MAGIC: u32 = 0x5889_1689;
+/// The MediaTek section header (`magic, dsize, name[32], maddr, mode,
+/// ext_magic, hdr_size, hdr_version, img_type, img_list_end, align_size,
+/// dsize_extend, maddr_extend`).
+const MD1_HEADER: usize = 0x50;
+/// Where the modem ROM runs.
+pub const MD1ROM_BASE: u64 = 0x9000_0000;
+
+/// One `md1img` section: name and data.
+fn md1_sections(b: &[u8]) -> Option<Vec<(String, &[u8])>> {
+    let mut out = Vec::new();
+    let mut off = 0usize;
+    while off + MD1_HEADER <= b.len() {
+        if le32(b, off)? != MD1_MAGIC || le32(b, off + 0x30)? != MD1_EXT_MAGIC {
+            break;
+        }
+        let dsize = le32(b, off + 4)? as usize;
+        let hdr = le32(b, off + 0x34)? as usize;
+        let align = (le32(b, off + 0x44)? as usize).max(1);
+        if hdr < MD1_HEADER {
+            break;
+        }
+        let name_bytes = b.get(off + 8..off + 40)?;
+        let name = String::from_utf8_lossy(&name_bytes[..name_bytes.iter().position(|&c| c == 0).unwrap_or(32)]).to_string();
+        let data = b.get(off + hdr..off + hdr + dsize)?;
+        out.push((name, data));
+        off += hdr + dsize;
+        off += (align - dsize % align) % align;
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+fn cstring(b: &[u8], at: &mut usize) -> Option<String> {
+    let rest = b.get(*at..)?;
+    let n = rest.iter().position(|&c| c == 0)?;
+    *at += n + 1;
+    Some(String::from_utf8_lossy(&rest[..n]).to_string())
+}
+
+/// `md1_dbginfo`: an LZMA stream holding 0x1c bytes, four strings (target,
+/// platform, version, build time), a word, the symbol-area end, then
+/// `(name, start, end)` records.
+pub fn md1_symbols(packed: &[u8]) -> Result<Vec<(u64, String)>, String> {
+    let mut data = Vec::new();
+    lzma_rs::lzma_decompress(&mut std::io::BufReader::new(packed), &mut data)
+        .or_else(|_| {
+            data.clear();
+            lzma_rs::xz_decompress(&mut std::io::BufReader::new(packed), &mut data)
+        })
+        .map_err(|e| format!("md1_dbginfo: {e}"))?;
+    let mut at = 0x1c;
+    for _ in 0..4 {
+        cstring(&data, &mut at).ok_or("md1_dbginfo: short header")?;
+    }
+    let end = le32(&data, at + 4).ok_or("md1_dbginfo: short header")? as usize;
+    at += 8;
+    let mut out = Vec::new();
+    while at < end.min(data.len()) {
+        let Some(name) = cstring(&data, &mut at) else { break };
+        let (Some(start), Some(_stop)) = (le32(&data, at), le32(&data, at + 4)) else { break };
+        at += 8;
+        if !name.is_empty() {
+            out.push((u64::from(start), name));
+        }
+    }
+    Ok(out)
+}
+
+/// MediaTek modem image (`md1img.img`): a chain of `0x58881688` sections;
+/// `md1rom` runs at 0x90000000, `md1_dbginfo` names its functions. A ROM that
+/// starts with nanoMIPS code (`c0 60`, a load-immediate) has no processor
+/// here: there is no nanoMIPS SLEIGH specification.
+fn md1img(b: &[u8]) -> Result<Option<Container>, String> {
+    let Some(sections) = md1_sections(b) else { return Ok(None) };
+    let Some((_, rom)) = sections.iter().find(|(n, _)| n == "md1rom") else {
+        return Err("md1img has no md1rom section".into());
+    };
+    let symbols = match sections.iter().find(|(n, _)| n == "md1_dbginfo") {
+        Some((_, packed)) => md1_symbols(packed)?,
+        None => Vec::new(),
+    };
+    let nanomips = rom.starts_with(&[0xc0, 0x60]);
+    Ok(Some(Container::Flat(Flat {
+        format: "MediaTek md1img",
+        target: (!nanomips).then(|| "MIPS:LE:32:default".to_string()),
+        base: MD1ROM_BASE,
+        bytes: rom.to_vec(),
+        entries: vec![MD1ROM_BASE],
+        symbols,
+        note: nanomips.then(|| "md1rom is nanoMIPS code, which no SLEIGH specification here decodes".to_string()),
+        ..Flat::default()
+    })))
+}
+
+/// The size IDA's BIOS loader reads: a size that is not 4 KiB-aligned loses
+/// its trailer to a 64 KiB boundary.
+fn bios_size(b: &[u8]) -> usize {
+    if b.len() & 0xfff != 0 { b.len() & !0xffff } else { b.len() }
+}
+
+/// A PC BIOS / flash dump: the reset vector, the last 16 bytes, is a far jump
+/// to segment F000 or above, a near jump, or a backward short jump, after any
+/// `nop`s and a `wbinvd`.
+fn bios_reset_vector(b: &[u8]) -> bool {
+    let size = bios_size(b);
+    if size < 16 {
+        return false;
+    }
+    let mut v = &b[size - 16..size];
+    while v.first() == Some(&0x90) {
+        v = &v[1..];
+    }
+    if v.starts_with(&[0x0f, 0x09]) {
+        v = &v[2..];
+    }
+    match v {
+        [0xea, _, _, _, seg, ..] => (0xf0..=0xfe).contains(seg),
+        [0xe9, _, _, ..] => true,
+        [0xeb, d, ..] => d & 0x80 != 0,
+        _ => false,
+    }
+}
+
+/// The real-mode view of a BIOS image: its last 128 KiB (or less) mapped below
+/// 1 MiB as segments E000 and F000, entered at F000:FFF0, with CS tracked per
+/// segment so near calls and jumps resolve to linear addresses.
+fn bios(b: &[u8]) -> Option<Container> {
+    if !bios_reset_vector(b) || b.len() > 64 << 20 {
+        return None;
+    }
+    let size = bios_size(b);
+    let len = size.min(0x20000);
+    let base = 0x10_0000 - len as u64;
+    let mut asserts = vec!["register CS 0xf000 0xf0000+0x10000".to_string()];
+    if len > 0x10000 {
+        asserts.push(format!("register CS 0xe000 {base:#x}+{:#x}", 0xf0000 - base));
+    }
+    Some(Container::Flat(Flat {
+        format: "PC BIOS image",
+        target: Some("x86:LE:16:Real Mode".into()),
+        base,
+        bytes: b[size - len..size].to_vec(),
+        entries: vec![0xf_fff0],
+        asserts,
+        ..Flat::default()
+    }))
+}
+
+/// The protected-mode view of a BIOS image: the whole flash mapped so it ends
+/// at 4 GiB, as the chipset aliases it.
+pub fn bios_flash(b: &[u8]) -> Option<Flat> {
+    if !bios_reset_vector(b) {
+        return None;
+    }
+    let size = bios_size(b);
+    Some(Flat {
+        format: "PC BIOS image (flash alias)",
+        target: None,
+        base: (1u64 << 32) - size as u64,
+        bytes: b[..size].to_vec(),
+        ..Flat::default()
     })
 }
 
@@ -345,6 +526,19 @@ mod tests {
         b.extend([0x70, 0x47, 0, 0, 0, 0, 0, 0]);
         let Some(Container::Flat(f)) = detect(&b).unwrap() else { panic!() };
         assert_eq!((f.target.as_deref(), f.base, f.entries.as_slice(), f.thumb), (Some("ARM:LE:32:v7"), 0x8000, &[0x8000u64][..], true));
+    }
+
+    #[test]
+    fn a_bios_image_maps_below_one_megabyte_with_tracked_segments() {
+        let mut b = vec![0u8; 0x20000];
+        b[0x1fff0..0x1fff5].copy_from_slice(&[0xea, 0x5b, 0xe0, 0x00, 0xf0]);
+        let Some(Container::Flat(f)) = detect(&b).unwrap() else { panic!() };
+        assert_eq!((f.base, f.entries.as_slice(), f.bytes.len()), (0xe0000, &[0xffff0u64][..], 0x20000));
+        assert_eq!(f.asserts, ["register CS 0xf000 0xf0000+0x10000", "register CS 0xe000 0xe0000+0x10000"]);
+        assert_eq!(bios_flash(&b).unwrap().base, 0xfffe_0000);
+        b[0x1fff0] = 0x90;
+        b[0x1fff1] = 0x90;
+        assert!(detect(&b).unwrap().is_none());
     }
 
     #[test]

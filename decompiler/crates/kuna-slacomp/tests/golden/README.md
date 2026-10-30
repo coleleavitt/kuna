@@ -26,8 +26,11 @@ C++ compiler, which reproduces the previous SPARC digests on the previous
 sources; `slacomp` produces the same digests.
 
 The x86 entries include the width-specific x87 integer-conversion operations,
-the control-word writes of `FXRSTOR` and `XRSTOR`/`XRSTORS`, and the signed
-BOUND operand loads and bounds-check user-ops.
+the control-word writes of `FXRSTOR` and `XRSTOR`/`XRSTORS`, the signed
+BOUND operand loads and bounds-check user-ops, and the 16-bit-code `rel16`
+constructor that keeps a near branch inside its 64 KiB code segment (x86.sla
+only; it shares a source line with the masked form so no later constructor's
+line moves and the x86-64 digest is unchanged).
 They were regenerated with the recorded C++ compiler after checking that it
 reproduces both unmodified x86 hashes; kuna’s compiler produces the same changed
 element streams.

@@ -2705,6 +2705,18 @@ provide processor-version and privilege-appropriate reads and masked writes.
 Register and immediate MSR update NZCVQ only when the flag byte is selected,
 preserving arithmetic flags across control-only writes.
 
+### x86 16-bit near branches keep their code segment
+
+`rel16` in `ia.sinc` masks the target to 16 bits, the Intel SDM's rule for a
+16-bit operand-size branch in 32-bit code (GH-7418): EIP's high bytes are
+zeroed. In 16-bit code (`addrsize=0`) the instruction pointer is the low 16 bits
+of an address whose segment base is the rest of it, so the masked form sent
+every near `call`/`jmp` in segment F000 of a BIOS to `0x0xxxx`. The 16-bit
+constructor now keeps the address bits above the low 16, as upstream's 64-bit
+build does (`((inst_next >> 16) << 16) | ((inst_next + simm16) & 0xFFFF)`); a
+code segment is therefore assumed 64 KiB-aligned, which holds for BIOS segments
+E000 and F000. Only `x86.sla` changes; the 32-bit masked form is unchanged.
+
 ### RISC-V moves and conversions from FP to integer registers (GH-831)
 
 `fmv.x.d` copies the 64-bit pattern of its FP source into the integer

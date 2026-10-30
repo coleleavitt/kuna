@@ -196,6 +196,21 @@ pub struct LocalFact {
     pub stack_offset: i64,
 }
 
+/// (kuna `dwarfscopes`) A DWARF local variable held in a register from `start` on.
+#[derive(Clone, Debug)]
+pub struct RegLocalFact {
+    /// Entry of the function the variable belongs to.
+    pub func_addr: u64,
+    pub name: String,
+    pub type_: std::rc::Rc<kuna_decomp::dtype::Datatype>,
+    /// The DWARF register number.
+    pub dwarf_reg: u16,
+    /// The SLEIGH register name (filled by the DWARF pass for the image's ABI).
+    pub reg: String,
+    /// The PC from which the variable lives in the register.
+    pub start: u64,
+}
+
 /// (kuna `libctypes`) A data symbol whose TYPE the analysis tier knows outright:
 /// the address, the name it is installed under, and the recovered type.
 ///
@@ -426,6 +441,10 @@ pub struct AnalysisOutput {
     pub dwarf_typed_globals: Vec<TypedDataFact>,
     /// (kuna `tlsnames`) The executable's static TLS block.
     pub tls_layout: Option<kuna_decomp::kuna_tlsnames::TlsLayout>,
+    /// (kuna `dwarfscopes`) DWARF locals held in a register.
+    pub dwarf_reg_locals: Vec<RegLocalFact>,
+    /// (kuna `dwarfscopes`) DWARF parameters whose entry location is a register.
+    pub dwarf_param_regs: Vec<RegLocalFact>,
     /// Discovered function entry points (for stripped targets).
     pub entries: Vec<u64>,
     /// (kuna) Function bodies that describe exactly one function, as `[start, end)`.
@@ -840,6 +859,8 @@ impl AnalysisOutput {
         self.data_objects.extend(other.data_objects);
         self.dwarf_typed_globals.extend(other.dwarf_typed_globals);
         self.tls_layout = self.tls_layout.take().or(other.tls_layout);
+        self.dwarf_reg_locals.extend(other.dwarf_reg_locals);
+        self.dwarf_param_regs.extend(other.dwarf_param_regs);
         self.typed_data.extend(other.typed_data);
         self.swift_types.typed_data.extend(other.swift_types.typed_data);
         self.swift_types.prototypes.extend(other.swift_types.prototypes);

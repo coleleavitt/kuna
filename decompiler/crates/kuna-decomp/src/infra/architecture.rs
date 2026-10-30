@@ -502,6 +502,9 @@ pub struct Architecture {
     pub peb_names: crate::kuna_pebnames::PebNamesMode,
     /// (kuna) `tlsnames`: the static TLS block the loader committed.
     pub tls_layout: Option<std::rc::Rc<crate::p5_types::kuna_tlsnames::TlsLayout>>,
+    /// (kuna `dwarfscopes`) Register-held DWARF locals by function entry:
+    /// name, type, register storage, and the PC the register holds it from.
+    pub dwarf_reg_locals: std::collections::BTreeMap<u64, Vec<(String, Rc<crate::dtype::Datatype>, Address, u64)>>,
     /// (kuna `structsynth`) Over which bases a structure may be synthesized from
     /// constant-offset dereferences: `off` (the default) or `param` (function
     /// parameters).  See [`kuna_structsynth`](crate::kuna_structsynth).
@@ -1829,6 +1832,8 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) `segmentize`: rewrite `<segmentop>` user-ops into SEGMENTOP.
+    pub segmentize: bool,
     /// (kuna) Gate the static-TLS naming (`tlsnames`); default on.
     pub analysis_tlsnames: bool,
     /// (kuna) `dwarfglobaltypes`: lock a DWARF global's declared type.
@@ -2828,6 +2833,7 @@ pub struct Architecture {
     pub call_mechanism_effects: bool,
     /// (kuna `jumpassist`) The compiled `<jumpassist>` scripts.
     jump_assists: Rc<crate::kuna_jumpassist::JumpAssists>,
+    segment_defs: Rc<crate::kuna_segmentops::SegmentDefs>,
     /// (kuna) Recover switches from a jump-assist user-op (option `jumpassist`).
     pub jump_assist: bool,
     /// (kuna `dexmodel`) The loaded DEX files, when the image is one (or an
@@ -3177,6 +3183,7 @@ impl Architecture {
             syscall_regs: crate::kuna_syscallregs::SyscallRegsMode::Off, // (kuna) option syscallregs; reset_defaults sets the shipped default
             image_os_userland: false, // (kuna) a load-time fact; set by the console's `load file`
             tls_layout: None,
+            dwarf_reg_locals: std::collections::BTreeMap::new(),
             peb_names: crate::kuna_pebnames::PebNamesMode::Off, // (kuna) option pebnames; reset_defaults sets the shipped default
             struct_synth: crate::kuna_structsynth::StructSynthMode::Off, // (kuna) option structsynth; reset_defaults sets the shipped default
             struct_synth_shard: None,
@@ -3456,6 +3463,7 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            segmentize: false,
             analysis_tlsnames: false,
             analysis_dwarfglobaltypes: false,
             analysis_dwarfscopes: true,
@@ -3606,6 +3614,7 @@ impl Architecture {
             call_mechanisms: Rc::default(),
             call_mechanism_effects: false,
             jump_assists: Rc::default(),
+            segment_defs: Rc::default(),
             jump_assist: true,
             dex: Vec::new(),
             dex_model: true,
@@ -3952,6 +3961,7 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.segmentize = true;
         self.analysis_tlsnames = true;
         self.analysis_dwarfglobaltypes = false;
         self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
@@ -4539,6 +4549,9 @@ impl Architecture {
         }); // dexmodel
         if self.jump_assist {
             ctx.jump_assists = Rc::clone(&self.jump_assists); // jumpassist
+        }
+        if self.segmentize {
+            ctx.segment_defs = Rc::clone(&self.segment_defs); // segmentize
         }
         ctx.min_laned_register_size = self.get_minimum_laned_register_size();
         // Carry the laned-register table so the per-function Funcdata reaches
@@ -5726,6 +5739,14 @@ impl Architecture {
                 let mut decoder = XmlDecode::new_with_root(&manager, &registry, assist, 0);
                 userops.decode_jump_assist(&mut decoder, self)?;
             }
+            // (kuna) ELEM_SEGMENTOP (`userops.decodeSegmentOp`): x86 real and
+            // 16-bit protected mode's `segment(base, inner)`.
+            let segments: Vec<Rc<kuna_base::xml::Element>> =
+                root.get_children().iter().filter(|c| c.get_name() == "segmentop").cloned().collect();
+            for segment in segments.iter() {
+                let mut decoder = XmlDecode::new_with_root(&manager, &registry, segment, 0);
+                userops.decode_segment_op(&mut decoder, self)?;
+            }
             Ok(())
         });
         self.userops = userops;
@@ -5764,6 +5785,7 @@ impl Architecture {
         if parse_res.is_ok() {
             self.call_mechanisms = Rc::new(crate::kuna_callmechanisms::Mechanisms::from_library(&lib));
             self.jump_assists = Rc::new(crate::kuna_jumpassist::JumpAssists::from_library(&self.userops, &lib));
+            self.segment_defs = Rc::new(crate::kuna_segmentops::SegmentDefs::from_library(&self.userops, &lib));
         }
         self.pcodeinjectlib = lib;
         parse_res
