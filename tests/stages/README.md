@@ -18,6 +18,10 @@ instead of a `switch` with only a `default` arm.
 of the `ret 8` function g see both pushed arguments popped, so a later `[esp+4]`
 reads the caller's own argument.
 
+`kuna-maxlinewidth.xml` checks that `option maxlinewidth 40` breaks a long
+prototype and return statement at 40 columns, while the default prints each on
+one line.
+
 `kuna-stack-byte-copy.xml` checks pushed scratch bytes, partial reads and a
 saved snapshot with `stackstoreguard` off and on. Its CLI companion compiles
 and executes the exact C at O2 in default, stackviews and stackalias modes, and checks
