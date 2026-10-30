@@ -242,7 +242,7 @@ pub(super) fn entry_storage(
     pieces: &kuna_decomp::fspec::PrototypePieces,
     out: &mut Vec<crate::pass::RegLocalFact>,
 ) {
-    if !enabled() {
+    if !enabled() || sub.nocall {
         return;
     }
     let params = sub.children.iter().filter_map(|c| dies.get(c)).filter(|d| d.tag == gimli::DW_TAG_formal_parameter);

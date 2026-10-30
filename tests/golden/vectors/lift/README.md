@@ -32,6 +32,13 @@ The function contains no `cs`, `neg`, `vs` or register branch, so its
 instructions, operations and temporary aliasing are unchanged; 150 lines change
 only unique-space offsets by `0xc00`.
 
+The x86 16-bit-code `rel16` constructor (kuna, segment-relative near branches)
+adds one constructor to x86.sla; every later unique-space temporary moves by
+`0x100`, so `promotecompare.txt` and `gh7139-x86-16-disp16-signed.txt` change
+only in unique-space offsets. The operations, instructions and temporary
+aliasing are unchanged. The bodies were rewritten from kuna's lift of the same
+points after checking that every changed line differs only in a unique offset.
+
 ## Regeneration
 
 ```bash
