@@ -2801,7 +2801,17 @@ moves.
   (`pass.rs (DataObjectFact)`) and the commit maps an `undefined<size>` entry —
   namelocked but *not* typelocked, so inference still recovers the real type —
   matching how IDA Pro and Ghidra name symbol-table globals (`max_width`, not
-  `dat_<addr>`). Declaration-only DIEs are skipped so DWARF never fights libproto
+  `dat_<addr>`). (kuna `dwarfglobaltypes`, default on) The pass also emits each
+  such global with its declared type (`pass.rs (AnalysisOutput::dwarf_typed_globals)`)
+  when that type is sized, complete and not void; with the option on the commit
+  drops the untyped entry for those addresses and maps the typed one,
+  typelocked and namelocked, first among the typed data facts, so
+  `cfg._12_4_ + cfg._8_4_` reads `cfg.flags + cfg.port` and
+  `*(char **)&modes[i * 8L]` reads `modes[i]`. (kuna) When neither `.comment`
+  nor the other signals name the toolchain, ELF and Mach-O detection falls back
+  to the debug info (`analyzers/sourcelang/kuna_dwarfproducer.rs (dwarf_compiler)`):
+  the first 16 compile units' `DW_AT_language` (Rust, Go, Swift) or
+  `DW_AT_producer` (`rustc`, `clang`, `GNU `) decide. Declaration-only DIEs are skipped so DWARF never fights libproto
   over imports. `dwarf_lines`
   (`decompiler/crates/kuna-analysis/src/analyzers/dwarf/lines.rs (DwarfLinesPass)`)
   is the separate `.debug_line` pass: each row becomes a `file:line` instruction

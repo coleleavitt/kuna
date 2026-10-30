@@ -8668,3 +8668,22 @@ inspiration = "IDA 9.5 dwarf.so local-variable import (lexical blocks, location 
 change_kind = "analysis-enablement"
 tier = "analysis"
 symptoms = "a variable declared inside a loop or if block of a -g binary is an anonymous vN|a clang -O0 binary names the wrong stack slot after a DWARF local|a -O1 spilled variable has no name although DWARF describes its slot"
+
+[[settable]]
+option = "dwarfglobaltypes"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "ida95-59"
+summary = "Give a DWARF global its declared type. The DWARF pass names every CU-level DW_TAG_variable with a DW_OP_addr location, but used its DW_AT_type only to size an undefined<size> symbol, namelocked and not typelocked, so inference re-derived the type at every use: a `struct config` global read as `*(int *)(cfg + 8)`, a `const char *` table as a long. On, a global whose type is complete, sized and not void is committed typelocked and namelocked with that type, in place of the untyped entry; its uses read as fields, elements and pointers of the declared type. An incomplete aggregate or an unsized type keeps the sized untyped entry. A typed global outranks a string literal the scan found inside its bytes, so a `char msg[16]` global prints by name."
+use_when = "On by default: the globals of a -g binary print with their source types (cfg.port, table[i].name). Flip off to see what inference alone recovers for a global, or when a DWARF type is wrong for the code (a global declared as one type and accessed as another through casts in the source)."
+example = "option dwarfglobaltypes off"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 dwarf.so typed global import; Ghidra DWARFFunctionImporter.outputGlobal"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "a global described by DWARF as a struct renders as raw offsets off its address|a DWARF-typed pointer global is a long or undefined8|a -g binary's globals have names but not types"

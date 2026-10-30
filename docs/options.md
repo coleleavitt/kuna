@@ -896,6 +896,9 @@ Three tiers:
 | a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes) |
 | a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes) |
 | a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes) |
+| a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3289,6 +3292,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default: `char scratch[32]` declared in a loop body is named and typed instead of `char v1 [31]`, and clang -O0 binaries name the right slot. Flip off to compare against direct-children-only import, or when nested locals that share one slot across sibling scopes make a function harder to read.
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-57
 - **Example:** `option dwarfscopes off`
+
+### `dwarfglobaltypes` -- on | off, default `on`
+
+- **Symptoms:** a global described by DWARF as a struct renders as raw offsets off its address; a DWARF-typed pointer global is a long or undefined8; a -g binary's globals have names but not types.
+- **What it does:** Give a DWARF global its declared type. The DWARF pass names every CU-level DW_TAG_variable with a DW_OP_addr location, but used its DW_AT_type only to size an undefined<size> symbol, namelocked and not typelocked, so inference re-derived the type at every use: a `struct config` global read as `*(int *)(cfg + 8)`, a `const char *` table as a long. On, a global whose type is complete, sized and not void is committed typelocked and namelocked with that type, in place of the untyped entry; its uses read as fields, elements and pointers of the declared type. An incomplete aggregate or an unsized type keeps the sized untyped entry. A typed global outranks a string literal the scan found inside its bytes, so a `char msg[16]` global prints by name.
+- **When to flip:** On by default: the globals of a -g binary print with their source types (cfg.port, table[i].name). Flip off to see what inference alone recovers for a global, or when a DWARF type is wrong for the code (a global declared as one type and accessed as another through casts in the source).
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-59
+- **Example:** `option dwarfglobaltypes off`
 
 ## Core rendering defaults
 

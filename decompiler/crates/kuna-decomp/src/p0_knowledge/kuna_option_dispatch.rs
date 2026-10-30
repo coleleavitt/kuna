@@ -1185,6 +1185,7 @@ kuna_options! { self, p1;
             if val { "on" } else { "off" }
         ))
     },
+    "dwarfglobaltypes" => on_off!(analysis_dwarfglobaltypes, "DWARF global types"),
     "dwarfscopes" => {
         let val = on_or_off(p1)?;
         self.analysis_dwarfscopes = val;

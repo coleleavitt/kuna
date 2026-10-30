@@ -1727,6 +1727,8 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) `dwarfglobaltypes`: lock a DWARF global's declared type.
+    pub analysis_dwarfglobaltypes: bool,
     /// (kuna) `dwarfscopes`: DWARF locals in lexical blocks and location lists.
     pub analysis_dwarfscopes: bool,
     /// (kuna) Gate the UEFI module markup pass (`uefi`); default on.
@@ -3253,6 +3255,7 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            analysis_dwarfglobaltypes: false,
             analysis_dwarfscopes: true,
             analysis_uefi: false,
             analysis_declaredlibcproto: false,
@@ -3691,6 +3694,7 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.analysis_dwarfglobaltypes = true;
         self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
         self.analysis_uefi = true;
         // (kuna) DIV-139 declared-name libc prototype lookup -- default-ON.

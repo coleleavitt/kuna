@@ -4536,6 +4536,14 @@ fn commit_analysis_output(
     } else {
         out.cpp_dwarf.prototypes.clear();
     }
+    // 0d. (kuna `dwarfglobaltypes`) A DWARF global keeps its declared type:
+    //     its untyped sized entry is replaced by the typed one.
+    let dwarf_globals = std::mem::take(&mut out.dwarf_typed_globals);
+    if prog.arch().analysis_dwarfglobaltypes {
+        let typed: std::collections::BTreeSet<u64> = dwarf_globals.iter().map(|g| g.addr).collect();
+        out.data_objects.retain(|d| !typed.contains(&d.addr));
+        out.typed_data.splice(0..0, dwarf_globals);
+    }
     // 0b. (kuna `swifttypes`) The Swift type-layout arm's facts, the same
     //     deferred shape: on, the typed metadata records and the accessor
     //     prototypes fold into their streams (the register-pinned parameters
