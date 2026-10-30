@@ -1724,7 +1724,7 @@ classified:
   calls by the user op the language's `svc` lowers to, the one `syscallregs`
   names.
 
-  Where the body does not settle it, two facts about the value do. First, a
+  Where the body does not settle it, three facts about the value do. First, a
   value already vetoed from another call is vetoed here too. clang -O0
   computes a comparison into `w8` ahead of two calls on different paths
   (`if (pg < 1) return corrupt(4321); if (pagecount(bt) == 0) ...`). The value
@@ -1746,7 +1746,13 @@ classified:
   `adrp x8,g; add x8,x8,:lo12:g; b make`, is left to the body evidence. The
   null-page rule cannot see a callee that takes a small number in `x8` by its
   own convention behind an import, such as the OCaml runtime's `caml_allocN`
-  reached through a PLT stub. That number is dropped (`caml_allocN()`).
+  reached through a PLT stub. That number is dropped (`caml_allocN()`). Third,
+  at an arm64e virtual call `arm64evcall` resolved to one method, the register
+  the call branched through (`ldr x8, [x16]; blraa x8, x17`) holds the
+  callee's own address, which no callee returns through. Flow builds such a
+  site as a direct call, so the loaded slot would otherwise stay live in `x8`
+  and print as the method's first argument; a Swift method, whose `self`
+  travels in `x20`, has no `x0` to push it back behind.
 
   Dropping the entry leaves no hole in `x0..x7`. Only a register entry is
   vetoed: not SPARC's `[sp+64]` stack slot, and not one that shares storage

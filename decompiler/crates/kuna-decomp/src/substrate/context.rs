@@ -636,6 +636,8 @@ pub struct ArchContext {
     pub alloca_calls: bool,
     /// (kuna `trapaftercall`) A trap after an x86 call marks the call no-return.
     pub trap_after_call: bool,
+    /// (kuna `arm64evcall`) The architecture's resolved arm64e virtual calls.
+    pub vcall_targets: Rc<std::collections::BTreeMap<u64, crate::architecture::VcallTargets>>,
 
     pub call_mechanisms: Rc<crate::kuna_callmechanisms::Mechanisms>,
     /// (kuna) `callmechanisms` — apply compiler-spec prototype entry/return p-code.
@@ -1905,6 +1907,7 @@ impl ArchContext {
             vararg_regs: None,
             alloca_calls: false,
             trap_after_call: false,
+            vcall_targets: Rc::default(),
             lanerecords: Vec::new(),
             split_records: Vec::new(),
             opbehaviors: Vec::new(),

@@ -537,6 +537,9 @@ fn walk_chain(
         let Some(fo) = va_to_fileoff(segs, va) else { return };
         let raw = if narrow { rd_u32(file, fo as usize).map(u64::from) } else { rd_u64(file, fo as usize) };
         let Some(raw) = raw else { return };
+        if let Some(ctx) = auth_context(raw, format.id) {
+            out.auth.insert(va, ctx);
+        }
         let next = if let Some((next, level, offset)) = kernel_cache_rebase(raw, format.id) {
             out.kernel_cache.push((va, level, offset));
             next
@@ -546,9 +549,6 @@ fn walk_chain(
                 ptr_format::ARM64E_SEGMENTED => decode_segmented(raw, segs),
                 _ => decode_ptr(raw, format.id, format.imagebase),
             };
-            if let Some(ctx) = auth_context(raw, format.id) {
-                out.auth.insert(va, ctx);
-            }
             if let Some(target) = decoded {
                 out.rebases.insert(va, target);
             } else if let Some((ordinal, addend)) = bind_entry(raw, format.id) {

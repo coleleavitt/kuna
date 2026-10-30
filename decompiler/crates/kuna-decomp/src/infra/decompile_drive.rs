@@ -453,7 +453,8 @@ impl FlowEnvironment for ArchFlowEnv {
     }
     fn vcall_resolution(&self, site: &Address) -> (Option<Address>, Option<String>) {
         let arch = self.arch();
-        let (Some(targets), Some(space)) = (arch.kuna_vcall_targets.get(&site.get_offset()), site.get_space())
+        let (Some(targets), Some(space)) =
+            (arch.kuna_vcall_targets.get(&site.get_offset()).map(|v| &v.targets), site.get_space())
         else {
             return (None, None);
         };
@@ -463,7 +464,11 @@ impl FlowEnvironment for ArchFlowEnv {
         }
         const SHOWN: usize = 6;
         let mut names: Vec<String> = Vec::new();
+        let mut named = 0;
         for &t in targets {
+            if names.len() == SHOWN {
+                break;
+            }
             let name = arch
                 .symboltab
                 .function_display_name_across_scopes(&at(t))
@@ -471,12 +476,12 @@ impl FlowEnvironment for ArchFlowEnv {
             if !names.contains(&name) {
                 names.push(name);
             }
+            named += 1;
         }
-        let more = match names.len().saturating_sub(SHOWN) {
+        let more = match targets.len() - named {
             0 => String::new(),
             n => format!(" and {n} more"),
         };
-        names.truncate(SHOWN);
         (None, Some(format!("virtual call to one of {} methods: {}{more}", targets.len(), names.join(", "))))
     }
     fn msvc_locked_entry(&self, entry: &Address) -> bool {

@@ -25,7 +25,7 @@
 //!   (`helper: svc #0; ret`, whose kernel reads the caller's syscall number)
 //!   keeps it, whatever the value.
 //!
-//! Where the body does not settle it, two facts about the value do. A value
+//! Where the body does not settle it, three facts about the value do. A value
 //! already vetoed from another call is vetoed here too: freeing it there leaves
 //! this call its only reader, and the double-use rule that kept it off this
 //! call would otherwise no longer see the first one (clang -O0 computes a
@@ -56,6 +56,7 @@ use crate::context::VarnodeId;
 use crate::dtype::type_class::TYPECLASS_HIDDENRET;
 use crate::fspec::{FuncCallSpecs, ProtoModel};
 use crate::funcdata::Funcdata;
+use crate::p0_knowledge::database::TranslateAccess;
 use crate::p0_knowledge::options::on_or_off;
 
 /// (kuna) Veto a hidden-return trial no callee could use: `hiddenretarg on|off`.
@@ -207,6 +208,18 @@ fn not_a_result_buffer(
     };
     leaves.iter().any(|&l| data.kuna_hiddenret_vetoed(l))
         || (!leaves.is_empty() && leaves.iter().all(null_page))
+        || branches_through(data, call, addr, size)
+}
+
+/// (kuna `arm64evcall`) Is `[addr, addr+size)` the register a resolved virtual
+/// call branched through? It holds the callee's own address (`ldr x8, [x16];
+/// blraa x8, x17`), which no callee returns through.
+fn branches_through(data: &Funcdata, call: &FuncCallSpecs, addr: &Address, size: int4) -> bool {
+    let Some(site) = data.obank().get(call.get_op()).map(|o| o.get_addr().get_offset()) else { return false };
+    let arch = data.get_arch();
+    let Some(vcall) = arch.vcall_targets.get(&site).filter(|v| v.targets.len() == 1) else { return false };
+    let Some(space) = addr.get_space() else { return false };
+    arch.get_register_name(space, addr.get_offset(), size).eq_ignore_ascii_case(&format!("x{}", vcall.register))
 }
 
 /// Rescore trial `trial` of call `call_idx` no-use when it is an ACTIVE trial on

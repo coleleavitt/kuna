@@ -4374,6 +4374,7 @@ pub fn bootstrap_from_object_with_isa(
         kuna_base::notes::say_once(path, &format!("[kuna] {note}"));
     }
     let bytes = peeled.bytes;
+    let signed = peeled.signed;
     // (PR-8) Mach-O fat / universal (`0xcafebabe`) peel: `object::File::parse`
     // is a thin, single-arch view and cannot parse a fat header, so a universal
     // binary is reduced to ONE arch slice's bytes here — the single, canonical
@@ -4526,6 +4527,19 @@ pub fn bootstrap_from_object_with_isa(
         sleigh.base().unwrap().translate(),
     );
     pending_analysis.extend(input_isa_stash(input_context_paints));
+    // (kuna `arm64evcall`) A kernelcache entry's signed slots lost their signing
+    // context when the collection was fixed up; its virtual calls are resolved
+    // against the whole collection's slots instead.
+    if let Some(signed) = &signed {
+        if let Ok(file) = kuna_analysis::loadimage_object::parse_object(&bytes) {
+            let vcall_sites = kuna_analysis::rtti::kuna_arm64evcall::resolve_signed(&file, signed);
+            pending_analysis.retain(|(id, _)| *id != "arm64evcall");
+            pending_analysis.push((
+                "arm64evcall",
+                kuna_analysis::pass::AnalysisOutput { vcall_sites, ..Default::default() },
+            ));
+        }
+    }
 
     // (kuna `dynrelocs`) The PT_GNU_RELRO-frozen dynamic-relocation slots, read
     // off the same loader while it is still in hand. `readonly_ranges` above
@@ -4930,7 +4944,8 @@ fn commit_analysis_output(
     // 1--. (kuna `arm64evcall`) The methods each arm64e virtual call site's slot
     //      can hold; flow reads them when it builds the CALLIND.
     for v in &out.vcall_sites {
-        prog.arch_mut().kuna_vcall_targets.insert(v.site, v.targets.clone());
+        let call = kuna_decomp::architecture::VcallTargets { register: v.register, targets: v.targets.clone() };
+        Rc::make_mut(&mut prog.arch_mut().kuna_vcall_targets).insert(v.site, call);
     }
 
     // 1---. (kuna `outlinedinline`) Flag clang's MachineOutliner fragments inline,

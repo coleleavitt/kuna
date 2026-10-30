@@ -13,6 +13,8 @@
 
 use kuna_decomp::kuna_kernelcache::KernelcacheChoice;
 
+use crate::rtti::kuna_arm64evcall::SignedImage;
+
 mod fileset;
 mod lzfse;
 mod lzss;
@@ -27,6 +29,9 @@ const DECODED_LIMIT: usize = 1 << 30;
 pub struct Peeled {
     pub bytes: Vec<u8>,
     pub note: Option<String>,
+    /// A kernel collection's signed pointer slots, whose signing context the
+    /// applied fixups no longer carry in `bytes`.
+    pub signed: Option<SignedImage>,
 }
 
 /// Whether `bytes` is an IMG4 / IM4P container or a bare compressed payload.
@@ -38,7 +43,7 @@ pub fn is_container(bytes: &[u8]) -> bool {
 /// neither a container nor an `MH_FILESET` comes back unchanged.
 pub fn peel(bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<Peeled, String> {
     if *choice == KernelcacheChoice::Off {
-        return Ok(Peeled { bytes, note: None });
+        return Ok(Peeled { bytes, note: None, signed: None });
     }
     let mut notes = Vec::new();
     let bytes = if is_container(&bytes) {
@@ -48,15 +53,15 @@ pub fn peel(bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<Peeled, String
     } else {
         bytes
     };
-    let bytes = if fileset::is_fileset(&bytes) {
-        let (image, note) = fileset::extract(bytes, choice)?;
+    let (bytes, signed) = if fileset::is_fileset(&bytes) {
+        let (image, note, signed) = fileset::extract(bytes, choice)?;
         notes.push(note);
-        image
+        (image, (!signed.slots.is_empty()).then_some(signed))
     } else {
-        fileset::legacy(bytes, choice)?
+        (fileset::legacy(bytes, choice)?, None)
     };
     let note = (!notes.is_empty()).then(|| notes.join("; "));
-    Ok(Peeled { bytes, note })
+    Ok(Peeled { bytes, note, signed })
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
