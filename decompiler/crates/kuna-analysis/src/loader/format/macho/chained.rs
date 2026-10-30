@@ -93,6 +93,10 @@ pub struct ChainedFixups {
     /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup. Bind
     /// fixups (external imports) are intentionally absent (out of scope).
     rebases: HashMap<u64, u64>,
+    /// Kernel-collection rebases as `(slot_vma, cache_level, target_offset)`,
+    /// resolved into `rebases` once every chain has been read
+    /// ([`resolve_kernel_cache_levels`]).
+    kernel_cache: Vec<(u64, u8, u64)>,
 }
 
 impl ChainedFixups {
@@ -207,7 +211,28 @@ where
 
     let mut out = ChainedFixups::default();
     walk_fixups(blob, &segs, imagebase, bytes, &mut out);
+    resolve_kernel_cache_levels(&mut out, imagebase);
     out
+}
+
+/// Resolve the kernel-collection rebases that target this collection.
+///
+/// A `DYLD_CHAINED_PTR_64_KERNEL_CACHE` target is an offset from the base of
+/// the collection its `cacheLevel` names — xnu's `basePointers` index: 0 the
+/// boot (primary) collection, 1 the pageable (System) one, 3 the auxiliary one
+/// (`pexpert/gen/kcformat.c`). xnu loads them in that order and a collection can
+/// point only into itself and the ones loaded before it, so the highest level a
+/// collection's chains name is its own: 0 for a boot KC, 1 for a System KC, 3
+/// for an Auxiliary KC. Those targets rebase from this file's base; a target in
+/// an earlier collection needs that file's base and stays unresolved.
+fn resolve_kernel_cache_levels(out: &mut ChainedFixups, imagebase: u64) {
+    let pending = std::mem::take(&mut out.kernel_cache);
+    let Some(own) = pending.iter().map(|&(_, level, _)| level).max() else { return };
+    for (va, level, offset) in pending {
+        if level == own {
+            out.rebases.insert(va, imagebase.wrapping_add(offset));
+        }
+    }
 }
 
 /// `dyld_chained_fixups_header` (fixup-chains.h): the only fields the rebase walk
@@ -311,10 +336,16 @@ fn walk_chain(
     for _ in 0..0x10000u32 {
         let Some(fo) = va_to_fileoff(segs, va) else { return };
         let Some(raw) = rd_u64(file, fo as usize) else { return };
-        let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
-        if let Some(target) = decoded {
-            out.rebases.insert(va, target);
-        }
+        let next = if let Some((next, level, offset)) = kernel_cache_rebase(raw, pointer_format) {
+            out.kernel_cache.push((va, level, offset));
+            next
+        } else {
+            let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
+            if let Some(target) = decoded {
+                out.rebases.insert(va, target);
+            }
+            next
+        };
         if next == 0 {
             return;
         }
@@ -353,13 +384,6 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         // stride. The auth form stores a 32-bit image-base-relative target (PAC
         // bits stripped); the non-auth form stores a 43-bit target whose meaning is
         // a full vmaddr (plain ARM64E) or an image-base offset (USERLAND).
-        ptr_format::PTR_64_KERNEL_CACHE | ptr_format::X86_64_KERNEL_CACHE => {
-            let next = (raw >> 51) & 0xFFF;
-            if (raw >> 30) & 3 != 0 {
-                return (next, None);
-            }
-            (next, Some(imagebase.wrapping_add(raw & 0x3FFF_FFFF)))
-        }
         ptr_format::ARM64E
         | ptr_format::ARM64E_USERLAND
         | ptr_format::ARM64E_USERLAND24
@@ -394,6 +418,15 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         // An unhandled format leaves the slot unresolved and stops the chain.
         _ => (0, None),
     }
+}
+
+/// `dyld_chained_ptr_64_kernel_cache_rebase` (`PTR_64_KERNEL_CACHE`,
+/// `X86_64_KERNEL_CACHE`): `(next, cacheLevel, target)` — a 30-bit target
+/// offset, the 2-bit level in bits 30..31, `next` in bits 51..62. `None` for any
+/// other format.
+fn kernel_cache_rebase(raw: u64, pointer_format: u16) -> Option<(u64, u8, u64)> {
+    matches!(pointer_format, ptr_format::PTR_64_KERNEL_CACHE | ptr_format::X86_64_KERNEL_CACHE)
+        .then(|| ((raw >> 51) & 0xFFF, ((raw >> 30) & 3) as u8, raw & 0x3FFF_FFFF))
 }
 
 /// Map a VMA to its file offset via the segment table (the inverse of the load
@@ -498,17 +531,38 @@ mod tests {
         assert_eq!(target, Some(0x1_0000_8050), "USERLAND form rebases imagebase + offset");
     }
 
-    /// The kernel-collection formats rebase every target from the collection
-    /// base; a target in another cache level stays unresolved.
+    /// The kernel-collection formats split a word into `next`, the cache level
+    /// and a 30-bit offset; `ARM64E_KERNEL` rebases every target from the base.
     #[test]
     fn decode_kernel_cache_formats() {
         let base = 0xffff_fff0_0700_4000;
-        let raw = (1u64 << 63) | (5u64 << 51) | (0x1234u64 << 32) | 0x00d7_8010;
-        assert_eq!(decode_ptr(raw, ptr_format::PTR_64_KERNEL_CACHE, base), (5, Some(base + 0xd7_8010)));
-        let other_level = (1u64 << 30) | 0x10;
-        assert_eq!(decode_ptr(other_level, ptr_format::PTR_64_KERNEL_CACHE, base), (0, None));
+        let raw = (1u64 << 63) | (5u64 << 51) | (0x1234u64 << 32) | (3u64 << 30) | 0x00d7_8010;
+        assert_eq!(kernel_cache_rebase(raw, ptr_format::PTR_64_KERNEL_CACHE), Some((5, 3, 0xd7_8010)));
+        assert_eq!(kernel_cache_rebase(raw, ptr_format::X86_64_KERNEL_CACHE), Some((5, 3, 0xd7_8010)));
+        assert_eq!(kernel_cache_rebase(raw, ptr_format::ARM64E_KERNEL), None);
         let plain = (2u64 << 51) | 0x8000;
         assert_eq!(decode_ptr(plain, ptr_format::ARM64E_KERNEL, base), (2, Some(base + 0x8000)));
+    }
+
+    /// A collection's own cache level is the highest its chains name: an
+    /// Auxiliary KC (level 3) rebases its own targets from its base and leaves
+    /// the ones into the boot (0) and System (1) collections unresolved; a boot
+    /// KC (only level 0) rebases them all.
+    #[test]
+    fn kernel_cache_rebases_resolve_the_collections_own_level() {
+        let base = 0xffff_fe00_0700_0000;
+        let mut aux = ChainedFixups {
+            kernel_cache: vec![(base + 0x10, 3, 0x4000), (base + 0x18, 0, 0x8000), (base + 0x20, 1, 0x100)],
+            ..ChainedFixups::default()
+        };
+        resolve_kernel_cache_levels(&mut aux, base);
+        assert_eq!(aux.resolved_ptr(base + 0x10), Some(base + 0x4000));
+        assert_eq!(aux.resolved_ptr(base + 0x18), None);
+        assert_eq!(aux.resolved_ptr(base + 0x20), None);
+
+        let mut boot = ChainedFixups { kernel_cache: vec![(base, 0, 0x4000)], ..ChainedFixups::default() };
+        resolve_kernel_cache_levels(&mut boot, base);
+        assert_eq!(boot.resolved_ptr(base), Some(base + 0x4000));
     }
 
     /// `ARM64E_FIRMWARE` keeps a non-auth target as a full vmaddr and rebases an
