@@ -262,6 +262,14 @@ impl AnalysisPass for ObjcMetadataPass {
         }
         let refs = kuna_objcrefs::emit(&img, ctx.file, ctx.arch, &tctx, &mut selectors, &mut out);
         kuna_objcblocks::emit(&img, ctx.file, &tctx, &mut out);
+        {
+            use object::ObjectSymbol;
+            let mut creators: Vec<(u64, String)> = out.fid_names.iter().map(|f| (f.addr, f.name.clone())).collect();
+            creators.extend(ctx.file.symbols().filter(|s| s.kind() == object::SymbolKind::Text && s.address() != 0).filter_map(|s| {
+                Some((s.address(), s.name().ok()?.trim_start_matches('_').to_string()))
+            }));
+            kuna_objcblocks::stack_blocks(&img, ctx.file, &tctx, &creators, &mut out);
+        }
         if let Some(table) = out.objc_classes.as_mut() {
             table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
             table.selref_at.extend(selectors.slots.iter().map(|(va, s)| (*va, s.clone())));

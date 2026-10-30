@@ -3844,9 +3844,19 @@ every other binary's pass list is byte-identical to before the pass existed):
     (`block_literal_<addr>`), its invoke is named `block_invoke_<addr>` and,
     when `BLOCK_HAS_SIGNATURE` is set, typed from the descriptor's signature
     with the block itself first (`long block_invoke_10000071c(Block_layout *block, long arg1)`).
-    A stack block is built by its creator at run time and is not recognized
-    (Hex-Rays reads the creator's microcode for the isa store). The stage test
-    `tests/stages/kuna-objcstructs.xml` runs `macho_objc_structs_arm64`.
+    A stack block is built by its creator at run time; `stack_blocks` finds
+    the build in each arm64 function the way Hex-Rays reads the creator's
+    microcode: the isa's GOT slot load (`adrp; ldr`, or the linker's `ldr
+    <literal>`) stored to `sp`, then the `adr` / `adrp; add` addresses stored
+    16 and 24 bytes after it (`str`/`stp`), state cleared at every `ret`. The
+    invoke is named `<creator>_block_invoke` (`_2`, `_3` for the next blocks
+    of one creator; the creator is the nearest IMP label or symbol at or before
+    the store), typed from the descriptor's signature, and its first argument
+    is `Block_layout_<invoke> *` — `Block_layout` then one word per captured
+    value up to the descriptor's `size` — so `return block->capture_0 * arg1;`.
+    `__block` byref cells are not modelled. The stage tests
+    `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
+    run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
 
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of

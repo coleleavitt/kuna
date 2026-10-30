@@ -2134,7 +2134,8 @@ mod tests {
         // and kuna-objcarc / Objective-C ARC bookkeeping hidden behind call-fixups
         // and kuna-objcresolve / a message send typed and resolved by its receiver
         // and kuna-objcstructs / by-value aggregates in ObjC encodings and global blocks
-        assert_eq!(count, 614, "corpus file count drifted");
+        // and kuna-objcblocks / a stack block's invoke named after its creator and typed
+        assert_eq!(count, 615, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
