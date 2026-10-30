@@ -1128,6 +1128,9 @@ pub struct Architecture {
     /// (kuna) Collapse an x86 `rep movs`/`rep stos` loop into `memcpy`/`memset`
     /// (option `repstring`).  See [`crate::p3_dataflow::kuna_repstring`].
     pub rep_string: bool,
+    /// (kuna) Collapse an unrolled element-copy run into `memcpy` (option
+    /// `copyrun`).  See [`crate::p3_dataflow::kuna_copyrun`].
+    pub copy_run: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) Region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -3074,6 +3077,7 @@ impl Architecture {
             devectorize_reduction: false, // (kuna) option devectorize (opt-in default-off)
             strlen_scan: false, // (kuna) option strlenscan; reset_defaults sets the shipped default
             rep_string: false, // (kuna) option repstring; reset_defaults sets the shipped default
+            copy_run: false, // (kuna) option copyrun; reset_defaults sets the shipped default
             stack_store_guard: false,
             region_structure: true,
             guard_arm: false,
@@ -3531,6 +3535,7 @@ impl Architecture {
         self.decl_order = crate::kuna_declorder::DeclOrder::Natural; // (kuna) option declorder default `natural`: locals declare v1, v2, ..., v10; only the order of declaration lines moves, 0/675 datatest assertions
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.rep_string = true; // (kuna) option repstring default-on: a rep movs/stos loop prints as memcpy/memset
+        self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
         self.caller_reads = true; // (kuna) option callerreads default-on: inert without the Listing, so 0/675 datatest assertions move
@@ -4374,6 +4379,7 @@ impl Architecture {
         ctx.devectorize_reduction = self.devectorize_reduction; // devectorize
         ctx.strlen_scan = self.strlen_scan; // strlenscan
         ctx.rep_string = self.rep_string; // repstring
+        ctx.copy_run = self.copy_run; // copyrun
         ctx.stack_store_guard = self.stack_store_guard;
         ctx.region_structure = self.region_structure; // regionstructure
         ctx.guard_arm = self.guard_arm; // guardarm

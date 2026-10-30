@@ -33,6 +33,9 @@ Three tiers:
 | a while loop that copies one element per iteration and steps two pointers and a count | [`repstring`](#repstring) |
 | rep movsq / rep stosd from -Os code printed as a loop instead of memcpy/memset | [`repstring`](#repstring) |
 | a struct copy prints as a 16-iteration word loop | [`repstring`](#repstring) |
+| a struct copy prints as eight paired assignments through a register | [`copyrun`](#copyrun) |
+| *a0 = *a1; a0[1] = v1; ... for a fixed-size memcpy | [`copyrun`](#copyrun) |
+| SSE xmm0 lanes shuttle a buffer one word at a time | [`copyrun`](#copyrun) |
 | stack string initialisation renders as an array-typed cast such as (char[8])s_addr._0_8_ | [`rodatastring`](#rodatastring) |
 | partial-symbol slice assignments like buf._0_9_ = s_addr._16_9_ instead of the string | [`rodatastring`](#rodatastring) |
 | a recognized rodata literal never appears in the function that copies it onto the stack | [`rodatastring`](#rodatastring) |
@@ -1380,6 +1383,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default. Flip off when a `rep movsb` copies forward over its own output on purpose -- an LZ77 decoder's overlapping match copy is defined for the instruction and not for memcpy -- or to see the instruction's loop.
 - **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-repstring
 - **Example:** `option repstring off`
+
+### `copyrun` -- on | off, default `on`
+
+- **Symptoms:** a struct copy prints as eight paired assignments through a register; *a0 = *a1; a0[1] = v1; ... for a fixed-size memcpy; SSE xmm0 lanes shuttle a buffer one word at a time.
+- **What it does:** Print an unrolled run of element copies as `builtin_memcpy(dst, src, n)`. A compiler expands a fixed-size copy (a struct assignment, `memcpy` with a constant length) into loads and stores of its widest registers -- SSE `movdqu`/`movups` pairs, 8- or 4-byte moves -- which printed one assignment per element (`*a0 = *a1; a0[1] = v1; ...`). `kuna_copyrun` runs in the fullloop tail after `repstring` and groups the STOREs of each basic block whose value is a LOAD of the same width in the same block, through copies read by nothing else. Pointers are read as a base plus a constant (through COPY, CAST, `INT_ADD` or `PTRSUB` of a constant, `PTRADD` of a constant index), and stores group when their destinations share a base, their sources share a base, and each pair's destination offset minus its source offset is the same. A group is rewritten only when the bytes its stores write form one contiguous range (stores may overlap: gcc copies 31 bytes with 8-byte moves at 0, 8, 15 and 23); it has at least three stores, or two covering 32 bytes, so a two-word assignment keeps its statements; nothing between its first and last op reads or writes memory or calls; the two ranges do not overlap when the bases are the same pointer; and the destination is not in the function's own frame (as for `repstring`, the builtin is placed after heritage). The builtin is placed at the last store, the stores, loads and copies are destroyed, and an INDIRECT heritage hung on one of the stores is moved onto the builtin. 0/675 datatest assertions and the stage corpus do not move; over 10 stripped x86-64 /usr/bin binaries 5 functions change (make, sed, wget), each a run replaced by one call, among them wget's hash-block buffering `memcpy(ctx + 0x1c, p, 0x40)`.
+- **When to flip:** On by default. Flip off to see the element moves, or when the two buffers may overlap through different pointers: the run copies in program order, which memcpy does not promise.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-copyrun
+- **Example:** `option copyrun off`
 
 ### `rodatastring` -- on | off, default `on`
 

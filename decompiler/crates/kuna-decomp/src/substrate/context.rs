@@ -1308,6 +1308,9 @@ pub struct ArchContext {
     /// (kuna) Collapse an x86 `rep movs`/`rep stos` loop into `memcpy`/`memset`
     /// (option `repstring`).  See [`crate::p3_dataflow::kuna_repstring`].
     pub rep_string: bool,
+    /// (kuna) Collapse an unrolled element-copy run into `memcpy` (option
+    /// `copyrun`).  See [`crate::p3_dataflow::kuna_copyrun`].
+    pub copy_run: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -2002,6 +2005,7 @@ impl ArchContext {
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
             rep_string: false, // repstring (live value copied from the Architecture)
+            copy_run: false, // copyrun (live value copied from the Architecture)
             stack_store_guard: false,
             region_structure: false,     // regionstructure (opt-in default-off)
             guard_arm: false,            // guardarm (opt-in default-off)

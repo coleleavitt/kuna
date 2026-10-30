@@ -2591,6 +2591,30 @@ movs` is defined for a destination that overlaps its source ahead of it, as an
 LZ77 decoder's match copy does on purpose, and `memcpy` is not; the rewrite
 cannot tell the two apart, which is what the option is for.
 
+**Unrolled copies** (`option copyrun`, default **on**) —
+`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_copyrun.rs (ActionCopyRun)`,
+in the fullloop tail after `repstring`. A fixed-size copy (a struct
+assignment, a constant-length `memcpy`) is expanded by the compiler into loads
+and stores of its widest registers, which printed one assignment per element.
+The action groups the STOREs of each basic block whose value is a LOAD of the
+same width in the same block, through COPYs that nothing else reads. A pointer
+is read as a base plus a constant, through COPY, CAST, `INT_ADD` or `PTRSUB` of
+a constant and `PTRADD` of a constant index; stores group when their
+destinations share a base, their sources share a base, and every pair's
+destination offset minus its source offset is the same. A group is rewritten
+when the bytes its stores write are one contiguous range (stores may overlap,
+as gcc's 31-byte copy with 8-byte moves at 0, 8, 15 and 23 does), it has at
+least three stores or two covering 32 bytes (two SSE moves), so a two-word
+assignment keeps its two statements, nothing between its first and last op
+reads or writes memory or calls, the ranges do not overlap when both bases are
+the same pointer, and the destination is not in the function's own frame (the
+reason `repstring` gives). `builtin_memcpy(base + lo, base' + lo', n)` is
+placed at the last store, the stores, loads and copies are destroyed, and an
+`INDIRECT` heritage hung on one of the stores is moved, in order, onto the
+builtin. The run copies element by element in program order, which `memcpy`
+does not promise for buffers that overlap through different pointers; the
+rewrite cannot see that, which is what the option is for.
+
 **constspaceload** (repipe `arm-neon-zero-initialization`) —
 `decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_constspaceload.rs
 (RuleConstSpaceLoad)`, oppool1, fires on LOAD. *Pattern:* a LOAD whose space

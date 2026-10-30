@@ -2115,7 +2115,8 @@ mod tests {
         // and kuna-ppc64-ldarx-encoding / generic PowerPC ldx and ldarx decode at their own opcodes
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-repstring / rep movs/stos loops print as memcpy/memset
-        assert_eq!(count, 593, "corpus file count drifted");
+        // and kuna-copyrun / unrolled element copies print as memcpy
+        assert_eq!(count, 594, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

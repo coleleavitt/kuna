@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3239,
-    3239
+    3246,
+    3246
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -376,6 +376,13 @@
     "data:CONSTSELECTJUMP #1: the selected destination renders as a computed call (bug reproduced)",
     "data:CONSTSELECTJUMP #2: constselectjump on recovers the constant destination set as a switch",
     "data:CONSTSELECTJUMP #3: both arms behind the branch are decoded",
+    "data:COPYRUN #1: off, every element is its own assignment",
+    "data:COPYRUN #2: on, a 64-byte struct copy is one memcpy",
+    "data:COPYRUN #3: on, a copy within one struct offsets its destination",
+    "data:COPYRUN #4: on, overlapping 8-byte moves cover 31 bytes",
+    "data:COPYRUN #5: on, the i386 word moves are one 32-byte memcpy",
+    "data:COPYRUN #6: a two-word copy keeps its assignments",
+    "data:COPYRUN #7: a copy into a frame local keeps its loads",
     "data:CORTEXMPRIV #1: OFF leaves the privilege user-op in the emitted C (pass 1 only)",
     "data:CORTEXMPRIV #2: OFF turns a straight-line special-register read into a branch (pass 1 only)",
     "data:CORTEXMPRIV #3: the real effect survives in BOTH passes",
@@ -973,7 +980,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 341 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 342 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",

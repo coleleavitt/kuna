@@ -1,17 +1,24 @@
-//! `repstring`: the memcpy/memset a `rep movs`/`rep stos` loop decompiles to
-//! computes what the source computed, recompiled on the host.
+//! `repstring` and `copyrun`: the memcpy/memset a `rep movs`/`rep stos` loop
+//! or an unrolled copy decompiles to computes what the source computed,
+//! recompiled on the host.
 use crate::common;
 use std::process::Command;
 
 fn emitted(option: &str) -> String {
-    let (output, error, status) = common::run_kuna(&[
-        "decompile-all",
-        &common::fixture("repstring_x86_64"),
-        "--json",
-        "--option",
-        "repstring",
-        option,
-    ]);
+    emitted_from("repstring_x86_64", "repstring", option)
+}
+
+fn emitted_from(fixture: &str, name: &str, option: &str) -> String {
+    emitted_functions(fixture, name, option, None)
+}
+
+fn emitted_functions(fixture: &str, name: &str, option: &str, functions: Option<&str>) -> String {
+    let path = common::fixture(fixture);
+    let mut args = vec!["decompile-all", path.as_str(), "--json", "--option", name, option];
+    if let Some(functions) = functions {
+        args.extend(["--functions", functions]);
+    }
+    let (output, error, status) = common::run_kuna(&args);
     assert_eq!(status, 0, "{error}");
     let document: serde_json::Value = serde_json::from_str(&output).unwrap();
     document["functions"]
@@ -59,9 +66,13 @@ int main(void) {{
 }}
 "#
     );
+    compile_and_run(&program, &body);
+}
+
+fn compile_and_run(program: &str, body: &str) {
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("round_trip.c");
-    std::fs::write(&path, &program).unwrap();
+    std::fs::write(&path, program).unwrap();
     let mut checked = 0;
     for cc in ["gcc", "clang"] {
         if Command::new(cc).arg("--version").output().is_err() {
@@ -78,4 +89,39 @@ int main(void) {{
         }
     }
     assert!(checked > 0, "a C compiler is required");
+}
+
+#[test]
+fn unrolled_copies_round_trip_as_memcpy() {
+    let all = emitted_from("copyrun_x86_64", "copyrun", "on");
+    let off = emitted_from("copyrun_x86_64", "copyrun", "off");
+    assert_eq!(all.matches("builtin_memcpy(").count(), 3, "{all}");
+    assert!(!off.contains("builtin_memcpy("), "{off}");
+    let body = emitted_functions("copyrun_x86_64", "copyrun", "on", Some("copy_struct,shift,copy31,small"));
+    let program = format!(
+        r#"
+#include <string.h>
+#define builtin_memcpy memcpy
+typedef struct {{ unsigned long field_0x0, field_0x8; }} struct_0;
+struct big {{ long a[8]; }};
+struct pair {{ struct big first, second; }};
+static void ref_copy_struct(struct big *d, const struct big *s) {{ *d = *s; }}
+static void ref_shift(struct pair *p) {{ p->second = p->first; }}
+static void ref_copy31(char *d, const char *s) {{ memcpy(d, s, 31); }}
+{body}
+int main(void) {{
+  struct pair a, b;
+  char s[64], x[64], y[64];
+  for (int i = 0; i < 64; i++) {{ s[i] = (char)(i * 5 + 1); x[i] = y[i] = 0; }}
+  memcpy(&a, s, 64); memcpy(&b, s, 64);
+  copy_struct((void *)&a.second, (void *)s); ref_copy_struct(&b.second, (const struct big *)s);
+  if (memcmp(&a, &b, sizeof a)) return 1;
+  shift((void *)&a); ref_shift(&b);
+  if (memcmp(&a, &b, sizeof a)) return 2;
+  copy31((void *)x, (void *)s); ref_copy31(y, s);
+  return memcmp(x, y, sizeof x) ? 3 : 0;
+}}
+"#
+    );
+    compile_and_run(&program, &body);
 }

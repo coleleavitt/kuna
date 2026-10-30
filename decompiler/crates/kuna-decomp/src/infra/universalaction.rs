@@ -690,6 +690,9 @@ pub fn universal_sched(
             // `rep movs`/`rep stos`, collapsed into memcpy/memset by removing
             // the edge into the copy; mainloop then deletes the orphaned body.
             act!(Box::new(crate::kuna_repstring::ActionRepString::new("returnsplit"))),
+            // (kuna) copyrun (option `copyrun`): an unrolled run of element
+            // copies within one block, collapsed into memcpy.
+            act!(Box::new(crate::kuna_copyrun::ActionCopyRun::new("returnsplit"))),
             act!(ActionReturnSplit::boxed("returnsplit")),
             // (kuna) angr SAILR gotoless `ReturnDuplicatorHigh` (option `returndup`,
             // default-OFF).  Runs right after ActionReturnSplit (the goto-driven
