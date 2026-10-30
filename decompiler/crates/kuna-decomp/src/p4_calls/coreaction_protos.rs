@@ -181,6 +181,17 @@ impl Action for ActionPrototypeTypes {
         // (no locked proto / no truncated stack space on the recovery path).
 
         let evalfp = crate::kuna_callmechanisms::evaluation_model(data);
+        // (kuna `vectorabi`) A function with vector operations is evaluated
+        // with the vector-widened default model.
+        let evalfp = match (evalfp, data.get_arch().vector_fp.clone()) {
+            (Some(e), Some(v))
+                if data.kuna_vector_code
+                    && data.get_arch().default_fp().is_some_and(|d| Rc::ptr_eq(d, &e)) =>
+            {
+                Some(v)
+            }
+            (e, _) => e,
+        };
         if let Some(evalfp) = evalfp {
             if !data.get_func_proto().is_model_locked()
                 && !data.get_func_proto().has_matching_model(&evalfp)
@@ -445,7 +456,11 @@ impl Action for ActionDefaultParams {
         // borrow the architecture's declared-callee map / type factory / space
         // manager while `data`'s call specs are mutated.
         let arch = data.get_arch().clone();
-        let default_fp = arch.default_fp().cloned();
+        let default_fp = arch
+            .vector_fp
+            .clone()
+            .filter(|_| data.kuna_vector_code)
+            .or_else(|| arch.default_fp().cloned());
         let size = data.num_calls();
         for i in 0..size {
             if !data.get_call_specs(i).proto().has_model() {
@@ -2243,6 +2258,15 @@ impl Action for ActionOutputPrototype {
         let out_type = data
             .high_get_type(trial0)
             .unwrap_or_else(|| Rc::new(crate::dtype::Datatype::new(1, crate::dtype::type_metatype::TYPE_UNKNOWN)));
+        // (kuna vectorabi) A vector result keeps its producer's vector type.
+        let out_type = if matches!(
+            out_type.get_metatype(),
+            crate::dtype::type_metatype::TYPE_UNKNOWN | crate::dtype::type_metatype::TYPE_ARRAY
+        ) {
+            crate::coreaction_infertypes::vector_result_type(data, trial0).unwrap_or(out_type)
+        } else {
+            out_type
+        };
         let pieces = crate::fspec::ParameterPieces { addr: out_addr, type_: Some(out_type), flags: 0 };
         data.get_func_proto_mut().set_output(&pieces);
         0

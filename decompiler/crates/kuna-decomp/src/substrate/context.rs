@@ -1764,6 +1764,21 @@ pub struct ArchContext {
     /// (kuna `itaniumeh`) The image's Itanium call-site table when the option is
     /// on; `None` otherwise (see [`crate::kuna_itaniumeh`]).
     pub eh_table: Option<Rc<crate::kuna_itaniumeh::EhTable>>,
+    /// (kuna `vexzeroupper`) See [`crate::kuna_vexzeroupper`].
+    pub vex_zero_upper: bool,
+    /// (kuna `itaniumeh catch`) Only pads with a catch clause get an edge.
+    pub itanium_eh_catch_only: bool,
+    /// (kuna `lanefuse`) See [`crate::kuna_lanefuse`].
+    pub lane_fuse: bool,
+    /// (kuna `lanefuse all`) See [`crate::kuna_lanefuse`].
+    pub lane_fuse_all: bool,
+    /// (kuna `vectorabi`) The vector user-ops (AVX SLEIGH ops with an intrinsic
+    /// name, and the `lanefuse` built-ins) with their element kind; their
+    /// operands and results take the Intel vector types.
+    pub vector_userops: Rc<Vec<(kuna_base::types::uint4, u8)>>,
+    /// (kuna `vectorabi`) The default model widened with the vector entries,
+    /// used for a function whose body holds vector operations.
+    pub vector_fp: Option<Rc<crate::fspec::ProtoModel>>,
     /// (kuna `litpoolconst`) `[start, stop]` (inclusive) offsets of the image's
     /// executable, non-writable, file-backed regions — the instruction stream, and
     /// so the literal pools embedded in it. A read entirely inside one is foldable
@@ -2225,6 +2240,12 @@ impl ArchContext {
             // installs them (see `Architecture::dynreloc_const`).
             dynreloc_const: Rc::new(Vec::new()),
             eh_table: None,
+            vex_zero_upper: false,
+            itanium_eh_catch_only: false,
+            lane_fuse: false,
+            lane_fuse_all: false,
+            vector_userops: Rc::new(Vec::new()),
+            vector_fp: None,
             // (kuna) No executable read-only ranges until a real object load
             // installs them (see `Architecture::litpool_const`).
             litpool_const: Rc::new(Vec::new()),

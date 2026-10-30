@@ -469,6 +469,8 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // off` drops the facts at the read-symbols boundary.
     if compiler.is_rust() {
         passes.push(Box::new(crate::strings::kuna_strrecords::StrRecordPass::rust()));
+        // (kuna `fatstr`) The code-side (ptr, len) literal finder.
+        passes.push(Box::new(crate::strings::kuna_strcodelen::StrCodeLenPass));
         // (kuna `panicloc`) The panic `Location` records, typed and named.
         passes.push(Box::new(crate::strings::kuna_panicloc::PanicLocationPass));
     }
@@ -1785,8 +1787,9 @@ mod tests {
         let rust = ids(&passes_for(Compiler::Rustc, NON_PE));
         assert_eq!(&rust[..base.len()], &base[..], "Rust set is the base set + extras");
         assert_eq!(rust.get(base.len()), Some(&"fatstrrecords"), "Rust appends the record pass");
+        assert_eq!(rust.get(base.len() + 1), Some(&"strcodelen"), "then the code-side length finder");
         assert_eq!(rust.last(), Some(&"panicloc"), "then the panic Location pass");
-        assert_eq!(rust.len(), base.len() + 2, "Rust adds exactly two passes");
+        assert_eq!(rust.len(), base.len() + 3, "Rust adds exactly three passes");
         // No compiler without a string-record arm carries the record pass
         // (Go carries it too — the next test).
         for c in [Compiler::Gcc, Compiler::Clang, Compiler::Swift, Compiler::Unknown] {

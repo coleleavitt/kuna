@@ -3109,9 +3109,98 @@ if (eh_selector() == 1) {
   `tail_call_kind` does not classify a branch from those instructions, so the
   cold code is decoded as part of the function.
 
-A `try` region kind in `p8_structure` would be the next step. The edges and
-helpers are what it would read. **Limits.** SjLj and ARM EHABI tables are not
+**One edge per pad.** Only the first call that unwinds to a pad gets the
+edge (`FlowInfo::eh_records_seen`); later calls to the same pad stay plain
+calls. That keeps the cost down (one extra block per pad, not per call), and
+the printer shows those calls inside the same `try`. Under `itaniumeh catch`
+only pads with a catch clause get an edge, so cleanup pads stay hidden. On
+`/usr/bin/patchelf` (252 KB, g++, decompile-all, user-mode instruction count
+on one P-core) `off` takes 102.87 G instructions, `catch` 103.35 G (+0.5%) and
+`on` 128.95 G (+25%). The aggressive preset uses `catch`.
+
+**try/catch in the C output**
+(`decompiler/crates/kuna-decomp/src/p9_emit/printc.rs (emit_eh_try,
+is_eh_if, eh_pad_start)`). An `if` whose condition is the `eh_unwinding()`
+CBRANCH prints as `try { <condition-block statements> } catch (..) { <pad> }`:
+
+- when its true branch starts at a landing pad, that branch is the handler;
+- when the structurer negated it (`if (!eh_unwinding()) { normal }`, whose
+  normal path never falls through) and the rest of the enclosing list starts
+  at the pad, the normal path prints inside the `try` and the rest of the list
+  is the handler. If that list is on the function's top-level spine (only
+  lists above it, or `if`s it is the condition of: the pad's own selector
+  tests), the catch brace stays open to the end of the body
+  (`eh_open_catch`), because everything after that point is reached only
+  through the pad;
+- inside a `try`, an exceptional edge to the same pad
+  (`eh_open_pad`, compared with the CBRANCH target) prints as its plain
+  statements: the calls of one try region share it.
+
+The header is `catch (T &)` when the pad has exactly one typed clause, and
+`catch (...)` otherwise. With several clauses the selector tests stay in the
+handler (`if (eh_selector() == 1)`) and the pad comment maps each selector to
+its type.
+
+**Limits.** SjLj and ARM EHABI tables are not
 read. Pinned by
 `tests/stages/kuna-itaniumeh.xml` (two passes over the `itaniumeh/eh_x86_64.elf`
 fixture), `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build) and
 `tests/stages/kuna-itaniumeh-a64.xml` (AArch64, x0/x1).
+
+## 2.13 VEX zero-upper writes and per-lane vector p-code
+
+**(kuna) `option vexzeroupper on|off`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_vexzeroupper.rs`.** A VEX- or
+EVEX-encoded instruction that writes an XMM or YMM register clears the rest
+of the ZMM register, and the x86 SLEIGH spec states that as one write of the
+whole register, `ZmmReg1 = zext(result)`. Every such write overlaps every
+read of the same XMM/YMM register, so heritage widened the register to all
+64 bytes: a function that read `ymm0` had a 64-byte `zmm0` input and read
+`SUB6432(zmm0, 0)`. At flow time (`FlowInfo::process_instruction`, x86-64
+only) each `INT_ZEXT` into a 32- or 64-byte register from a 16- or 32-byte
+value is split:
+
+- the low part keeps the value at its own width. When the value is a
+  temporary that only this write reads, its producer (the user-op) writes the
+  low register itself; when the value already is the low register, nothing is
+  copied;
+- the bytes above it are zeroed by `COPY 0` ops cut at the YMM/ZMM boundary
+  (`[16, 32)` and `[32, 64)` for an XMM write), so an XMM write does not create
+  a YMM-wide value either.
+
+**(kuna) `option lanefuse on|off`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_lanefuse.rs`.** The spec writes
+many SSE/AVX instructions lane by lane: `VADDPS ymm0, ymm0, ymm1` is eight
+`FLOAT_ADD`s on 4-byte slices, so no op reads or writes a whole vector. After
+translation, a run of two or more ops of one opcode whose output and inputs
+are consecutive equal-width slices of the same storage (or `SUBPIECE`s of one
+varnode at consecutive offsets), covering 16, 32 or 64 bytes, is rebuilt into
+one `CALLOTHER` on the whole operands. The instruction's first lane op is
+rewritten in place, so the instruction keeps its first op. The user-op is a
+generated built-in (`BUILTIN_LANE_BASE`) named for the intrinsic:
+`_mm256_add_ps`, `_mm_sub_pd`, `_mm256_add_epi32`. Which runs fuse:
+
+- `FLOAT_ADD/SUB/MULT/DIV` and `INT_ADD/SUB/MULT` always under VEX/EVEX;
+- under legacy SSE encoding, only four-lane float runs (`addps`) at the
+  default `on`. Legacy SSE integer lanes and two-lane double runs are what
+  compilers emit for auto-vectorised and SLP-paired scalar code, and
+  `devectorize`, `wideslice`, `simdlane` and the float-precision rules read
+  them back as scalars. `lanefuse all` fuses them too, for hand-written SSE2
+  intrinsic code (`__m128i add128i(__m128i a0,__m128i a1) { return
+  _mm_add_epi32(a0,a1); }`);
+- never lane-wise `AND/OR/XOR`, which carry scalar idioms (`xorps x,x`,
+  `andps` with a sign mask for `fabs`).
+
+An EVEX `{k}` mask is applied by the spec per lane after the user-op:
+`r[j] = zext(k_j)*r[j] | zext(!k_j)*src[j]`. When every lane of the user-op's
+result is rewritten that way (`fold_mask`), the lane ops and the mask
+extraction are removed. The user-op becomes its masked built-in
+(`BUILTIN_MASK_BASE + 2*id`, `vaddps_avx512f_mask`) reading
+`(src, k, operands...)`, or its zero-masked one (`+1`, `..._maskz`) reading
+`(k, operands...)` when EVEX.z is set (byte 3 bit 7 of the `62` prefix). The
+mask is passed at the intrinsic's width (`__mmask16`), and a following
+`dst = COPY r` is folded so the op writes `dst`. `avxintrinsics` prints these
+as `_mm512_mask_add_ps(src, k, a, b)` / `_mm512_maskz_add_ps(k, a, b)`. A
+function in which either step finds a whole-register vector run is marked
+`Funcdata::kuna_vector_code`, which `vectorabi` (chapter 04) keys on.
+Pinned by `tests/stages/kuna-vectorabi.xml`.

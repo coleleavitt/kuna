@@ -221,7 +221,17 @@ impl Rule for RuleFatStr {
             let Some(res) = data.get_internal_string(&buf, len_val as int4, char_ptr, op) else {
                 continue;
             };
+            let old = data.obank().get(op).and_then(|o| o.get_in(i));
             data.op_set_input(op, res, i).expect("RuleFatStr: setInput");
+            // This pool runs after the last dead-code pass, so the PTRSUB that
+            // named the old pointer must go now or it prints as a tmp.
+            if let Some(def) = old
+                .and_then(|v| data.vbank().get(v))
+                .filter(|v| v.is_written() && v.has_no_descend())
+                .and_then(|v| v.get_def())
+            {
+                data.op_destroy(def);
+            }
             return 1;
         }
         0

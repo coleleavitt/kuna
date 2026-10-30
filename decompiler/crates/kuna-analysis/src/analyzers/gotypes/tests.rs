@@ -86,31 +86,39 @@ fn img_of(spans: &[(u64, Vec<u8>)]) -> ImageBytes<'_> {
 }
 
 #[test]
+fn go116_name_encoding_uses_a_big_endian_length() {
+    let spans = vec![(0x1000u64, vec![0u8, 0, 3, b'a', b'b', b'c'])];
+    let img = img_of(&spans);
+    assert_eq!(read_go_name(&img, 0x1000, true).as_deref(), Some("abc"));
+    assert_eq!(read_go_name(&img, 0x1000, false), None, "varint length 0");
+}
+
+#[test]
 fn go_name_encoding_decodes_and_refuses() {
     let data = [0u8, 3, b'a', b'b', b'c', 0, 0];
     let spans = vec![(0x1000u64, data.to_vec())];
     let img = img_of(&spans);
-    assert_eq!(read_go_name(&img, 0x1000).as_deref(), Some("abc"));
+    assert_eq!(read_go_name(&img, 0x1000, false).as_deref(), Some("abc"));
     // zero length refused; unmapped refused.
     let zero = vec![0u8, 0];
     let spans = vec![(0x1000u64, zero)];
     let img = img_of(&spans);
-    assert_eq!(read_go_name(&img, 0x1000), None);
-    assert_eq!(read_go_name(&img, 0x9999), None);
+    assert_eq!(read_go_name(&img, 0x1000, false), None);
+    assert_eq!(read_go_name(&img, 0x9999, false), None);
 }
 
 #[test]
 fn type_records_decode_with_kind_and_name() {
     let (spans, _m, types, etypes) = synth();
     let img = img_of(&spans);
-    let int_t = read_type(&img, types, etypes, 0).expect("int record");
+    let int_t = read_type(&img, types, etypes, 0, false).expect("int record");
     assert_eq!((int_t.kind, int_t.size, int_t.name.as_str()), (KIND_INT, 8, "int"));
-    let pt = read_type(&img, types, etypes, 0x60).expect("struct record");
+    let pt = read_type(&img, types, etypes, 0x60, false).expect("struct record");
     assert_eq!((pt.kind, pt.size, pt.name.as_str()), (KIND_STRUCT, 16, "main.Point"));
     assert!(pt.tflag & TFLAG_NAMED != 0);
     // Out-of-blob and bad-kind offsets refuse.
-    assert!(read_type(&img, types, etypes, 0x3f0).is_none(), "truncated record");
-    assert!(read_type(&img, types, etypes, 0x20).is_none(), "kind 0 at padding");
+    assert!(read_type(&img, types, etypes, 0x3f0, false).is_none(), "truncated record");
+    assert!(read_type(&img, types, etypes, 0x20, false).is_none(), "kind 0 at padding");
 }
 
 #[test]
@@ -228,7 +236,7 @@ fn descriptor_region_walk_enumerates_without_typelinks() {
     assert_eq!(meta.types, types);
     assert_eq!(meta.offsets.len(), 8, "int, Point, *Point, five fillers");
     assert!(meta.offsets.contains(&0x38), "main.Point's record offset");
-    let t = read_type(&img, meta.types, meta.etypes, 0x38).expect("decodes");
+    let t = read_type(&img, meta.types, meta.etypes, 0x38, false).expect("decodes");
     assert_eq!(t.name, "main.Point");
 }
 
@@ -237,11 +245,11 @@ fn descriptor_stride_matches_the_abi_math() {
     let (spans, _anchor, types) = synth_descriptors();
     let img = img_of(&spans);
     let etypes = types + 0x400;
-    let int_t = read_type(&img, types, etypes, 0x08).expect("int");
+    let int_t = read_type(&img, types, etypes, 0x08, false).expect("int");
     assert_eq!(descriptor_stride(&img, &int_t), Some(48), "plain kind");
-    let point = read_type(&img, types, etypes, 0x38).expect("struct");
+    let point = read_type(&img, types, etypes, 0x38, false).expect("struct");
     assert_eq!(descriptor_stride(&img, &point), Some(80 + 2 * 24), "struct base + fields");
-    let ptr = read_type(&img, types, etypes, 0xb8).expect("ptr");
+    let ptr = read_type(&img, types, etypes, 0xb8, false).expect("ptr");
     assert_eq!(descriptor_stride(&img, &ptr), Some(56), "pointer wrapper");
 }
 

@@ -14,6 +14,19 @@
 /// The intrinsic name and the order of the user-op's arguments (0-based,
 /// after the user-op id) for the user-op `name` whose result is `size` bytes.
 pub fn intrinsic(name: &str, size: i32) -> Option<(String, Vec<usize>)> {
+    // The `lanefuse` masked forms: `(src, k, operands...)` / `(k, operands...)`.
+    if let Some(base) = name.strip_suffix("_maskz") {
+        let (intr, order) = intrinsic(base, size)?;
+        let (head, tail) = intr.split_once('_').and_then(|(_, r)| r.split_once('_'))?;
+        let named = format!("_{head}_maskz_{tail}");
+        return Some((named, std::iter::once(0).chain(order.into_iter().map(|a| a + 1)).collect()));
+    }
+    if let Some(base) = name.strip_suffix("_mask") {
+        let (intr, order) = intrinsic(base, size)?;
+        let (head, tail) = intr.split_once('_').and_then(|(_, r)| r.split_once('_'))?;
+        let named = format!("_{head}_mask_{tail}");
+        return Some((named, [0, 1].into_iter().chain(order.into_iter().map(|a| a + 2)).collect()));
+    }
     let (mnem, ext) = name.rsplit_once('_')?;
     if !matches!(ext, "avx" | "avx2" | "fma" | "avx512f" | "avx512bw" | "avx512dq" | "avx512vl" | "avx512cd") {
         return None;
@@ -155,6 +168,46 @@ pub fn intrinsic(name: &str, size: i32) -> Option<(String, Vec<usize>)> {
     Some((named, ident(n)))
 }
 
+/// The element kind of an intrinsic's vectors: `b'f'` for `_ps`/`_ss`,
+/// `b'd'` for `_pd`/`_sd`, `b'i'` for the integer forms.
+pub fn element_kind(intrinsic: &str) -> u8 {
+    if intrinsic.ends_with("_ps") || intrinsic.ends_with("_ss") {
+        b'f'
+    } else if intrinsic.ends_with("_pd") || intrinsic.ends_with("_sd") {
+        b'd'
+    } else {
+        b'i'
+    }
+}
+
+/// The Intel vector type name of `size` bytes holding `kind` elements
+/// (`__m256`, `__m512d`, `__m128i`).
+pub fn vector_type_name(size: i32, kind: u8) -> Option<String> {
+    let bits = match size {
+        16 => 128,
+        32 => 256,
+        64 => 512,
+        _ => return None,
+    };
+    let suffix = match kind {
+        b'f' => "",
+        b'd' => "d",
+        _ => "i",
+    };
+    Some(format!("__m{bits}{suffix}"))
+}
+
+/// The vector type itself: an opaque named type of `size` bytes, as the
+/// intrinsic headers declare it (the lanes are not addressable by name).
+pub fn vector_type(
+    tf: &dyn crate::dtype::TypeFactory,
+    size: i32,
+    kind: u8,
+) -> Option<std::rc::Rc<crate::dtype::Datatype>> {
+    let name = vector_type_name(size, kind)?;
+    tf.get_base_named(size, crate::dtype::type_metatype::TYPE_UNKNOWN, &name).ok()
+}
+
 /// `(kind, form, type)` of an FMA mnemonic such as `vfnmsub231ps`.
 fn fma(mnem: &str) -> Option<(&str, &str, &str)> {
     let rest = mnem.strip_prefix("vf")?;
@@ -197,5 +250,10 @@ mod tests {
         assert_eq!(intrinsic("vpaddd_avx2", 8), None);
         assert_eq!(intrinsic("cpuid", 16), None);
         assert_eq!(intrinsic("vzeroupper_avx", 16), None);
+        assert_eq!(intrinsic("vaddps_avx512f_mask", 64), Some(("_mm512_mask_add_ps".into(), vec![0, 1, 2, 3])));
+        assert_eq!(intrinsic("vaddps_avx512f_maskz", 64), Some(("_mm512_maskz_add_ps".into(), vec![0, 1, 2])));
+        assert_eq!(vector_type_name(32, element_kind("_mm256_add_epi32")).as_deref(), Some("__m256i"));
+        assert_eq!(vector_type_name(64, element_kind("_mm512_add_ps")).as_deref(), Some("__m512"));
+        assert_eq!(vector_type_name(16, element_kind("_mm_fmadd_sd")).as_deref(), Some("__m128d"));
     }
 }

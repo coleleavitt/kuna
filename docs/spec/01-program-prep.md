@@ -2170,6 +2170,27 @@ The always-on core, in pass order (`passes.rs (passes_for)`):
   bytes, valid UTF-8 at least 90% printable-or-whitespace, and the direct
   (relocation-less) arm additionally keeps the NUL scan's minimum of four.
   The engine half of the option is chapter [05](05-types.md)'s `RuleFatStr`.
+- **Code-side `&str` lengths** (`strcodelen`, kuna, default on, rustc-detected
+  images under the `fatstr` gate,
+  `decompiler/crates/kuna-analysis/src/analyzers/strings/kuna_strcodelen.rs
+  (scan)`): a literal that only code references has no static record, but the
+  code loads its length beside it, because a `&str` argument or result is two
+  scalar registers. The pass scans executable sections the way IDA 9.5's rust
+  plugin does (rust.so 0xd200). On x86-64 the pointer is a `lea r64, [rip+d]`
+  (or a non-PIE `mov r32, imm32`) into a SysV argument register, and the length
+  is the nearest `mov r32, imm32` into the next argument register (`rdx` beside
+  a returned `rax`) within 32 bytes, after the pointer first. On AArch64 it is
+  `adrp`+`add` into x(N) and the nearest `movz w(N+1)` within eight
+  instructions. The pair must then reach its consumer: a call or tail jump, or a
+  `ret` for the result registers. That rejects a lookup table whose base and an
+  unrelated constant happen to sit in `rax` and `rdx`. The target must be
+  2..=4096 bytes of valid UTF-8 in read-only data. Pieces of one `fmt::Arguments`
+  template are referenced inside each other, so a fact ends at the next fact's
+  start. The facts join the record facts as bounded strings: they commit before
+  the NUL stream and narrow its rows. In `std` (a 446 KB static rustc build) the
+  pass finds 117 literals for +0.008% instructions over decompile-all, and on
+  the 50 functions it changes the C output prints 160 string literals instead of
+  78.
 - **Wide strings** (`widestrings`, the `StringsAnalyzer` `allCharWidths` arm,
   `decompiler/crates/kuna-analysis/src/analyzers/strings/kuna_widestrings.rs
   (scan_wide_strings)`): the same matcher over 2-byte little-endian code units —
@@ -3916,41 +3937,83 @@ every other binary's pass list is byte-identical to before the pass existed):
   `decompiler/crates/kuna-analysis/src/analyzers/gotypes/mod.rs (GoTypesPass)`):
   phase 1 of the `docs/multilang.md` W3 Go provider. A stripped Go binary
   carries no DWARF, but the linker bakes the runtime's type graph in, and the
-  pass walks it: moduledata is found WITHOUT symbols (its first field points at
-  the pclntab header, which `locate_header` already finds on a stripped image;
-  the anchor is the data-section word holding that address whose next three
-  words parse as the `funcnametab` slice — go1.26+ emits `firstmoduledata`
-  into its own `.go.module` section, which the scan covers), and the type
-  metadata is then found by CROSS-VALIDATION inside the moduledata window in
-  whichever of its two historical forms is present — never by hardcoded field
-  offsets. Through go1.25: the `types`/`etypes` pair plus the `typelinks`
-  slice, sampled entries required to decode as plausible `_type` records.
-  From go1.26 the slice is gone: moduledata carries `types, typedesclen,
-  etypes` and the records sit consecutively in `[types + 8, types +
-  typedesclen)`, enumerated by advancing each record's own descriptor size
-  (`internal/abi.Type::DescriptorSize` — the per-kind wrapper, the optional
-  uncommon block and its methods, and the kind's trailing arrays), the walk
-  accepted only when records decode back to back and refused whole on the
-  first divergence. That is what lets one implementation hold across
-  go1.18..go1.27's layout drift (verified under go1.22, go1.25 and go1.27;
-  the e2e gate is `verify_gotypes`). Typelinks hold the pointer forms
-  interface conversion reaches (`*main.Point`), so the walk follows a
-  pointer record's elem to the named struct pointee. It interns
-  package-qualified named struct shells (fields at their recorded offsets,
-  zero-size embedded markers dropped, overlapping or over-extent layouts
-  refused whole) plus the well-known header shells `go.string`/`go.slice`/
-  `go.iface`/`go.eface` with their `LangFacet` records
-  (`decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_langfacet.rs`). Phase
-  1 is OUTPUT-NEUTRAL by construction — nothing binds the shells to a
-  variable yet, and the e2e proves the decompiled code byte-identical on vs
-  off — the knowledge is for the type surfaces and the consumers that follow
-  (typed globals, interface dispatch, signature recovery). Deliberately out of
-  phase 1: itab/method resolution, generic instantiations, map/chan internals,
-  named non-struct aliases, 32-bit and big-endian images. Interning happens at
-  `load file`, so the gate is the `KUNA_GOTYPES` env bridge
+  pass walks it. `runtime.moduledata` is found without symbols: its first field
+  points at the pclntab header, which `locate_header` already finds on a
+  stripped image, so the record is the data-section word holding that address
+  (go1.26+ emits `firstmoduledata` into its own `.go.module` section).
+  - **Layout table**
+    (`decompiler/crates/kuna-analysis/src/analyzers/pclntab/kuna_gomoduledata.rs
+    (locate)`). The fields after `pcHeader` move between releases, so the
+    record is read through one row per layout, with word indices taken from
+    `runtime/symtab.go` at each tag from go1.16 to go1.26: `rodata`/`gofunc`
+    arrived in go1.18, `covctrs` in go1.20, `inittasks` in go1.21 and
+    `epclntab` in go1.26 (`types` at word 35 or 37, `typelinks` at 40, 42, 44
+    or 45). The build-info version picks the row; without one every row is
+    tried, newest first. A row is accepted only when `text <= minpc < maxpc
+    <= etext`, `types < etypes`, the `ftab`, `typelinks` and `itablinks`
+    slices have `len == cap` and point into the image, and the `hasmain` byte
+    is 0 or 1. The rows were checked against stripped linux/amd64 builds by
+    every release from go1.16.15 to go1.26.2: each finds its record, with
+    `hasmain` 1 at the predicted word. The pclntab pass reads `moduledata.text`
+    through the same table.
+  - **Release encodings.** go1.16 names carry a big-endian `u16` length
+    (a varint from go1.17), and struct fields store `offset << 1 | embedded`
+    before go1.19; the build-info release selects both.
+  - **Past the table.** A layout no row validates (a future release) falls
+    back to cross-validation inside the moduledata window: a `types`/`etypes`
+    pair plus a `typelinks` slice whose sampled entries decode as `_type`
+    records, or the `types, typedesclen, etypes` triple of the descriptor form
+    that replaces the slice after go1.26, whose records sit consecutively in
+    `[types + 8, types + typedesclen)` and are enumerated by each record's own
+    descriptor size (`internal/abi.Type::DescriptorSize`), accepted only when
+    they decode back to back.
+
+  Typelinks hold the pointer forms interface conversion reaches
+  (`*main.Point`), so the walk follows a pointer record's elem to the named
+  struct pointee. It interns package-qualified named struct shells (fields at
+  their recorded offsets, zero-size embedded markers dropped, overlapping or
+  over-extent layouts refused whole) plus the well-known header shells
+  `go.string`/`go.slice`/`go.iface`/`go.eface` with their `LangFacet` records
+  (`decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_langfacet.rs`).
+  Nothing binds the shells to a variable yet, so they do not change the
+  decompiled code. Interning happens at `load file`, so the gate is the
+  `KUNA_GOTYPES` env bridge
   (`decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_gotypes.rs`, the
   `dwarfstructs` pattern), the walk is bounded (20,000 typelinks), and the
   pass registers before `gopclntab`, preserving its appended-last contract.
+- **Go type and itab names** (`gortti`, default on, part of the `gotypes`
+  pass, `decompiler/crates/kuna-analysis/src/analyzers/gotypes/mod.rs
+  (rtti_names, qualified_name)`). The pass also names the runtime type
+  descriptors and itabs as the image's linker does: `type:main.Point`,
+  `type:*main.Point`, `go:itab.*main.Point,main.Shape` (`type.` and
+  `go.itab.` before go1.20). The descriptors are found by walking the type
+  graph from `typelinks` and the itabs in `itablinks`, along element, key,
+  field, parameter, interface-method and `ptrToThis` edges (at most 200,000
+  records). A named type's package is spelled as its full import path from
+  `uncommontype.pkgPath` (`internal/poll.DeadlineExceededError`, where the
+  type's `str` holds `poll.DeadlineExceededError`). Pointer, slice, array and
+  map names are rebuilt from their elements' names. Each name becomes a
+  `TypedDataFact` typed `runtime._type` (48 bytes) or `runtime.itab` (32
+  bytes). The facts ride in `AnalysisOutput::go_rtti` and join the typed data
+  stream at commit only under `gortti on`, where a real symbol at the address
+  still wins. The result is that `runtime.newobject(0x49b840)` reads
+  `runtime.newobject(&type:main.Point)`, and an interface conversion stores
+  `&go:itab.*main.Point,main.Shape`.
+
+  Checked against unstripped builds of the same program: every itab name
+  equals the linker's symbol (7/7 for go1.16, 8/8 for go1.22, 15/15 for
+  go1.26). Type names were compared with the DWARF type named by each
+  descriptor (`DW_AT_go_runtime_type`): 409/426, 365/368 and 574/592 are
+  equal. The rest differ only in DWARF's own spellings (package-qualified
+  field names inside struct literals, `noalg.` types, `·N` suffixes). Linkers
+  since go1.16 emit no per-type symbols, so a stripped and an unstripped
+  build print the same names.
+
+  Cost: on a stripped go1.26 build of a small program (1,784 functions),
+  decompile-all takes +2.6% instructions. A one-function decompile of the
+  15 MB `go` tool (7,649 named records) takes +2.7%, once the string-literal
+  commit tests typed spans by binary search over merged spans (it was a
+  linear scan per literal, +24%).
 - **Go pclntab** (`gopclntab`, Go-detected binaries only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pclntab/mod.rs`): the runtime
   needs the PC→name table for stack traces, so it survives stripping; the pass
@@ -3969,9 +4032,9 @@ every other binary's pass list is byte-identical to before the pass existed):
   The last function ends at the table's closing `etext` entry, so host code an
   external link places after Go's is not swallowed. Go 1.26 stopped storing the
   text base in the header, so an `entryoff` is then resolved against the module's
-  `moduledata.text` (the record in `.go.module` / `__go_module` / the data
-  sections that opens with the header's address, accepted only when its
-  `minpc`/`maxpc`/`text`/`etext` nest) — an external link puts `crt` code and
+  `moduledata.text` (the record read through the `kuna_gomoduledata` layout
+  table, accepted only when its `ftab` holds `nfunc + 1` entries) — an external
+  link puts `crt` code and
   `.init`/`.plt` ahead of `runtime.text` — falling back to the lowest code section
   when no record is found.
 - **MSVC RTTI** (`rtti`, PE-only, default-off;

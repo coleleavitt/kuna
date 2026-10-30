@@ -8264,3 +8264,39 @@ image's source language is Go; `always` drops the language test (the
 stage-test bytechunk); `off` keeps the faithful concatenation. Pinned by
 `tests/stages/kuna-gobool.xml` (two-pass over a hand-assembled
 `mov %rdi,%rax; cmp $1,%rdi; sete %al; ret`).
+
+### (kuna) The SysV x86-64 vector calling convention — `option vectorabi`, default on
+
+`decompiler/crates/kuna-decomp/src/p4_calls/kuna_vectorabi.rs (model)`. The
+vendored `x86-64-gcc.cspec` describes XMM0-7 only as 8-byte float slots
+(`XMMn_Qa`), so a `__m128`, `__m256` or `__m512` argument, or any XMM
+parameter wider than 8 bytes, had no entry. It read as an uninitialized local,
+and a vector result was lost. `model` clones the default model and adds, on
+each `XMMn_Qa` slot and in the same group, 16-, 32- and 64-byte entries on the
+same register base (`ParamEntry::seed` + `kuna_whole_register`, the
+`armfloatreturn` pattern). It adds the same three to the output list on
+register 0. The widened model is built once per default model
+(`Architecture::vector_models`) and carried as `ArchContext::vector_fp`.
+
+It is used only by functions whose flow found vector code
+(`Funcdata::kuna_vector_code`, set by `lanefuse` or by a vector user-op): for
+the function's own prototype in `ActionPrototypeTypes`, and for its call
+sites in `ActionDefaultParams`. Scalar code keeps the plain model, because
+compilers move scalar doubles with whole-register instructions (`movapd`,
+`pxor x,x`), which a 16-byte entry would read as `__m128`.
+
+Vector types: the operands and results of a vector user-op (an AVX SLEIGH op
+with an intrinsic name, or a `lanefuse` built-in) take the Intel types
+`__m128`/`__m256`/`__m512` with the `d`/`i` suffix from the intrinsic's
+element type. These are named base types, so they print without a struct
+wrapper (`p5_types/coreaction_infertypes.rs (vector_userop_type)`).
+`ActionOutputPrototype` gives a recovered vector return the type of the
+user-op that produced it (`vector_result_type`, following COPYs). Result:
+`__m256 addv(__m256 a0,__m256 a1) { return _mm256_add_ps(a0,a1); }` and
+`__m512 madd(__m512 a0,__m512 a1,__m512 a2,unsigned short a3) { return
+_mm512_mask_add_ps(a0,a3,a1,a2); }`.
+
+Legacy-SSE integer and two-lane double code (`paddd`, `mulpd` without VEX)
+keeps its lanes at the default `lanefuse on` (chapter 02), so such a
+function's 16-byte arguments read as 8-byte lane pieces; `lanefuse all` gives
+it `__m128i`/`__m128d` arguments and returns.

@@ -494,6 +494,8 @@ Three tiers:
 | obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b | [`mba`](#mba) |
 | xor and and terms combined with additions and multiplications by 2 | [`mba`](#mba) |
 | ollvm or tigress instruction substitution in the output | [`mba`](#mba) |
+| products of and/or terms such as (x & y) * (x  | [`mba`](#mba) |
+|  y) that hide a plain multiplication | [`mba`](#mba) |
 | heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
 | dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
 | caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
@@ -633,6 +635,12 @@ Three tiers:
 | a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc) |
 | panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc) |
 | rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc) |
+| a rust string literal prints glued to the next literal | [`strcodelen`](#strcodelen) |
+| a &str pointer alone shows several literals run together | [`strcodelen`](#strcodelen) |
+| rust string symbol names concatenate two messages | [`strcodelen`](#strcodelen) |
+| a go runtime.newobject call passes a bare address | [`gortti`](#gortti) |
+| go interface conversion stores an unnamed itab address | [`gortti`](#gortti) |
+| stripped go binary shows hex constants where type descriptors are used | [`gortti`](#gortti) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -1539,6 +1547,16 @@ Three tiers:
 | the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl) |
 | a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl) |
 | --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl) |
+| avx code reads SUB6432(zmm0,0) instead of ymm0 | [`vexzeroupper`](#vexzeroupper) |
+| a ymm or xmm argument shows as a 64-byte zmm local | [`vexzeroupper`](#vexzeroupper) |
+| vector values are widened to char[64] | [`vexzeroupper`](#vexzeroupper) |
+| eight float additions on slices of one register instead of a vector add | [`lanefuse`](#lanefuse) |
+| avx-512 mask applied as sixteen per-lane multiply-or statements | [`lanefuse`](#lanefuse) |
+| a vector function body is one statement per lane | [`lanefuse`](#lanefuse) |
+| a function taking __m256 shows (void) parameters and reads ymm registers as locals | [`vectorabi`](#vectorabi) |
+| a vector-returning function is void or undefined32 | [`vectorabi`](#vectorabi) |
+| x86-64 xmm parameter wider than 8 bytes is lost | [`vectorabi`](#vectorabi) |
+| char[32] locals for vector values | [`vectorabi`](#vectorabi) |
 | vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
 | fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
 | avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
@@ -2696,8 +2714,8 @@ The control surface: each of these can make output worse on the wrong source sha
 
 ### `mba` -- on | off, default `off`
 
-- **Symptoms:** obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b; xor and and terms combined with additions and multiplications by 2; ollvm or tigress instruction substitution in the output.
-- **What it does:** Simplify linear mixed boolean-arithmetic (MBA) expressions, the obfuscation that hides `x + y` as `(x ^ y) + 2*(x & y)`. RuleMbaSimplify collects the tree under an arithmetic root (interior ops with one reader inlined, up to 4 distinct leaves), requires the linear-MBA shape (+, -, negation and multiplication by a constant over bitwise subterms of leaves) with at least one arithmetic and one bitwise op, evaluates it on the 2^n points where each leaf is 0 or 1, and Möbius-inverts those values into conjunction-basis coefficients. For a linear MBA, agreement on those points implies equality at every width, so no SMT solver is needed. The replacement is the cheapest of: a linear sum of the leaves, k + c*g(x,y) for one two-variable boolean function g, or the conjunction sum; it is applied only when it has fewer ops and 64 pseudo-random full-width evaluations agree.
+- **Symptoms:** obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b; xor and and terms combined with additions and multiplications by 2; ollvm or tigress instruction substitution in the output; products of and/or terms such as (x & y) * (x ;  y) that hide a plain multiplication.
+- **What it does:** Simplify mixed boolean-arithmetic (MBA) expressions, the obfuscation that hides `x + y` as `(x ^ y) + 2*(x & y)`. RuleMbaSimplify collects the tree under an arithmetic root (interior ops with one reader inlined, up to 6 distinct leaves) with at least one arithmetic and one bitwise op. A linear MBA (+, -, negation and multiplication by a constant over bitwise subterms of leaves) is evaluated on the 2^n points where each leaf is 0 or 1 and Möbius-inverted into conjunction-basis coefficients; agreement on those points implies equality at every width, so no SMT solver is needed. The multi-leaf terms are split into groups of leaves that share a term, each group rewritten as c*g for one boolean function g (the smallest table expression for up to 3 leaves; for 4 to 6, the cheapest disjoint bi-decomposition or Shannon expansion). A polynomial MBA (a product of two non-constant terms) is multiplied out over the conjunction basis and rebuilt from that normal form, so `(x & y) * (x | y) + (x & ~y) * (~x & y)` becomes `x * y`. A replacement is applied only when it has fewer ops (a multiply by -1 is free, the IR spelling of a subtraction) and 64 pseudo-random full-width evaluations agree.
 - **When to flip:** Off by default. Turn it on for obfuscated code (Tigress, OLLVM substitution) whose arithmetic reads as xor/and/or soup, such as `(a0 ^ a1) + (a0 & a1) * 2`.
 - **Where / provenance:** P3/simplification-quiescence · kuna · new-analysis · ida95-45
 - **Example:** `--option mba on`
@@ -3002,10 +3020,10 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-ehframe-lsda
 - **Example:** `--option eh_frame_full on`
 
-### `itaniumeh` -- on | off, default `off`
+### `itaniumeh` -- on | catch | off, default `off`
 
 - **Symptoms:** catch block missing from a c++ function; destructor calls on the exception path are missing; __cxa_begin_catch never appears in the pseudocode; _Unwind_Resume never appears although the binary calls it; a c++ function with try/catch shows only the normal return.
-- **What it does:** Show Itanium C++ catch and cleanup code. Each call covered by a .gcc_except_table call-site record gets an exceptional successor: `if (eh_unwinding()) goto pad;` right after the call. At the landing pad the exception pointer register is defined by `eh_exception()` and, when the pad has a catch clause, the selector register by `eh_selector()`, so `__cxa_begin_catch(eh_exception())` and the `eh_selector() == N` tests read as written. A comment at each pad lists its clauses by selector value (`catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`, or `cleanup`), with catch types named from their typeinfo symbols. Without it the pads are unreachable and catch bodies, destructor calls and `_Unwind_Resume` vanish from the pseudocode. ELF only (x86, x86-64, AArch64, ARM).
+- **What it does:** Show Itanium C++ catch and cleanup code as try/catch. Each landing pad gets one exceptional edge, from the first call that unwinds to it; the printer renders the edge as `try { <calls and normal path> } catch (T &) { <pad> }` (`catch (...)` when the pad has several clauses, which stay as `eh_selector() == N` tests listed in the pad comment), and later calls unwinding to the same pad print inside the same try. `catch` gives edges only to pads with a catch clause (cleanup pads stay hidden): +0.5% instructions on a 252 KB g++ binary, so the aggressive preset uses it; `on` costs +25%. The edge is `if (eh_unwinding()) goto pad;` right after the call. At the landing pad the exception pointer register is defined by `eh_exception()` and, when the pad has a catch clause, the selector register by `eh_selector()`, so `__cxa_begin_catch(eh_exception())` and the `eh_selector() == N` tests read as written. A comment at each pad lists its clauses by selector value (`catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`, or `cleanup`), with catch types named from their typeinfo symbols. Without it the pads are unreachable and catch bodies, destructor calls and `_Unwind_Resume` vanish from the pseudocode. ELF only (x86, x86-64, AArch64, ARM).
 - **When to flip:** Off (default) shows only the normal path, as upstream Ghidra and IDA do for Itanium code. Turn it on to see what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows.
 - **Where / provenance:** P2/flow-classification · kuna · new-analysis · ida95-44
 - **Example:** `--option itaniumeh on`
@@ -3017,6 +3035,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default for Rust binaries: panic and bounds-check calls show the source position they report. Turn it off to see the raw record addresses.
 - **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
 - **Example:** `--option panicloc off`
+
+### `strcodelen` -- on | off, default `on`
+
+- **Symptoms:** a rust string literal prints glued to the next literal; a &str pointer alone shows several literals run together; rust string symbol names concatenate two messages.
+- **What it does:** Bound Rust `&str` literals by the length the code loads beside them. A literal that only code references has no static `(ptr, len)` record, so the NUL-run scan glued it to the next literal (`hello theregeneral kenobi`) wherever the pointer appears alone. The pass scans executable sections the way IDA 9.5's rust plugin does: an x86-64 `lea r64, [rip+d]` (or non-PIE `mov r32, imm32`) of read-only text into a SysV argument register and a `mov r32, imm32` into the next argument register within 32 bytes, or an AArch64 `adrp`+`add` into x(N) and a `movz w(N+1)` within eight instructions. A hit with 2 <= len <= 4096 bytes of valid UTF-8 becomes a bounded string, which retires the glued row at its start. Registered for rustc-detected images under `fatstr`.
+- **When to flip:** On by default for Rust binaries: a literal pointer that appears without its length still prints only its own text. Turn it off to see the NUL-scan strings.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
+- **Example:** `--option strcodelen off`
+
+### `gortti` -- on | off, default `on`
+
+- **Symptoms:** a go runtime.newobject call passes a bare address; go interface conversion stores an unnamed itab address; stripped go binary shows hex constants where type descriptors are used.
+- **What it does:** Name and type a Go image's runtime type descriptors and itabs, as its own linker does: `type:main.Point`, `type:*main.Point`, `go:itab.*main.Point,main.Shape` (`type.` and `go.itab.` before go1.20). `runtime.moduledata` is read through a layout table per release (go1.16 to go1.26, word indices from `runtime/symtab.go` at each tag) to find the type blob and the `typelinks` and `itablinks` slices; the descriptors are found by walking the type graph from them (element, key, field, parameter, method and `ptrToThis` edges). Each becomes a data symbol typed `runtime._type` (48 bytes) or `runtime.itab` (32), so `runtime.newobject(0x49b840)` reads `runtime.newobject(&type:main.Point)`. Registered for Go-detected images; a real symbol at the address wins.
+- **When to flip:** On by default for Go binaries: allocations, interface conversions and type switches name the type they use. Turn it off to see the raw descriptor addresses.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-47
+- **Example:** `--option gortti off`
 
 ### `unwindstarts` -- on | off, default `off`
 
@@ -4869,6 +4903,30 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default (DIV-143). Keep it on when a function's body re-declares one of its own parameters -- the shape is a signature `f(unsigned int a0, ...)` immediately followed by `int4 a0;`, with `&a0` the only use, and the disassembly showing that `&a0` is a `LEA` of the parameter's own frame slot. It is the standard rendering for a parameter passed by address to an API (`CryptDeriveKey`, `GetTokenInformation`, any out-parameter), because the body then never reads the slot as a value and the parameter's storage carries no Varnode. Inert unless an `&symbol` reference resolves to a `function_parameter` Symbol, so any function that does not take the address of a parameter is byte-identical. Flip OFF to restore the duplicate declaration -- worth doing only to confirm that a variable you expected to be a local really is the parameter.
 - **Where / provenance:** P9/naming-policy · kuna · correctness-fix · repipe-address-taken-key-parameter
 - **Example:** `option paramrefdecl off`
+
+### `vexzeroupper` -- on | off, default `on`
+
+- **Symptoms:** avx code reads SUB6432(zmm0,0) instead of ymm0; a ymm or xmm argument shows as a 64-byte zmm local; vector values are widened to char[64].
+- **What it does:** Split each VEX/EVEX zero-upper register write at the result's width. The x86 SLEIGH spec writes `ZmmReg1 = zext(result)` for every VEX-encoded instruction that writes an XMM or YMM register, so each write overlaps every read of the same XMM/YMM register and heritage widens the storage to all 64 bytes of ZMM: a function that reads ymm0 and returns in ymm0 had a 64-byte zmm0 input and read it back as `SUB6432(zmm0,0)`. At flow time each such `INT_ZEXT` into a 32- or 64-byte register becomes a write of the result's own width (the producing user-op writes the low register directly when its temporary has no other reader) plus zero fills of the bytes above it, cut at the YMM/ZMM boundary. x86-64 only.
+- **When to flip:** On by default: AVX code keeps xmm/ymm values at their width, which the vector calling convention (`vectorabi`) needs. Turn it off to see the SLEIGH spec's whole-ZMM writes.
+- **Where / provenance:** P2/flow-follow · kuna · correctness-fix · ida95-46
+- **Example:** `--option vexzeroupper off`
+
+### `lanefuse` -- on | all | off, default `on`
+
+- **Symptoms:** eight float additions on slices of one register instead of a vector add; avx-512 mask applied as sixteen per-lane multiply-or statements; a vector function body is one statement per lane.
+- **What it does:** Re-fuse the per-lane p-code of a vector instruction into one intrinsic op, and fold an AVX-512 write mask into the instruction's user-op. The x86 SLEIGH spec writes many SSE/AVX instructions lane by lane (`VADDPS ymm0,ymm0,ymm1` is eight FLOAT_ADDs on 4-byte slices), so heritage never sees the whole vector and the body prints as one float statement per lane. A run of two or more ops of one opcode (FLOAT_ADD/SUB/MULT/DIV, INT_ADD/SUB/MULT/AND/OR/XOR) whose output and inputs are consecutive equal-width slices of the same storage, covering 16, 32 or 64 bytes, becomes one built-in user-op named for the intrinsic (`_mm256_add_ps`, `_mm_add_epi32`, `_mm_and_si128`). An EVEX `{k}` mask, which the spec applies per lane after the user-op as `r[j] = zext(k_j)*r[j] | zext(!k_j)*src[j]`, becomes the user-op's masked form with the source and the mask as arguments (`_mm512_mask_add_ps(src, k, a, b)`, `_mm512_maskz_add_ps(k, a, b)` when EVEX.z is set). At `on` (default) legacy-SSE integer and two-lane double runs keep their lanes, because compilers emit them for auto-vectorised and SLP-paired scalar code that `devectorize`, `wideslice`, `simdlane` and the float-precision rules turn back into scalars; `all` fuses them too, for hand-written SSE2 intrinsic code (`_mm_add_epi32`, `_mm_mul_pd` with `__m128i`/`__m128d` arguments). Lane-wise AND/OR/XOR never fuse (scalar `xorps x,x` / `andps` sign-mask idioms). x86-64 only.
+- **When to flip:** On by default: vector code reads as one intrinsic per instruction and whole vectors flow into arguments and returns. Use `all` for hand-written SSE2 integer/double intrinsic code; turn it off to see the SLEIGH lane statements.
+- **Where / provenance:** P2/flow-follow · kuna · new-analysis · ida95-46
+- **Example:** `--option lanefuse off`
+
+### `vectorabi` -- on | off, default `on`
+
+- **Symptoms:** a function taking __m256 shows (void) parameters and reads ymm registers as locals; a vector-returning function is void or undefined32; x86-64 xmm parameter wider than 8 bytes is lost; char[32] locals for vector values.
+- **What it does:** The SysV x86-64 vector calling convention, and the Intel vector types. The vendored x86-64-gcc.cspec describes XMM0-7 only as 8-byte float slots (XMMn_Qa), so a `__m128`, `__m256` or `__m512` argument (and #16: any XMM/YMM parameter wider than 8 bytes) had no entry: it read as an uninitialized local and the vector result was lost. With this option the default model gains, on each XMMn_Qa slot and in the same group, 16-, 32- and 64-byte entries on xmm/ymm/zmm n, and its output list the same three on register 0 (built once per model, like `armfloatreturn`). The operands and results of vector user-ops (the AVX SLEIGH ops with an intrinsic name and the `lanefuse` built-ins) take the Intel vector types `__m128`/`__m256`/`__m512` with the `d` and `i` variants from the intrinsic's element type, and a recovered vector return takes its producer's type. Applies to `x86:LE:64:default:gcc`.
+- **When to flip:** On by default: `__m256 addv(__m256 a0,__m256 a1) { return _mm256_add_ps(a0,a1); }`. Turn it off for the cspec's scalar-only float model.
+- **Where / provenance:** P4/input-prototype · kuna · correctness-fix · ida95-46
+- **Example:** `--option vectorabi off`
 
 ### `avxintrinsics` -- on | off, default `on`
 

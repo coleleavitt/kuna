@@ -16,4 +16,8 @@ __attribute__((noinline)) int cleanup(int x){
   { Guard g(&n); n += risky(x); n += risky(x + 1); }
   return n;
 }
-int main(int c, char **v){ return catcher(c) + cleanup(c); }
+__attribute__((noinline)) int typed(int x){
+  try { return risky(x); }
+  catch (const std::runtime_error &e) { return -3; }
+}
+int main(int c, char **v){ return catcher(c) + cleanup(c) + typed(c); }

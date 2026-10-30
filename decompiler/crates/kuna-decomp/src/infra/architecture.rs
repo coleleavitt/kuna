@@ -399,6 +399,22 @@ pub struct Architecture {
     /// (kuna `itaniumeh`) Give each call covered by a `.gcc_except_table`
     /// call-site record an exceptional edge to its landing pad.
     pub itanium_eh: bool,
+    /// (kuna `itaniumeh catch`) Only pads with a catch clause get an edge.
+    pub itanium_eh_catch_only: bool,
+    /// (kuna `vexzeroupper`) Split each VEX zero-upper ZMM write at the result's
+    /// width (`kuna_vexzeroupper`).
+    pub vex_zero_upper: bool,
+    /// (kuna `vectorabi`) Widen the SysV x86-64 default model with the
+    /// xmm/ymm/zmm vector entries (`kuna_vectorabi`).
+    pub vector_abi: bool,
+    /// (kuna `lanefuse`) Re-fuse per-lane vector p-code (`kuna_lanefuse`).
+    pub lane_fuse: bool,
+    /// (kuna `lanefuse all`) Also fuse legacy-SSE integer and two-lane double runs.
+    pub lane_fuse_all: bool,
+    /// (kuna `vectorabi`) The widened models, built once per default model.
+    pub vector_models: std::cell::RefCell<Vec<(Rc<crate::fspec::ProtoModel>, Rc<crate::fspec::ProtoModel>)>>,
+    /// (kuna `vectorabi`) The vector user-ops and their element kinds, built once.
+    pub vector_userop_kinds: std::cell::OnceCell<Rc<Vec<(kuna_base::types::uint4, u8)>>>,
     /// (kuna `itaniumeh`) The image's Itanium call-site table, installed by the
     /// analysis commit from `AnalysisOutput::eh_call_sites`. Empty without it.
     pub eh_table: Rc<crate::kuna_itaniumeh::EhTable>,
@@ -2335,6 +2351,10 @@ pub struct Architecture {
     pub analysis_datasyms: bool,
     /// (kuna `panicloc`) Type and name Rust panic `Location` records.
     pub analysis_panicloc: bool,
+    /// (kuna `strcodelen`) Bound `&str` literals by the length the code loads beside them.
+    pub analysis_strcodelen: bool,
+    /// (kuna `gortti`) Name Go type descriptors and itabs.
+    pub analysis_gortti: bool,
     /// (kuna) Gate the DWARF `.debug_line` source-line comment pass (`dwarf_lines`);
     /// default **off** — it changes the decompiled output (adds `/* file:line */`
     /// comments). The kuna analog of Ghidra's `DWARFLineInfoCommentScript`.
@@ -3212,6 +3232,13 @@ impl Architecture {
             caller_reads: true, // (kuna) option callerreads; reset_defaults sets the shipped default
             kuna_call_returns: Vec::new(),
             itanium_eh: false,
+            itanium_eh_catch_only: false,
+            vex_zero_upper: false,
+            vector_abi: false,
+            lane_fuse: false,
+            lane_fuse_all: false,
+            vector_models: std::cell::RefCell::new(Vec::new()),
+            vector_userop_kinds: std::cell::OnceCell::new(),
             eh_table: Rc::new(crate::kuna_itaniumeh::EhTable::default()),
             bool_byte: true, // (kuna) option boolbyte; reset_defaults sets the shipped default
             float_bits: false, // (kuna) option floatbits; reset_defaults sets the shipped default
@@ -3599,6 +3626,8 @@ impl Architecture {
             analysis_dwarf: false,
             analysis_datasyms: false,
             analysis_panicloc: false,
+            analysis_strcodelen: false,
+            analysis_gortti: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
             analysis_dwarfnocall: false,
@@ -3981,6 +4010,11 @@ impl Architecture {
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
         self.itanium_eh = false;
+        self.itanium_eh_catch_only = false;
+        self.vex_zero_upper = true;
+        self.vector_abi = true;
+        self.lane_fuse = true;
+        self.lane_fuse_all = false;
         self.caller_reads = true; // (kuna) option callerreads default-on: inert without the Listing, so 0/675 datatest assertions move
         self.call_target_type = false; // (kuna) option calltargettype: default-OFF in the catalog because the XML datatest corpus pins the upstream `code *` spellings and applies no mode; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for every real binary
         self.ptrdepthcap = false; // (kuna) DIV-108: default-OFF in the catalog because it changes INFERRED types and the datatest corpus pins the upstream spellings; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so the cap is the default rendering for every real binary
@@ -4139,6 +4173,8 @@ impl Architecture {
         self.analysis_mips_isa = true;
         self.analysis_dwarf = true;
         self.analysis_panicloc = true; // (kuna) Rust-only; inert on the datatest corpus, which loads no ELF
+        self.analysis_strcodelen = true;
+        self.analysis_gortti = true;
         self.analysis_datasyms = true; // (kuna) DIV-76 ELF data-symbol naming default-ON (the DIV-26 arm, now gated)
         self.analysis_dwarf_lines = false; // (kuna) source-line comments default-OFF (output-changing, opt-in)
         self.analysis_typedepth = true; // (kuna) DIV: full-depth DWARF type resolution default-ON (the depth budget truncated ordinary C declarations to void; real-ELF DWARF path only, so every parity gate is byte-identical)
@@ -5085,6 +5121,56 @@ impl Architecture {
         // propagation still off. `Rc` clone: the list is built once at load.
         ctx.dynreloc_const = Rc::clone(&self.dynreloc_const);
         ctx.eh_table = self.itanium_eh.then(|| Rc::clone(&self.eh_table));
+        ctx.itanium_eh_catch_only = self.itanium_eh_catch_only;
+        ctx.vex_zero_upper = self.vex_zero_upper && self.archid.starts_with("x86:LE:64");
+        ctx.lane_fuse = self.lane_fuse && self.archid.starts_with("x86:LE:64");
+        ctx.lane_fuse_all = self.lane_fuse_all;
+        ctx.vector_fp = if self.vector_abi && self.archid == "x86:LE:64:default:gcc" {
+            ctx.defaultfp.as_ref().map(|model| {
+                let mut built = self.vector_models.borrow_mut();
+                if let Some((_, widened)) = built.iter().find(|(from, _)| Rc::ptr_eq(from, model)) {
+                    return widened.clone();
+                }
+                let widened = crate::kuna_vectorabi::model(model, ctx.manage());
+                built.push((model.clone(), widened.clone()));
+                widened
+            })
+        } else {
+            None
+        };
+        ctx.vector_userops = if self.vector_abi && self.archid.starts_with("x86:LE:64") {
+            Rc::clone(self.vector_userop_kinds.get_or_init(|| {
+                let sleigh = self.userops.named_ops().filter_map(|(i, nm)| {
+                    let (intr, _) = crate::kuna_avxintrin::intrinsic(std::str::from_utf8(nm).ok()?, 32)?;
+                    Some((i, crate::kuna_avxintrin::element_kind(&intr)))
+                });
+                let fused = crate::kuna_lanefuse::builtins()
+                    .into_iter()
+                    .chain(crate::kuna_lanefuse::mask_builtins(self.userops.named_ops()))
+                    .filter_map(|(i, nm)| {
+                        let (intr, _) = crate::kuna_avxintrin::intrinsic(&nm, 32).or_else(|| Some((nm.clone(), vec![])))?;
+                        Some((i, crate::kuna_avxintrin::element_kind(&intr)))
+                    });
+                let mut all: Vec<(kuna_base::types::uint4, u8)> = sleigh.chain(fused).collect();
+                all.sort_unstable();
+                Rc::new(all)
+            }))
+        } else {
+            Rc::new(Vec::new())
+        };
+        ctx.vector_fp = if self.vector_abi && self.archid == "x86:LE:64:default:gcc" {
+            ctx.defaultfp.as_ref().map(|model| {
+                let mut built = self.vector_models.borrow_mut();
+                if let Some((_, widened)) = built.iter().find(|(from, _)| Rc::ptr_eq(from, model)) {
+                    return widened.clone();
+                }
+                let widened = crate::kuna_vectorabi::model(model, ctx.manage());
+                built.push((model.clone(), widened.clone()));
+                widened
+            })
+        } else {
+            None
+        };
         ctx.litpool_const = Rc::clone(&self.litpool_const);
         ctx.litpoolconst = self.litpoolconst; // litpoolconst (in-code literal-pool folding)
         // Carry the data-type-splitting toggle bits (C++ `glb->split_datatype_config`)
@@ -5970,6 +6056,14 @@ impl Architecture {
             // (kuna strlenscan) the length an inline `repnz scasb` computes.
             userops.register_builtin(BUILTIN_STRLEN, &adapter)?;
             // (kuna itaniumeh) the exceptional-edge test and the two pad values.
+            for (id, name) in crate::kuna_lanefuse::builtins() {
+                userops.register_named_builtin(id, &name);
+            }
+            let named: Vec<(kuna_base::types::uint4, Vec<u8>)> =
+                userops.named_ops().map(|(i, nm)| (i, nm.to_vec())).collect();
+            for (id, name) in crate::kuna_lanefuse::mask_builtins(named.iter().map(|(i, nm)| (*i, nm.as_slice()))) {
+                userops.register_named_builtin(id, &name);
+            }
             for id in [
                 crate::userop::BUILTIN_EH_UNWINDING,
                 crate::userop::BUILTIN_EH_EXCEPTION,

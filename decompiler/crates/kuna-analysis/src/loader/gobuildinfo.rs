@@ -100,10 +100,14 @@ fn read_va(file: &object::File, va: u64, len: usize) -> Option<Vec<u8>> {
 
 /// The Go toolchain version from either build-info form.
 pub fn go_version_any(bytes: &[u8]) -> Option<(u16, u16)> {
-    let file = object::File::parse(bytes).ok()?;
+    go_version_of(&object::File::parse(bytes).ok()?)
+}
+
+/// [`go_version_any`] over an already parsed image.
+pub fn go_version_of(file: &object::File) -> Option<(u16, u16)> {
     for name in BUILDINFO_SECTIONS {
         if let Some(data) = file.section_by_name(name).and_then(|s| s.data().ok()) {
-            if let Some(v) = version_from_blob(data).or_else(|| version_from_pointer_blob(&file, data)) {
+            if let Some(v) = version_from_blob(data).or_else(|| version_from_pointer_blob(file, data)) {
                 return Some(v);
             }
         }

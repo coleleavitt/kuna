@@ -111,6 +111,10 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
                 }
             }
         }
+        // (kuna vectorabi) a vector user-op's result is an Intel vector type.
+        if let Some(t) = vector_userop_type(&arch, in0_off, out_size) {
+            return t;
+        }
         // (kuna itaniumeh) the exceptional-edge test is a `bool`.
         if in0_off == crate::userop::BUILTIN_EH_UNWINDING as u64 {
             if let Some(Ok(t)) = arch.types().map(|t| t.get_base(out_size, type_metatype::TYPE_BOOL)) {
@@ -154,6 +158,32 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
     }
 }
 
+/// The Intel vector type `vn` has when a vector user-op wrote it.
+pub(crate) fn vector_result_type(data: &Funcdata, vn: crate::context::VarnodeId) -> Option<Rc<Datatype>> {
+    let mut vn = vn;
+    for _ in 0..8 {
+        let v = data.vbank().get(vn)?;
+        let def = data.obank().get(v.get_def().filter(|_| v.is_written())?)?;
+        match def.code() {
+            OpCode::CPUI_COPY => vn = def.get_in(0)?,
+            OpCode::CPUI_CALLOTHER => {
+                let id = data.vbank().get(def.get_in(0)?)?.get_offset();
+                return vector_userop_type(data.get_arch(), id, v.get_size());
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// The Intel vector type of a `size`-byte operand of the vector user-op `id`.
+fn vector_userop_type(arch: &crate::context::ArchHandle, id: u64, size: int4) -> Option<Rc<Datatype>> {
+    let id = kuna_base::types::uint4::try_from(id).ok()?;
+    let at = arch.vector_userops.binary_search_by_key(&id, |(i, _)| *i).ok()?;
+    let kind = arch.vector_userops[at].1;
+    crate::kuna_avxintrin::vector_type(arch.types()?, size, kind)
+}
+
 pub(crate) fn input_type_local(data: &Funcdata, op: OpId, slot: int4) -> Rc<Datatype> {
     input_type_local_with(data, op, slot, true)
 }
@@ -184,6 +214,14 @@ fn input_type_local_with(data: &Funcdata, op: OpId, slot: int4, recovered: bool)
     if (opcode == OpCode::CPUI_CALL || opcode == OpCode::CPUI_CALLIND) && slot > 0 {
         if let Some(ct) = call_input_type_local(data, op, slot, opcode, recovered) {
             return ct;
+        }
+    }
+
+    // (kuna vectorabi) a vector user-op's vector operands are Intel vector types.
+    if opcode == OpCode::CPUI_CALLOTHER && slot > 0 {
+        let id = o.get_in(0).and_then(|v| data.vbank().get(v)).map(|v| v.get_offset()).unwrap_or(0);
+        if let Some(t) = vector_userop_type(&arch, id, in_size) {
+            return t;
         }
     }
 

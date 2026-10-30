@@ -571,7 +571,7 @@ fn recover_go_table(file: &object::File) -> (Vec<GoFunc>, Option<u64>) {
     // falling back to the lowest code section when no moduledata is found.
     if h.ver.is_118plus() && h.text_start == 0 {
         h.text_start =
-            moduledata_text(file, &h, header_vma).unwrap_or_else(|| text_section_start(file));
+            moduledata_text(file, &img, &h, header_vma).unwrap_or_else(|| text_section_start(file));
     }
     (decode_functions(&img, &h), functab_end(&img, &h))
 }
@@ -591,31 +591,14 @@ fn functab_end(img: &ImageBytes, h: &PcHeader) -> Option<u64> {
     }
 }
 
-/// `moduledata.text` of the module whose `pcHeader` is at `header_vma`. The
-/// `moduledata` opens with that pointer; word 17 is `len(ftab)` (`nfunc + 1`) and
-/// words 20-23 are `minpc, maxpc, text, etext`, which must nest. Searched in the
-/// data sections the linker places `runtime.firstmoduledata` in.
-fn moduledata_text(file: &object::File, h: &PcHeader, header_vma: u64) -> Option<u64> {
-    let ps = h.ptr_size as usize;
-    let word = |rec: &[u8], i: usize| rd_ptr(&rec[i * ps..], h.ptr_size, h.end);
-    for name in [".go.module", "__go_module", ".noptrdata", ".data", "__noptrdata", "__data"] {
-        let Some(sec) = file.section_by_name(name) else { continue };
-        let Ok(data) = sec.data() else { continue };
-        let lead = (ps - (sec.address() as usize % ps)) % ps;
-        let mut off = lead;
-        while off + 24 * ps <= data.len() {
-            let rec = &data[off..off + 24 * ps];
-            off += ps;
-            if word(rec, 0) != header_vma || word(rec, 17) != h.nfunc.wrapping_add(1) {
-                continue;
-            }
-            let (minpc, maxpc, text, etext) = (word(rec, 20), word(rec, 21), word(rec, 22), word(rec, 23));
-            if text != 0 && text <= minpc && minpc < maxpc && maxpc <= etext {
-                return Some(text);
-            }
-        }
-    }
-    None
+/// `moduledata.text` of the module whose `pcHeader` is at `header_vma`
+/// ([`kuna_gomoduledata`]); its `ftab` holds `nfunc + 1` entries.
+fn moduledata_text(file: &object::File, img: &ImageBytes, h: &PcHeader, header_vma: u64) -> Option<u64> {
+    let minor = crate::loader::gobuildinfo::go_version_of(file).filter(|v| v.0 == 1).map(|v| v.1);
+    let md = kuna_gomoduledata::locate(file, img, header_vma, minor, h.ptr_size as u64, &|img, va| {
+        img.read(va, h.ptr_size as usize).map(|b| rd_ptr(b, h.ptr_size, h.end))
+    })?;
+    (md.ftab_len == h.nfunc.wrapping_add(1)).then_some(md.text)
 }
 
 /// Address of the lowest `SectionKind::Text` section — the `moduledata.text` of an
@@ -675,6 +658,7 @@ impl AnalysisPass for GoPclntabPass {
     }
 }
 
+pub mod kuna_gomoduledata;
 pub mod kuna_gonoreturn;
 
 #[cfg(test)]

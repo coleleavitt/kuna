@@ -909,8 +909,27 @@ kuna_options! { self, p1;
     "calltargettype" => on_off!(call_target_type, "indirect-call target types"),
     "floatglobals" => on_off!(float_globals, "float typing of globals moved only through float registers"),
     "callerreads" => on_off!(caller_reads, "return recovery from what the callers read"),
-    "itaniumeh" => on_off!(itanium_eh, "Itanium exception edges to landing pads"),
+    "itaniumeh" => {
+        let catch = p1.trim().eq_ignore_ascii_case("catch");
+        self.itanium_eh = catch || on_or_off(p1)?;
+        self.itanium_eh_catch_only = catch;
+        Ok(format!("Itanium exception edges to landing pads turned {}", if catch { "catch" } else if self.itanium_eh { "on" } else { "off" }))
+    },
+    "vexzeroupper" => on_off!(vex_zero_upper, "VEX zero-upper writes split at the result width"),
+    "vectorabi" => on_off!(vector_abi, "SysV x86-64 vector arguments and returns"),
+    "lanefuse" => {
+        let v = p1.trim().to_ascii_lowercase();
+        let (on, all) = match v.as_str() {
+            "all" => (true, true),
+            _ => (on_or_off(p1)?, false),
+        };
+        self.lane_fuse = on;
+        self.lane_fuse_all = all;
+        Ok(format!("Per-lane vector p-code re-fused into one intrinsic turned {}", if all { "all" } else if on { "on" } else { "off" }))
+    },
     "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
+    "strcodelen" => on_off!(analysis_strcodelen, "code-side Rust &str lengths"),
+    "gortti" => on_off!(analysis_gortti, "Go type descriptor and itab names"),
     "mba" => on_off!(mba, "Linear MBA simplification"),
     "avxintrinsics" => on_off!(avx_intrinsics, "Intel intrinsic names for AVX user-ops"),
     "x87depth" => on_off!(x87_depth, "x87 stack depth at returns"),

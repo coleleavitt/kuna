@@ -51,7 +51,9 @@ pub mod kuna_chkstkdarwin; // (kuna) drop the Darwin ___chkstk_darwin stack prob
 pub mod kuna_ptrauthtrap; // (kuna) drop the arm64e pointer-auth failure checks
 pub mod kuna_linuxsyscall; // (kuna) name the 32-bit Linux int 0x80 sites instead of calling through swi()
 pub mod kuna_x64syscall; // (kuna) give the x86-64 SYSCALL user-op the Linux ABI register effects
-pub mod kuna_itaniumeh; // (kuna `itaniumeh`) exceptional edges from each covered call to its Itanium landing pad
+pub mod kuna_itaniumeh;
+pub mod kuna_lanefuse; // (kuna `lanefuse`) re-fuse per-lane vector p-code into one intrinsic op
+pub mod kuna_vexzeroupper; // (kuna `vexzeroupper`) split the VEX zero-upper ZMM write at the result width // (kuna `itaniumeh`) exceptional edges from each covered call to its Itanium landing pad
 pub mod kuna_syscallregs; // (kuna) give the ARM/AArch64/RISC-V/MIPS/PowerPC system-call user-op its register effects
 pub mod kuna_msvcstrappend; // (kuna) collapse an inlined MSVC std::string push_back/append diamond into one call
 pub mod kuna_fastfailnoreturn; // (kuna) a Windows `int 0x29` (__fastfail) ends the flow instead of unbalancing the stack

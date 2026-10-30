@@ -136,6 +136,10 @@ const RELIABLE_OVERRIDES: &[(&str, &str)] = &[];
 const AGGRESSIVE_OVERRIDES: &[(&str, &str)] = &[
     // transform-tier default-off recovery/structuring passes.
     ("switchmodbound", "on"),
+    // (kuna) Itanium try/catch for the landing pads with a catch clause: +0.5%
+    // instructions on a 252 KB g++ binary (`itaniumeh on`, every cleanup pad
+    // too, costs +25%).
+    ("itaniumeh", "catch"),
     // (kuna) Recover a CMOV/predicated indirect dispatch over constant code
     // addresses. Default OFF because a conditional tail call between two nearby
     // function entries has the same shape and recovering it splices both callee
@@ -453,8 +457,9 @@ mod tests {
                 "aggressive must enable `{want}`"
             );
         }
-        // Every aggressive override turns its option on.
-        assert!(agg.iter().all(|(_, v)| *v == "on"));
+        // Every aggressive override turns its option on; `itaniumeh` uses its
+        // cheap level (pads with a catch clause only).
+        assert!(agg.iter().all(|(o, v)| *v == "on" || (*o == "itaniumeh" && *v == "catch")));
     }
 
     /// The preset's headline contract, enforced rather than sampled: **every**
@@ -611,10 +616,6 @@ mod tests {
               // `relronoreturn` trades structure for speed (it skips a restart
               // whose second pass renders better), the opposite of this preset.
               "relronoreturn",
-              // `itaniumeh` adds the exception paths of every C++ function, which
-              // roughly doubles the size of a catch-heavy body; it is a reading
-              // aid to ask for, not a better default rendering.
-              "itaniumeh",
               // `mba` targets obfuscated code; on ordinary code it can only
               // refold arithmetic the compiler already chose.
               "mba",

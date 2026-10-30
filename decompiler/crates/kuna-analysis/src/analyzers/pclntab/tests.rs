@@ -575,14 +575,17 @@ fn zero_text_start_resolves_against_moduledata_text() {
     let funcs = [(0x0u32, "main.main"), (0x80u32, "main.compute")];
     let blob = build_go118_image_end(0, &funcs, Some(0x100));
     let mut md = Vec::new();
-    for w in 0..24u64 {
+    for w in 0..68u64 {
         push_u64_le(
             &mut md,
             match w {
                 0 => pcln_vma,
-                17 => funcs.len() as u64 + 1,
+                17 | 18 => funcs.len() as u64 + 1,
                 20 | 22 => go_text,
                 21 | 23 => go_text + 0x100,
+                16 | 37 => pcln_vma,
+                38 => pcln_vma + 0x10,
+                67 => 1,
                 _ => 0,
             },
         );

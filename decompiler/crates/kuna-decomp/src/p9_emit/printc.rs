@@ -1599,6 +1599,12 @@ pub struct PrintC {
     /// [`emit_function_body`](PrintC::emit_function_body) and cleared after, so it
     /// is live only for that function's emission.
     void_tail_return: Option<OpId>,
+    /// (kuna `itaniumeh`) The landing pad of the `try` being printed: an
+    /// exceptional edge to it inside the try body prints as its plain call.
+    eh_open_pad: Option<u64>,
+    /// (kuna `itaniumeh`) `catch` braces left open because the handler runs
+    /// to the end of the function body; closed by `emit_function_body`.
+    eh_open_catch: Vec<i32>,
     /// (kuna `javanew`) This function's `<init>` calls that print as `new T(args)`.
     java_new: std::collections::HashMap<OpId, crate::kuna_javanew::NewInit>,
     /// (kuna `gotonext`) The gotos left out or printed as `break;`, and the labels
@@ -1688,6 +1694,8 @@ impl PrintC {
             pending: 0,
             commsorter: crate::comment::CommentSorter::new(),
             void_tail_return: None,
+            eh_open_pad: None,
+            eh_open_catch: Vec::new(),
             java_new: std::collections::HashMap::new(),
             goto_rewrites: Default::default(),
             rt_ctx: RealTypeCtx::OFF,
@@ -4244,6 +4252,9 @@ impl PrintC {
             Default::default()
         };
         self.emit_block_graph(fd, arch, sroot);
+        while let Some(id) = self.eh_open_catch.pop() {
+            self.emit.close_brace_indent(self.lang().kw_close_curly, id);
+        }
         self.void_tail_return = None;
         self.java_new.clear();
         self.goto_rewrites = Default::default();
@@ -4581,6 +4592,128 @@ impl PrintC {
         self.emit_basic_block_ops(fd, arch, blk, false);
     }
 
+    /// (kuna `itaniumeh`) The landing pad a structured block starts at: the
+    /// address of the first op of its front leaf, when the image's call-site
+    /// table lists it as a pad.
+    fn eh_pad_start(&self, fd: &Funcdata, blk: BlockId) -> Option<u64> {
+        let table = fd.get_arch().eh_table.clone()?;
+        let leaf = fd.sblocks_ref().get_front_leaf(blk)?;
+        let bb = fd.sblocks_ref().block(leaf).get_copy()?;
+        let mut cur = fd.bb_op_head(bb);
+        while let Some(op) = cur {
+            let o = fd.obank().get(op)?;
+            if !o.is_marker() {
+                let at = o.get_addr().get_offset();
+                return table.is_pad(at).then_some(at);
+            }
+            cur = fd.bb_op_next(op);
+        }
+        None
+    }
+
+    /// (kuna `itaniumeh`) The landing pad an exceptional-edge `if` branches to.
+    fn eh_if_target(&self, fd: &Funcdata, blk: BlockId) -> Option<u64> {
+        let cond = fd.sblocks_ref().block(blk).get_block(0);
+        let leaf = fd.sblocks_ref().get_exit_leaf(cond)?;
+        let bb = fd.sblocks_ref().block(leaf).get_copy()?;
+        let br = fd.bb_op_tail(bb)?;
+        let dest = fd.obank().get(br)?.get_in(0)?;
+        Some(fd.vbank().get(dest)?.get_offset())
+    }
+
+    /// (kuna `itaniumeh`) Is `blk` an `if` whose condition is an
+    /// `eh_unwinding()` exceptional edge?
+    fn is_eh_if(&self, fd: &Funcdata, blk: BlockId) -> bool {
+        use crate::block::BlockType;
+        if fd.sblocks_ref().block(blk).get_type() != BlockType::If {
+            return false;
+        }
+        let cond = fd.sblocks_ref().block(blk).get_block(0);
+        let Some(leaf) = fd.sblocks_ref().get_exit_leaf(cond) else { return false };
+        let Some(bb) = fd.sblocks_ref().block(leaf).get_copy() else { return false };
+        let Some(br) = fd.bb_op_tail(bb) else { return false };
+        let Some(o) = fd.obank().get(br) else { return false };
+        if o.code() != OpCode::CPUI_CBRANCH {
+            return false;
+        }
+        let mut vn = o.get_in(1);
+        for _ in 0..3 {
+            let Some(def) = vn.and_then(|v| fd.vbank().get(v)).and_then(|v| v.get_def()).and_then(|d| fd.obank().get(d)) else {
+                return false;
+            };
+            match def.code() {
+                OpCode::CPUI_BOOL_NEGATE | OpCode::CPUI_COPY => vn = def.get_in(0),
+                OpCode::CPUI_CALLOTHER => {
+                    return def.get_in(0).and_then(|v| fd.vbank().get(v)).is_some_and(|v| {
+                        v.is_constant() && v.get_offset() == crate::userop::BUILTIN_EH_UNWINDING as u64
+                    })
+                }
+                _ => return false,
+            }
+        }
+        false
+    }
+
+    /// (kuna `itaniumeh`) `catch (T)` for a pad with one typed clause, else
+    /// `catch (...)`.
+    fn eh_catch_header(fd: &Funcdata, pad: u64) -> String {
+        let Some(table) = fd.get_arch().eh_table.clone() else { return "catch (...)".into() };
+        let types: Vec<String> = table
+            .sites
+            .iter()
+            .filter(|s| s.pad == pad)
+            .flat_map(|s| s.clauses.iter())
+            .filter_map(|c| match c {
+                crate::kuna_itaniumeh::EhClause::Catch { type_name: Some(t), .. } => Some(t.clone()),
+                _ => None,
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let catch_all = table.sites.iter().filter(|s| s.pad == pad).flat_map(|s| s.clauses.iter()).any(|c| {
+            !matches!(c, crate::kuna_itaniumeh::EhClause::Catch { type_name: Some(_), .. })
+        });
+        match types.as_slice() {
+            [t] if !catch_all => format!("catch ({t} &)"),
+            _ => "catch (...)".into(),
+        }
+    }
+
+    /// (kuna `itaniumeh`) Emit `try { <cond statements> } catch (..) { <pad> }`.
+    fn emit_eh_try(&mut self, fd: &Funcdata, arch: &Architecture, cond: BlockId, normal: Option<BlockId>, pad: u64, handler: &[BlockId], keep_open: bool) {
+        self.emit.tag_line();
+        self.emit.print("try", SyntaxHighlight::KeywordColor);
+        let id = self.emit.open_brace_indent(self.lang().kw_open_curly, to_emit_brace(self.options.brace_ifelse));
+        self.context.push_mod();
+        self.context.set_mod(modifiers::NO_BRANCH);
+        let b = self.emit.begin_block(0);
+        self.emit_block(fd, arch, cond);
+        self.emit.end_block(b);
+        self.context.pop_mod();
+        if let Some(normal) = normal {
+            let outer = self.eh_open_pad.replace(pad);
+            let b = self.emit.begin_block(0);
+            self.emit_block(fd, arch, normal);
+            self.emit.end_block(b);
+            self.eh_open_pad = outer;
+        }
+        self.emit.close_brace_indent(self.lang().kw_close_curly, id);
+        self.emit.spaces(1, 0);
+        let header = Self::eh_catch_header(fd, pad);
+        self.emit.print(&header, SyntaxHighlight::KeywordColor);
+        let id = self.emit.open_brace_indent(self.lang().kw_open_curly, to_emit_brace(self.options.brace_ifelse));
+        for &h in handler {
+            let b = self.emit.begin_block(0);
+            self.emit_block(fd, arch, h);
+            self.emit.end_block(b);
+        }
+        if keep_open {
+            self.eh_open_catch.push(id);
+        } else {
+            self.emit.close_brace_indent(self.lang().kw_close_curly, id);
+        }
+    }
+
     /// C++ `PrintC::emitBlockLs` (printc.cc:2930): emit a list of blocks in
     /// sequence.  The first block keeps its branch suppressed (`no_branch`); the
     /// last block keeps the caller's branch state.  The per-edge `nextInFlow`
@@ -4598,6 +4731,46 @@ impl PrintC {
             return;
         }
         let n = list.len();
+        // (kuna `itaniumeh`) An exceptional-edge `if` whose normal path never
+        // falls through and whose landing pad starts the rest of the list:
+        // `try { call; <normal path> } catch (..) { <pad> }`.
+        if self.lang().kw_open_curly == "{" {
+            if let Some(k) = (0..n.saturating_sub(1)).find(|&k| {
+                self.is_eh_if(fd, list[k])
+                    && fd.sblocks_ref().block(list[k]).get_size() == 2
+                    && fd.sblocks_ref().block(fd.sblocks_ref().block(list[k]).get_block(1)).size_out() == 0
+                    && self.eh_pad_start(fd, list[k + 1]).is_some()
+            }) {
+                let pad = self.eh_pad_start(fd, list[k + 1]).expect("pad");
+                self.context.push_mod();
+                self.context.set_mod(modifiers::NO_BRANCH);
+                for &b in &list[..k] {
+                    let id = self.emit.begin_block(0);
+                    self.emit_block(fd, arch, b);
+                    self.emit.end_block(id);
+                }
+                self.context.pop_mod();
+                let cond = fd.sblocks_ref().block(list[k]).get_block(0);
+                let normal = fd.sblocks_ref().block(list[k]).get_block(1);
+                // On the function's top-level spine (only lists above, or ifs this
+                // list is the condition of — the pad's own selector tests), the
+                // rest of the body is reached through the pad alone: the catch
+                // stays open to the end of the body.
+                let mut spine = true;
+                let mut at = blk;
+                while let Some(p) = fd.sblocks_ref().block(at).get_parent() {
+                    let ty = fd.sblocks_ref().block(p).get_type();
+                    let as_condition = ty == crate::block::BlockType::If && fd.sblocks_ref().block(p).get_block(0) == at;
+                    if !as_condition && !matches!(ty, crate::block::BlockType::Ls | crate::block::BlockType::Graph) {
+                        spine = false;
+                        break;
+                    }
+                    at = p;
+                }
+                self.emit_eh_try(fd, arch, cond, Some(normal), pad, &list[k + 1..], spine);
+                return;
+            }
+        }
         let id1 = self.emit.begin_block(0);
         // C++ `PrintC::emitBlockLs` (printc.cc:2929-2933): a single-element list
         // emits its one block **once**, in the caller's branch state (before the
@@ -4647,6 +4820,42 @@ impl PrintC {
         // `dest = ( cond );`.  Checked BEFORE the ternary so the more specific
         // form wins when both match; the mark is set only with
         // `option iteboolean on`.
+        // (kuna `itaniumeh`) Inside a `try` whose pad this edge also reaches,
+        // the edge is the try's own: print the call and the normal path only.
+        if self.eh_open_pad.is_some() && self.is_eh_if(fd, blk) && self.eh_if_target(fd, blk) == self.eh_open_pad {
+            let size = fd.sblocks_ref().block(blk).get_size();
+            let cond = fd.sblocks_ref().block(blk).get_block(0);
+            self.context.push_mod();
+            self.context.set_mod(modifiers::NO_BRANCH);
+            let b = self.emit.begin_block(0);
+            self.emit_block(fd, arch, cond);
+            self.emit.end_block(b);
+            self.context.pop_mod();
+            for k in 1..size {
+                let sub = fd.sblocks_ref().block(blk).get_block(k);
+                if self.eh_pad_start(fd, sub) != self.eh_open_pad {
+                    let b = self.emit.begin_block(0);
+                    self.emit_block(fd, arch, sub);
+                    self.emit.end_block(b);
+                }
+            }
+            return;
+        }
+        // (kuna `itaniumeh`) `if (eh_unwinding()) { pad } [else { normal }]`.
+        if self.lang().kw_open_curly == "{" && fd.sblocks_ref().block(blk).get_size() >= 2 && self.is_eh_if(fd, blk) {
+            let tru = fd.sblocks_ref().block(blk).get_block(1);
+            if let Some(pad) = self.eh_pad_start(fd, tru) {
+                let cond = fd.sblocks_ref().block(blk).get_block(0);
+                self.emit_eh_try(fd, arch, cond, None, pad, &[tru], false);
+                if fd.sblocks_ref().block(blk).get_size() == 3 {
+                    let other = fd.sblocks_ref().block(blk).get_block(2);
+                    let id = self.emit.begin_block(0);
+                    self.emit_block(fd, arch, other);
+                    self.emit.end_block(id);
+                }
+                return;
+            }
+        }
         if let Some(m) = self.ite_boolean_match(fd, blk) {
             self.emit_block_if_bool(fd, arch, m);
             return;
@@ -6785,6 +6994,7 @@ impl PrintC {
                                     &addr,
                                     &subct,
                                     &mut chars_emitted,
+                                    false,
                                 ) {
                                     ok = true;
                                 }
@@ -11559,7 +11769,11 @@ impl PrintC {
         }
         let mut s = String::new();
         let mut chars_emitted: int4 = 0;
-        if !self.print_character_constant(arch, &mut s, &stringaddr, subct, &mut chars_emitted) {
+        let printed = match bounded_char_array(arch, &stringaddr, subct) {
+            Some(bytes) => self.print_bounded_literal(&mut s, &bytes, &mut chars_emitted),
+            None => self.print_character_constant(arch, &mut s, &stringaddr, subct, &mut chars_emitted, true),
+        };
+        if !printed {
             return false;
         }
         // (kuna `elemptr`) `indexed` is `Some(bound)` for the base of an access
@@ -11619,6 +11833,17 @@ impl PrintC {
         }
     }
 
+    /// A bounded literal's exact bytes as a quoted string literal.
+    fn print_bounded_literal(&self, s: &mut String, bytes: &str, chars_emitted: &mut int4) -> bool {
+        s.push('"');
+        for c in bytes.chars() {
+            self.push_escaped_codepoint(s, c as int4);
+            *chars_emitted += 1;
+        }
+        s.push('"');
+        true
+    }
+
     fn print_character_constant(
         &self,
         arch: &Architecture,
@@ -11626,6 +11851,7 @@ impl PrintC {
         addr: &Address,
         char_type: &std::rc::Rc<crate::dtype::Datatype>,
         chars_emitted: &mut int4,
+        cut_at_bounded: bool,
     ) -> bool {
         use crate::stringmanage::StringManager;
         // Pull UTF-8 string data through the architecture's persistent
@@ -11654,7 +11880,13 @@ impl PrintC {
         // the buffer is already UTF-8 (charsize 1); walk codepoints and re-escape.
         let bigend = arch.translate().is_big_endian();
         let mut i: int4 = 0;
-        let count = buffer.len() as int4;
+        let mut count = buffer.len() as int4;
+        if cut_at_bounded && char_type.get_size() == 1 {
+            if let Some(cut) = (1..buffer.len()).find(|&k| addr.get_space().is_some_and(|spc| bounded_char_array(arch, &Address::new(std::rc::Rc::clone(spc), addr.get_offset() + k as uintb), char_type).is_some())) {
+                count = cut as int4;
+                is_trunc = false;
+            }
+        }
         while i < count {
             let mut skip: int4 = 1;
             let codepoint = StringManager::get_codepoint(&buffer[i as usize..], 1, bigend, &mut skip);
@@ -11672,6 +11904,29 @@ impl PrintC {
         }
         true
     }
+}
+
+/// (kuna `fatstr`) The text of a NUL-free `char[N]` data symbol starting at
+/// `addr`: a length-bounded `(ptr, len)` literal, which runs straight into the
+/// next one, so reading to a NUL would glue them (and a NUL-terminated read
+/// that reaches one ends there).
+fn bounded_char_array(arch: &Architecture, addr: &Address, char_type: &crate::dtype::Datatype) -> Option<String> {
+    if char_type.get_size() != 1 {
+        return None;
+    }
+    let global = arch.symboltab.get_global_scope()?;
+    let eref = arch.symboltab.find_addr(global, addr, &Address::new_invalid())?;
+    let sym = arch.symboltab.entry(global, eref).symbol;
+    let ct = arch.symboltab.symbol(sym).dtype.clone()?;
+    if ct.get_metatype() != crate::dtype::type_metatype::TYPE_ARRAY || !ct.get_array_base()?.is_char_print() {
+        return None;
+    }
+    let mut buf = vec![0u8; usize::try_from(ct.get_size()).ok()?];
+    arch.translate().loader_rc().borrow_mut().load_fill(&mut buf, addr).ok()?;
+    if buf.contains(&0) {
+        return None;
+    }
+    String::from_utf8(buf).ok()
 }
 
 /// The import a `LOAD` reads through when its pointer is a loader-marked
