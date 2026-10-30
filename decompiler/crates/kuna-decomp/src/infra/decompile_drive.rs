@@ -1113,6 +1113,7 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
         // callee's writes; shares rustabi's cache, so this is a map lookup.
         crate::p4_calls::kuna_calleepreserves::seed_callee_preserves(arch, fd);
         crate::kuna_calleememory::seed(arch, fd);
+        crate::p4_calls::kuna_calleeretpurge::seed(arch, fd);
     }
 }
 
@@ -1840,6 +1841,7 @@ fn decompile_func_full_with_objects_inner(
         // `option calleepreserves` is live.
         crate::p4_calls::kuna_calleepreserves::seed_callee_preserves(arch, &mut fd);
         crate::kuna_calleememory::seed(arch, &mut fd);
+        crate::p4_calls::kuna_calleeretpurge::seed(arch, &mut fd);
         // Report a pass panic as a per-function failure at the driver boundary.
         let res =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run_pipeline(arch, &mut fd)));

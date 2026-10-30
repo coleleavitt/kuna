@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3367,
-    3367
+    3371,
+    3371
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -224,6 +224,10 @@
     "data:CALLEERETPRESERVES-MIPSBE #2: off, the callers lose the parameter",
     "data:CALLEERETPRESERVES-MIPSBE #3: on, the store reads p",
     "data:CALLEERETPRESERVES-MIPSBE #4: on, the callers take p",
+    "data:CALLEERETPURGE #1: off, the result pointer is four bytes past the slot the caller passes",
+    "data:CALLEERETPURGE #2: on, mk receives the address of the caller's slot",
+    "data:CALLEERETPURGE #3: both passes, the second call passes the second stored word and k",
+    "data:CALLEERETPURGE #4: on, the return multiplies the first word the caller stored",
     "data:CALLEESCRATCHBODY #1: off, the whole frame is indexed off the value __chkstk supposedly returns",
     "data:CALLEESCRATCHBODY #2: on, the probe is called for its side effect and the frame slot is a fixed offset",
     "data:CALLEESCRATCHBODY #3: on, the slot written and read back at that offset is the argument",
@@ -986,7 +990,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 354 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 355 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",

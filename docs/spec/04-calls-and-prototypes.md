@@ -3339,6 +3339,36 @@ pointer that is still an unresolved frame-derived expression keeps the INDIRECT
 too, until the merge resolves. Elsewhere such a pointer is usually a cursor into
 a local buffer, and it defers to the mark.
 
+### (kuna) `calleeretpurge` — the callee's own `ret imm16`
+
+The prototype model states one extrapop for every callee: `x86gcc.cspec`'s
+`__cdecl` pops only the return address. The machine can disagree. An i386 SysV
+function that returns a structure in memory ends with `ret $4` and pops the
+hidden result pointer itself, and gcc compiles each caller around that: every
+stack offset after the call is four bytes higher than the model predicts, so
+the caller's later locals and arguments are read from the wrong slots.
+Callee-cleans conventions (`stdcall`, Pascal, Borland `register`) do the same
+with every argument, where the model leaves the extrapop unknown and the stack
+solver can only guess.
+
+With `calleeretpurge` on (the default) the driver decodes the body of each
+direct callee once per image
+(`decompiler/crates/kuna-decomp/src/p4_calls/kuna_calleeretpurge.rs
+(probe_callee_purge)`). The walk starts at the entry, follows fall-through
+(calls are assumed to return), direct and conditional branches, and stops a
+path at an indirect branch or an undecodable instruction. Each instruction that
+carries a `RETURN` contributes the sum of the constant increments it applies to
+the stack pointer: the return-address pop plus the `imm16`. When every return
+reached agrees, that sum is the callee's extrapop. `ActionDefaultParams` then
+writes it into the call's prototype when it differs
+(`kuna_calleeretpurge.rs (apply)`), before `ActionExtraPopSetup` turns it into
+the `INT_ADD sp, #extrapop` after the call, so the purge is a property of the
+callee shared by all its call sites, as IDA keeps it on `func_t`. A callee
+whose returns disagree, or that has none on the walk (a PLT stub is an indirect
+branch), keeps the model's answer. The pass is limited to x86 language ids: on
+a RISC target the return instruction can restore the stack pointer for its own
+frame (`pop {r4,pc}`), which is not a purge.
+
 ### (kuna) `swiftcall` — Swift's `self` and error registers
 
 Swift's convention adds registers the C model has no row for: `swiftself` (x20

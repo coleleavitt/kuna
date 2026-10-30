@@ -965,6 +965,10 @@ Three tiers:
 | GetLastError() or another argument-less import eats the pushes staged for the call after it | [`calleeprotostack`](#calleeprotostack) |
 | a buffer whose address is passed to an api is read back as an incoming parameter instead of the local | [`calleeprotostack`](#calleeprotostack) |
 | an import with a known signature still has its cleanup guessed from the caller's push run | [`calleeprotostack`](#calleeprotostack) |
+| the result pointer passed to a struct-returning call renders as `(int)&local + 4` | [`calleeretpurge`](#calleeretpurge) |
+| i386 locals after a call are read four bytes off | [`calleeretpurge`](#calleeretpurge) |
+| a callee that ends with `ret 4` or `ret N` is treated as popping only its return address | [`calleeretpurge`](#calleeretpurge) |
+| stack offsets after a stdcall or pascal call are wrong | [`calleeretpurge`](#calleeretpurge) |
 | a call to an msvc c++ import that takes a class by value keeps only its hidden return pointer | [`msvcbyval`](#msvcbyval) |
 | the arguments after a by-value class render as stores before the call | [`msvcbyval`](#msvcbyval) |
 | a copy constructor or a by-value return fills a local the caller never passes on | [`msvcbyval`](#msvcbyval) |
@@ -3443,6 +3447,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default: the flip moves 0 of 675 datatest assertions -- both parity corpora are symbol-less byte chunks whose callees carry no declared prototype, so nothing in them reaches the locked branch. Flip OFF to restore the pre-signature behaviour. With it off, a Win32 API whose arguments are staged across an intervening call renders with only the arguments pushed after that call, the staged ones are dropped, and the buffer whose address was among them decays into an incoming parameter -- so the call that fills it and the calls that read it disagree about which object they are talking about. Inert on any target whose callees carry no signature, and on any spec that states its own extrapop (x86gcc `__cdecl extrapop="4"`, x86-64, every RISC spec).
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · re-needs-getlasterror-consumes-arguments-prepared
 - **Example:** `option calleeprotostack off`
+
+### `calleeretpurge` -- on | off, default `on`
+
+- **Symptoms:** the result pointer passed to a struct-returning call renders as `(int)&local + 4`; i386 locals after a call are read four bytes off; a callee that ends with `ret 4` or `ret N` is treated as popping only its return address; stack offsets after a stdcall or pascal call are wrong.
+- **What it does:** Read how many bytes a callee pops from its own `ret imm16` and use that as the call's extrapop. The prototype model states one extrapop for every callee (x86gcc.cspec's __cdecl pops only the return address), but an i386 SysV function that returns a structure in memory ends with `ret $4` and pops the hidden result pointer itself, and gcc compiles each caller around that: every stack offset after the call is four bytes higher than the model predicts, so the result pointer reads as `(int4)&v3 + 4` and later locals come from the wrong slots. Callee-cleans conventions (stdcall, Pascal, Borland register) do the same with every argument. The driver decodes each direct callee once per image: the walk follows fall-through (calls assumed to return), direct and conditional branches, stops a path at an indirect branch, and sums the constant stack-pointer increments of each RETURN instruction (return-address pop plus imm16). When every return reached agrees, ActionDefaultParams writes that sum into the call's prototype, so ActionExtraPopSetup adds the right `INT_ADD sp, #extrapop` after the call. A callee whose returns disagree, or with none on the walk (a PLT stub), keeps the model's answer. x86 language ids only, because a RISC return can restore the stack pointer of its own frame.
+- **When to flip:** On by default. The tell-tale of it being off is an i386 caller of a struct-returning (or stdcall/Pascal) function whose first argument renders as `(int)&local + 4` and whose locals after the call are shifted by one word. Flip off to get the model's extrapop back, for example to bisect a stack-offset change at a call.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-50
+- **Example:** `option calleeretpurge off`
 
 ### `msvcbyval` -- on | off, default `on`
 

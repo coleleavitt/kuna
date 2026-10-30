@@ -602,6 +602,7 @@ impl Action for ActionDefaultParams {
                     data.get_call_specs_mut(i).proto_mut(),
                 );
             }
+            crate::p4_calls::kuna_calleeretpurge::apply(data, i);
             if let Err(error) = crate::kuna_callmechanisms::apply_return(data, i) {
                 data.kuna_call_mechanisms.failure = Some(error.to_string());
                 return 0;

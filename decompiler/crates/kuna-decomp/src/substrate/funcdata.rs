@@ -478,6 +478,8 @@ pub struct Funcdata {
         (int4, kuna_base::types::uintb),
         std::rc::Rc<crate::kuna_calleedeadarg::CalleeEntryDead>,
     >,
+    /// (kuna `calleeretpurge`) The extrapop each direct callee's returns state.
+    kuna_callee_purges: std::collections::BTreeMap<(int4, kuna_base::types::uintb), int4>,
     /// (kuna `hiddenretarg`) The values a veto removed from a call's
     /// hidden-return register, as the leaves
     /// [`crate::kuna_hiddenretarg::value_leaves`] finds. Cleared with the
@@ -810,6 +812,7 @@ impl Funcdata {
             kuna_wide: None,
             kuna_callwide: None,
             kuna_callee_entry_dead: std::collections::HashMap::new(),
+            kuna_callee_purges: std::collections::BTreeMap::new(),
             kuna_hiddenret_vetoed: std::collections::HashSet::new(),
             kuna_own_entry_dead: None,
             kuna_callee_entry_through: std::collections::HashMap::new(),
@@ -1139,6 +1142,20 @@ impl Funcdata {
     ) -> Option<&crate::kuna_rustabi::CalleeReturnWrites> {
         let sp = entry.get_space()?;
         self.kuna_callee_ret_writes.get(&(sp.get_index(), entry.get_offset())).map(|r| r.as_ref())
+    }
+
+    /// (kuna `calleeretpurge`) Record the callee purges the driver decoded.
+    pub fn kuna_set_callee_purges(
+        &mut self,
+        purges: std::collections::BTreeMap<(int4, kuna_base::types::uintb), int4>,
+    ) {
+        self.kuna_callee_purges = purges;
+    }
+
+    /// (kuna `calleeretpurge`) The extrapop `entry`'s returns state, if decoded.
+    pub fn kuna_callee_purge(&self, entry: &Address) -> Option<int4> {
+        let sp = entry.get_space()?;
+        self.kuna_callee_purges.get(&(sp.get_index(), entry.get_offset())).copied()
     }
 
     /// (kuna `calleedeadarg`) Record what a probe of `entry`'s body proved about
