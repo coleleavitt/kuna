@@ -1720,6 +1720,21 @@ following this call as a branch"
     /// is nonzero only when `function bounds` / `--define-function START-END`
     /// supplied an explicit size; the `baddr`/`eaddr` pair is the same range the
     /// flow follower enforces (inclusive at the end).
+    /// (kuna `fdeflowbound`) Does fall-through to `next` leave the unwind-table
+    /// extent (`.eh_frame` FDE, `.pdata`, Go `functab`) that starts at this
+    /// function's entry? The extent is the compiler's own statement of where the
+    /// function ends, so walking past it decodes the next function's bytes.
+    fn leaves_own_fde(&self, next: &Address) -> bool {
+        let arch = self.data.get_arch();
+        if !arch.fde_flow_bound || self.is_inside_declared_extent(next) {
+            return false;
+        }
+        let entry = self.data.get_address().get_offset();
+        let extents = &arch.kuna_fde_extents;
+        let i = extents.partition_point(|&(start, _)| start < entry);
+        extents.get(i).is_some_and(|&(start, end)| start == entry && next.get_offset() >= end)
+    }
+
     fn is_inside_declared_extent(&self, addr: &Address) -> bool {
         self.data.get_size() > 0 && self.baddr <= *addr && *addr <= self.eaddr
     }
@@ -2030,11 +2045,13 @@ truncating the fall-through here"
                 if needs_halt {
                     self.visited.insert(next.clone(), VisitStat { seqnum: seq, size: 1 });
                 }
+                let text = if self.leaves_own_fde(&next) {
+                    "fdeflowbound: fall-through left the function's unwind extent; truncating flow here"
+                } else {
+                    "funcboundflow: fall-through reached the next function entry; truncating flow here"
+                };
                 self.funcbound_cutoffs.insert(next);
-                self.data.warning(
-                    "funcboundflow: fall-through reached the next function entry; truncating flow here",
-                    curaddr,
-                );
+                self.data.warning(text, curaddr);
                 isfallthru = false;
             } else if self.baddr <= next
                 && next <= self.eaddr
@@ -2095,6 +2112,9 @@ truncating the fall-through here"
     /// walk naturally and cannot consume anything beyond it. See
     /// [`kuna_funcboundflow`].
     fn is_funcbound_fallthru(&self, next: &Address) -> bool {
+        if self.leaves_own_fde(next) {
+            return true;
+        }
         // Fast-path the default-off gate: no symbol-table lookup per instruction.
         if !self.env.funcbound_flow_enabled() {
             return false;

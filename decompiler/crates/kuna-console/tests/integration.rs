@@ -73,6 +73,12 @@ mod verify_ehcold;
 #[path = "verify_importvote.rs"]
 mod verify_importvote;
 
+#[path = "verify_fdeflowbound.rs"]
+mod verify_fdeflowbound;
+
+#[path = "verify_ehnote.rs"]
+mod verify_ehnote;
+
 #[path = "verify_cortexmvectors.rs"]
 mod verify_cortexmvectors;
 

@@ -163,9 +163,139 @@ impl TypeNames {
     }
 }
 
+/// (kuna `ehnote`) A header note on every function whose landing pads flow does
+/// not show: how many call sites unwind to one, what the pads do, and the
+/// personality that reads them. Committed only when `ehnote` is on and
+/// `itaniumeh` (which shows the pads) is off.
+pub struct EhNotePass;
+
+impl AnalysisPass for EhNotePass {
+    fn phase(&self) -> Phase {
+        Phase::P1
+    }
+
+    fn id(&self) -> &'static str {
+        "ehnote"
+    }
+
+    fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
+        AnalysisOutput { header_comments: eh_notes(ctx.file), ..AnalysisOutput::default() }
+    }
+}
+
+/// One note per FDE with landing pads, at the FDE's start.
+pub fn eh_notes(file: &object::File) -> Vec<crate::pass::CommentFact> {
+    let mut out = Vec::new();
+    let Some(gcc) = file.section_by_name(".gcc_except_table") else {
+        return out;
+    };
+    let gcc_vma = gcc.address();
+    let Ok(gcc_data) = gcc.data() else {
+        return out;
+    };
+    let ptr_size = if file.is_64() { 8 } else { 4 };
+    let names = TypeNames::new(file);
+    super::for_each_fde_lsda_classified(file, ptr_size, &mut |pc_begin, lsda_ptr, personality| {
+        if !personality.reads_itanium_lsda() {
+            out.push(crate::pass::CommentFact {
+                func_addr: pc_begin,
+                addr: pc_begin,
+                text: "eh: SjLj exception table (call-site indices); landing pads not shown".to_string(),
+            });
+            return;
+        }
+        let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size) else {
+            return;
+        };
+        let sites: Vec<_> = lsda.call_sites.iter().filter(|cs| cs.pad != 0 && cs.len != 0).collect();
+        if sites.is_empty() {
+            return;
+        }
+        let mut cleanup = 0usize;
+        let mut filters = 0usize;
+        let mut catches: Vec<String> = Vec::new();
+        for cs in &sites {
+            for clause in clauses(gcc_data, gcc_vma, &lsda, cs.action, ptr_size, &names) {
+                let name = match clause {
+                    EhClause::Cleanup => {
+                        cleanup += 1;
+                        continue;
+                    }
+                    EhClause::Catch { type_name, .. } => type_name.unwrap_or_else(|| "?".to_string()),
+                    EhClause::CatchAll { .. } => "...".to_string(),
+                    EhClause::Filter { .. } => {
+                        filters += 1;
+                        continue;
+                    }
+                };
+                if !catches.contains(&name) {
+                    catches.push(name);
+                }
+            }
+        }
+        let mut what = Vec::new();
+        if cleanup > 0 {
+            what.push(format!("{cleanup} cleanup"));
+        }
+        if !catches.is_empty() {
+            what.push(format!("catch {}", catches.join(", ")));
+        }
+        if filters > 0 {
+            what.push(format!("{filters} exception specification"));
+        }
+        let runtime = match personality {
+            super::Personality::Unknown => String::new(),
+            p => format!("{} ", p.label()),
+        };
+        out.push(crate::pass::CommentFact {
+            func_addr: pc_begin,
+            addr: pc_begin,
+            text: format!(
+                "eh: {} call site{} to {}landing pads ({}); not shown",
+                sites.len(),
+                if sites.len() == 1 { " unwinds" } else { "s unwind" },
+                runtime,
+                what.join("; ")
+            ),
+        });
+    });
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn notes_name_the_hidden_pads() {
+        let bytes = std::fs::read(format!("{}/tests/fixtures/ehcold_x86_64", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        let notes: Vec<String> = eh_notes(&file).into_iter().map(|n| n.text).collect();
+        assert!(notes.contains(&"eh: 1 call site unwinds to C++ landing pads (catch int); not shown".to_string()), "{notes:?}");
+        assert!(notes.contains(&"eh: 3 call sites unwind to C++ landing pads (3 cleanup); not shown".to_string()), "{notes:?}");
+    }
+
+    #[test]
+    fn a_rust_image_reads_rust_eh_personality() {
+        let bytes = std::fs::read(format!("{}/tests/fixtures/rust_eh_x86_64", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        let mut seen = Vec::new();
+        super::super::for_each_fde_lsda_classified(&file, 8, &mut |_, _, p| seen.push(p));
+        assert!(!seen.is_empty() && seen.iter().all(|&p| p == super::super::Personality::Rust), "{seen:?}");
+    }
+
+    #[test]
+    fn personality_names_classify() {
+        use super::super::Personality as P;
+        assert_eq!(P::of_name("DW.ref.__gxx_personality_v0"), P::Cxx);
+        assert_eq!(P::of_name("__gxx_personality_sj0"), P::SjLj);
+        assert!(!P::of_name("__gxx_personality_sj0").reads_itanium_lsda());
+        assert_eq!(P::of_name("rust_eh_personality"), P::Rust);
+        assert_eq!(P::of_name("__objc_personality_v0"), P::ObjC);
+        assert_eq!(P::of_name("__gcc_personality_v0@GCC_3.3.1"), P::GccC);
+        assert_eq!(P::of_name("__gnat_personality_v0"), P::Gnat);
+        assert_eq!(P::of_name("my_handler"), P::Unknown);
+    }
 
     /// `catcher` catches `std::runtime_error const&` (selector 1) and `...`
     /// (selector 2) around one call; `cleanup` runs a destructor around two.

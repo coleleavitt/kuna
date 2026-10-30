@@ -1695,6 +1695,10 @@ pub struct ArchContext {
     pub switch_trim: bool,
     /// (kuna) `Architecture::stack_exit_anchor`, flipped by `option stackexitanchor`.
     pub stack_exit_anchor: bool,
+    /// (kuna) `Architecture::fde_flow_bound`, flipped by `option fdeflowbound`.
+    pub fde_flow_bound: bool,
+    /// (kuna) `Architecture::kuna_fde_extents`.
+    pub kuna_fde_extents: Rc<Vec<(u64, u64)>>,
     /// (kuna) Recover the interleaved jump tables of an MSVC optimized
     /// memcpy/memmove by making the jump-table-recovery partial clone's
     /// `collect_edges` SKIP a recovered sibling table's case-target edge whose
@@ -2173,6 +2177,8 @@ impl ArchContext {
             switch_multi_pred: false, // (kuna) angr opt-in default off (upstream byte-identical)
             switch_trim: false,
             stack_exit_anchor: false,
+            fde_flow_bound: false,
+            kuna_fde_extents: Rc::new(Vec::new()),
             unrolled_guard: false, // (kuna) angr opt-in default off (upstream byte-identical)
             jumptable_share_partial: true, // (kuna) DIV: upstream stageJumpTable shape
             loader: None,

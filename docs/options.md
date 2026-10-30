@@ -628,6 +628,9 @@ Three tiers:
 | a tail jump to an undeclared import drops an argument the function passes through | [`importvote`](#importvote) |
 | a forwarder to a library function prints void and no return | [`importvote`](#importvote) |
 | return helper() with fewer arguments than the other calls to helper pass | [`importvote`](#importvote) |
+| a c++ function's cleanups and catch bodies are missing with no hint | [`ehnote`](#ehnote) |
+| nothing says which calls can throw | [`ehnote`](#ehnote) |
+| a rust drop-glue landing pad disappears silently | [`ehnote`](#ehnote) |
 | spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
 | a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
 | function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
@@ -1317,6 +1320,9 @@ Three tiers:
 | locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor) |
 | a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor) |
 | the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor) |
+| pseudocode continues past a call that does not return into the next fragment's code | [`fdeflowbound`](#fdeflowbound) |
+| a function returns a constant that belongs to the bytes after it | [`fdeflowbound`](#fdeflowbound) |
+| _Unwind_Resume() is followed by more statements | [`fdeflowbound`](#fdeflowbound) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -2955,6 +2961,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · analysis-enablement · ida95-extra-plt-passthrough
 - **Example:** `option importvote off`
 
+### `ehnote` -- on | off, default `on`
+
+- **Symptoms:** a c++ function's cleanups and catch bodies are missing with no hint; nothing says which calls can throw; a rust drop-glue landing pad disappears silently.
+- **What it does:** Say in a function's pseudocode that it has landing pads flow does not show. Unless itaniumeh is on, a landing pad is unreachable code: the cleanups and catch bodies of every call that can throw vanish, and nothing in the output says so. For every FDE with an LSDA the analysis tier decodes the call-site table and the action chains and attaches a comment at the function's entry: `eh: 4 call sites unwind to C++ landing pads (3 cleanup; catch std::bad_alloc, ...); not shown`. The runtime is the CIE personality routine (`__gxx_personality_v0`, `rust_eh_personality`, `__objc_personality_v0`, `__gnat_personality_v0`, `__gcc_personality_v0`), resolved directly or through its DW.ref/GOT slot; an SjLj personality's table holds call-site indices, not ranges, so it is noted as such and no walker reads it as ranges. Catch types are the demangled typeinfo names. With itaniumeh on the pads are shown and no note is attached. IDA's Hex-Rays prints the same kind of header warning ("C++ exceptions not shown").
+- **When to flip:** On by default. Turn it off to drop the `eh:` comment lines, e.g. when diffing against output from before the option existed.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-43-ehnote
+- **Example:** `option ehnote off`
+
 ### `fdeinterior` -- on | off, default `on`
 
 - **Symptoms:** spurious sub_<addr> functions inside a c++ function that uses try/catch; a decompiled function body dereferences an uninitialised frame pointer so every local is garbage; function count inflated by unwinder-only landing pads; a function entry lands in the middle of an instruction; extra entries between two real functions in a binary built with exceptions.
@@ -4406,6 +4420,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when a callee-cleans call with no prototype (an indirect call, a Borland/Delphi or 16-bit callee) leaves the locals after it off by the arguments it popped. Flip OFF to get the guess-only solve back.
 - **Where / provenance:** P6/stack-pointer-flow · kuna · correctness-fix · ida95-9-stacksolver
 - **Example:** `option stackexitanchor off`
+
+### `fdeflowbound` -- on | off, default `on`
+
+- **Symptoms:** pseudocode continues past a call that does not return into the next fragment's code; a function returns a constant that belongs to the bytes after it; _Unwind_Resume() is followed by more statements.
+- **What it does:** Stop fall-through at the end of the function's own unwind-table extent. An `.eh_frame` FDE (and a `.pdata` record or a Go functab entry, the same channel fdeinterior reads) states where its function ends. A call to an import kuna does not know is no-return (`call mydie@plt` as a function's last instruction, `call [GOT _Unwind_Resume]` closing a cleanup rung) is taken to return, and flow then walks off the function's end into whatever bytes follow: the next cleanup rung, padding, or code no known entry names, which funcboundflow cannot bound. With the option on, when the function's entry is the start of a single-function extent, fall-through to an address at or past the extent's end is truncated the way funcboundflow truncates at a foreign entry, with its own warning. A declared extent (`--define-function S-E`) still wins. IDA queries the same region (find_syseh) for its function bounds.
+- **When to flip:** On by default. Keep it on when a function's pseudocode continues past a call that never returns into code that is not part of it (`mydie(); return 7;` where the 7 is the next fragment's). Flip OFF to follow fall-through past the unwind extent, e.g. for a hand-written FDE that covers less than its function.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · ida95-43-fdeflowbound
+- **Example:** `option fdeflowbound off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

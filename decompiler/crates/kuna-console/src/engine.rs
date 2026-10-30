@@ -2938,6 +2938,7 @@ impl ConsoleProgram {
         // ranges.
         let mut fde_bodies = std::mem::take(&mut merged.fde_bodies);
         fde_bodies.sort_unstable();
+        self.arch_mut().kuna_fde_extents = Rc::new(fde_bodies.clone());
         kuna_analysis::entry::kuna_fdeinterior::suppress_interior_entries(
             &mut merged.entries,
             &fde_bodies,
@@ -3118,6 +3119,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // the discovery set is byte-identical to FDE-pcBegin-only.
         "eh_frame_full" => arch.analysis_eh_frame_full,
         "itaniumeh" => arch.itanium_eh,
+        "ehnote" => arch.analysis_ehnote && !arch.itanium_eh,
         // (kuna) Mach-O `__unwind_info` function-start discovery — facts computed
         // at LOAD, COMMITTED only when this gate is on. Default-off (output-
         // changing: adds entries), so a default run is byte-identical and an image
@@ -5975,6 +5977,10 @@ fn commit_analysis_output(
     //    `add_comment_no_duplicate` (the script also de-dups via `appendComment`).
     //    Produced only by the `dwarf_lines` pass (default-off); empty otherwise, so
     //    the default output is byte-identical to before this arm.
+    for fact in out.header_comments {
+        let fad = Address::new(Rc::clone(code_space), fact.func_addr);
+        prog.arch_mut().commentdb.add_comment_no_duplicate(kuna_decomp::comment::comment_type::HEADER, &fad, &fad, &fact.text);
+    }
     for fact in out.comments {
         let fad = Address::new(Rc::clone(code_space), fact.func_addr);
         let ad = Address::new(Rc::clone(code_space), fact.addr);

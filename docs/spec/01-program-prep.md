@@ -5441,6 +5441,24 @@ included, after the `coldentry` entries are added. A cold throw path reached by
 an ordinary branch (`may_throw.cold`) is not a landing-pad target and stays a
 function. x86/x86-64 ELF only.
 
+**(kuna) The pads that stay hidden are named** (`ehnote`, default-**on**;
+`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_itaniumeh.rs (eh_notes)`).
+Unless `itaniumeh` shows them, a landing pad is unreachable code: the cleanups
+and catch bodies of every call that can throw vanish from the pseudocode. For
+every FDE with an LSDA the pass decodes the call-site table and the action
+chains, and commits a function header comment such as
+`/* eh: 3 call sites unwind to C++ landing pads (3 cleanup); not shown */`.
+Catch types are the demangled `typeinfo` names, `...` is a catch-all, and a
+negative filter is an exception specification. The runtime is the CIE `P`
+personality routine (`entry/mod.rs (Personality)`), read directly or through
+its `DW.ref`/GOT slot, as IDA's `eh_parse` does: `__gxx_personality_v0` (C++),
+`rust_eh_personality`, `__objc_personality_v0`, `__gnat_personality_v0`,
+`__gcc_personality_v0` (C cleanups). An SjLj personality (`*_sj0`) keeps
+call-site indices, not code ranges, in its table. So every LSDA walker skips it
+(`for_each_fde_lsda`), and its function is noted as having an SjLj table. A
+personality whose name cannot be read is read as Itanium. With `itaniumeh` on,
+the pads are shown and no note is attached.
+
 **(kuna) `.pdata` interiors are not function starts either** (`pdatainterior`,
 default-**on**, DIV-155;
 `decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_pdatainterior.rs`). The

@@ -631,6 +631,9 @@ pub struct AnalysisOutput {
     /// architecture's `commentdb`. Produced only by the DWARF lines pass
     /// (`dwarf_lines`, default-off); empty otherwise. See [`CommentFact`].
     pub comments: Vec<CommentFact>,
+    /// (kuna) Function header (plate) comments, keyed by `func_addr`. Produced
+    /// only by [`crate::entry::kuna_itaniumeh::EhNotePass`] (`ehnote`).
+    pub header_comments: Vec<CommentFact>,
     /// Functions the FID matcher re-identified by full-hash fingerprint, by
     /// `(addr, name)`. The commit boundary **renames** each (resolved by ADDRESS) only
     /// when it still carries an engine `FUN_*`/`sub_*` placeholder (the label gate)
@@ -888,6 +891,7 @@ impl AnalysisOutput {
         self.call_fixups.extend(other.call_fixups);
         self.locals.extend(other.locals);
         self.comments.extend(other.comments);
+        self.header_comments.extend(other.header_comments);
         self.fid_names.extend(other.fid_names);
         self.cpp_dwarf.symbols.extend(other.cpp_dwarf.symbols);
         self.cpp_dwarf.locals.extend(other.cpp_dwarf.locals);
