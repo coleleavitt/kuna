@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3337,
-    3337
+    3342,
+    3342
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -443,6 +443,11 @@
     "data:DECODEHALT #2: on, the halt names the decode failure and carries the truncation warning",
     "data:DECODEHALT #3: on, the function header says the body is incomplete",
     "data:DECODEHALT #4: exactly one of the two passes renders the pseudo-call",
+    "data:DEDUPGOTO #1: shared() twice with dedupitetail off, once with it on",
+    "data:DEDUPGOTO #2: the on pass merges the if/else tail",
+    "data:DEDUPGOTO #3: each pass prints the goto into the true arm",
+    "data:DEDUPGOTO #4: each pass prints the label the goto names",
+    "data:DEDUPGOTO #5: post() once per pass",
     "data:DWARFVARIANTS #10: no variant name is ever synthesized",
     "data:DWARFVARIANTS #11: off, an overlaying Result payload is a raw byte offset",
     "data:DWARFVARIANTS #12: on, the overlaying Result keeps its recovered tag field",
