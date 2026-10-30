@@ -107,6 +107,8 @@ Three tiers:
 | a re-rolled switch dispatches on a function parameter and the compiler's if/else-if chain would read better | [`switchselector`](#switchselector) |
 | a callback or window/dialog procedure's message dispatch reads better as the chain the compiler emitted | [`switchselector`](#switchselector) |
 | option loweredswitch off gives the rendering you want, but you want it for one cascade and not for the whole binary | [`switchselector`](#switchselector) |
+| decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return | [`relronoreturn`](#relronoreturn) |
+| a function restarts once for every no-return callee reached through a .got slot | [`relronoreturn`](#relronoreturn) |
 | stack locals render as offsets off a char * instead of named locals | [`fastfailnoreturn`](#fastfailnoreturn) |
 | explicit stores of a call's own return address, like *(unsigned long long *)&v66[-8] = 0x140003e16 | [`fastfailnoreturn`](#fastfailnoreturn) |
 | Win32/API call arguments come out as *(unsigned long long *)&v66[0x50] stack blobs instead of values | [`fastfailnoreturn`](#fastfailnoreturn) |
@@ -1580,6 +1582,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** You want the compiler's own if/else-if chain back for a cascade that dispatches on a parameter, without turning `loweredswitch` off for the whole binary - typically a callback, window procedure or dialog procedure whose message parameter is the switch value. A declined cascade renders exactly as `option loweredswitch off` renders it, and every cascade over a value the function computes (a getopt return, a table load) still re-rolls. MEASURED: byte-identical on the 675-assertion datatest corpus with the guard forced on.
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-loweredswitch-parameter-selector
 - **Example:** `option switchselector on`
+
+### `relronoreturn` -- on | off, default `off`
+
+- **Symptoms:** decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return; a function restarts once for every no-return callee reached through a .got slot.
+- **What it does:** Make a call through a relocated read-only slot direct while the flow is followed, when the function the slot holds never returns. A PIE built without a PLT (rustc's default, gcc/clang `-fno-plt`) calls its own functions as `call *slot(%rip)` through a `.got` word an `R_*_RELATIVE` relocation fills; `ActionDeindirect` folds the RELRO word and binds the call, and when the callee is no-return upstream restarts the whole function so the re-followed flow plants the halt. A Rust panic helper sits behind most bounds and overflow checks, so with the Rust no-return paths in place nearly every such function decompiles twice. On: when the CALLIND reads a word inside a relocated read-only range (`dynreloc_const`) whose value is the entry of a function flagged no-return, the call is made direct and halted during flow, and no restart happens. Only no-return callees are taken, so every other call keeps the upstream path. The output is not byte-identical to the restart path: the restart also hands the second pass every other call the first pass bound and every lesson it recorded, which this skips.
+- **When to flip:** Off by default: the restart it avoids also improves the rendering. MEASURED on a 1.1 MB Rust PIE (bcp, 1343 functions): decompile-all user time 528 s -> 342 s, but 468 functions change and gotos rise 8,318 -> 8,650 (lines 149,240 -> 153,329); clap Validator::validate 49 s -> 24 s. Turn ON for latency-sensitive whole-binary runs over large no-PLT PIEs, especially Rust; leave off for the best structure. Inert on images without relocated read-only slots (every datatest, 0/675) and on calls whose slot holds a function that returns.
+- **Where / provenance:** P2/flow-classification · kuna · opt-in-tool · kuna-relro-noreturn-restart
+- **Example:** `option relronoreturn on`
 
 ### `fastfailnoreturn` -- on | off, default `on`
 

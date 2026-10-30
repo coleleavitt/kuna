@@ -750,6 +750,36 @@ gcc -O2 -fPIC -pie -fno-plt -fno-reorder-blocks-and-partition -fno-stack-protect
     -Wl,--build-id=none -o elf_got_noreturn_x86_64 elf_got_noreturn_x86_64.c
 ```
 
+`rust_noreturn_pie_x86_64` (10776 B, source `rust_noreturn_pie_x86_64.rs`) is the same `no_std`
+source linked as a PIE (`-C relocation-model=pie`, `-z relro,-z now`): `opt`, `sum` and `add` reach
+their panic helpers through `R_X86_64_RELATIVE` `.got` slots, the shape `option relronoreturn`
+resolves during flow (`tests/stages/ghdec-noreturnnames.xml`).
+
+```bash
+rustc --edition 2021 -C opt-level=2 -C overflow-checks=on -C panic=abort -C relocation-model=pie \
+    -C link-arg=-nostartfiles -C link-arg=-nostdlib -C link-arg=-Wl,--build-id=none \
+    -C link-arg=-Wl,-z,relro,-z,now -C strip=debuginfo \
+    -o rust_noreturn_pie_x86_64 rust_noreturn_pie_x86_64.rs
+```
+
+`noreturn_names_x86_64` (16184 B, ELF x86-64 PIE, source `noreturn_names_x86_64.cc`) and
+`rust_noreturn_v0_x86_64` (9328 B, static `no_std` ELF x86-64, source
+`rust_noreturn_v0_x86_64.rs`) are the **no-return name** fixtures
+(`tests/stages/ghdec-noreturnnames.xml`). The first ends `quit_now`@`0x12b0`,
+`quit_thread`@`0x12d0` and `replay`@`0x12f0` in `_Exit`, `thrd_exit` and
+`std::rethrow_exception`; the second is rustc 1.98.1 output with v0 symbols, and `opt`, `sum`
+and `add` end their failure paths in `core::option::unwrap_failed`,
+`core::slice::index::slice_index_fail` and `core::panicking::panic_const::panic_const_add_overflow`.
+
+```bash
+g++ -std=c++17 -O2 -fno-reorder-blocks-and-partition -Wl,--build-id=none \
+    -o noreturn_names_x86_64 noreturn_names_x86_64.cc
+rustc --edition 2021 -C opt-level=2 -C overflow-checks=on -C panic=abort \
+    -C relocation-model=static -C link-arg=-nostartfiles -C link-arg=-nostdlib \
+    -C link-arg=-static -C link-arg=-Wl,--build-id=none -C strip=debuginfo \
+    -o rust_noreturn_v0_x86_64 rust_noreturn_v0_x86_64.rs
+```
+
 `pe_noreturn_import.exe` (6173 B, PE32+/x86-64, source `pe_noreturn_import.c`) is the
 PE **import-call binding** fixture (`--option peimportcall`, `tests/stages/ghdec-peimportcall.xml`).
 Its point is the one call shape `pe_imports.exe` does not have: a *direct indirect*

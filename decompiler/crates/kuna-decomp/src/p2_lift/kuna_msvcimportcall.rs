@@ -33,6 +33,22 @@ pub fn locked_import_slot(
     op: OpId,
     locked: &BTreeSet<(int4, uintb)>,
 ) -> Option<Address> {
+    let (slot, size) = call_slot(data, op)?;
+    let space = slot.get_space()?;
+    if !locked.contains(&(space.get_index(), slot.get_offset())) {
+        return None;
+    }
+    let props = data.get_arch().query_global_properties(&slot, size, &slot);
+    if props & crate::varnode::varnode_flags::externref == 0 {
+        return None;
+    }
+    let (_, entry, proto) = data.get_arch().query_function(&slot)?;
+    (entry == slot && proto.is_input_locked()).then_some(slot)
+}
+
+/// The memory word, and its size, a CALLIND `op` takes its destination from: the
+/// word itself, or the one its own instruction loaded into the temporary it reads.
+pub(crate) fn call_slot(data: &Funcdata, op: OpId) -> Option<(Address, int4)> {
     let call = data.obank().get(op)?;
     if call.code() != OpCode::CPUI_CALLIND {
         return None;
@@ -44,16 +60,7 @@ pub fn locked_import_slot(
         spacetype::IPTR_INTERNAL => loaded_slot(data, op, target.get_addr().clone(), size)?,
         _ => return None,
     };
-    let space = slot.get_space()?;
-    if !locked.contains(&(space.get_index(), slot.get_offset())) {
-        return None;
-    }
-    let props = data.get_arch().query_global_properties(&slot, size, &slot);
-    if props & crate::varnode::varnode_flags::externref == 0 {
-        return None;
-    }
-    let (_, entry, proto) = data.get_arch().query_function(&slot)?;
-    (entry == slot && proto.is_input_locked()).then_some(slot)
+    Some((slot, size))
 }
 
 /// The memory word the temporary `(addr, size)` that `op` reads was filled from,

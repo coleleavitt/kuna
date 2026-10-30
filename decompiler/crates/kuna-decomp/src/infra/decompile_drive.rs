@@ -409,6 +409,29 @@ impl FlowEnvironment for ArchFlowEnv {
         }
         crate::kuna_msvcimportcall::locked_import_slot(fd, op, locked)
     }
+    fn relro_noreturn_call(&self, fd: &Funcdata, op: crate::context::OpId) -> Option<Address> {
+        let arch = self.arch();
+        if !arch.relro_noreturn || arch.dynreloc_const.is_empty() {
+            return None;
+        }
+        let (slot, size) = crate::kuna_msvcimportcall::call_slot(fd, op)?;
+        let (start, last) = (slot.get_offset(), slot.get_offset().checked_add(size as u64 - 1)?);
+        if !arch.dynreloc_const.iter().any(|&(lo, hi)| lo <= start && last <= hi) {
+            return None;
+        }
+        let space = slot.get_space()?;
+        let mut word = [0u8; 8];
+        let bytes = word.get_mut(..usize::try_from(size).ok()?)?;
+        arch.translate().loader_rc().try_borrow_mut().ok()?.load_fill(bytes, &slot).ok()?;
+        let value = if space.is_big_endian() {
+            bytes.iter().fold(0u64, |v, &b| (v << 8) | u64::from(b))
+        } else {
+            bytes.iter().rev().fold(0u64, |v, &b| (v << 8) | u64::from(b))
+        };
+        let code = arch.manage().get_default_code_space()?;
+        let target = Address::new(Rc::clone(code), value);
+        arch.symboltab.function_is_no_return_across_scopes(&target).then_some(target)
+    }
     fn msvc_locked_entry(&self, entry: &Address) -> bool {
         let locked = &self.arch().msvcsig_import_slots;
         !locked.is_empty()
