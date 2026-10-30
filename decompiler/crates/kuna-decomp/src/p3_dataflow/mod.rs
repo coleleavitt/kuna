@@ -61,6 +61,8 @@ pub mod kuna_cancelbytearithmetic;
 pub mod kuna_wideslice;
 pub mod kuna_devectorize;
 pub mod kuna_strlenscan;
+pub mod kuna_cmpmerge;
+pub mod kuna_latecse;
 pub mod kuna_rangefold;
 pub mod kuna_selectdiv;
 pub mod kuna_repstring;

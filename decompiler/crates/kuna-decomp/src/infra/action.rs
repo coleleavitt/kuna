@@ -1123,6 +1123,14 @@ type PerOp = SmallVec<[usize; 4]>;
 /// `ActionPool`).
 pub struct ActionPool {
     base: ActionBase,
+    /// (kuna `dirtypool`) The ops a repeated sweep visits: the neighbourhood of
+    /// every op a rule changed in the previous sweep.  `None` = visit every op.
+    focus: Option<std::collections::HashSet<OpId>>,
+    /// (kuna `dirtypool`) The newest op creation time when the previous sweep
+    /// started; a newer op is always visited.
+    focus_time: u32,
+    /// (kuna `dirtypool`) The focus the current sweep is building.
+    touched: std::collections::HashSet<OpId>,
     /// The set of rules in this pool, in insertion order (C++ `allrules`).
     allrules: Vec<RuleEntry>,
     /// Rules associated with each OpCode, in insertion order — a flat
@@ -1201,6 +1209,9 @@ impl ActionPool {
     pub fn new(f: uint4, nm: impl Into<String>) -> ActionPool {
         ActionPool {
             base: ActionBase::new(f, nm, ""),
+            focus: None,
+            focus_time: 0,
+            touched: Default::default(),
             allrules: Vec::new(),
             perop: vec![PerOp::new(); OpCode::CPUI_MAX as usize],
             op_state: OpCursor::Unstarted,
@@ -1287,6 +1298,9 @@ impl ActionPool {
             }
             self.allrules[rl_idx].state.count_tests += 1;
             let res = self.allrules[rl_idx].rule.apply_op(op, data);
+            if res > 0 && data.get_arch().dirty_pool {
+                touch_neighbourhood(&mut self.touched, data, op);
+            }
             if res > 0 {
                 self.allrules[rl_idx].state.count_apply += 1;
                 self.base.count += res;
@@ -1389,6 +1403,33 @@ impl ActionPool {
     }
 }
 
+/// (kuna `dirtypool`) Add `op` and the ops within two def-use steps of it.
+fn touch_neighbourhood(set: &mut std::collections::HashSet<OpId>, data: &Funcdata, op: OpId) {
+    let mut frontier = vec![op];
+    set.insert(op);
+    for _ in 0..2 {
+        let mut next = Vec::new();
+        for cur in frontier {
+            let Some(o) = data.obank().get(cur) else { continue };
+            for slot in 0..o.num_input() {
+                if let Some(d) = o.get_in(slot).and_then(|v| data.vbank().get(v)).and_then(|v| v.get_def()) {
+                    if set.insert(d) {
+                        next.push(d);
+                    }
+                }
+            }
+            if let Some(v) = o.get_out().and_then(|v| data.vbank().get(v)) {
+                for d in v.descend_iter() {
+                    if set.insert(d) {
+                        next.push(d);
+                    }
+                }
+            }
+        }
+        frontier = next;
+    }
+}
+
 impl Action for ActionPool {
     fn base(&self) -> &ActionBase {
         &self.base
@@ -1445,8 +1486,25 @@ impl Action for ActionPool {
         }
         self.next_op = None;
         self.lookahead_epoch = None;
+        // (kuna `dirtypool`) A repeat sweep visits only what the previous sweep's
+        // rules touched and the ops created since it began.
+        let dirty = data.get_arch().dirty_pool;
+        let filter = if dirty && self.base.status == statusflags::status_repeat { self.focus.take() } else { None };
+        let newer_than = self.focus_time;
+        if dirty && self.base.status != statusflags::status_mid {
+            self.focus_time = data.obank().iter_all().map(|(_, id)| id).filter_map(|id| data.obank().get(id).map(|o| o.get_time())).max().unwrap_or(0);
+            self.touched.clear();
+        }
         let mut ops_since_deadline_probe: u32 = 0;
         while let Some(op) = self.current_op(data) {
+            if let Some(f) = &filter {
+                let keep = f.contains(&op) || data.obank().get(op).map_or(true, |o| o.get_time() > newer_than || o.is_dead());
+                if !keep {
+                    self.advance_op_state(data, op);
+                    self.rule_index = 0;
+                    continue;
+                }
+            }
             // (kuna decompile-all watchdog) Cooperative deadline in the tight
             // rule loop, probed only every POOL_DEADLINE_STRIDE ops so the hot
             // path stays cheap.  On expiry, stop visiting ops and report
@@ -1472,6 +1530,9 @@ impl Action for ActionPool {
         self.next_op = None;
         self.lookahead_epoch = None;
         self.drain_into(ctx);
+        if dirty {
+            self.focus = Some(std::mem::take(&mut self.touched));
+        }
         0 // Indicate successful completion
     }
 

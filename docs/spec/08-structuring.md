@@ -166,6 +166,34 @@ scope; conditional loops disable recovery because their continue may evaluate
 a condition or iterator rather than restart the first leaf. Other destinations
 retain gotos. `off` restores the original collapse precedence and rendering.
 
+**`gotosink` — backward gotos become loops; a jump over a run becomes an
+`if`.** `kuna_gotosink.rs (ActionGotoSink)` runs after the other
+blockrecovery passes that edit the tree (last before `paramcopyhoist`), with
+`gotosink on` (the default). It first splices every `BlockList` that is a
+member of a list or graph into its parent (`BlockGraph::kuna_flatten_lists`):
+a nested list prints its members in order anyway, so the edit is invisible,
+and a jump that named the list now names its first member, where it lands.
+Then, to a fixpoint over every list:
+
+* A component that ends in a plain jump back to the front leaf of an earlier
+  component of the same list, `L: S1..Sk; goto L;`, is wrapped with
+  everything from `L` on in a `BlockInfLoop` around a `BlockList`; the jump
+  at the end is the loop's back edge, which the print-time census leaves out,
+  and every other plain jump to `L` whose innermost loop is the new one is
+  retagged `continue`. A conditional jump back, `L: S1..Sk; if (c) goto L;`,
+  becomes a `BlockDoWhile` whose body ends in the jump's condition block.
+  A run holding a `break` or `continue` that no loop (for `continue`) or loop
+  or switch (for `break`) inside it encloses is skipped.
+* An if-goto whose target is the front leaf of a later component of the same
+  list, `if (c) goto L; S1..Sk; L:`, with one to sixteen components between
+  and a condition that is one basic block, becomes a two-component `BlockIf`
+  over those components, and the condition's branch is negated
+  (`Funcdata::block_basic_negate_lastop`) so it prints `if (!c)`.
+
+Labels no carrier reaches any more are released
+(`kuna_gotolabel::release_converted_labels`), and `mark_label_bump_up` runs
+again so a new loop prints its head's label above itself.
+
 **`whilecontinue` — the continue point of a conditional loop.** With
 `whilecontinue on` (the default, and only while `loopcontinue` is on),
 `kuna_loopcontinue.rs (continue_points)` gives a conditional loop the leaf its
@@ -214,6 +242,14 @@ decline in both engines: a complex sibling is accepted when **either** of two
 admission rules takes it. The predicate is their union — the two rules were
 derived independently against the two shapes above and neither subsumes the
 other.
+
+**Defaults and the loop test.** `condfold` defaults to `on`; `condstmts`
+(default 3) still re-splits an operand that prints more statements than its
+cap. `kuna_condfold.rs (compute_condfold_sets)` admits no block that branches
+back to a block dominating it (`is_loop_latch`): that block is a loop's test,
+and folding it into a short-circuit operand leaves the loop no condition, so a
+`do { ... } while (c)` would come out as `while( true )` with the test as an
+exit.
 
 **The shared width budget.** Every admitted sibling first has to fit the
 policy level's **printed-width budget**: `kuna_condfold.rs (printed_shape)`
@@ -1207,6 +1243,29 @@ split forms compile to the *same* object code, so nothing in the binary
 distinguishes them. Its per-edge narrowings — `earlyreturn` (DIV-23) and
 `switchreturn` (DIV-25) — remain separate options: they reach the mixed
 const/variable diamonds this whole-block gate rejects outright.
+
+### unmergecall — one call per path for a cross-jumped call tail
+
+`decompiler/crates/kuna-decomp/src/p8_structure/kuna_unmergecall.rs
+(ActionUnmergeCall)`, option `unmergecall` (default off), runs in the
+`returnsplit` group right after `returndup`. gcc `-Os` cross-jumps the tails of
+paths that end in the same call: each path sets the arguments and jumps to one
+`call f; ...; ret` block, so the call reads MULTIEQUALs and prints as
+`if (c) { a = b; k = 2; } return f(a, k);`. The pass splits such a block once
+per predecessor with `decompiler/crates/kuna-decomp/src/substrate/funcdata_block.rs
+(Funcdata::node_split_calls)`, the `node_split` clone with CALL and INDIRECT
+cloning enabled: each cloned call gets its own copy of the original call spec
+(`FuncCallSpecs::clone_for_op`, a fresh fspec handle), and a cloned INDIRECT's
+iop input names the cloned call. Each path then prints its own call:
+`if (c) return f(b, 2); return f(a, 1);`.
+
+A block qualifies when it has no successors, two to four distinct
+predecessors, at most 16 ops, exactly one direct CALL, an argument of that call
+computed (within the block) from a MULTIEQUAL, and no INDIRECT that still
+creates the call's output (prototype recovery has not settled the output yet;
+a later fullloop pass retries). Splitting is exact, since each predecessor runs
+one copy. It stays off because the source often wrote the merged form as a
+ternary argument (`lua_pushstring(L, isint ? "integer" : "float")`).
 
 ### orchain — the split that must not happen (decbench)
 

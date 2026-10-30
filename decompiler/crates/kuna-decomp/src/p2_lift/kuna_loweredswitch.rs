@@ -795,6 +795,7 @@ fn recover_cascade(
     let mut stack: Vec<(BlockId, uintb, uintb)> = Vec::new();
     stack.push((startbb, 0, 0xFFFF_FFFF_FFFF_FFFF));
     let mut saw_range = false; // true once a range (binary-search) node is seen
+    let mut case_blocks: Vec<BlockId> = Vec::new();
     let mut range_signedness: Option<LoweredSwitchSignedness> = None;
     let mut path_signedness: Option<LoweredSwitchSignedness> = None;
     let mut effective_size: Option<int4> = None;
@@ -862,6 +863,7 @@ fn recover_cascade(
                         return None; // duplicate case value: bail (v1)
                     }
                     cases.insert(cn.cval, tgt);
+                    case_blocks.push(cn.match_out.expect("equality node has matchOut"));
                 }
             }
             match is_cascade(cn.cont_a) {
@@ -973,12 +975,22 @@ fn recover_cascade(
             return None;
         }
     }
-    // Require the GCC binary-search structure (a range/jump-tree split).  A
-    // purely linear equality chain is a hand-written if/else-if.
-    if !saw_range {
-        return None;
+    // Require the GCC binary-search structure (a range/jump-tree split): a purely
+    // linear equality chain reads as a hand-written if/else-if.  Option
+    // `linearswitch N` lets a linear chain of at least N cases re-roll too.
+    let linear = !saw_range;
+    if linear {
+        let min = data.get_arch().linear_switch;
+        if min <= 0 || (cases.len() as int4) < min {
+            return None;
+        }
+        // A case body another path also enters is a copy of the chain the
+        // compiler duplicated; re-rolling one copy splits what the two share.
+        if case_blocks.iter().any(|&b| data.bblocks_ref().block(b).size_in() != 1 || !data.bblocks_ref().dominates(startbb, Some(b))) {
+            return None;
+        }
     }
-    if strict_labels {
+    if strict_labels && !linear {
         let proven_signedness = range_signedness?;
         if let Some(path_signedness) = path_signedness {
             if path_signedness != proven_signedness {
@@ -1033,7 +1045,20 @@ fn recover_cascade(
         case_vals.push(*val);
         case_targets.push(tgt.clone());
     }
-    let signed_labels = if strict_labels {
+    let signed_labels = if strict_labels && linear {
+        // Equalities never decide signedness; an extension on the path does, and
+        // without one every label must print the same either way.
+        match path_signedness {
+            Some(signedness) => signedness.signed_labels(),
+            None => {
+                let sign_bit = 1u64 << ((var_size * 8 - 1).clamp(0, 63) as u32);
+                if case_vals.iter().any(|&v| v & sign_bit != 0) {
+                    return None;
+                }
+                false
+            }
+        }
+    } else if strict_labels {
         range_signedness?.signed_labels()
     } else {
         legacy_signed_labels(var_size, &case_vals)

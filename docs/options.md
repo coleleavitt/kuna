@@ -37,6 +37,15 @@ Three tiers:
 | v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4 | [`pow2select`](#pow2select) |
 | a signed remainder by a power of two prints as a select between x & m and -(-x & m) | [`pow2select`](#pow2select) |
 | (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4 | [`pow2select`](#pow2select) |
+| a < b or a == b printed as two tests where a <= b would do | [`cmpmerge`](#cmpmerge) |
+| a0 != a1 && !(a0 < a1) on floats | [`cmpmerge`](#cmpmerge) |
+| two branches in a row test the same value against neighbouring constants and jump to one place | [`cmpmerge`](#cmpmerge) |
+| x == 3 or 3 < x printed as two tests | [`cmpmerge`](#cmpmerge) |
+| the same arithmetic expression on the same values is computed twice into two temporaries | [`latecse`](#latecse) |
+| v1 = a + b * 4; ... v2 = a + b * 4; where one would do | [`latecse`](#latecse) |
+| duplicated address arithmetic in both arms of an if | [`latecse`](#latecse) |
+| if (c) x = a; else x = b; return f(x); where the source called f on each path | [`unmergecall`](#unmergecall) |
+| the compiler shared one call block between two paths and the arguments became a merged variable | [`unmergecall`](#unmergecall) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -289,6 +298,12 @@ Three tiers:
 | goto plus label into the shared body of a guard cascade whose arms reconverge | [`condfold`](#condfold) |
 | nested if where angr emits one compound short-circuit condition | [`condfold`](#condfold) |
 | second condition block assigns one value or calls something before its test and the fold is declined | [`condfold`](#condfold) |
+| a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch) |
+| loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch) |
+| nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch) |
+| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight) |
+| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight) |
+| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight) |
 | a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts) |
 | if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts) |
 | a while header carries several comma-separated assignments | [`condstmts`](#condstmts) |
@@ -296,6 +311,9 @@ Three tiers:
 | goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue) |
 | a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue) |
 | continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue) |
+| if (c) goto label_N; ... label_N: where an if around the skipped statements would do | [`gotosink`](#gotosink) |
+| label_N: ... if (c) goto label_N; where a do-while would do | [`gotosink`](#gotosink) |
+| label_N: ... goto label_N; at the end of a statement run instead of a loop | [`gotosink`](#gotosink) |
 | goto to a label that only returns | [`gotoreduce`](#gotoreduce) |
 | label_N: return; shared tail after an if | [`gotoreduce`](#gotoreduce) |
 | more gotos than angr for the same function | [`gotoreduce`](#gotoreduce) |
@@ -553,6 +571,8 @@ Three tiers:
 | numerical integer conversion is stored in a float local | [`fputruncviews`](#fputruncviews) |
 | short call argument uses inverse floating storage unions | [`fputruncviews`](#fputruncviews) |
 | one floating register carries both integers and genuine floating values | [`fputruncviews`](#fputruncviews) |
+| rule pools spend most of their time re-testing ops nothing changed | [`dirtypool`](#dirtypool) |
+| a large function's simplification repeats full sweeps for a handful of rewrites | [`dirtypool`](#dirtypool) |
 | a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel) |
 | a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel) |
 | invoke-range calls lose their arguments | [`dexmodel`](#dexmodel) |
@@ -1650,6 +1670,30 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-pow2select
 - **Example:** `option pow2select off`
 
+### `cmpmerge` -- on | off, default `off`
+
+- **Symptoms:** a < b or a == b printed as two tests where a <= b would do; a0 != a1 && !(a0 < a1) on floats; two branches in a row test the same value against neighbouring constants and jump to one place; x == 3 or 3 < x printed as two tests.
+- **What it does:** Merge two comparisons of the same operands into one. A comparison's outcome is a set of the relations LT, EQ, GT (and UN, unordered, for floats); two of them combined by `||`, `&&` or `^` are the union, intersection or symmetric difference of their sets, and fold when that set is one comparison, its negation, a constant, or one of the two inputs. A comparison of one varnode against two constants is a pair of CircleRanges instead, which folds when the combined range is one strict comparison against a constant (`c - 1 < v`, `v < c`, `==`, `!=`, signed or unsigned), keeping the `<=` presentation when an input was written with it. `RuleCompareMerge` (oppool1) folds BOOL_OR / BOOL_AND / BOOL_XOR of two comparisons. `ActionBranchMerge` (group unreachable) folds a CBRANCH whose one successor is a single-predecessor block holding nothing but a second test of the same operands that shares the first branch's other target: the first branch takes the merged test and the second can no longer reach the shared target, so ActionDeterminedBranch removes its edge. Signed and unsigned orderings never mix; floats keep unordered results (`a != b && !(a < b)` is `!(a <= b)`, not `a > b`).
+- **When to flip:** Turn on to print `a <= b` for `a < b || a == b`, `(unsigned)v >= 8` for `v < 0 || 8 <= v`, and `!(a <= b)` for a float `a != b && !(a < b)`, mostly in -O0 code where each test is its own branch. Default off: the merged forms move 5/675 datatest assertions (an AArch64 ccmp `val <= 9` that becomes `val < 10`, bitfield and signed-byte tests). x86-64 gcc -O0: `if ((a1 <= a0) && (a0 != a1)) return 0;` becomes `if (a1 < a0) return 0;` and `if ((!(a1 < a0)) && (a0 != a1))` on doubles becomes `if (!(a1 <= a0))`.
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-cmpmerge
+- **Example:** `option cmpmerge on`
+
+### `latecse` -- on | off, default `off`
+
+- **Symptoms:** the same arithmetic expression on the same values is computed twice into two temporaries; v1 = a + b * 4; ... v2 = a + b * 4; where one would do; duplicated address arithmetic in both arms of an if.
+- **What it does:** Merge identical pure ops that read the same varnode once the rule pools settle: for every varnode with more than one reader, the readers `get_cse_hash` accepts (unary or binary, no COPY, LOAD, call or other effect) go through `Funcdata::cse_eliminate_list`, which keeps one op in a block dominating both and reads its output at both. An op whose value is a LOAD or STORE address is skipped: type recovery turns each such use into its own field or element access. Runs once per function in group `unreachable` (a rule that later splits the shared value again would otherwise alternate with it); upstream merges only MULTIEQUALs (ActionMultiCse) and SUBPIECE/INT_SRIGHT (RuleSelectCse).
+- **When to flip:** Turn on to see a value the source computed once and the compiler recomputed print once. Default off: over 4,072 x86-64 functions it changes 560 (many through synthesized struct numbering), and the shared values become explicit temporaries, so output grows (lines 180,432 -> 180,724, gotos 8,892 -> 8,940).
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-latecse
+- **Example:** `option latecse on`
+
+### `unmergecall` -- on | off, default `off`
+
+- **Symptoms:** if (c) x = a; else x = b; return f(x); where the source called f on each path; the compiler shared one call block between two paths and the arguments became a merged variable.
+- **What it does:** Split a block that ends in one direct CALL and a RETURN once per predecessor when an argument of the call is computed from a MULTIEQUAL in the block (a tail shared by cross-jumping, gcc -Os). Funcdata::node_split_calls clones the block's ops for one in-edge, gives the cloned call its own copy of the call spec and points cloned INDIRECTs at the cloned call; each path then prints its own call with its own arguments. Blocks with more than 16 ops, more than four predecessors, a second call or an INDIRECT that still creates the call's output are left alone.
+- **When to flip:** Turn on when -Os code shows `if (c) { a = b; k = 2; } return f(a, k);` where the source called f on each path. Default off: it moves 3/675 datatest assertions, and over 4,072 x86-64 functions it changes 183 (lines 180,432 -> 180,303, returns 7,829 -> 7,916) but often where the source passed a ternary argument (lua math_type, luaG_opinterror), which the merged form matches better.
+- **Where / provenance:** P8/goto-quality · kuna · presentation-default · kuna-unmergecall
+- **Example:** `option unmergecall on`
+
 ### `strlenscan` -- on | off, default `on`
 
 - **Symptoms:** a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero; if (!v3) break; v3 -= 1; inside a loop that reads one byte per step; ~v3 - 1 or ~v3 - 5 where the source computes a string length; repnz scasb in the disassembly where IDA prints strlen.
@@ -2226,13 +2270,29 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P8/goto-quality · angr · structure-recovery · angr-sailr-edge-ordering
 - **Example:** `option regionedgeorder on`
 
-### `condfold` -- off | on | wide, default `off`
+### `condfold` -- off | on | wide, default `on`
 
 - **Symptoms:** crossing goto from the else arm back into the then arm's shared clause; goto plus label into the shared body of a guard cascade whose arms reconverge; nested if where angr emits one compound short-circuit condition; second condition block assigns one value or calls something before its test and the fold is declined.
 - **What it does:** Relax the ONE gate that makes Ghidra decline a short-circuit fold: the is_complex(orblock) check inside ruleBlockOr (and its verbatim twin try_block_or in the region structurer). BlockBasic::isComplex is a >2-statement readability budget, so a single spill, address computation or extra call parked in front of the second test costs a crossing goto back into the first arm's clause (coreutils tr build_spec_list: `result_idx = &v9; if (es_match(es_00,v11,'=')) goto label_40242e;`) or a goto+label into a guard cascade's shared body (lighttpd server.c::main in the angr corpus binary newbury: 1 goto / 1 label where angr emits 0 / 0). With this on, a complex sibling is accepted when it fits the level's PRINTED-WIDTH BUDGET -- the operand renders at most 5 comma elements at `on` / 9 at `wide`, counted with the printer's own skip rules (not_printed, markers, implied outputs, the bare BRANCH), the terminal CBRANCH included -- AND either of two admission rules takes it. Rule A (bounded prefix): a BlockCopy of ONE basic block, branch-free, comment-free, with at most 1 statement-root call. Rule B (statement shape): every op is a marker, an op with an output, a void CALL/CALLIND, a STORE, or the single terminal CBRANCH (RETURN, a second branch, BRANCHIND, CALLOTHER and no-return calls all decline), with <=2 conservatively-scored statements and <=2 calls per block, no comment, and -- because Rule B also admits a NESTED BlockCondition so a guard cascade can fold -- <=4 condition leaves and <=4 total scored statements at the fold site. The absorbed statements render inside the &&/|| operand as a C comma expression, which the printer already supports (comma_separate). The fold moves no p-code: it re-parents two existing structuring nodes, and C short-circuit plus comma sequencing preserves the original execution paths and order, so predicates that call functions need no purity analysis. Applied at BOTH structuring paths. Port of the angr Phoenix MultiStatementExpression relaxation (_should_use_multistmtexprs / _build_multistatementexpr_statements) under its default MAX_ONE_CALL policy; `on` uses angr's statement threshold (5) and `wide` raises the budget to 9 for BOTH rules, because kuna's printed-statement granularity is finer than angr's AIL for the same block (argument recovery and address-tied copy shadows split one AIL statement into several printed ones). THREE ACCURACY NOTES. (1) Rule A's call cap counts only calls printed as their own comma-chain element: the eligibility walk mirrors the printer, whose implied-output skip necessarily runs before the call test, so a call inlined into the sibling's own condition is not charged and a folded operand can render more than one call (measured: mv -O2 copy_internal at `wide` renders cached_umask(...) counted and fchmod(...) not counted). This is deliberate and is a readability bound, not a soundness bound; Rule B counts every call. (2) Rule B's <=2 SCORED statements is a calc_explicit approximation, NOT a width: a block can score 2 and render 7 comma elements, which is exactly why the printed-width budget above is enforced on top of it. The scored count survives only because the <=4 leaf / <=4 statement cross-leaf caps are expressed in it, so those caps bound the relaxation at each site where it is exercised but do NOT bound the summed printed width of a folded cascade, nor the final condition's global width -- a purely upstream-legal fold (both operands non-complex) can still extend a cascade on the left without consulting them, exactly as it can with the option off. (3) The width is measured on the op list as it stands at structuring time: later passes can add or drop an op, and where a call's stack-effect ops are still live (unprototyped callee) it over-counts, which only ever declines a fold.
-- **When to flip:** kuna emits a crossing `if (cond) goto label_X;` from the else arm back into the then arm's clause, or a goto+label into the shared body of a permission/validation guard cascade, or a nested if where angr short-circuits into `A || B` / `A && B` -- because the second condition block also assigns something (a spill, a pointer setup, a call whose result is the test). Default off: byte-identical to upstream (the eligibility precompute is skipped and every gate disjunct is dead). Try `on` first: it is the angr-parity width and it closes the guard-cascade case (newbury main reaches 0 gotos / 0 labels there). Go to `wide` when the sibling is a kuna-noisy block (copy shadows, unrecovered call arguments) that `on` still declines -- that is what tr build_spec_list needs to reach angr goto parity, and what true_ubuntu1804 usage needs for its ifs 9 -> 7 fold. THIS IS NOT A MONOTONE GOTO REDUCER: folding changes which edges the structurer can subsequently match, so individual functions can GAIN a goto even though the aggregate is a clear net win (measured on 2827 functions over 7 real binaries: gotos 2294 -> 2219 at `on` and -> 2191 at `wide` overall; 2 functions gain one -- clientloop.o process_escapes 26 -> 28 at both levels, true_ubuntu1804 usage 1 -> 2 at `wide` only). Flip back off when you prefer a nested if to a comma expression in the condition, when the folded operand reads as too dense (an operand can render two calls when one is inlined into the test), or when you need a kuna advisory comment that the fold can drop: the comment guard declines on any comment buffered at structuring time, but comma_separate suppresses emitCommentGroup, so an advisory produced by a LATER pass can vanish (newbury main emits 4 WARNING lines at off and 3 at on, losing its `WARNING: branchflip:` line). The emitted C is unaffected by that loss.
+- **When to flip:** On by default at `on` (DIV-R2): 0/675 datatest assertions move; condstmts (default 3) still caps how many statements an operand prints, and a block that branches back to a block dominating it (a loop test) is never folded, so a do-while keeps its condition (regionstructure-loop-refine). Measured over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): gotos 9,087 -> 9,069, if 20,419 -> 20,327, lines 180,786 -> 180,392, 14 functions fewer gotos and one more (lua addk); speed unchanged. Flip off to keep every complex sibling as its own nested if. Before the default flip: kuna emits a crossing `if (cond) goto label_X;` from the else arm back into the then arm's clause, or a goto+label into the shared body of a permission/validation guard cascade, or a nested if where angr short-circuits into `A || B` / `A && B` -- because the second condition block also assigns something (a spill, a pointer setup, a call whose result is the test). Try `on` first: it is the angr-parity width and it closes the guard-cascade case (newbury main reaches 0 gotos / 0 labels there). Go to `wide` when the sibling is a kuna-noisy block (copy shadows, unrecovered call arguments) that `on` still declines -- that is what tr build_spec_list needs to reach angr goto parity, and what true_ubuntu1804 usage needs for its ifs 9 -> 7 fold. THIS IS NOT A MONOTONE GOTO REDUCER: folding changes which edges the structurer can subsequently match, so individual functions can GAIN a goto even though the aggregate is a clear net win (measured on 2827 functions over 7 real binaries: gotos 2294 -> 2219 at `on` and -> 2191 at `wide` overall; 2 functions gain one -- clientloop.o process_escapes 26 -> 28 at both levels, true_ubuntu1804 usage 1 -> 2 at `wide` only). Flip back off when you prefer a nested if to a comma expression in the condition, when the folded operand reads as too dense (an operand can render two calls when one is inlined into the test), or when you need a kuna advisory comment that the fold can drop: the comment guard declines on any comment buffered at structuring time, but comma_separate suppresses emitCommentGroup, so an advisory produced by a LATER pass can vanish (newbury main emits 4 WARNING lines at off and 3 at on, losing its `WARNING: branchflip:` line). The emitted C is unaffected by that loss.
 - **Where / provenance:** P8/goto-quality · angr · structure-recovery · angr-tr-build-spec-list
 - **Example:** `option condfold wide`
+
+### `linearswitch` -- off | 3 | 4 | <n>, default `off`
+
+- **Symptoms:** a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable; loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one; nested != tests on one variable with shared tails where the source has a switch.
+- **What it does:** Let `loweredswitch` re-roll a linear chain of equality tests on one variable into a switch. Detection requires a binary-search split (`saw_range`) because a linear chain reads as a hand-written if/else-if; a compiler also lowers a switch of three or four cases that way, and an if/else-if chain on one variable reads as a switch too. With `linearswitch N` a chain with no range node is recorded when it has at least N cases, every case body is entered only from the chain and dominated by the chain head (a chain the compiler copied into two paths keeps its ifs), and the labels print the same signed or unsigned (an extension on the path decides, else no case value may have the sign bit set). Every other check of the cascade recovery, the single shared default sink and `loweredswitchexact`'s routing replay included, still applies.
+- **When to flip:** Set `3` (or a larger count) when nested `if (v != 5) { if (v != 2) ... }` tests on one variable stand for a switch. Default off: re-rolling moves 4/675 datatest assertions (Copy trim #6-#8, Partial union #5). Measured at `3` over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 13 functions change, switch 298 -> 309, if 20,327 -> 20,299, gotos unchanged in total (lua_compare +2, bzip2 compress and uncompress -1 each), lines +69. A switch installed in a session stays when the option is turned off later for the same function (the installed jump table is kept), so compare off before on.
+- **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-linearswitch
+- **Example:** `option linearswitch 3`
+
+### `implweight` -- off | <n>, default `off`
+
+- **Symptoms:** a tiny expression such as a0 + 1 read three times gets its own temporary; many one-use-looking temporaries for small expressions read in several places; want small shared expressions printed inline and large ones kept in a variable.
+- **What it does:** Let an expression read by more than `max_implied_ref` ops still print inline when its terms times its readers is at most N. ActionMarkExplicit takes such a varnode as a multi-reader candidate (max_implied_ref raised to N) and process_multiplier caps its terms at min(max_term_duplication, N / readers), so a small expression read three times prints at each use and a large one keeps its temporary.
+- **When to flip:** Set N (2..64) to inline small shared expressions. Default off (upstream: at most max_implied_ref = 2 readers, any size). At 6 over 4,072 x86-64 functions: 583 change, lines 180,432 -> 179,740, assignments 69,898 -> 69,370; a load read three times then prints three times (no write in between).
+- **Where / provenance:** P6/variable-merging · kuna · presentation-default · kuna-implweight
+- **Example:** `option implweight 8`
 
 ### `condstmts` -- off | 0 | 1 | 2 | 3 | <n>, default `3`
 
@@ -2249,6 +2309,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: 0/675 datatest assertions move. Flip off to print the goto to the loop test. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib 1.3.2, libexpat, libyaml): 9 functions change, gotos 9,853 -> 9,838, `continue;` 50 -> 65, every one a `goto label_X;` to an empty `label_X: ;` directly above `} while (...)` (zlib inflate, Lua str_pack, four expat tokenizers). Jumps into the latch of a `while( true )` loop, the commoner shape, are unchanged: they resume after the loop head, not at it.
 - **Where / provenance:** P8/goto-quality · kuna · structure-recovery · kuna-whilecontinue
 - **Example:** `option whilecontinue off`
+
+### `gotosink` -- on | off, default `on`
+
+- **Symptoms:** if (c) goto label_N; ... label_N: where an if around the skipped statements would do; label_N: ... if (c) goto label_N; where a do-while would do; label_N: ... goto label_N; at the end of a statement run instead of a loop.
+- **What it does:** Two print-tree rewrites of a structured statement list, run after every other structuring pass. Backward goto: `L: S1..Sk; goto L;` becomes `while( true ) { S1..Sk }` (the trailing jump is then the loop's back edge, which the print-time goto census leaves out), and `L: S1..Sk; if (c) goto L;` becomes `do { S1..Sk } while (c);`; in the infinite loop every other jump to `L` whose innermost loop is the new one prints as `continue;`. A run with a `break;` or `continue;` that no loop or switch inside it encloses is left alone, because the new loop would capture it. Sinking: `if (c) goto L; S1..Sk; L: T` with the `if` and `L` in one list becomes `if (!c) { S1..Sk } L: T` (at most 16 components, the condition one basic block whose branch is negated). Before both, every BlockList that is a member of a list is spliced into it (a jump that named the list names its first member), so statements that print as one sequence are siblings. Labels no jump reaches any more are released.
+- **When to flip:** On by default: 0/675 datatest assertions move. Measured over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 58 functions change, every one with fewer gotos and none with more; gotos 9,069 -> 8,892, labels 3,124 -> 3,076, `continue;` 55 -> 128. Sinking fires rarely after the structurer (it already sinks a local jump): 0 times with the default passes, 3 times with crossjumprevert/taildup/gotoreduce/returndup off. Flip off to keep the backward gotos.
+- **Where / provenance:** P8/goto-quality · kuna · structure-recovery · kuna-gotosink
+- **Example:** `option gotosink off`
 
 ### `gotoreduce` -- on | off, default `on`
 
@@ -2829,6 +2897,14 @@ The control surface: each of these can make output worse on the wrong source sha
 ## Analysis & loader passes
 
 Program-prep enablement: what is discovered, decoded, and named before any function is decompiled.
+
+### `dirtypool` -- on | off, default `off`
+
+- **Symptoms:** rule pools spend most of their time re-testing ops nothing changed; a large function's simplification repeats full sweeps for a handful of rewrites.
+- **What it does:** A repeated sweep of a rule pool (rule_repeatapply) visits only the ops near the previous sweep's rewrites: when a rule changes an op, the op and every op within two def-use steps of it are recorded; the next sweep runs rules on those ops and on ops created since the previous sweep began, and skips the rest. The first sweep of every pool invocation still visits every op.
+- **When to flip:** Turn on for speed on large functions: lua -O0 (gcc) user time 79.4 s -> 31.2 s. Default off: rules that act more than two steps from the op they match reach a different fixpoint; 31 of 4,072 functions print differently (equivalent forms) and the wide-slice and devectorize stage tests lose their folds.
+- **Where / provenance:** P3/simplification-quiescence · kuna · speed · kuna-dirtypool
+- **Example:** `option dirtypool on`
 
 ### `dexmodel` -- on | off, default `on`
 

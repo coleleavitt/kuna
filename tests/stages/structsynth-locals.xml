@@ -149,7 +149,7 @@ b615820e00008850084c89e05d415c415dc366662e0f1f8400000000000f1f00
 ^    char field_0x14\[4\];$
 ^\};$</stringmatch>
 <stringmatch name="STRUCTSYNTH-LOCALS #7: a buffer filled with text is not a record" min="2" max="2">\*v1 = 0x782e594c49484353;</stringmatch>
-<stringmatch name="STRUCTSYNTH-LOCALS #8: a record returned beside another value is not typed" min="2" max="2">v1 = \(unsigned int \*\)sub_200030\(\);</stringmatch>
+<stringmatch name="STRUCTSYNTH-LOCALS #8: a record returned beside another value is not typed" min="2" max="2">v1 = \(unsigned int \*\)sub_200030\(\)[;,]</stringmatch>
 <stringmatch name="STRUCTSYNTH-LOCALS #9: a buffer filled from a string literal is not a record" min="2" max="2">\*v2 = dat_101000;</stringmatch>
 <stringmatch name="STRUCTSYNTH-LOCALS #10: a record whose address escapes past its fields is not typed" min="2" max="2">sub_200020\(&amp;v1\[2\]\);</stringmatch>
 </decompilertest>

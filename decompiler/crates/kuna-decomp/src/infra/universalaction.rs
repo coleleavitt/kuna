@@ -372,6 +372,7 @@ pub fn universal_sched(
         rrow!("constspaceload", "analysis", crate::kuna_constspaceload::RuleConstSpaceLoad::with_group(false, "analysis")),
         rrow!("x87truncate", "analysis", crate::kuna_x87truncate::RuleX87Truncate::new("analysis")),
         rrow!("selectdiv", "analysis", crate::kuna_selectdiv::RuleSelectDiv::new("analysis")),
+        rrow!("comparemerge", "analysis", crate::kuna_cmpmerge::RuleCompareMerge::new("analysis")),
         rrow!("bitidioms", "analysis", crate::kuna_bitidioms::RuleBitIdioms::new("analysis")),
         rrow!("alloca", "analysis", crate::kuna_alloca::RuleAlloca::new("analysis")),
         rrow!("allocaprobe", "analysis", crate::kuna_alloca::RuleAllocaProbe::new("analysis")),
@@ -633,6 +634,8 @@ pub fn universal_sched(
             act!(Box::new(crate::condexe::ActionConditionalExe::new("conditionalexe"))),
             act!(ActionConditionalConst::boxed("analysis")),
             act!(crate::p3_dataflow::kuna_rangefold::ActionRangeFold::boxed("unreachable")),
+            act!(crate::p3_dataflow::kuna_cmpmerge::ActionBranchMerge::boxed("unreachable")),
+            act!(crate::p3_dataflow::kuna_latecse::ActionLateCse::boxed("unreachable")),
         ],
     };
 
@@ -714,6 +717,9 @@ pub fn universal_sched(
             // same merge/naming passes and are re-structured by the next fullloop
             // iteration (and the final ActionBlockStructure).
             act!(crate::p8_structure::kuna_returndup::ActionReturnDup::boxed("returnsplit")),
+            // (kuna) unmergecall (option `unmergecall`): split a tail-merged
+            // `call f; return` block per predecessor.
+            act!(crate::p8_structure::kuna_unmergecall::ActionUnmergeCall::boxed("returnsplit")),
             // (kuna) angr SAILR `ReturnDuplicatorHigh`, per-edge const narrowing (option
             // `earlyreturn`, default-OFF).  Sibling of ActionReturnDup: peels only the
             // CONSTANT arm of a mixed return phi (the guard's `return K`), leaving the
@@ -874,6 +880,7 @@ pub fn universal_sched(
             // final: the Cover legality test sees the variable's complete live range,
             // and no merge or structuring decision can be perturbed by the move --
             // only which basic block's statement list holds the COPY changes.
+            act!(crate::p8_structure::kuna_gotosink::ActionGotoSink::boxed("blockrecovery")),
             act!(crate::p6_variables::kuna_paramcopyhoist::ActionParamCopyHoist::boxed("merge")),
             act!(ActionPrototypeWarnings::boxed("protorecovery")),
             act!(ActionStop::boxed("base")),

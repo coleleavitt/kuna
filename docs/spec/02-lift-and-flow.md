@@ -2065,6 +2065,24 @@ the switch variable constant on a guarded edge, and classifying that constant
 as broken made repair and cond-const toggle the same input forever — the fixed
 infinite-loop hang on stripped openssh/bash binaries (`tests/hang-repro/`).
 
+### Linear equality chains — `option linearswitch`, default off
+
+`kuna_loweredswitch.rs (recover_cascade)` records a cascade only after it has
+seen a range node (`saw_range`), because a chain of equality tests with no
+binary-search split reads as a hand-written if/else-if. Compilers lower a
+switch of three or four cases exactly that way, and an if/else-if chain on one
+variable is a switch in all but syntax. `linearswitch N` (N from 3 to 16)
+accepts such a linear chain when it has at least N cases, when each case body
+is entered only from the chain and is dominated by the chain head (a chain the
+compiler copied into two paths keeps its ifs: re-rolling one copy would split
+what the two share), and when the labels print the same either way: an
+extension on the path to the selector decides the signedness; with none, no
+case value may have the sign bit set. Every other check of the recovery —
+three to sixteen cases, one shared default sink, `loweredswitchexact`'s
+routing replay — still applies. The re-roll is installed through the same
+restart, so a switch installed for a function in a session stays if the option
+is turned off later in that session.
+
 ### Restricting the re-roll to a locally computed selector — `option switchselector`, default off
 
 The re-rolled `switch` and the cascade it replaces read the same value, so which

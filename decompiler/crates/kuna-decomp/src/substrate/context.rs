@@ -1353,6 +1353,21 @@ pub struct ArchContext {
     pub devectorize_reduction: bool,
     /// (kuna) `strlenscan` — collapse an inline `repnz scasb` length into `strlen`.
     pub strlen_scan: bool,
+    /// (kuna) `unmergecall` — split a block that ends in one call and a return once per predecessor when the call's arguments are merged values.
+    pub unmerge_calls: bool,
+    /// (kuna) `dirtypool` — let a repeated rule-pool sweep visit only the ops near the previous sweep's rewrites.
+    pub dirty_pool: bool,
+    /// (kuna) `latecse` — merge identical pure ops that read the same varnode once the rules settle.
+    pub late_cse: bool,
+    /// (kuna) `gotosink` — sink `if (c) goto L` over the statements it skips and turn a backward goto into a loop.
+    pub goto_sink: bool,
+    /// (kuna) `cmpmerge` — merge two comparisons of the same operands, combined by a boolean op or by two branches in a row, into one.
+    pub cmp_merge: bool,
+    /// (kuna) `linearswitch` — the fewest cases a linear equality chain needs to
+    /// re-roll into a switch; 0 = off.
+    pub linear_switch: int4,
+    /// (kuna) `implweight` — terms times uses an expression may print inline; 0 = off.
+    pub impl_weight: int4,
     /// (kuna) `rangefold` — fold comparisons and masks a dominating branch decides.
     pub range_fold: bool,
     /// (kuna) `pow2select` — rewrite a signed division or remainder by a power of two written as a select or a sign-mask shift.
@@ -2110,6 +2125,13 @@ impl ArchContext {
             wide_slice_reduce: false,    // wideslice (Architecture::reset_defaults sets the shipped default: on)
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
+            unmerge_calls: false, // unmergecall (live value copied from the Architecture)
+            dirty_pool: false, // dirtypool (live value copied from the Architecture)
+            late_cse: false, // latecse (live value copied from the Architecture)
+            goto_sink: false, // gotosink (live value copied from the Architecture)
+            cmp_merge: false, // cmpmerge (live value copied from the Architecture)
+            linear_switch: 0, // linearswitch (live value copied from the Architecture)
+            impl_weight: 0, // implweight (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)
             while_continue: false, // whilecontinue (live value copied from the Architecture)

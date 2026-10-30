@@ -804,7 +804,17 @@ impl CondFoldSets {
     }
 }
 
+/// Does `bb` branch back to a block that dominates it?  Such a block is a loop's
+/// test: folding it into a short-circuit operand leaves the loop no condition to
+/// carry, so `do { ... } while (c)` degrades to `while( true )` with an exit.
+fn is_loop_latch(data: &Funcdata, bb: BlockId) -> bool {
+    let graph = data.bblocks_ref();
+    let block = graph.block(bb);
+    (0..block.size_out()).any(|k| block.is_back_edge_out(k) || graph.dominates(block.get_out(k), Some(bb)))
+}
+
 /// Precompute both admission rules' verdicts for every `BlockBasic` in the function.
+/// A loop's test block ([`is_loop_latch`]) is never admitted.
 ///
 /// `max_stmts` is the `Architecture::cond_fold` policy cap: **0 means the option is
 /// off**, in which case this returns empty sets without touching the graph, so the
@@ -820,6 +830,9 @@ pub fn compute_condfold_sets(data: &Funcdata, max_stmts: int4) -> CondFoldSets {
     let nbb = data.bblocks_get_size();
     for i in 0..nbb {
         let bb = data.bblocks_get_block(i);
+        if is_loop_latch(data, bb) {
+            continue;
+        }
         if prefix_eligible(data, bb, max_stmts) {
             if debug {
                 let w = printed_shape(data, &data.bb_ops(bb))

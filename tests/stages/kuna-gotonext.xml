@@ -70,6 +70,8 @@ c389f089d199f7f9c389f089d199f7f989c7e9e9fdffff31c0c389f789d6e9fdfdffff666666662e
 <symbol space="ram" offset="0x501110" name="fall_clang"/>
 </binaryimage>
 <script>
+  <!-- this test pins its own option; gotosink would turn the backward gotos it counts into loops -->
+  <com>option gotosink off</com>
   <com>lo fu fall</com>
   <com>decompile</com>
   <com>print C</com>

@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_420() {
-    assert_eq!(kuna_num_settables(), 420);
-    assert_eq!(SETTABLE_TABLE.len(), 420);
+fn settable_count_is_427() {
+    assert_eq!(kuna_num_settables(), 427);
+    assert_eq!(SETTABLE_TABLE.len(), 427);
 }
 
 #[test]
-fn tier_counts_are_136_core_153_transform_131_analysis() {
+fn tier_counts_are_136_core_159_transform_132_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_136_core_153_transform_131_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (136, 153, 131));
+    assert_eq!((core, transform, analysis), (136, 159, 132));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_189() {
+fn option_values_live_value_present_for_194() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -661,6 +661,8 @@ fn option_values_live_value_present_for_189() {
                     matches!(
                         st.option,
                         "outline"
+                            | "implweight"
+                            | "linearswitch"
                             | "loweredswitch"
                             | "regionstructure"
                             | "regionlooprefine"
@@ -1008,7 +1010,12 @@ fn option_values_live_value_present_for_189() {
     // 159 -> 160: +1 for `tailcontract` (live_field).
     // 187 -> 188: +1 for `stackexitanchor` (live_field).
     // 188 -> 189: +1 for `fdeflowbound` (live_field).
-    assert_eq!(with_live, 191);
+    // +1 for `cmpmerge`.
+    // +1 for `gotosink`.
+    // +1 for `latecse`.
+    // +1 for `dirtypool`.
+    // +1 for `unmergecall`.
+    assert_eq!(with_live, 196);
 }
 
 #[test]
@@ -1264,7 +1271,14 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `importvote`.
     // +1 for `fdeflowbound`.
     // +1 for `ehnote`.
-    assert_eq!(json.matches("},\n").count(), 419);
+    // +1 for `linearswitch`.
+    // +1 for `cmpmerge`.
+    // +1 for `gotosink`.
+    // +1 for `latecse`.
+    // +1 for `implweight`.
+    // +1 for `dirtypool`.
+    // +1 for `unmergecall`.
+    assert_eq!(json.matches("},\n").count(), 426);
 }
 
 #[test]

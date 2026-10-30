@@ -2164,7 +2164,13 @@ mod tests {
         // and kuna-calleeretpurge-x86 / the personal/x86-stack calleeretpurge test, kept beside bugs-misc's
         // and kuna-dyldcacheobjc / a dyld shared cache image's ObjC metadata through the cache
         // and kuna-stackexitanchor / the epilogue settles an unknown callee's purge
-        assert_eq!(count, 686, "corpus file count drifted");
+        // and kuna-condfold-default / condfold on by default keeps a loop test
+        // and kuna-linearswitch / a linear equality chain re-rolls into a switch
+        // and kuna-cmpmerge / two comparisons of the same operands merge into one
+        // and kuna-gotosink / backward gotos become loops, a jump over a run becomes an if
+        // and kuna-p69 / latecse, implweight and dirtypool keep the gotonext fixture's output
+        // and kuna-unmergecall / gcc -Os cross-jumped call tails
+        assert_eq!(count, 692, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

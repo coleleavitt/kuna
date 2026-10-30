@@ -603,6 +603,11 @@ mod tests {
               // the `__divdi3` quotient its low word or its whole return (see its
               // catalog row), so the preset must not turn it on.
               "libgccsigs",
+              // `latecse` lengthens the output (shared values become temporaries),
+              // `unmergecall` undoes ternary arguments the source wrote, and
+              // `dirtypool` reaches a different fixpoint (stage folds lost); see
+              // their catalog rows.
+              "latecse", "unmergecall", "dirtypool",
               // `relronoreturn` trades structure for speed (it skips a restart
               // whose second pass renders better), the opposite of this preset.
               "relronoreturn",
@@ -665,6 +670,9 @@ mod tests {
             // number are the two things that PR has to add).
             "guardarm",
             "loopcondhoist",
+            // `cmpmerge` moves 5/675 datatest assertions; a preset flip needs a
+            // decbench sweep first.
+            "cmpmerge",
             // `switchselector` is the one entry here whose evaluation is already
             // done and recorded (its catalog row carries the 0/675 datatest
             // ablation and the whole-corpus sweep: one function changes across
