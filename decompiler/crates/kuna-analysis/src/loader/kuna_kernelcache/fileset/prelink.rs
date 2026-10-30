@@ -11,6 +11,9 @@ pub(super) struct KextInfo {
     pub id: String,
     pub version: String,
     pub load_addr: Option<u64>,
+    /// `ModuleIndex`: the kext's slot in `__kmod_info`/`__kmod_start` of a
+    /// merged (iOS 12-14) prelinked kernelcache.
+    pub module_index: Option<u64>,
     pub classes: Vec<String>,
 }
 
@@ -165,6 +168,9 @@ pub(super) fn kexts(bytes: &[u8]) -> Option<Vec<KextInfo>> {
         if tag == "plist" || tag.starts_with("plist ") {
             break parser.value(0)?;
         }
+        if tag == "dict" {
+            break parser.value_from(tag, 0)?;
+        }
     };
     let Value::Array(items) = root.get("_PrelinkInfoDictionary")? else { return None };
     Some(
@@ -178,10 +184,11 @@ pub(super) fn kexts(bytes: &[u8]) -> Option<Vec<KextInfo>> {
                     .and_then(Value::str)
                     .unwrap_or("")
                     .to_string();
-                let load_addr = match d.get("_PrelinkExecutableLoadAddr") {
+                let int = |key: &str| match d.get(key) {
                     Some(Value::Int(a)) => Some(*a),
                     _ => None,
                 };
+                let (load_addr, module_index) = (int("_PrelinkExecutableLoadAddr"), int("ModuleIndex"));
                 let mut classes: Vec<String> = match d.get("IOKitPersonalities") {
                     Some(Value::Dict(ps)) => {
                         ps.iter().filter_map(|(_, p)| p.get("IOClass")?.str().map(str::to_string)).collect()
@@ -190,7 +197,7 @@ pub(super) fn kexts(bytes: &[u8]) -> Option<Vec<KextInfo>> {
                 };
                 classes.sort();
                 classes.dedup();
-                Some(KextInfo { id, version, load_addr, classes })
+                Some(KextInfo { id, version, load_addr, module_index, classes })
             })
             .collect(),
     )
@@ -237,6 +244,10 @@ mod tests {
         let root = p.value(0).unwrap();
         let Some(Value::Array(items)) = root.get("_PrelinkInfoDictionary") else { panic!() };
         assert_eq!(items.len(), 2);
+        let bare = &xml[xml.find("<dict>").unwrap()..xml.rfind("</plist>").unwrap()];
+        let mut p = Parser { text: bare, pos: 0, ids: HashMap::new() };
+        let tag = p.tag().unwrap();
+        assert!(p.value_from(tag, 0).unwrap().get("_PrelinkInfoDictionary").is_some());
         assert_eq!(items[1].get("CFBundleVersion").and_then(Value::str), Some("1.0"));
         let ps = items[0].get("IOKitPersonalities").unwrap();
         assert_eq!(ps.get("p2").and_then(|d| d.get("IOClass")).and_then(Value::str), Some("AService"));

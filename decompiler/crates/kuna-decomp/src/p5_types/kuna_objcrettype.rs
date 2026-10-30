@@ -127,7 +127,7 @@ fn class_of_constant(data: &Funcdata, vn: VarnodeId) -> Option<String> {
 
 /// The address a varnode names: a constant, `&sym` as `PTRSUB(0, addr)`, either
 /// through the copies and casts the printer's own passes wrap it in.
-fn constant_address(data: &Funcdata, vn: VarnodeId, depth: u32) -> Option<u64> {
+pub(crate) fn constant_address(data: &Funcdata, vn: VarnodeId, depth: u32) -> Option<u64> {
     let v = data.vbank().get(vn)?;
     if v.is_constant() {
         return Some(v.get_offset());

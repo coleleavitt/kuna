@@ -27,8 +27,22 @@ reference `lzfse` CLI on `PATH`); the arm64 instructions are hand-encoded there.
 `MH_KEXT_BUNDLE` for the `iokitclasses` pass: one `__mod_init_func` initializer
 registers `Base` and `Derived` through an unnamed constructor and stores their
 metaclass vtables; each class has a vtable with its `getMetaClass()`; `Derived`
-overrides `Base::m2` and adds one method. Only `meta_of_derived`, `Base::m1` and
-`Base::m2` have symbols, and pointers are plain absolute words.
+overrides `Base::m2` and adds one method. For `xnutables` it also holds a
+`__kalloc_type` view for `site.Derived` (signature `121112`, 0x30 bytes),
+`alloc_derived` allocating through `kalloc_type_impl` and storing into the
+result, a four-record `IOExternalMethodDispatch` table that `Derived::m3`
+addresses, and a reader of its third function pointer. Only `meta_of_derived`,
+`Base::m1`, `Base::m2`, `kalloc_type_impl` and `alloc_derived` have symbols, and
+pointers are plain absolute words.
+
+`prelinked_merged.macho`, `prelinked_split.macho` and `chainstarts.macho`
+(written by `gen_prelinked.py`, plain Python 3) are pre-fileset images: an iOS
+12-14 style kernel with a merged kext found through `__kmod_start` and every
+pointer threaded through `__thread_starts` (four of them the handlers of an
+`IOExternalMethodDispatch` table); an iOS 11 style kernel with a stripped kext
+in `__PRELINK_TEXT` whose `__got` / `__stubs` are untyped and whose plist has no
+`<plist>` wrapper; and an SPTM-style static image with one
+`DYLD_CHAINED_PTR_ARM64E_KERNEL` chain in `__chain_starts`.
 
 `dext_osclassinfo.macho` (written by `gen_dext.py`) is a stripped arm64
 DriverKit-style executable for the `osclassinfo` pass: one `__osclassinfo`

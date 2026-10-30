@@ -972,9 +972,48 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   address, the `IOClass` of each of its `IOKitPersonalities`;
   `decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelink.rs (kexts)`,
   a small XML plist reader that resolves `ID`/`IDREF`). A pre-fileset
-  (prelinked) kernelcache loads as its kernel; `list` prints its plist's kexts,
-  and naming one is refused because extracting a prelinked kext is not
-  implemented.
+  (prelinked) kernelcache is one `MH_EXECUTE` kernel that carries its kexts
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelinked.rs (rebase)`).
+  Its pointers are not in a fixup table but threaded through the words
+  themselves: `__TEXT,__thread_starts` (iOS 12-14) opens with a word whose bit
+  0 picks a 4- or 8-byte hop unit, then lists each chain's offset from the
+  image base up to `0xffffffff`. A chain word with bit 62 clear is a rebase:
+  authenticated (bit 63) it holds a 32-bit offset from the base, otherwise a
+  43-bit sign-extended address with its top byte in bits 43..50, exactly as
+  xnu's `rebase_threaded_starts` reads it; bits 51..61 hop to the next word.
+  `__TEXT,__chain_starts`, which `ld -static -fixup_chains` writes for SPTM,
+  TXM and other static images, holds a pointer format, a count and each
+  chain's offset from the base, and its chains are walked by the
+  `LC_DYLD_CHAINED_FIXUPS` decoder in `chained.rs (chain_starts_rebases)`.
+  Every rebase is written into its slot before anything reads the image, so
+  `auto`, which loads the kernel, already sees real pointers (iOS 14.8 A12:
+  338,665 pointers, and 37,000 IOKit class and method names where there were
+  none). The kexts come in two layouts
+  (`fileset/prelinked.rs (entries)`). Up to iOS 11 each is a whole Mach-O in
+  `__PRELINK_TEXT` at the plist's `_PrelinkExecutableLoadAddr`, its segments
+  spread over the `__PLK_*` and `__PRELINK_DATA` ranges, its file offsets
+  relative to its own header and not always consistent; from iOS 12 they are
+  merged into the kernel's own segments, `__PRELINK_INFO,__kmod_start` points
+  at each one's header, which describes only its `__TEXT_EXEC`, and the plist
+  names it by `ModuleIndex` (failing that, `__kmod_info`'s `kmod_info_t` name
+  does). Each kext header's segment and section offsets are rewritten to the
+  absolute offsets of their addresses, and a merged kext's code sections get
+  the instruction flags its stripped header no longer carries. `list` prints
+  these entries, and a kext is chosen by the same names as in a fileset
+  (`fileset/prelinked.rs (cut)`). On a merged cache the kernel already holds
+  every kext, and a kext alone keeps the kernel's non-code segments beside
+  its own code, because they hold its data. On an older cache a stripped kext
+  has no symbols and untyped `__got` / `__stubs` sections, so each one chosen
+  gets a symbol table of the kernel symbols its `__got` slots, stubs and `bl`s
+  reach, each absolute at the kernel address in the undefined range, where a
+  fileset kext's bound imports sit, plus an indirect-symbol table for those
+  sections, which are retyped to non-lazy pointers and 12- (16-, for
+  `__auth_stubs`) byte stubs; the import walk then names its stubs and slots
+  after the kernel functions they reach. Several entries, or `all`, go through
+  the same `merge` as a fileset's, the kernel's `__PRELINK` segments dropped
+  so nothing is mapped twice. iOS 11.4.1 A10: `all` loads 197 entries (34,425
+  functions, 8.9 s); IOSurface alone loads in 0.5 s with its calls named
+  `OSUnserializeXML`, `lck_mtx_lock`, and so on.
   A comma-separated list or `all` loads several entries as one image
   (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/merge.rs (merge)`):
   their segment commands are concatenated at their collection addresses (one
@@ -4840,21 +4879,46 @@ every other binary's pass list is byte-identical to before the pass existed):
   (`kalloc_type_impl`, `IOMallocTypeImpl`, `OSObject_typed_operator_new`, their
   `var` and `free` forms) get prototypes whose first parameter is a pointer,
   parked by name and at every address the image calls one at, so the view an
-  allocation passes renders by name. A run of at least four
+  allocation passes renders by name. A fixed-size view also describes what it
+  allocates: its `kt_signature` (+0x20) spells the type one character per
+  8-byte granule (`1` a pointer, `8` a signed pointer, `2` data, `4` either,
+  `0` padding; a data-only type has an empty signature) and `kt_size` (+0x2c)
+  is `sizeof` the type. The pass builds a struct `<T>` of that size from it
+  (`tables.rs (allocated_struct)`): a `void *` field per pointer granule, an
+  `undefined8` per data granule, a trailing `undefined1[n]` where the size is
+  not a multiple of eight, each named `field_0x<off>` except the first pointer
+  of a class `iokitclasses` recovered, which is its `vtable`; a name another
+  size already holds becomes `<T>_<size>` (template instances, `ExpansionData`),
+  and a same-size struct of the name is reused. The view-to-struct map is
+  handed to the engine (`Architecture::kuna_kalloc_types`), where
+  `TypeOpCall::getOutputLocal`
+  (`decompiler/crates/kuna-decomp/src/p5_types/kuna_kalloctype.rs (allocated_type)`)
+  answers for a call to one of the allocators whose view argument folds to a
+  known view with `<T> *`, ahead of the prototype's locked `void *`: the
+  allocation is declared `<T> *` and the stores into it are field accesses.
+  A run of at least four
   `IOExternalMethodDispatch` (0x18-byte) or `IOExternalMethodDispatch2022`
   (0x28-byte) records in `__const`, each a pointer into this image's code with
   at most 16 scalars each way and struct sizes up to 256 KiB or variable, at
   least one variable (the checks IDA's kcu applies), is a dispatch table: it
-  becomes a data object (its symbol, else `<Owner>_sMethods`) and every unnamed
+  becomes a typed data object (its symbol, else `<Owner>_sMethods`) whose type
+  is an array of the record struct (`tables.rs (dispatch_struct)`:
+  `function`, a pointer to `int (void *target, void *reference, void *arguments)`,
+  the four `check…` counts, and for 2022 `allowAsync` and `checkEntitlement`),
+  so a read of a slot is `sMethods[2].function`, and every unnamed
   handler `<Owner>::externalMethod_<selector>`, the owner being the class whose
   vtable holds a method that computes the table's address (`a64::constants`),
   else the class of the table's named handlers. A `__got` / `__auth_got` /
   `__auth_ptr` slot the indirect-symbol table does not name, whose rebased
   pointer reaches a named function or object of this image, is named
   `<target>_ptr`. On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
-  views, 1,687 var views and 56 dispatch tables (901 records); in IOSurface,
+  views (4,140 distinct structs; the kernel's 1,088 views build 533), 1,687 var
+  views and 56 dispatch tables (901 records); in IOSurface,
   `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
-  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)`.
+  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)` and its
+  result an `IOSurfaceSharedEventListener *`; 48 of the kext's 1,806 functions
+  carry a view-derived type, and the struct building adds nothing measurable
+  to the kernel's 4.9 s `kuna functions`.
 - **DriverKit class records** (kuna, `osclassinfo`, Mach-O with an
   `__osclassinfo` section, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/iokit/osclassinfo.rs (classes)`):

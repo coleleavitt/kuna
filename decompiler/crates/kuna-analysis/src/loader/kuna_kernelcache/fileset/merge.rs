@@ -237,6 +237,11 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
         .collect();
 
     let starts_base = segs.iter().rev().find(|s| seg_name(s, 0) == b"__TEXT").and_then(|s| rd_u64(s, 24));
+    let ranges: Vec<(u64, u64)> = segs
+        .iter()
+        .filter_map(|s| Some((rd_u64(s, 24)?, rd_u64(s, 24)?.saturating_add(rd_u64(s, 32)?))))
+        .collect();
+    starts.retain(|&a| ranges.iter().any(|&(lo, hi)| (lo..hi).contains(&a)));
     starts.sort_unstable();
     starts.dedup();
     let mut starts_blob = Vec::new();

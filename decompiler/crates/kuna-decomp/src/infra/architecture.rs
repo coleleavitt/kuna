@@ -600,6 +600,9 @@ pub struct Architecture {
     /// stub site the prototype the call keeps (the stub's shape, `self` typed).
     pub kuna_objc_retargets: std::collections::HashMap<u64, u64>,
     pub kuna_objc_site_pieces: std::collections::HashMap<u64, crate::fspec::PrototypePieces>,
+    /// (kuna `xnutables`) The struct each kalloc_type view allocates, by view
+    /// address, handed over by the XNU table analysis; empty elsewhere.
+    pub kuna_kalloc_types: Rc<crate::kuna_kalloctype::KallocTypes>,
     /// (kuna tee-O2 tail-jumps) Recover a direct `jmp` to another function's
     /// entry (e.g. `jmp setlocale@plt`) as a tail call (CALL + RETURN) instead of
     /// flowing into the callee (`option tailcalljump on|direct`).
@@ -3293,6 +3296,7 @@ impl Architecture {
             kuna_objc_classes: Rc::new(Default::default()),
             kuna_objc_retargets: Default::default(),
             kuna_objc_site_pieces: Default::default(),
+            kuna_kalloc_types: Rc::new(Default::default()),
             tail_call_jumps: false,
             tail_call_tables: false, // (kuna) option tailcalljump; reset_defaults sets the shipped default
             tail_call_frame: false, // (kuna) option tailcallframe; reset_defaults sets the shipped default
@@ -4839,6 +4843,7 @@ impl Architecture {
         ctx.objc_rettype = self.objc_rettype;
         ctx.objc_resolve = self.objc_resolve;
         ctx.kuna_objc_classes = Rc::clone(&self.kuna_objc_classes);
+        ctx.kuna_kalloc_types = Rc::clone(&self.kuna_kalloc_types);
         // (kuna GH-558) carry the comparison-presentation gate so the
         // `compareform canonical|original` option reaches
         // `ActionPresentCompareForm` via `glb` (the ArchContext read site).

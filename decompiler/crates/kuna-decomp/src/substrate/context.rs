@@ -832,6 +832,8 @@ pub struct ArchContext {
     pub objc_resolve: bool,
     /// (kuna) The image's Objective-C class table, from the ObjC analysis.
     pub kuna_objc_classes: Rc<crate::kuna_objcrettype::ObjcClassTable>,
+    /// (kuna `xnutables`) The struct each kalloc_type view allocates, by view address.
+    pub kuna_kalloc_types: Rc<crate::kuna_kalloctype::KallocTypes>,
     /// (kuna) GH-558: present canonicalized `INT_LESS(x, c+1)` comparisons in
     /// their original `x <= c` form (C++ `present_lessequal`, DIV-2 default-on).
     /// Read by [`ActionPresentCompareForm`](crate::kuna_compareform::ActionPresentCompareForm).
@@ -1989,6 +1991,7 @@ impl ArchContext {
             objc_rettype: false,
             objc_resolve: false,
             kuna_objc_classes: Rc::new(Default::default()),
+            kuna_kalloc_types: Rc::new(Default::default()),
             // (kuna) DIV-2 default-on (GH-558): resetDefaults sets present_lessequal=true.
             present_lessequal: true,
             // (kuna) the real arch overwrites each of these in `build_arch_handle`;

@@ -10,6 +10,7 @@ use crate::rtti::kuna_arm64evcall::SignedImage;
 
 mod merge;
 mod prelink;
+mod prelinked;
 
 const MH_MAGIC_64: u32 = 0xfeed_facf;
 const MH_EXECUTE: u32 = 0x2;
@@ -33,19 +34,45 @@ pub(super) struct FilesetEntry {
     pub(super) filetype: u32,
 }
 
-/// A pre-fileset (prelinked) kernelcache loads as the kernel: `list` prints
-/// its `__PRELINK_INFO` kexts, and naming one is refused.
-pub(super) fn legacy(bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<Vec<u8>, String> {
-    let KernelcacheChoice::Entry(name) = choice else { return Ok(bytes) };
-    let Some(kexts) = prelink::kexts(&bytes) else { return Ok(bytes) };
-    if name == "list" {
-        let lines: Vec<String> = kexts.iter().map(prelink::describe).collect();
-        return Err(format!("prelinked kernelcache kexts ({}):\n{}", kexts.len(), lines.join("\n")));
+/// A pre-fileset (prelinked) kernelcache, or a static image with threaded or
+/// chained pointers: the pointers are rebased, then `auto` loads the kernel
+/// (with every kext, on a cache that merged them into it), `list` prints the
+/// kexts the cache holds, and kexts are chosen as in a fileset.
+pub(super) fn legacy(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<(Vec<u8>, Option<String>), String> {
+    if !prelinked::is_prelinked(&bytes) {
+        return Ok((bytes, None));
     }
-    Err(format!(
-        "{name:?}: choosing a kext of a pre-fileset (prelinked) kernelcache is not supported; \
-         `--option kernelcache auto` loads its kernel, `list` prints its kexts"
-    ))
+    let rebased = prelinked::rebase(&mut bytes);
+    let info = prelink::kexts(&bytes).unwrap_or_default();
+    let KernelcacheChoice::Entry(name) = choice else {
+        let note = (rebased > 0 || !info.is_empty()).then(|| {
+            let kexts = if info.is_empty() {
+                String::new()
+            } else {
+                format!("; {} kexts listed in __PRELINK_INFO (--option kernelcache list)", info.len())
+            };
+            format!("prelinked kernelcache: {rebased} threaded/chained pointers rebased{kexts}")
+        });
+        return Ok((bytes, note));
+    };
+    let (all, merged) = prelinked::entries(&mut bytes, &info);
+    if name == "list" {
+        let by_id: HashMap<&str, &prelink::KextInfo> = info.iter().map(|k| (k.id.as_str(), k)).collect();
+        let lines: Vec<String> =
+            all.iter().map(|e| by_id.get(e.id.as_str()).map_or_else(|| e.id.clone(), |k| prelink::describe(k))).collect();
+        return Err(format!(
+            "prelinked kernelcache entries ({}{}):\n{}",
+            all.len(),
+            if merged { ", kexts merged into the kernel" } else { "" },
+            lines.join("\n")
+        ));
+    }
+    let chosen = select_many(&all, choice)?;
+    let ids: Vec<&str> = chosen.iter().map(|&i| all[i].id.as_str()).collect();
+    let shown = if ids.len() > 4 { format!("{} entries", ids.len()) } else { ids.join(", ") };
+    let image = prelinked::cut(bytes, &all, merged, &chosen)?;
+    let note = format!("prelinked kernelcache: loaded {shown} ({rebased} threaded/chained pointers rebased)");
+    Ok((image, Some(note)))
 }
 
 pub(super) fn is_fileset(bytes: &[u8]) -> bool {
