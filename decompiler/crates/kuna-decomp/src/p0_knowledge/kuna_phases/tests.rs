@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_356() {
-    assert_eq!(kuna_num_settables(), 356);
-    assert_eq!(SETTABLE_TABLE.len(), 356);
+fn settable_count_is_357() {
+    assert_eq!(kuna_num_settables(), 357);
+    assert_eq!(SETTABLE_TABLE.len(), 357);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_101_analysis() {
+fn tier_counts_are_121_core_134_transform_102_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_101_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 101));
+    assert_eq!((core, transform, analysis), (121, 134, 102));
 }
 
 #[test]
@@ -322,6 +322,8 @@ fn option_values_live_value_present_for_156() {
         // with no codegen live reader (read console-side via kuna_live_value),
         // same as `libcsigs` above. Default-ON (DIV-141).
         "win32sigs",
+        // (kuna) DWARF lexical-block and location-list locals -- a load-time env bridge.
+        "dwarfscopes",
         // (kuna) Global typing from stored values -- a batch ledger read in project.rs.
         "storetype",
         // (kuna) The UEFI module pass -- an analysis-pass gate read console-side. Default-ON.

@@ -1727,6 +1727,8 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) `dwarfscopes`: DWARF locals in lexical blocks and location lists.
+    pub analysis_dwarfscopes: bool,
     /// (kuna) Gate the UEFI module markup pass (`uefi`); default on.
     pub analysis_uefi: bool,
     /// (kuna) Gate the built-in libc signature lookup for a function name the
@@ -3251,6 +3253,7 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            analysis_dwarfscopes: true,
             analysis_uefi: false,
             analysis_declaredlibcproto: false,
             analysis_unmappedentry: false,

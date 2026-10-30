@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3372,
-    3372
+    3377,
+    3377
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -448,6 +448,11 @@
     "data:DEDUPGOTO #3: each pass prints the goto into the true arm",
     "data:DEDUPGOTO #4: each pass prints the label the goto names",
     "data:DEDUPGOTO #5: post() once per pass",
+    "data:DWARFSCOPES #1: off, the loop-body buffer is anonymous",
+    "data:DWARFSCOPES #2: on, the buffer is named and typed in both builds",
+    "data:DWARFSCOPES #3: on, the loop counter is named",
+    "data:DWARFSCOPES #4: clang's RBP frame base puts total on the accumulator, not the buffer",
+    "data:DWARFSCOPES #5: no build names the buffer as total",
     "data:DWARFVARIANTS #10: no variant name is ever synthesized",
     "data:DWARFVARIANTS #11: off, an overlaying Result payload is a raw byte offset",
     "data:DWARFVARIANTS #12: on, the overlaying Result keeps its recovered tag field",
@@ -986,7 +991,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 356 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 357 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",

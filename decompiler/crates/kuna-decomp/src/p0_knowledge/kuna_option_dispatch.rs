@@ -1185,6 +1185,12 @@ kuna_options! { self, p1;
             if val { "on" } else { "off" }
         ))
     },
+    "dwarfscopes" => {
+        let val = on_or_off(p1)?;
+        self.analysis_dwarfscopes = val;
+        std::env::set_var("KUNA_DWARFSCOPES", if val { "on" } else { "off" });
+        Ok(format!("DWARF lexical-block and location-list locals turned {}", if val { "on" } else { "off" }))
+    },
     "dwarfstructs" => {
         let val = on_or_off(p1)?;
         self.analysis_dwarfstructs = val;

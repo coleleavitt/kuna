@@ -51,6 +51,7 @@ fn binding(name: &str) -> Option<(&'static str, Encoding)> {
         "typedepth" => (kuna_typedepth::TYPEDEPTH_ENV, DefaultOn),
         "libctypes" => (kuna_libctypes::LIBCTYPES_ENV, LibcTypes),
         "dwarfstructs" => (kuna_dwarfstructs::DWARFSTRUCTS_ENV, DefaultOn),
+        "dwarfscopes" => (kuna_analysis::dwarf::kuna_dwarfscopes::DWARFSCOPES_ENV, DefaultOn),
         "gotypes" => (kuna_gotypes::GOTYPES_ENV, DefaultOn),
         "dwarfvariants" => (kuna_dwarfvariants::DWARFVARIANTS_ENV, DefaultOn),
         "variantnames" => (kuna_variantnames::VARIANTNAMES_ENV, DefaultOn),

@@ -2779,8 +2779,22 @@ moves.
   location may include `DW_OP_plus_uconst` displacements, as emitted for interior
   equivalence views. Each unsigned LEB128 operand is decoded and added without
   signed overflow; truncated operands and dereference, piece, register, or value
-  expressions remain outside this fixed-local path. Nested lexical-block locals
-  and composite locations are a documented loss. (ida) The
+  expressions remain outside this fixed-local path. The offset is relative to
+  the subprogram's `DW_AT_frame_base`
+  (`decompiler/crates/kuna-analysis/src/analyzers/dwarf/kuna_dwarfscopes.rs (frame_base_offset)`):
+  gcc's `DW_OP_call_frame_cfa` is `call_frame_cfa`; clang's frame-pointer
+  bases are where the standard prologue leaves them, RBP on x86-64 16 bytes
+  below the CFA, EBP on i386 8 below, x29 on AArch64 16 below, s0 on RISC-V at
+  the CFA; any other register base (an `-fomit-frame-pointer` RSP) moves with
+  the body, so that function gets no DWARF stack locals. Every clang -O0 local
+  used to be placed 16 bytes off and named the wrong slot. (kuna `dwarfscopes`,
+  default on, a load-time env bridge `KUNA_DWARFSCOPES`) Locals nested in
+  `DW_TAG_lexical_block` scopes at any depth are collected in document order
+  like direct children, and a variable whose location is a location list takes
+  the stack slot when every frame-relative entry of the list names the same one;
+  register entries stay with inference. Inlined-subroutine locals and composite
+  (`DW_OP_piece`) locations remain a documented loss, and parameter storage
+  is still the calling convention's. (ida) The
   data-global fix (DIV-24): a global used to be mapped with a size-1 type, so any
   multi-byte access queried `queryContainer(addr, 4)` past it and rendered
   `dat_<addr>`; the pass now resolves `DW_AT_type` to a byte size

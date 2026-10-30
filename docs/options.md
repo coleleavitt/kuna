@@ -893,6 +893,9 @@ Three tiers:
 | a global holding a service table is an untyped dat_ word in every function but the one that stores it | [`storetype`](#storetype) |
 | a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool | [`storetype`](#storetype) |
 | the same global prints typed in one function and untyped in the next | [`storetype`](#storetype) |
+| a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes) |
+| a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes) |
+| a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3278,6 +3281,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Default `uefi`: a UEFI driver's gBS/gST/gRT read in every helper as typed tables (gBS->AllocatePool(...)) instead of (**(code **)(dat_1a70 + 0x40))(...). Flip to `all` to type other globals the same way (a FILE * a program caches, a context pointer) on any binary; flip `off` to compare.
 - **Where / provenance:** P5/type-propagation · ida · analysis-enablement · ida95-54
 - **Example:** `option storetype all`
+
+### `dwarfscopes` -- on | off, default `on`
+
+- **Symptoms:** a variable declared inside a loop or if block of a -g binary is an anonymous vN; a clang -O0 binary names the wrong stack slot after a DWARF local; a -O1 spilled variable has no name although DWARF describes its slot.
+- **What it does:** Import DWARF stack locals from nested lexical blocks and from location lists, not only from a subprogram's direct children with a single DW_OP_fbreg expression. A local declared inside a loop body or an if block (DW_TAG_lexical_block, at any depth) is a fixed stack object exactly like a function-scope one, and a variable whose DW_AT_location is a location list takes the stack slot when every frame-relative entry of the list names the same one (a value spilled to one slot for part of its life); register-only entries are left to inference. Independently of this option, a DW_OP_fbreg offset is now taken relative to the subprogram's DW_AT_frame_base: gcc's DW_OP_call_frame_cfa as before, and clang's frame-pointer bases (RBP on x86-64, EBP on i386, x29 on AArch64, s0 on RISC-V) at the distance the standard prologue leaves them below the CFA; any other register frame base places no locals, where it used to place every one of them 16 bytes off and name the wrong slot. A load-time env bridge (KUNA_DWARFSCOPES): set it before the image is loaded.
+- **When to flip:** On by default: `char scratch[32]` declared in a loop body is named and typed instead of `char v1 [31]`, and clang -O0 binaries name the right slot. Flip off to compare against direct-children-only import, or when nested locals that share one slot across sibling scopes make a function harder to read.
+- **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-57
+- **Example:** `option dwarfscopes off`
 
 ## Core rendering defaults
 
