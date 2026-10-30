@@ -824,6 +824,7 @@ kuna_options! { self, p1;
     "callmechanisms" => on_off!(call_mechanism_effects, "compiler prototype call mechanisms"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
+    "gotonext" => on_off!(goto_next, "goto-to-next suppression"),
     "castimplied" => on_off!(cast_implied, "C-implied cast elision"),
     "castsign" => on_off!(cast_sign, "signed declarations for signed-only locals"),
     "castternary" => on_off!(cast_ternary, "conditional-arm cast elision"),

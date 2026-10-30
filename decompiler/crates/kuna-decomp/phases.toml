@@ -4519,6 +4519,28 @@ tier = "transform"
 symptoms = "a condition holds a long comma chain of assignments before its test|if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line|a while header carries several comma-separated assignments|want a cap on how many statements a short-circuit operand may print"
 
 [[settable]]
+option = "gotonext"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P8"
+subphase = "goto-quality"
+strength = "HARD"
+rewind = "P9"
+issue = "kuna-gotonext"
+summary = "Leave out a `goto` whose target is the statement that runs next anyway, print a `goto` to the statement after the innermost enclosing loop or switch as `break;`, and drop the label only those gotos reached. Upstream `PrintC::emitBlockGoto` prints a `BlockGoto`'s jump only when `BlockGoto::gotoPrints` holds (the target is not `nextFlowAfter` of the parent chain); kuna printed every such jump, so a switch case falling into the next case and an `if` arm ending in a jump to the statement after the `if` printed `goto label_X;` directly above `label_X:`. `kuna_gotonext` walks the final structured tree at print time, after every structuring pass that edits it, so its view is the printed layout: it reads `nextFlowAfter` with one addition, that a switch case whose body prints no `break;` falls into the next case even when the body is not a `BlockGoto`. A `goto`, `if (c) goto` or bare-goto switch arm whose target is what follows the innermost loop or switch holding it prints as `break;` (`scopeBreak` already lowers most of those during `ActionFinalStructure`; the passes that edit the tree after it leave the rest). The case sort also re-derives each fall-thru chain from the case blocks before sorting: `grab_case_basic` read the chained case's switch out-index from sblocks edges, which a case wrapped in its own `BlockGoto` has lost, so a chain was missed or pointed at the case itself and the sort printed that case first under label 0; with the chain right, a case that jumps to another case prints directly above it and the jump is a fall-through. Every printed `goto` keeps its label: the label census counts the same carriers `mark_unstructured` marks."
+use_when = "On by default: 0/675 datatest assertions move. Flip off to restore the upstream-port rendering, which prints every `BlockGoto` jump and sorts switch cases by the chains `grab_case_basic` recorded. Measured over 2,739 functions in eight x86-64 binaries (gcc 15.3 and clang 22.1 -O2 builds of Lua 5.4.8, zlib 1.3.2 and bzip2 1.0.8, plus the system libexpat and libyaml): gotos 9,476 -> 9,373; 60 functions lose at least one goto and none gains one; goto-to-next-statement 26 -> 9; a case falling into the next case through a goto 16 -> 3. Speed unchanged (user time within noise on libz)."
+example = "option gotonext off"
+source_decompiler = "ghidra"
+inspiration = "gcc -O2 switch fall-through printed `case 0: ...; goto label_X; case 1: label_X:`; clang -O2 printed `case 3:` first in the switch with `goto` from case 2; lua `luaK_dischargevars` printed `case 0xc: goto label_dfd8;` with `label_dfd8:` right after the switch"
+change_kind = "presentation-default"
+tier = "core"
+symptoms = "goto label_N; directly above label_N:|switch case falls into the next case through a goto|case N: label_X: right after a goto label_X;|an if arm ends in a goto to the statement after the if"
+live_field = "goto_next"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "gotoreduce"
 values = "on|off"
 default = "on"

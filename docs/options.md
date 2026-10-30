@@ -1168,6 +1168,10 @@ Three tiers:
 | a loop index is read as the high word of a 64-bit variable | [`pairrefine`](#pairrefine) |
 | two unrelated 32-bit values share one 64-bit local | [`pairrefine`](#pairrefine) |
 | ldd/std copies make the registers they load into one fused variable | [`pairrefine`](#pairrefine) |
+| goto label_N; directly above label_N: | [`gotonext`](#gotonext) |
+| switch case falls into the next case through a goto | [`gotonext`](#gotonext) |
+| case N: label_X: right after a goto label_X; | [`gotonext`](#gotonext) |
+| an if arm ends in a goto to the statement after the if | [`gotonext`](#gotonext) |
 | iVar1/uVar2/param_1 ghidra-style names wanted instead of v1/a1 (set ghidra) | [`namestyle`](#namestyle) |
 | v-numbered locals and sub_/dat_/label_ names in the default output | [`namestyle`](#namestyle) |
 | byte-for-byte comparison against upstream ghidra naming | [`namestyle`](#namestyle) |
@@ -3729,6 +3733,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. The OFF symptom is an unsigned long long local whose storage comment names a register pair (l4_5, o4_5) in a function that uses those registers as two independent 32-bit values: loop counters and sums are read as v >> 0x20 or (int)v and written back with CONCAT44(hi,lo). Turn it off to compare against upstream's whole-pair heritage.
 - **Where / provenance:** P3/heritage-refinement · kuna · correctness-fix · sparc-register-pair-fusion
 - **Example:** `option pairrefine off`
+
+### `gotonext` -- on | off, default `on`
+
+- **Symptoms:** goto label_N; directly above label_N:; switch case falls into the next case through a goto; case N: label_X: right after a goto label_X;; an if arm ends in a goto to the statement after the if.
+- **What it does:** Leave out a `goto` whose target is the statement that runs next anyway, print a `goto` to the statement after the innermost enclosing loop or switch as `break;`, and drop the label only those gotos reached. Upstream `PrintC::emitBlockGoto` prints a `BlockGoto`'s jump only when `BlockGoto::gotoPrints` holds (the target is not `nextFlowAfter` of the parent chain); kuna printed every such jump, so a switch case falling into the next case and an `if` arm ending in a jump to the statement after the `if` printed `goto label_X;` directly above `label_X:`. `kuna_gotonext` walks the final structured tree at print time, after every structuring pass that edits it, so its view is the printed layout: it reads `nextFlowAfter` with one addition, that a switch case whose body prints no `break;` falls into the next case even when the body is not a `BlockGoto`. A `goto`, `if (c) goto` or bare-goto switch arm whose target is what follows the innermost loop or switch holding it prints as `break;` (`scopeBreak` already lowers most of those during `ActionFinalStructure`; the passes that edit the tree after it leave the rest). The case sort also re-derives each fall-thru chain from the case blocks before sorting: `grab_case_basic` read the chained case's switch out-index from sblocks edges, which a case wrapped in its own `BlockGoto` has lost, so a chain was missed or pointed at the case itself and the sort printed that case first under label 0; with the chain right, a case that jumps to another case prints directly above it and the jump is a fall-through. Every printed `goto` keeps its label: the label census counts the same carriers `mark_unstructured` marks.
+- **When to flip:** On by default: 0/675 datatest assertions move. Flip off to restore the upstream-port rendering, which prints every `BlockGoto` jump and sorts switch cases by the chains `grab_case_basic` recorded. Measured over 2,739 functions in eight x86-64 binaries (gcc 15.3 and clang 22.1 -O2 builds of Lua 5.4.8, zlib 1.3.2 and bzip2 1.0.8, plus the system libexpat and libyaml): gotos 9,476 -> 9,373; 60 functions lose at least one goto and none gains one; goto-to-next-statement 26 -> 9; a case falling into the next case through a goto 16 -> 3. Speed unchanged (user time within noise on libz).
+- **Where / provenance:** P8/goto-quality · ghidra · presentation-default · kuna-gotonext
+- **Example:** `option gotonext off`
 
 ### `namestyle` -- angr | ghidra, default `angr`
 
