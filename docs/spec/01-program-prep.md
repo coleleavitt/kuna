@@ -4069,10 +4069,51 @@ every other binary's pass list is byte-identical to before the pass existed):
   byte-exact port of Ghidra's FunctionID hashing — the operand-masked FNV-1a64
   full hash over a function's instruction stream (mask via the SLEIGH
   `instruction_mask`, x86 NOP padding skipped) — looked up in a kuna `.fid`
-  database built by `kuna fid build`. Only a bucket that collapses to exactly one
-  name renames (never guess on a tie), and only through the placeholder label
-  gate: the stripped-static-library recovery (`sub_4017c0` → `kuna_crc32`) with no
-  way to clobber a real name.
+  database built by `kuna fid build`. Renames go only through the placeholder
+  label gate: the stripped-static-library recovery (`sub_4017c0` → `kuna_crc32`)
+  with no way to clobber a real name.
+
+  The generator (`decompiler/crates/kuna-analysis/src/analyzers/fid/build.rs (build_records)`)
+  hashes each function over the linear `[entry, next symbol)` clip, but the
+  Listing never decodes the unreachable alignment padding after a function's last
+  instruction. Ghidra's skipper table lacks the `data16 cs nopw` runs gcc pads
+  with, so a function followed by one hashed differently on the two sides and
+  could never match. The generator therefore drops trailing padding (`int3`, or
+  `90` / the `0F 1F` NOP family under any `66`/`2E` prefixes) from the clip; the
+  Ghidra skipper still decides everything inside the body. On a stripped
+  `-static` x86-64 program built against Gentoo glibc 2.43, a `libc.a` database
+  renames 324 functions correctly instead of 258. Where several symbols share an
+  address the generator keeps the public spelling (no `.` suffix, fewest leading
+  underscores, shortest), so the database says `fflush` and `malloc` rather than
+  `_IO_fflush` and `__libc_malloc`, the names the prototype tables know.
+
+  **Callee checks** (`fidcallees`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/fid/mod.rs (arbitrate)`) give
+  the matcher what IDA's FLIRT has: a check against the names of what a function
+  calls. The generator records, per function, the offset of every call or jump
+  that leaves it with the callee's name: the relocation's symbol in a `.o`, or
+  the named function at the target. A callee recorded under an alias is
+  rewritten to the name the database keeps for it, so both sides use one
+  spelling. The callee table is format version 2 of the `.fid` file; a database
+  without callees is still written and read as version 1. At match time each
+  candidate name of a function is scored the way IDA 9.x arbitrates ambiguous
+  FLIRT matches: +4 for each recorded callee whose target already has that name,
+  -4 for each whose target has another name, 0 when the target is unnamed or
+  inside the function. The best score wins; a tie or a negative score names
+  nothing. A function of at most 16 bytes, padding excluded, needs at least one
+  confirming callee: like IDA's tiny-module guard, a few instructions match too
+  many stubs. A decision an unnamed callee could still change waits, and the pass
+  runs up to three rounds, so the names one round finds confirm their callers in
+  the next (IDA's `AU_LIBF`/`AU_LBF2`/`AU_LBF3` queues). A name already in the
+  binary is not given again, and a name found at several addresses in one round
+  goes only to the address with the strictly best score. On the program above
+  (324 right and 6 wrong names with the option off) it settles one two-name
+  bucket by its callees (`_IO_str_pbackfail` over `_IO_wstr_pbackfail`),
+  withholds three wrong names that two addresses each received, and loses three
+  right ones: two stubs of 16 bytes or less with no named callee, and one
+  collision the old rule happened to resolve right. The result is 322 right and
+  3 wrong. Off restores the single-pass rule: rename whenever
+  the bucket has exactly one name.
 - **Format strings** (`formatstring off|static|full`, default `static`;
   `decompiler/crates/kuna-analysis/src/analyzers/formatstring/mod.rs`): what a
   `printf`/`scanf`-family call does with its variadic arguments is stated by its

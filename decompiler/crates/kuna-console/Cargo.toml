@@ -65,6 +65,10 @@ name = "verify_fid"
 path = "tests/verify_fid.rs"
 
 [[test]]
+name = "verify_fid_callees"
+path = "tests/verify_fid_callees.rs"
+
+[[test]]
 name = "verify_libctypes_glibc_target"
 path = "tests/verify_libctypes_glibc_target.rs"
 

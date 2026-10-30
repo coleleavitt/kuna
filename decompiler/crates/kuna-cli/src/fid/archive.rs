@@ -2,17 +2,17 @@
 
 use std::io::Write;
 
-use super::{records_for_object_path, FidRecord};
+use super::{records_for_object_path, Built};
 
 pub(super) fn records_for_archive(
     archive_path: &str,
     bytes: &[u8],
     spec_roots: &[String],
-) -> Result<Vec<FidRecord>, String> {
+) -> Result<Built, String> {
     use object::read::archive::ArchiveFile;
 
     let archive = ArchiveFile::parse(bytes).map_err(|e| format!("not a valid archive: {e}"))?;
-    let mut out: Vec<FidRecord> = Vec::new();
+    let mut out: Built = (Vec::new(), Vec::new());
     for member in archive.members() {
         let member = member.map_err(|e| format!("archive member error: {e}"))?;
         let data = member
@@ -27,7 +27,10 @@ pub(super) fn records_for_archive(
         let res = records_for_object_path(&tmp_str, spec_roots);
         drop(tmp);
         match res {
-            Ok(mut recs) => out.append(&mut recs),
+            Ok((mut recs, mut aliases)) => {
+                out.0.append(&mut recs);
+                out.1.append(&mut aliases);
+            }
             Err(e) => eprintln!("kuna fid build: {archive_path}({name}): skipped: {e}"),
         }
     }
