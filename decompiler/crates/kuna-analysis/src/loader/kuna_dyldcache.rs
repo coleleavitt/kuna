@@ -307,8 +307,27 @@ impl DyldCache {
             layouts: RefCell::default(),
             objc_selector_base: None,
         };
-        cache.objc_selector_base = cache.read_objc_selector_base(&h);
+        cache.objc_selector_base = cache.read_objc_selector_base(&h).or_else(|| cache.libobjc_selector_base());
         Ok(cache)
+    }
+
+    /// The selector base of a cache older than dyld-1042: libobjc's own
+    /// `objc_opt_t` (`__objc_opt_ro`, version 16) carries it at +0x28 as an
+    /// offset from the record itself.
+    fn libobjc_selector_base(&self) -> Option<u64> {
+        let index = self.images.iter().position(|i| i.path.ends_with("/libobjc.A.dylib"))?;
+        let layout = self.image_layout(index).ok()?;
+        let opt = layout
+            .segments
+            .iter()
+            .flat_map(|s| s.sections.iter())
+            .find(|s| s.sectname == "__objc_opt_ro")?;
+        let record = self.read_va(opt.addr, 0x30).ok()?;
+        if u32_at(&record, 0) < 16 {
+            return None;
+        }
+        let rel = u64_at(&record, 0x28);
+        (rel != 0).then(|| opt.addr.wrapping_add(rel))
     }
 
     /// The base every direct-selector method list of the cache offsets its

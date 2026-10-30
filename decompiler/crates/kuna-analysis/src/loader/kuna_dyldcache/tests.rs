@@ -120,3 +120,17 @@ fn a_companion_image_joins_the_rebuild() {
         file.exports().unwrap().iter().map(|e| String::from_utf8_lossy(e.name()).into_owned()).collect();
     assert_eq!(exports, ["_caller_entry", "_caller_indirect"]);
 }
+
+/// The ObjC caches of `dyld_cache_objc.py`: the dyld-1042+ one names its
+/// selector base in the header's ObjCOptimizationHeader, the `_v16` one only
+/// in libobjc's `objc_opt_t`; both resolve to the strings at 0x180030100.
+#[test]
+fn objc_selector_base_from_the_header_and_from_libobjc() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    for folder in ["dyld_cache_objc", "dyld_cache_objc_v16"] {
+        let cache = DyldCache::open(&root.join(folder).join("dyld_shared_cache_arm64e")).unwrap();
+        assert_eq!(cache.objc_selector_base(), Some(0x180030100), "{folder}");
+    }
+    let plain = DyldCache::open(&fixture()).unwrap();
+    assert_eq!(plain.objc_selector_base(), None, "a cache without ObjC names no base");
+}

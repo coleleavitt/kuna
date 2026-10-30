@@ -261,6 +261,12 @@ fn query(args: &XrefArgs) -> Result<String, String> {
 
     let target = resolve_target(&prog, &file, &index, &names, resolution.settle(&index)?);
     warn_other_entries(&index, &names, &target);
+    // (kuna `objcresolve`) A message send whose receiver's class the decompiler
+    // resolves is an edge to the method, not to the runtime entry point; the
+    // p-code walk cannot see it, so the functions that could carry one are
+    // decompiled and their retargets added.
+    let mut prog = prog;
+    let objc_rows = objc_resolved_edges(&mut prog, &index, &entries, &target, args.direction);
     let rows = match args.direction {
         // `--to` answers for the callable, not the literal address: an import
         // reached through a veneer and an IAT/GOT slot is one thing under two
@@ -275,10 +281,13 @@ fn query(args: &XrefArgs) -> Result<String, String> {
             }
         }
     };
-    let rows: Vec<&Xref> = rows
+    let mut rows: Vec<&Xref> = rows
         .into_iter()
         .filter(|r| args.kinds.is_empty() || args.kinds.contains(&r.kind))
         .collect();
+    rows.extend(objc_rows.iter().filter(|r| args.kinds.is_empty() || args.kinds.contains(&r.kind)));
+    rows.sort_by_key(|r| (r.from, r.to));
+    rows.dedup_by_key(|r| (r.from, r.to, r.kind));
 
     Ok(if args.json {
         format!("{}\n", dumps_indent2(&result_json(args, &prog, &index, &names, &target, &rows)))
@@ -700,4 +709,68 @@ fn usage() {
          xrefs:[{{address,address_hex,kind,from_function,to_function,instruction,..}}]}};\n\
          without it, one tab-separated row each."
     );
+}
+
+/// (kuna `objcresolve`) The call edges message sends add once their receiver's
+/// class is known. `--from f`: `f` is decompiled and every send it resolved is
+/// an edge to the method. `--to m`: the functions that call the selector's
+/// `objc_msgSend$<sel>` stub or read its `selRef_` slot are decompiled, and the
+/// ones that resolved a send to `m` are its call sites. Empty when the image has
+/// no Objective-C class table or the option is off.
+fn objc_resolved_edges(
+    prog: &mut ConsoleProgram,
+    index: &XrefIndex,
+    entries: &[kuna_console::engine::FunctionEntry],
+    target: &Target,
+    direction: Direction,
+) -> Vec<Xref> {
+    if !prog.arch().objc_resolve || prog.arch().kuna_objc_classes.classes.is_empty() {
+        return Vec::new();
+    }
+    let candidates: Vec<u64> = match direction {
+        Direction::From => vec![target.addr],
+        Direction::To => {
+            let Some(selector) = target.name.as_deref().and_then(objc_selector_of_label) else {
+                return Vec::new();
+            };
+            // The stub's callers first (each sends exactly this selector), then
+            // every `objc_msgSend` caller, which may send it.
+            let mut sources: Vec<u64> = Vec::new();
+            for name in [format!("objc_msgSend${selector}"), "objc_msgSend".to_string()] {
+                let mut found = BTreeSet::new();
+                for entry in entries.iter().filter(|e| e.name == name || e.aliases.iter().any(|a| *a == name)) {
+                    for x in index.refs_to_class(&BTreeSet::from([entry.addr.get_offset()])) {
+                        if let Some(f) = index.function_containing(x.from) {
+                            found.insert(f);
+                        }
+                    }
+                }
+                let fresh: Vec<u64> = found.into_iter().filter(|f| !sources.contains(f)).collect();
+                sources.extend(fresh);
+            }
+            sources
+        }
+    };
+    let opts = kuna_console::project::DecompileOptions { no_vars: true, single_target: true, ..Default::default() };
+    for &entry in candidates.iter().take(512) {
+        let Some(fe) = entries.iter().find(|e| e.addr.get_offset() == entry) else { continue };
+        let _ = kuna_console::project::decompile_entry(prog, fe.clone(), &opts);
+    }
+    let retargets = &prog.arch().kuna_objc_retargets;
+    let mut out: Vec<Xref> = retargets
+        .iter()
+        .filter(|(site, imp)| match direction {
+            Direction::From => index.function_containing(**site) == Some(target.addr),
+            Direction::To => **imp == target.addr,
+        })
+        .map(|(&site, &imp)| Xref { from: site, to: imp, kind: XrefKind::Call, instruction: "objc_msgSend (resolved)".to_string() })
+        .collect();
+    out.sort_by_key(|r| (r.from, r.to));
+    out
+}
+
+/// `-[Foo bar:]` / `+[Foo(Cat) bar:]` → `bar:`.
+fn objc_selector_of_label(label: &str) -> Option<&str> {
+    let body = label.strip_prefix('-').or_else(|| label.strip_prefix('+'))?.strip_prefix('[')?.strip_suffix(']')?;
+    body.split_once(' ').map(|(_, sel)| sel)
 }

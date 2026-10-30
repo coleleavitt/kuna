@@ -2162,7 +2162,8 @@ mod tests {
         // and kuna-switchtrim / an unguarded jump table is read until its layout ends
         // and kuna-tailcontract / a tail-calling thunk sees its callee's prototype in a single decompile
         // and kuna-calleeretpurge-x86 / the personal/x86-stack calleeretpurge test, kept beside bugs-misc's
-        assert_eq!(count, 677, "corpus file count drifted");
+        // and kuna-dyldcacheobjc / a dyld shared cache image's ObjC metadata through the cache
+        assert_eq!(count, 678, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

@@ -4299,11 +4299,24 @@ every other binary's pass list is byte-identical to before the pass existed):
     a pointer to a class struct, or a value the P5 walk resolves — is the IMP
     found along the superclass chain: `-[Base setInner:](v1, sel_setInner_, …)`,
     `-[Base count](self->inner, sel_count)`, `-[Holder inner](self)` for the
-    `objc_msgSend$inner` stub (`objcresolve`). A selector no class of the chain
-    declares keeps the runtime entry point; the prototype, arguments and the
-    listing's call graph are unchanged (Hex-Rays also adds a code xref, which
-    this does not). The stage test `tests/stages/kuna-objcresolve.xml` runs
-    both fixtures with the options off and on.
+    `objc_msgSend$inner` stub (`objcresolve`). The resolution is not a
+    rendering: once the first decompile has resolved the sends of a function,
+    each site's IMP is recorded on the architecture
+    (`decompile_step.rs (objc_retargets)`) and the function is decompiled
+    again with every such CALL sent to the IMP — `FlowInfo::setup_call_specs`
+    asks `query_call_retarget` before the callee is looked up, so the call
+    carries the method's own prototype (`-[Base setInner:](self, SEL, id)`) and
+    `kuna xrefs` its edge. An `objc_msgSend$<sel>` stub site has no selector
+    argument, so it keeps the stub's argument shape (`query_call_site_pieces`)
+    with `self` typed as the receiver's class and the method's declared return.
+    The retarget is the kuna analog of Hex-Rays' `cot_obj` callee plus the code
+    xref it adds; `kuna xrefs --from f` decompiles `f` and `--to m` the callers
+    of the selector's stub and then of `objc_msgSend` (at most 512), reading the
+    retargets back. A method's `self`/`_cmd` parameter names are never adopted
+    for the caller's variables. A selector no class of the chain declares keeps
+    the runtime entry point. The stage test `tests/stages/kuna-objcresolve.xml`
+    runs both fixtures with the options off and on; `kuna-cli`'s
+    `xrefs_objc_resolved` test asks both directions.
 
   - **By-value aggregates and global blocks**
     (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (struct_leaves)`,
@@ -4333,11 +4346,55 @@ every other binary's pass list is byte-identical to before the pass existed):
     invoke is named `<creator>_block_invoke` (`_2`, `_3` for the next blocks
     of one creator; the creator is the nearest IMP label or symbol at or before
     the store), typed from the descriptor's signature, and its first argument
-    is `Block_layout_<invoke> *` — `Block_layout` then one word per captured
+    is `Block_layout_<invoke> *` — `Block_layout` then one field per captured
     value up to the descriptor's `size` — so `return block->capture_0 * arg1;`.
-    `__block` byref cells are not modelled. The stage tests
+    Each capture's type comes from the descriptor's copy helper when the block
+    has one (`BLOCK_HAS_COPY_DISPOSE`: the helper's `_Block_object_assign`
+    flags say 3 object, 7 block, 8 byref, 16 weak, and a capture it
+    `objc_retain`s itself is an object) and otherwise from the store that
+    filled it (`str w` an `int`, `str d` a `double`, `str s` a `float`, `str q`
+    16 bytes, a frame or code address a `void *`, else a `long`). A `__block`
+    variable's cell — built on the same frame as `isa = 0`, `forwarding =
+    &cell`, `flags`/`size` (one eight-byte constant the compiler pools, or two
+    words) and the value — becomes `Block_byref_<size>_<width>` (`isa`,
+    `forwarding` of its own type, `flags`, `size`, the copy/dispose helpers
+    when `flags` says so, `value` as wide as the initializing store), and the
+    capture that holds its address a pointer to it, so the invoke reads
+    `block->capture_1->forwarding->value`. The creator's frame is typed too
+    (`LocalFact`s the decompile seeds like DWARF locals): the literal is
+    `block` (`block_2`, …) and each cell `cell_<k>`, so the build reads
+    `block.block.invoke = …; block.capture_1 = &cell_1; cell_1.forwarding = block.capture_1;`
+    — Hex-Rays' `Block_layout_<ea>` frame members. x86-64 creators and a
+    capture's signedness are not modelled. The stage tests
     `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
     run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
+
+  - **A dyld shared cache image**
+    (`decompiler/crates/kuna-analysis/src/loader/kuna_dyldcache.rs (objc_selector_base)`,
+    `decompiler/crates/kuna-analysis/src/analyzers/objc/sections.rs (MachoImage::with_cache)`,
+    kuna, no option — it rides `objc`): an image rebuilt out of a cache has
+    its classes but, read as a standalone Mach-O, no methods. A cache's small
+    method lists hold their selectors as offsets from the cache's *selector
+    base* (`entsizeAndFlags & 0x40000000`) and, under `0x20000000`, their type
+    strings too; the strings live in libobjc's `__OBJC_RO` region, outside the
+    image; and `class_ro_t.baseMethods` with its low bit set names a relative
+    list-of-lists (`entsize 8`, each `i64 >> 16` the list's offset from the
+    entry; the low 16 bits an image index) — the preattached-category shape.
+    When the ObjC pass runs on a cache (`ctx.image_path` opens it), the image
+    reads every address outside its own sections through the cache
+    (`DyldCache::read_slid`, pointers unslid; `read_cstr` scans a bounded
+    window there), `methods.rs` resolves the two flags from the base, and
+    `classt.rs (method_lists)` walks the list-of-lists; an IMP outside the
+    image's sections — another image's preattached category — is dropped. The
+    base is read from the cache header's ObjCOptimizationHeader
+    (`objcOptsOffset`, an offset from the cache base, dyld 1042+;
+    `relativeMethodSelectorBaseAddressOffset` at +0x30), else from libobjc's
+    `objc_opt_t` (`__objc_opt_ro`, version 16, the base at +0x28 relative to the
+    record) for an older cache. Foundation out of an iOS 17 arm64e cache: 643
+    classes, 3,516 methods decoded, 448 method names the `.symbols` file lacked,
+    3,979 `objc_msgSend$<sel>` stubs named, `self` typed. The stage test
+    `tests/stages/kuna-dyldcacheobjc.xml` runs the two synthetic caches of
+    `dyld_cache_objc.py` — one with the header, one with only the `objc_opt_t`.
 
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of

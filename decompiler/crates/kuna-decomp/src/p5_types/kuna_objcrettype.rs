@@ -19,6 +19,7 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use kuna_base::address::Address;
 use kuna_num::opcodes::OpCode;
 
 use crate::context::{OpId, VarnodeId};
@@ -31,8 +32,8 @@ use crate::p4_calls::fspec::FuncCallSpecs;
 pub struct ObjcClass {
     /// The superclass's shown name, when it is a class of this image.
     pub superclass: Option<String>,
-    /// `(class method?, selector)` → the IMP's label (`-[Foo bar:]`).
-    pub methods: HashMap<(bool, String), String>,
+    /// `(class method?, selector)` → the IMP's label (`-[Foo bar:]`) and address.
+    pub methods: HashMap<(bool, String), (String, u64)>,
 }
 
 /// The image's Objective-C classes, keyed by shown name.
@@ -63,14 +64,14 @@ fn returns_receiver(sel: &str) -> bool {
 
 impl ObjcClassTable {
     /// The method `sel` reaches on an instance (or, `class_method`, the class)
-    /// of `class`, walking the superclass chain: its label.
-    pub fn resolve(&self, class: &str, sel: &str, class_method: bool) -> Option<&str> {
+    /// of `class`, walking the superclass chain: its label and address.
+    pub fn resolve(&self, class: &str, sel: &str, class_method: bool) -> Option<(&str, u64)> {
         let key = (class_method, sel.to_string());
         let mut name = class;
         for _ in 0..64 {
             let c = self.classes.get(name)?;
-            if let Some(label) = c.methods.get(&key) {
-                return Some(label);
+            if let Some((label, imp)) = c.methods.get(&key) {
+                return Some((label, *imp));
             }
             name = c.superclass.as_deref()?;
         }
@@ -214,26 +215,59 @@ pub fn instancetype(data: &Funcdata, op: OpId, fc: &FuncCallSpecs) -> Option<Rc<
     instancetype_at(data, op, fc, 0)
 }
 
-/// The method a message send reaches when its receiver's class is known: the
-/// label (`-[Foo bar:]`, `+[Foo new]`) the printer renders as the callee.
-pub fn resolved_callee(data: &Funcdata, op: OpId) -> Option<String> {
+/// A message send whose receiver's class is known: the method it reaches.
+#[derive(Debug, Clone)]
+pub struct ResolvedSend {
+    /// The CALL op's address.
+    pub site: Address,
+    /// The IMP's entry and label (`-[Foo bar:]`).
+    pub imp: u64,
+    pub label: String,
+    /// The callee is an `objc_msgSend$<sel>` stub (the selector is not an
+    /// argument of the call) rather than `objc_msgSend`.
+    pub stub: bool,
+    /// The receiver's class pointer type, when the receiver is an instance.
+    pub self_type: Option<Rc<Datatype>>,
+}
+
+/// The method the send at `op` reaches when its receiver's class is known.
+pub fn resolve_send(data: &Funcdata, op: OpId) -> Option<ResolvedSend> {
     let arch = data.get_arch();
     if !arch.objc_resolve {
         return None;
     }
     let fc = data.get_call_specs(data.get_call_specs_index(op)?);
-    if fc.get_name() != "objc_msgSend" && !fc.get_name().starts_with("objc_msgSend$") {
+    let stub = fc.get_name().starts_with("objc_msgSend$");
+    if !stub && fc.get_name() != "objc_msgSend" {
         return None;
     }
     let sel = selector(data, op, fc)?;
-    let recv = data.obank().get(op)?.get_in(1)?;
+    let o = data.obank().get(op)?;
+    let recv = o.get_in(1)?;
+    let site = o.get_addr().clone();
     let table = &arch.kuna_objc_classes;
     if let Some(class) = class_of_constant(data, recv) {
-        return table.resolve(&class, &sel, true).map(str::to_string);
+        let (label, imp) = table.resolve(&class, &sel, true)?;
+        return Some(ResolvedSend { site, imp, label: label.to_string(), stub, self_type: None });
     }
     let t = class_of_receiver(data, recv, 0)?;
     let class = t.get_ptr_to()?.get_name().to_string();
-    table.resolve(&class, &sel, false).map(str::to_string)
+    let (label, imp) = table.resolve(&class, &sel, false)?;
+    Some(ResolvedSend { site, imp, label: label.to_string(), stub, self_type: Some(t) })
+}
+
+/// The method a message send reaches when its receiver's class is known: the
+/// label (`-[Foo bar:]`, `+[Foo new]`) the printer renders as the callee.
+pub fn resolved_callee(data: &Funcdata, op: OpId) -> Option<String> {
+    resolve_send(data, op).map(|r| r.label)
+}
+
+/// Every send of the finished function whose method is known and whose call
+/// still goes to the runtime: what a second decompile retargets.
+pub fn resolved_sends(data: &Funcdata) -> Vec<ResolvedSend> {
+    (0..data.num_calls())
+        .filter_map(|i| resolve_send(data, data.get_call_specs(i).get_op()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -243,10 +277,10 @@ mod tests {
     fn table() -> ObjcClassTable {
         let mut t = ObjcClassTable::default();
         let mut base = ObjcClass::default();
-        base.methods.insert((false, "count".into()), "-[Base count]".into());
-        base.methods.insert((true, "alloc".into()), "+[Base alloc]".into());
+        base.methods.insert((false, "count".into()), ("-[Base count]".into(), 0x100));
+        base.methods.insert((true, "alloc".into()), ("+[Base alloc]".into(), 0x200));
         let mut sub = ObjcClass { superclass: Some("Base".into()), ..Default::default() };
-        sub.methods.insert((false, "x".into()), "-[Sub x]".into());
+        sub.methods.insert((false, "x".into()), ("-[Sub x]".into(), 0x300));
         t.classes.insert("Base".into(), base);
         t.classes.insert("Sub".into(), sub);
         t
@@ -255,9 +289,9 @@ mod tests {
     #[test]
     fn resolution_walks_the_superclass_chain() {
         let t = table();
-        assert_eq!(t.resolve("Sub", "x", false), Some("-[Sub x]"));
-        assert_eq!(t.resolve("Sub", "count", false), Some("-[Base count]"));
-        assert_eq!(t.resolve("Sub", "alloc", true), Some("+[Base alloc]"));
+        assert_eq!(t.resolve("Sub", "x", false), Some(("-[Sub x]", 0x300)));
+        assert_eq!(t.resolve("Sub", "count", false), Some(("-[Base count]", 0x100)));
+        assert_eq!(t.resolve("Sub", "alloc", true), Some(("+[Base alloc]", 0x200)));
         assert_eq!(t.resolve("Sub", "count", true), None, "a class method is not an instance one");
         assert_eq!(t.resolve("Other", "count", false), None);
     }
