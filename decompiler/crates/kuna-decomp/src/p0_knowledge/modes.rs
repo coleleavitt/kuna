@@ -247,7 +247,7 @@ const AGGRESSIVE_OVERRIDES: &[(&str, &str)] = &[
     ("widestrings32", "on"),
     ("fid", "on"),
     ("rtti", "on"),          // PE-only; no-op off-PE
-    ("itaniumrtti", "on"),   // ELF-only, and inert without __cxxabiv1 typeinfo relocs
+    ("itaniumrtti", "on"),   // ELF and Mach-O, inert without __cxxabiv1 typeinfo anchors
     ("aif", "on"),           // speculative gap-walk ("may create bad code")
     // (kuna, GH-299) The aligned gap cursor. Every number in its catalog row was
     // measured under this preset, and it is a net win in BOTH directions there

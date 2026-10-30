@@ -390,13 +390,13 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // `<C>::typeinfo_name` / `<C>::vtable` / `<C>::vtable_for_<Base>` labels and one
     // `<C>::vtable_<i>` function symbol per virtual slot. Ghidra has NO Itanium RTTI
     // analyzer (its `RttiAnalyzer` is MSVC-only and its GCC class recovery is
-    // script-tier), so this is a kuna capability rather than a port. ELF-only:
-    // registered ONLY for `BinaryFormat::Elf`, so every other target's pass set is
-    // byte-identical (the pass ALSO self-gates on ELF in `run`). DEFAULT-OFF: its
+    // script-tier), so this is a kuna capability rather than a port. ELF and
+    // Mach-O (chained-fixup slots resolved first); every other target's pass set
+    // is byte-identical (the pass ALSO self-gates in `run`). DEFAULT-OFF: its
     // facts are computed at load but committed only when `--option itaniumrtti on`
     // (`engine.rs::analysis_pass_enabled` reads `arch.analysis_itaniumrtti`, default
     // false), so a default run is byte-identical.
-    if format == object::BinaryFormat::Elf {
+    if matches!(format, object::BinaryFormat::Elf | object::BinaryFormat::MachO) {
         passes.push(Box::new(crate::rtti::kuna_itaniumrtti::ItaniumRttiPass));
     }
 

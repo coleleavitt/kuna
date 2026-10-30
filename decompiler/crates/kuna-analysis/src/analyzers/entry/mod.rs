@@ -2667,9 +2667,9 @@ mod tests {
             0x8b, 0x01, 0x19, 0x00, 0x00, // record 5 (5) → none (cs_start uleb 0x8b,0x01)
         ];
         let func_pc_begin = 0x4012d6u64;
-        let mut out: Vec<u64> = Vec::new();
         // gcc_vma=0, lsda_vma=0 (section offset 0), ptr_size 8.
-        decode_lsda_landing_pads(gcc, 0, 0, func_pc_begin, 8, &mut out);
+        let lsda = decode_lsda(gcc, 0, 0, func_pc_begin, 8).expect("lsda");
+        let mut out: Vec<u64> = lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| cs.pad).collect();
         out.sort_unstable();
         out.dedup();
         assert_eq!(
