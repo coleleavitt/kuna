@@ -2137,7 +2137,8 @@ mod tests {
         // and kuna-gotonext / a goto to the next statement, a case fall-through, a loop or switch exit
         // and kuna-rangefold / a test or mask a dominating branch's range decides
         // and kuna-pow2select + kuna-pow2select-aarch64 / x / 2^k and x % 2^k written as a select
-        assert_eq!(count, 619, "corpus file count drifted");
+        // and kuna-whilecontinue / a jump to a do-while test continues
+        assert_eq!(count, 620, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

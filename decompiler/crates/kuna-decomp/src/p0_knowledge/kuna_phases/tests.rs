@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_361() {
-    assert_eq!(kuna_num_settables(), 361);
-    assert_eq!(SETTABLE_TABLE.len(), 361);
+fn settable_count_is_362() {
+    assert_eq!(kuna_num_settables(), 362);
+    assert_eq!(SETTABLE_TABLE.len(), 362);
 }
 
 #[test]
-fn tier_counts_are_123_core_138_transform_100_analysis() {
+fn tier_counts_are_123_core_139_transform_100_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_138_transform_100_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 138, 100));
+    assert_eq!((core, transform, analysis), (123, 139, 100));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_162() {
+fn option_values_live_value_present_for_163() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -941,7 +941,8 @@ fn option_values_live_value_present_for_162() {
     // 154 -> 155: +1 for `gotonext` (live_field = goto_next).
     // 154 -> 155: +1 for `rangefold` (live_field = range_fold).
     // 154 -> 155: +1 for `pow2select` (live_field = pow2_select).
-    assert_eq!(with_live, 164);
+    // 154 -> 155: +1 for `whilecontinue`.
+    assert_eq!(with_live, 165);
 }
 
 #[test]
@@ -1170,7 +1171,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `gotonext`; its P8 row sits beside `gotoreduce`.
     // +1 for `rangefold`; its P3 row sits beside `strlenscan`.
     // +1 for `pow2select`; its P3 row sits beside `strlenscan`.
-    assert_eq!(json.matches("},\n").count(), 360);
+    // +1 for `whilecontinue`.
+    assert_eq!(json.matches("},\n").count(), 361);
 }
 
 #[test]
