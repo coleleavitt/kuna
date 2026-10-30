@@ -1339,7 +1339,16 @@ kuna_options! { self, p1;
     },
     "funcchunks" => {
         on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
+    },    "globalwidth" => {
+        on_off!(analysis_globalwidth, "Data-object typing from access width")
+    },    "aifdataveto" => {
+        on_off!(analysis_aifdataveto, "AIF data read/write veto")
+    },    "incrementalwalk" => {
+        on_off!(analysis_incrementalwalk, "Incremental Listing walk for callback roots")
     },
+
+
+
     "tailcallentryall" => {
         on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
     },

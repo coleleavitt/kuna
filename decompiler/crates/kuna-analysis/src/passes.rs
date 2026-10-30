@@ -940,17 +940,24 @@ pub fn run_listing_consumers_replaying(
                 break;
             }
             callback_roots += added;
-            listing = crate::listing::Listing::build_with_meta_planned(
-                &file,
-                image,
-                arch,
-                translate,
-                &seeds,
-                &funcsym_seeds,
-                &seed_names,
-                detail,
-                plan,
-            );
+            // (kuna `incrementalwalk`) Continue the walk from the new roots,
+            // the way IDA queues only what a new fact affects, instead of
+            // decoding the whole program again.
+            listing = if arch.analysis_incrementalwalk {
+                listing.resume(&file, arch, translate, &seeds, &funcsym_seeds, &seed_names, detail, plan)
+            } else {
+                crate::listing::Listing::build_with_meta_planned(
+                    &file,
+                    image,
+                    arch,
+                    translate,
+                    &seeds,
+                    &funcsym_seeds,
+                    &seed_names,
+                    detail,
+                    plan,
+                )
+            };
         }
     }
     // (kuna `thunkentry`, `addrtakenentry`) Where the walk's own function set is
@@ -1290,6 +1297,27 @@ pub fn run_listing_consumers_replaying(
                 bracket(listing.exec_ranges()), None,
             ));
             aif_out.entries = checked.entries;
+            // (kuna `aifdataveto`) IDA rolls a speculative code run back when
+            // the program reads or writes any of it as data.
+            if arch.analysis_aifdataveto {
+                if let Some(data) = arch.manage().get_default_data_space() {
+                    let targets = crate::listing::kuna_accesswidth::data_targets(&listing, translate, code_space, data);
+                    let mut veto_out = AnalysisOutput::default();
+                    veto_out.data_vetoed = listing
+                        .functions()
+                        .filter(|(_, f)| !f.from_symbol)
+                        .map(|(&e, _)| e)
+                        .filter(|e| targets.contains(e))
+                        .collect();
+                    out.push(("aifdataveto", veto_out));
+                    aif_out.entries.retain(|&e| {
+                        let span = listing
+                            .instruction_at(e)
+                            .map_or(1, |i| u64::from(i.len).max(1));
+                        targets.range(e..e.saturating_add(span)).next().is_none()
+                    });
+                }
+            }
             if !checked.pool_entries.is_empty() {
                 let mut pool_out = AnalysisOutput::default();
                 pool_out.entries = checked.pool_entries;
@@ -1330,6 +1358,23 @@ pub fn run_listing_consumers_replaying(
             .filter_map(|(&e, _)| Some((e, model.chunks(e)?.iter().map(|&(s, end)| end - s).sum())))
             .collect();
         out.push(("funcchunks", fc_out));
+    }
+
+    // (kuna `globalwidth`) The access width of each symbol-table data object.
+    if arch.analysis_listing && arch.analysis_globalwidth {
+        if let (Some(code), Some(data)) = (arch.manage().get_default_code_space(), arch.manage().get_default_data_space()) {
+            use object::read::{Object, ObjectSymbol};
+            let objects: Vec<(u64, u64)> = file
+                .symbols()
+                .chain(file.dynamic_symbols())
+                .filter(|s| s.kind() == object::SymbolKind::Data && s.address() != 0 && s.size() > 0)
+                .map(|s| (s.address(), s.size()))
+                .collect();
+            let mut gw_out = AnalysisOutput::default();
+            gw_out.global_widths =
+                crate::listing::kuna_accesswidth::access_widths(&listing, translate, code, data, &objects);
+            out.push(("globalwidth", gw_out));
+        }
     }
 
     // (kuna `callerreads`) Where each direct call returns to, for the decompile

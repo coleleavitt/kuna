@@ -916,6 +916,14 @@ Three tiers:
 | a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks) |
 | a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks) |
 | a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks) |
+| a symbol-table array prints as *(short *)&g[i * 2] | [`globalwidth`](#globalwidth) |
+| a global array with a symbol but no debug info decompiles as byte offsets | [`globalwidth`](#globalwidth) |
+| element accesses to a named global table need casts | [`globalwidth`](#globalwidth) |
+| a sub_ entry starts on a table the code loads from | [`aifdataveto`](#aifdataveto) |
+| aif adds a function at an address the program writes to | [`aifdataveto`](#aifdataveto) |
+| a stripped function list contains data the code reads | [`aifdataveto`](#aifdataveto) |
+| function discovery on an i386 binary full of push imm callbacks is slow | [`incrementalwalk`](#incrementalwalk) |
+| each callback round re-decodes the whole program | [`incrementalwalk`](#incrementalwalk) |
 | a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
 | a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
 | tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
@@ -3532,6 +3540,30 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Flip on with listing on and fid on when FID misses a library function whose body is not one contiguous run (a gcc .cold split, a shared epilogue, an outlined error path after the next function), or when the clip makes a function absorb a neighbour that the walk never reaches from its entry. Off keeps the [entry, next) clip.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-funcchunks
 - **Example:** `--option listing on --option fid on --option funcchunks on`
+
+### `globalwidth` -- on | off, default `on`
+
+- **Symptoms:** a symbol-table array prints as *(short *)&g[i * 2]; a global array with a symbol but no debug info decompiles as byte offsets; element accesses to a named global table need casts.
+- **What it does:** Type each symbol-table data object (STT_OBJECT with a size, no DWARF type) from the width the code reads and writes it with. A data object is otherwise mapped as undefined<size>, so a short g[8] is an opaque 16-byte blob and every element access renders as *(short *)&g[i * 2]. With the Listing built, every LOAD or STORE whose address is a constant or a constant plus something, and every direct data-space operand, that lands inside the object is read at the width of the value moved; an object all of whose accesses use one width w that divides its size is mapped as an array of size / w undefined<w> elements (or undefined<w> when w is the size). Mixed widths leave it as it was. IDA sizes data items from the operand of the instructions that use them (insn_create_op_data).
+- **When to flip:** On (default); inert without the Listing (option listing on, which the aggressive preset and auto under 500 KiB carry). Flip off to restore undefined<size> blobs for symbol-table data objects.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · kuna-globalwidth
+- **Example:** `--option globalwidth off`
+
+### `aifdataveto` -- on | off, default `on`
+
+- **Symptoms:** a sub_ entry starts on a table the code loads from; aif adds a function at an address the program writes to; a stripped function list contains data the code reads.
+- **What it does:** Drop an Aggressive Instruction Finder gap entry whose first instruction the decoded code reads or writes as data. IDA rolls a speculative code run back as a unit when any address in it carries a data read or write reference (dr_R/dr_W); a gap the program loads from or stores to is a table, a literal or a variable, not a function. The data targets are every LOAD/STORE address that is a constant or a constant plus something, and every direct data-space operand, over the decoded Listing. Inert without aif and the Listing.
+- **When to flip:** On (default). Flip off to keep an AIF entry the program also reads as data (self-modifying or code-as-data tricks).
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-aifdataveto
+- **Example:** `--option aifdataveto off`
+
+### `incrementalwalk` -- on | off, default `on`
+
+- **Symptoms:** function discovery on an i386 binary full of push imm callbacks is slow; each callback round re-decodes the whole program.
+- **What it does:** Continue the Listing walk from the callback roots a round accepts (x86 PUSH imm callbacks) instead of decoding the whole program again for each round. A resumed walk keeps the instructions, functions and references already found and decodes only what the new roots reach; a decode at an address does not depend on who reached it first, so the result is the Listing a fresh build makes. IDA queues only the addresses a new fact affects; this is that for the callback rounds.
+- **When to flip:** On (default). Flip off to rebuild the Listing from scratch for every callback round, the old behaviour, if a resumed walk ever disagrees with a fresh one.
+- **Where / provenance:** P1/code-data-partition · kuna · performance · kuna-incrementalwalk
+- **Example:** `--option incrementalwalk off`
 
 ### `tailcallentryall` -- on | off, default `off`
 

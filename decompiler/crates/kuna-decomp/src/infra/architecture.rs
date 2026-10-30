@@ -2640,6 +2640,12 @@ pub struct Architecture {
     pub analysis_tailcallentry: bool,
     /// (kuna) Function bodies as chunks with shared tails (`funcchunks`); the FID matcher hashes the chunk body. Default off.
     pub analysis_funcchunks: bool,
+    /// (kuna) Type symbol-table data objects from their access width (`globalwidth`). Default on.
+    pub analysis_globalwidth: bool,
+    /// (kuna) Drop an AIF gap entry whose first instruction the code reads or writes as data (`aifdataveto`). Default on.
+    pub analysis_aifdataveto: bool,
+    /// (kuna) Resume the Listing walk from new callback roots instead of rebuilding it (`incrementalwalk`). Default on.
+    pub analysis_incrementalwalk: bool,
     /// (kuna) Run `tailcallentry` on AArch64, x86 and RISC-V as well as ARM (`tailcallentryall`). Default off.
     pub analysis_tailcallentryall: bool,
     /// (kuna) Read AArch64 compact (shifted-offset) jump tables in the reference walk (`compacttable`). Default on.
@@ -3563,6 +3569,9 @@ impl Architecture {
             analysis_aifpoolslide: true,
             analysis_tailcallentry: false,
             analysis_funcchunks: false,
+            analysis_globalwidth: true,
+            analysis_aifdataveto: true,
+            analysis_incrementalwalk: true,
             analysis_tailcallentryall: false,
             analysis_compacttable: true,
             analysis_nameladder: true,
@@ -4092,6 +4101,9 @@ impl Architecture {
         self.analysis_aifpoolslide = true;
         self.analysis_tailcallentry = false; // tail-call function-entry recovery default-off
         self.analysis_funcchunks = false;
+        self.analysis_globalwidth = true;
+        self.analysis_aifdataveto = true;
+        self.analysis_incrementalwalk = true;
         self.analysis_tailcallentryall = false;
         self.analysis_compacttable = true;
         self.analysis_nameladder = true;

@@ -484,6 +484,9 @@ mod xrefs_switch_case_calls;
 #[path = "cppsig_hidden_return.rs"]
 mod cppsig_hidden_return;
 
+#[path = "globalwidth.rs"]
+mod globalwidth;
+
 #[path = "zero_extended_returns.rs"]
 mod zero_extended_returns;
 

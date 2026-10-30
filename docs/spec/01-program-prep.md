@@ -7152,6 +7152,30 @@ identical to the library function named (`buffer_free` for
 every matching module agrees and skips every prefix-only module without a
 reference.
 
+**Data-object width** (`globalwidth`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_accesswidth.rs (access_widths)`):
+a symbol-table data object (`STT_OBJECT` with a size) has no type, so it was
+mapped as `undefined<size>` and an element access rendered as
+`*(short *)&g3[(i & 7) * 2UL]`. Over the decoded Listing every `LOAD`/`STORE`
+whose address is a constant or a constant plus something, and every direct
+data-space operand (branch and call targets excluded), that lands in an object
+is read at the width of the value moved. An object all of whose accesses use
+one width `w` that divides its size, with some access indexed or past the first
+element, is mapped as `undefined<w>[size / w]` (or `undefined<w>` when `w` is
+the size); a lone narrowing read (`(int)g1` of a `long`) changes nothing. IDA
+sizes items from the referencing operand (`insn_create_op_data`). The same scan
+gives **the AIF data veto** (`aifdataveto`, default-on;
+`decompiler/crates/kuna-analysis/src/listing/kuna_accesswidth.rs (data_targets)`):
+a discovered entry (not a symbol) whose first instruction the code reads or
+writes as data is dropped from the entry stream, and an AIF gap entry likewise,
+IDA's roll-back of a speculative run with a `dr_R`/`dr_W` xref. On the stripped
+Lua (x86-64, AArch64), ld.so, llvm-nm and llvm-objdump images it removes
+nothing; on the fixture it removes the function-shaped table the code reads.
+**Incremental walk** (`incrementalwalk`, default-on): the x86 callback rounds
+resume the Listing from the accepted roots instead of rebuilding it, the
+`addrtakenentry` way; on a 300-callback i386 fixture the function set is
+identical either way.
+
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
 gives a discovered function a body. The Listing keys a function by its entry,

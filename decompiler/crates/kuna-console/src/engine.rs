@@ -3261,6 +3261,8 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // the live gate is the pre-invocation check in `run_listing_consumers`.
         "tailcallentry" => arch.analysis_tailcallentry,
         "funcchunks" => arch.analysis_funcchunks,
+        "globalwidth" => arch.analysis_globalwidth,
+        "aifdataveto" => arch.analysis_aifdataveto,
         "gopclntab" => arch.analysis_gopclntab,
         "gotypes" => arch.analysis_gotypes,
         "gonoreturn" => arch.analysis_gonoreturn,
@@ -4700,11 +4702,15 @@ pub fn bootstrap_from_object_with_isa(
 fn commit_analysis_output(
     prog: &mut ConsoleProgram,
     code_space: &Rc<AddrSpace>,
-    out: kuna_analysis::pass::AnalysisOutput,
+    mut out: kuna_analysis::pass::AnalysisOutput,
 ) -> KunaResult<()> {
     use kuna_analysis::pass::SymKind;
 
     let num_spaces = prog.arch().manage().num_spaces();
+    if !out.data_vetoed.is_empty() {
+        let vetoed: std::collections::BTreeSet<u64> = out.data_vetoed.iter().copied().collect();
+        out.entries.retain(|e| !vetoed.contains(e));
+    }
 
     // 0. (kuna `cppproto`) The DWARF C++ arm's facts. The producing pass runs at
     //    `load file`, upstream of the `option` commands, so it stashes them apart
@@ -5513,6 +5519,7 @@ fn commit_analysis_output(
     //     option lines are applied, so the flag needs no env bridge on either CLI
     //     path. The stash is drained either way (a second `read symbols` must not
     //     re-commit); off simply drops it and the rendering is exactly pre-DIV-26.
+    let global_widths: std::collections::BTreeMap<u64, u32> = out.global_widths.iter().copied().collect();
     let mut loader_data_objects = std::mem::take(&mut prog.loader_data_objects);
     if !prog.arch().analysis_datasyms {
         loader_data_objects.clear();
@@ -5545,13 +5552,15 @@ fn commit_analysis_output(
         // NEGATIVE size that indexed the type factory's cache out of bounds and
         // took the process down. A declared extent is never trusted to be
         // representable. GH-339.
-        let ct = prog
-            .arch()
-            .types()
-            .get_base(
-                (*size).clamp(1, int4::MAX as u64) as int4,
-                kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN,
-            )?;
+        let clamped = (*size).clamp(1, int4::MAX as u64) as int4;
+        let width = global_widths.get(sym_addr).copied().unwrap_or(0) as int4;
+        let ct = if width > 0 && width < clamped && clamped % width == 0 {
+            let types = prog.arch().types();
+            let elem = types.get_base(width, kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN)?;
+            types.get_type_array(clamped / width, elem)?
+        } else {
+            prog.arch().types().get_base(clamped, kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN)?
+        };
         let name = data_names.name(name, *sym_addr);
         let arch = prog.arch_mut();
         let (scope, base) =
