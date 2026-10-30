@@ -759,6 +759,9 @@ Three tiers:
 | a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
 | kuna cannot use ida flirt signatures | [`flirt`](#flirt) |
 | memcpy and printf in a static binary have no names | [`flirt`](#flirt) |
+| flirt leaves printf-style wrappers unnamed because several modules match | [`flirtsites`](#flirtsites) |
+| flirt names a short i386 wrapper after the wrong library function | [`flirtsites`](#flirtsites) |
+| flirt misses an ifunc resolver whose reference is a lea of a function address | [`flirtsites`](#flirtsites) |
 | a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto) |
 | a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto) |
 | code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto) |
@@ -2998,6 +3001,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default). Flip on with listing on and KUNA_FLIRT_SIGS pointing at IDA's .sig files (for example sig/pc/glibc_amd64.sig for a static x86-64 glibc binary, sig/arm/glibc_arm64.sig for AArch64) when a stripped statically linked binary shows hundreds of sub_ functions that are libc. With fidproto on the renamed functions also get the libc prototype and no-return verdict.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-flirt
 - **Example:** `KUNA_FLIRT_SIGS=$IDADIR/sig/pc/glibc_amd64.sig kuna functions ./static-stripped --option listing on --option flirt on`
+
+### `flirtsites` -- on | off, default `on`
+
+- **Symptoms:** flirt leaves printf-style wrappers unnamed because several modules match; flirt names a short i386 wrapper after the wrong library function; flirt misses an ifunc resolver whose reference is a lea of a function address.
+- **What it does:** Check FLIRT matches against the names a module's reference sites expect, as IDA 9.5 does. A site's target is the branch or call target of the instruction covering it, or on x86 the address its 32-bit field encodes (a lea or mov of a function address). A module that lies wholly inside the trie prefix (no CRC) and names sites is dropped when a site's target carries another name, and waits for the last round unless one site agrees; such a module with no named site is accepted as IDA accepts it, and the collision rule guards it. An entry that is a bare return is never named. When the modules matching at an entry disagree on the name, each name is scored by its sites like IDA's ambiguity arbitration (libida.so 0x70c280): +4 for a site whose target has the expected name, -4 for one whose target has another name, 0 when it is unnamed. The strictly best name wins and a tie waits for a later round; a round that names nothing new makes the next one the last; a name found at several entries in one round goes only to the strictly best scored one. Only acts when flirt is on.
+- **When to flip:** On (default); it only acts when flirt is on. Flip off to restore the rule that renames an entry only when every matching module agrees on the name and skips every module no longer than the trie prefix that has no reference.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-flirtsites
+- **Example:** `--option flirtsites off`
 
 ### `fidproto` -- on | off, default `on`
 

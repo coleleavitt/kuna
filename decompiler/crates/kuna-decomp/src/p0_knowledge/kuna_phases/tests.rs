@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_361() {
-    assert_eq!(kuna_num_settables(), 361);
-    assert_eq!(SETTABLE_TABLE.len(), 361);
+fn settable_count_is_362() {
+    assert_eq!(kuna_num_settables(), 362);
+    assert_eq!(SETTABLE_TABLE.len(), 362);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_106_analysis() {
+fn tier_counts_are_121_core_134_transform_107_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_106_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 106));
+    assert_eq!((core, transform, analysis), (121, 134, 107));
 }
 
 #[test]
@@ -497,6 +497,7 @@ fn option_values_live_value_present_for_156() {
         "compacttable",
         "nameladder",
         "flirt",
+        "flirtsites",
         "fidproto",
         "fidcallees",
         // (kuna) ARM literal-pool inference — an analysis-pass gate with no codegen
@@ -1165,8 +1166,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unwindstarts`; its P1 row sits beside `eh_frame_full`.
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
-    // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`.
-    assert_eq!(json.matches("},\n").count(), 360);
+    // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
+    assert_eq!(json.matches("},\n").count(), 361);
 }
 
 #[test]

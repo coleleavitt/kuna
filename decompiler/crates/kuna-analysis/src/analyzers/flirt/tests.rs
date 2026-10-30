@@ -30,6 +30,17 @@ fn parses_the_header_and_the_one_module() {
 }
 
 #[test]
+fn startup_and_foreign_file_type_signatures_do_not_apply() {
+    let mut h = vec![0u8; 41];
+    h[..6].copy_from_slice(b"IDASGN");
+    assert!(sig::applies_to(&h, Some(18)), "an unset file-type mask applies to every file");
+    h[8..12].copy_from_slice(&(1u32 << 11).to_le_bytes());
+    assert!(sig::applies_to(&h, Some(11)) && !sig::applies_to(&h, Some(18)), "a PE-only library is not tried on an ELF");
+    h[16] = 1;
+    assert!(!sig::applies_to(&h, Some(11)), "a startup signature names no function");
+}
+
+#[test]
 fn crc_is_x25_byte_swapped() {
     assert_eq!(crc16(&[0x90; 4]), 0xbc16);
     assert_eq!(crc16(b"123456789"), 0x6e90);
@@ -49,7 +60,7 @@ fn trie_crc_and_length_decide_the_match() {
     bad_prefix[1] = 0x00;
     assert!(candidates(&s, &bad_prefix).is_empty());
     assert!(!module_matches(&s, m[0], &good[..36]), "shorter than the module");
-    assert_eq!(function_name(m[0], s.pattern_len).as_deref(), Some("myfunc"));
+    assert_eq!(function_name(m[0], s.pattern_len, false).as_deref(), Some("myfunc"));
 }
 
 /// `KUNA_FLIRT_PARSE_ALL=<dir>` parses every `.sig` under it.

@@ -6395,7 +6395,46 @@ prototype of its name (or a `nameladder` spelling) and the no-return flag when
 the no-return lists name it, as IDA applies the type and `noret.cfg` on a
 FLIRT rename. All 212 signature files IDA 9.5 ships parse to the last byte; on
 the stripped static-pie `/sbin/ldconfig` with `glibc_amd64.sig`, 207 of 1,611
-functions are named in 1.9 s.
+functions are named in 1.9 s. `KUNA_FLIRT_SIGS` may name directories, whose
+`*.sig` files are all taken. A startup signature is never loaded (its module
+names are IDA scripts that choose runtime signatures, not function names), nor
+is one whose header file-type mask excludes the binary's format, so pointing
+the variable at all of IDA's `sig/` directories loads only the ELF-capable
+libraries for an ELF: on a stripped static x86-64 program that is 4.7 s and
+1.2 GB instead of 11 s and 3.8 GB for every `sig/pc` file, with the same names.
+A reference names a function when the instruction covering its offset points
+there, by a branch or call target or, on x86, by the address its 32-bit field
+encodes (RIP-relative on x86-64, else absolute): an `ifunc` resolver
+references its implementations with `lea`, which the Listing records as no
+flow.
+
+**FLIRT site checks** (`flirtsites`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/mod.rs (match_all)`) use
+the version-11 reference sites the way IDA 9.5 does. Each named site of a
+module (and its classic reference) is compared with the name already at the
+site's target: it agrees, differs, or the target is unnamed. A module that
+lies wholly inside the trie prefix has no CRC to tell it apart, so when it
+names sites it is dropped if one differs, and waits for the last round unless
+one agrees; one without any named site is accepted, as IDA accepts it, and the
+collision rule guards it. An entry whose first instruction is a return is
+never named, IDA's rule against matching `ret` padding. When the modules
+matching at one entry disagree on the name, each name is scored like IDA's
+ambiguity arbitration (`libida.so` 0x70c280): +4 for a site whose target has
+the expected name, -4 for one whose target has another name, 0 when it is
+unnamed. The strictly best name wins and a tie waits for a later round, when
+more targets are named; a round that names nothing new makes the next one the
+last. A name found at several entries in one round goes only to the strictly
+best scored one. Measured on stripped static programs built here against
+glibc 2.43 (names compared with the unstripped twin): x86-64 gcc `-O2`, clang
+`-O2` and gcc `-O0` each get 175 right and 2 wrong names (171 and 2 with the
+option off; 160 and 2 before the field-encoded targets), i386 gcc `-O2` with
+`glibc_i386.sig` gets 227 and 4 (220 and 5 off), and a stripped Go 1.26
+program with `gopclntab off` and the Go standard-library signatures gets 127
+and 1 (123 and 0 off). The remaining wrong names are functions whose code is
+identical to the library function named (`buffer_free` for
+`__libio_freemem`). Off restores the rule that renames an entry only when
+every matching module agrees and skips every prefix-only module without a
+reference.
 
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)

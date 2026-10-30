@@ -2512,6 +2512,8 @@ pub struct Architecture {
     pub analysis_nameladder: bool,
     /// (kuna) Name library functions from IDA FLIRT `.sig` files listed in `KUNA_FLIRT_SIGS` (`flirt`). Default off.
     pub analysis_flirt: bool,
+    /// (kuna) FLIRT reference-site checks and arbitration (`flirtsites`). Default on.
+    pub analysis_flirtsites: bool,
     /// (kuna) Apply libc prototype / no-return to functions a FID or FLIRT rename names (`fidproto`). Default on.
     pub analysis_fidproto: bool,
     /// (kuna) Gate the Go `pclntab` function-name recovery pass (`gopclntab`); the
@@ -3357,6 +3359,7 @@ impl Architecture {
             analysis_compacttable: true,
             analysis_nameladder: true,
             analysis_flirt: false,
+            analysis_flirtsites: true,
             analysis_fidproto: true,
             analysis_gopclntab: false,
             analysis_gotypes: false,
@@ -3830,6 +3833,7 @@ impl Architecture {
         self.analysis_compacttable = true;
         self.analysis_nameladder = true;
         self.analysis_flirt = false;
+        self.analysis_flirtsites = true;
         self.analysis_fidproto = true;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)

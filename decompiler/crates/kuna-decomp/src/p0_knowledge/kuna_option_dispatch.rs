@@ -1279,6 +1279,8 @@ kuna_options! { self, p1;
         on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
     },    "flirt" => {
         on_off!(analysis_flirt, "FLIRT signature matching")
+    },    "flirtsites" => {
+        on_off!(analysis_flirtsites, "FLIRT reference-site checks and arbitration")
     },    "fidproto" => {
         on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
     },

@@ -602,7 +602,11 @@ mod tests {
               // `libgccsigs` costs a SPARC32 caller that returns arithmetic on
               // the `__divdi3` quotient its low word or its whole return (see its
               // catalog row), so the preset must not turn it on.
-              "libgccsigs"];
+              "libgccsigs",
+              // `flirt` needs signature files the user supplies (`KUNA_FLIRT_SIGS`,
+              // IDA's own `.sig` files); kuna ships none, so the preset has nothing
+              // to run it with.
+              "flirt"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open
