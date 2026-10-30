@@ -355,6 +355,21 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
     }
     let mut got_slots: HashMap<u64, u64> = HashMap::new();
     let mut got_order: Vec<u64> = Vec::new();
+    // MIPS addresses its GOT from `_gp`, conventionally 0x7ff0 past the GOT's
+    // start; `_gp_disp` is `_gp` relative to the `lui` that loads it.
+    let mips = matches!(architecture, Architecture::Mips | Architecture::Mips64);
+    let gp = got_base + 0x7ff0;
+    let gp_disp = |reloc: &object::Relocation| match reloc.target() {
+        RelocationTarget::Symbol(idx) => {
+            file.symbol_by_index(idx).ok().and_then(|s| s.name().ok()) == Some("_gp_disp")
+        }
+        _ => false,
+    };
+    let local_target = |reloc: &object::Relocation| match reloc.target() {
+        RelocationTarget::Symbol(idx) => file.symbol_by_index(idx).is_ok_and(|s| s.is_local()),
+        RelocationTarget::Section(_) => true,
+        _ => false,
+    };
 
     // Externs (undefined referenced symbols) live in a synthetic area above the
     // laid-out sections — the angr extern-object analog.  Allocated on demand.
@@ -383,6 +398,7 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         .find(|section| section.name().ok() == Some(".toc"))
         .and_then(|section| vma_of.get(&section.index()).copied())
         .map(|base| base.wrapping_add(0x8000));
+    let toc = if mips { Some(gp) } else { toc };
 
     // --- Pass 2: apply relocations, patching each laid-out section's bytes.
     for li in 0..laid.len() {
@@ -453,7 +469,9 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                     RelocationTarget::Symbol(sym_idx) => {
                         // Instruction branches mark even STT_NOTYPE undefined symbols
                         // as callable externs, including r_types object leaves Unknown.
-                        if spec.targets_code() {
+                        if spec.targets_code()
+                            || (mips && r_type == Some(object::elf::R_MIPS_CALL16))
+                        {
                             code_externs.insert(sym_idx);
                         }
                         resolve_symbol(
@@ -487,24 +505,49 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 continue;
             };
             let place = sec_vma.wrapping_add(offset);
-            if spec.is_mips_hi16() && reloc.has_implicit_addend() {
+            let is_gp_disp = mips && gp_disp(&reloc);
+            // `_gp_disp` is `_gp - P` of the HI16 and `_gp - P + 4` of the LO16.
+            let target = if is_gp_disp {
+                let address = if spec.is_mips_lo16() { gp.wrapping_sub(place).wrapping_add(4) } else { gp.wrapping_sub(place) };
+                ResolvedRelocationTarget { address, thumb: None }
+            } else {
+                target
+            };
+            let local_got16 = spec.is_mips_got16() && r_type == Some(object::elf::R_MIPS_GOT16) && local_target(&reloc);
+            if (spec.is_mips_hi16() || local_got16) && reloc.has_implicit_addend() {
                 mips_hi.push((off, reloc, target.address));
                 continue;
             }
             if spec.is_mips_lo16() && reloc.has_implicit_addend() {
                 let (paired, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut mips_hi)
                     .into_iter()
-                    .partition(|(_, hi, address)| hi.target() == reloc.target() && *address == target.address);
+                    .partition(|(_, hi, address)| {
+                        hi.target() == reloc.target() && (is_gp_disp || *address == target.address)
+                    });
                 mips_hi = rest;
                 let lo_field = laid[li].data[off..end].to_vec();
                 for (hi_off, hi, address) in paired {
-                    if let Err(reason) = reloc_apply::mips_hi16_with_lo(
-                        &hi,
-                        &mut laid[li].data[hi_off..hi_off + 4],
-                        &lo_field,
-                        little_endian,
-                        address,
-                    ) {
+                    let hi_field = &mut laid[li].data[hi_off..hi_off + 4];
+                    let result = if matches!(hi.flags(), RelocationFlags::Elf { r_type: object::elf::R_MIPS_GOT16 }) {
+                        // A local GOT16 loads the 64 KiB page of `S + AHL`; its
+                        // LO16 adds the rest.
+                        let page = ((address as i128 + reloc_apply::mips_ahl(hi_field, &lo_field, little_endian) + 0x8000)
+                            & !0xffff) as u64;
+                        let slot = *got_slots.entry(page).or_insert_with(|| {
+                            got_order.push(page);
+                            got_base + (got_order.len() as u64 - 1) * pointer
+                        });
+                        let value = slot as i128 - gp as i128;
+                        if (-0x8000..0x8000).contains(&value) {
+                            reloc_apply::mips_set_imm16(hi_field, little_endian, value);
+                            Ok(())
+                        } else {
+                            Err(RelocationFailure::OutOfRange)
+                        }
+                    } else {
+                        reloc_apply::mips_hi16_with_lo(&hi, hi_field, &lo_field, little_endian, address)
+                    };
+                    if let Err(reason) = result {
                         diagnostics.record(architecture, r_type, reason, sec_vma, hi_off as u64);
                     }
                 }

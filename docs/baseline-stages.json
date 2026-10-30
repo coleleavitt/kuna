@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3381,
-    3381
+    3383,
+    3383
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2955,6 +2955,8 @@
     "data:relocs #5: MIPS R_MIPS_26 calls the extern",
     "data:relocs #6: PPC32 ADDR16_HA/LO resolve the global",
     "data:relocs #7: PPC32 REL24 calls the extern",
+    "data:relocs #8: MIPS PIC GOT16 page + LO16 reaches the local table",
+    "data:relocs #9: MIPS PIC global GOT16 through _gp reaches the global",
     "data:rename after rebuilding updates initializer fields",
     "data:rename after rebuilding updates the call view",
     "data:retsplitglobal #1: the shared epilogue is cloned into all three predecessors with the option off and emitted once with it on",

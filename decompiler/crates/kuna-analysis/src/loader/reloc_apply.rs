@@ -88,6 +88,7 @@ enum Specific {
     PpcAddr16 { form: PpcHalf },
     PpcRel14,
     PcRel32,
+    MipsGot16,
     Generic { bits: u8 },
 }
 
@@ -411,6 +412,7 @@ fn classify_info(
             Some(Specific::RiscvPcrelHi20)
         }
         (Architecture::Arm, Some(elf::R_ARM_GOT_PREL)) => Some(Specific::PcRelativeData),
+        (Architecture::Mips, Some(elf::R_MIPS_GOT16 | elf::R_MIPS_CALL16)) => Some(Specific::MipsGot16),
         _ => None,
     };
     if let Some(specific) = got {
@@ -579,6 +581,15 @@ fn apply_info(
         Specific::MipsPc16 => mips_pc16(field, little_endian, reloc, symbol, place),
         Specific::PpcAddr16 { form } => ppc_addr16(field, little_endian, reloc, symbol, form),
         Specific::PpcRel14 => ppc_rel14(field, little_endian, reloc, symbol, place),
+        // `toc` carries `_gp`: the field is the slot's offset from it.
+        Specific::MipsGot16 => {
+            let gp = toc.ok_or(RelocationFailure::MissingToc)?;
+            let value = symbol as i128 - gp as i128;
+            require_signed(value, 16)?;
+            let insn = read_u32(field, little_endian);
+            write_u32(field, little_endian, (insn & 0xffff_0000) | ((value as u32) & 0xffff));
+            Ok(())
+        }
         Specific::PcRel32 => {
             let value = symbol as i128 + explicit_plus_implicit(reloc, read_signed(field, little_endian)) - place as i128;
             require_signed(value, 32)?;
@@ -625,10 +636,29 @@ impl RelocationSpec {
         matches!(self.specific, Specific::MipsHi16)
     }
 
+    /// A MIPS `GOT16`/`CALL16`.
+    pub fn is_mips_got16(self) -> bool {
+        matches!(self.specific, Specific::MipsGot16)
+    }
+
     /// A MIPS `LO16`.
     pub fn is_mips_lo16(self) -> bool {
         matches!(self.specific, Specific::MipsLo16)
     }
+}
+
+/// The full REL addend of a split `HI16`/`GOT16` + `LO16` pair:
+/// `(AHI << 16) + sext(ALO)`.
+pub fn mips_ahl(hi_field: &[u8], lo_field: &[u8], little_endian: bool) -> i128 {
+    let hi = read_u32(hi_field, little_endian) & 0xffff;
+    let lo = read_u32(lo_field, little_endian) & 0xffff;
+    ((hi as i128) << 16) + lo as i16 as i128
+}
+
+/// Write `value` into the low half of a MIPS instruction.
+pub fn mips_set_imm16(field: &mut [u8], little_endian: bool, value: i128) {
+    let insn = read_u32(field, little_endian);
+    write_u32(field, little_endian, (insn & 0xffff_0000) | ((value as u32) & 0xffff));
 }
 
 /// Patch a REL MIPS `HI16` once its `LO16` is known: `AHL = (AHI << 16) +

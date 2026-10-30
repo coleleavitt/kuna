@@ -135,6 +135,7 @@ Two timing consequences shape the tier. First, anything that must influence the
 bridged across the process by environment variables the CLI exports:
 `KUNA_RELOC_OBJECTS` (`relocobjects`), `KUNA_I386_PIE_PLT` (`i386_pie_plt`),
 `KUNA_RELOCREBASE` (`relocrebase`), `KUNA_DYNRELOCS` (`dynrelocs`),
+`KUNA_DEBUGLINK` (`debuglink`),
 `KUNA_MSVCFPCONST` (`msvcfpconst`), `KUNA_PDATACHAINED` (`pdatachained`),
 `KUNA_REXTHUNK` (`rexthunk`), `KUNA_PEORDINAL` (`peordinal`),
 `KUNA_MACHO_ARM64E` (`macho-arm64e`),
@@ -637,8 +638,15 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   object splits a `HI16`'s addend across the pair, so each `HI16` waits for the
   next `LO16` against the same symbol and takes the carry-adjusted high half of
   `S + (AHI << 16) + sext(ALO)`; a `HI16` that never meets one is reported as
-  unresolved. GOT-relative MIPS forms (`GOT16`, `CALL16`, `GPREL16`) still need a
-  synthesized GOT and `_gp`. 32-bit PowerPC covers `ADDR16`/`_LO`/`_HI`/`_HA`,
+  unresolved. PIC MIPS code addresses its GOT through `$gp`, so the layout
+  places `_gp` 0x7ff0 past the synthetic GOT described below. `_gp_disp` is
+  `_gp - P` for its `HI16` and `_gp - P + 4` for its `LO16`, which with the
+  `t9 = entry` seed (§1.4, `mips_gp`) folds the prologue's `$gp` to `_gp`.
+  `CALL16` and a global `GOT16` take the offset of the symbol's GOT slot from
+  `_gp`. A local `GOT16` pairs with the next `LO16` like a `HI16`: its slot
+  holds the 64 KiB page of `S + AHL` and the `LO16` adds the rest. `CALL16`
+  marks its symbol as a code extern, so the call renders by name. `GPREL16`,
+  `GPREL32` and the n64 composite relocations are not handled. 32-bit PowerPC covers `ADDR16`/`_LO`/`_HI`/`_HA`,
   `REL24`/`PLTREL24`/`LOCAL24PC`, `REL14` and its branch-hint forms, and
   `REL32`. A relocation that addresses its symbol's GOT slot
   (x86-64 `GOTPCREL`/`GOTPCRELX`/`REX_GOTPCRELX`, AArch64 `ADR_GOT_PAGE`/
@@ -757,8 +765,10 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   a laid-out section has its `st_value` shifted by **its own section's** delta,
   since the layout is non-contiguous and there is no single global offset (a COFF
   symbol needs no shift — it is reported as `VirtualAddress + value`, so the section
-  write already moved it). Every pass then produces an already-rebased fact with no
-  source change of its own.
+  write already moved it). The header, symbol and relocation fields are read and
+  written in the object's own byte order, so a big-endian object (MIPS, PowerPC,
+  s390x, SPARC) is rebased as well. Every pass then produces an already-rebased
+  fact with no source change of its own.
   A field with no relocation still yields an address in no laid-out section, so
   `kuna_relocrebase (retain_in_image)` **drops** exactly those rather than letting a
   pre-link address through — that is the phantom class. The single exception is a
