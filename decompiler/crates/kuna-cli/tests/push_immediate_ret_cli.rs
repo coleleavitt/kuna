@@ -61,8 +61,10 @@ fn option_on_restores_the_terminal_transfer() {
         code.contains("sub_402010();"),
         "unpacker call disappeared:\n{code}"
     );
+    // RuleSwitchSingle turns the one-entry table into a BRANCH; the target
+    // lies outside the defined range, so it surfaces as the out-of-bounds flow.
     assert!(
-        code.contains("switch(0x401000)") && code.contains("case 0x401000:"),
+        code.contains("flows to r0x00401000"),
         "terminal transfer stayed hidden:\n{code}"
     );
 }

@@ -3052,8 +3052,10 @@ fn a_nan_returned_in_s0_round_trips() {
     }
     assert!(stdout.contains("*(float *)(a1 + a2 * 4) = core(a0);"), "put stores core's float:\n{stdout}");
     let printed = printed_functions(&stdout, &["qnanf_ ", "core ", "logish ", "use ", "qp ", "sn ", "nn ", "put2 "]);
+    // The errno slot sits at address 0, the pspec's `Reset` vector; mapGlobals prints
+    // the wider access as `_Reset`.
     let src = format!(
-        "#include <stdio.h>\n#include <string.h>\n#include <math.h>\n{BITS}int dat_0;\n{printed}\n\
+        "#include <stdio.h>\n#include <string.h>\n#include <math.h>\n{BITS}int dat_0;\nint _Reset;\n{printed}\n\
          int main(void) {{\n  float out[4] = {{0}};\n  put2(3.0f, out);\n  \
          printf(\"%f %f %f %f %llx %llx %llx %llx\\n\", use(-3.0f), use(0.0f), use(4.0f), logish(-3.0f), \
          BITS(qp()), BITS(sn()), BITS(nn()), BITS(out[2]));\n  return 0;\n}}\n"

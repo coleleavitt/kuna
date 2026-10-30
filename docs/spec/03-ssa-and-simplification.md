@@ -1120,7 +1120,11 @@ address, then drops the table and the structured-block graph so no `switch`
 is emitted. A header warning (`Switch with 1 destination removed at <addr>`,
 plus `: N cases all go to same destination` when every entry matches) is
 added unless the table has one entry and the switch value is a constant
-(`tests/stages/kuna-switchsingle.xml`).
+(`tests/stages/kuna-switchsingle.xml`). Unlike upstream, a one-entry table over a
+computed value is left alone: kuna's map-row table recovery can keep only the
+entries its guards prove reachable, and a single kept entry is then not the
+only destination of the binary's dispatch (`compact_switch_cli`,
+`map_value_at_the_sign_bit_keeps_the_index_switch`).
 
 **Ordered floating-point condition negation.** The shared
 `decompiler/crates/kuna-num/src/opcodes.rs (get_booleanflip)` table returns no

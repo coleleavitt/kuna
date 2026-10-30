@@ -1995,6 +1995,10 @@ impl Rule for RuleSwitchSingle {
             return 0;
         }
         let addr = jt.get_address_by_index(0);
+        let constant_input = data.vbank().get(in_vn(data, op, 0)).expect("RuleSwitchSingle: stale input").is_constant();
+        if num == 1 && !constant_input {
+            return 0;
+        }
         let mut needwarning = false;
         let mut allcasesmatch = false;
         if num != 1 {

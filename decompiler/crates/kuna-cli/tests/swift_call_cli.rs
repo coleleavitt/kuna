@@ -46,9 +46,10 @@ fn a_throwing_call_keeps_its_error_test() {
 #[test]
 fn a_method_hands_its_own_self_on() {
     let on = decompile("swift_call_syms_elf", "0x35e0", &[]);
-    assert!(on.contains("v1 = callfix.Account.fee(for:)(self,a1);"), "{on}");
-    assert!(on.contains("return callfix.Account.fee(for:)(self,v2) + v1;"), "{on}");
-    assert!(on.contains("v2 = (*((void **)self->isa)[9])(self);"), "{on}");
+    // The declared prototype from the mangled name puts `self` last.
+    assert!(on.contains("v1 = callfix.Account.fee(for:)(a0,self);"), "{on}");
+    assert!(on.contains("return callfix.Account.fee(for:)(for_,self) + v1;"), "{on}");
+    assert!(on.contains("for_ = (*((void **)self->isa)[9])(self);"), "{on}");
     let off = decompile("swift_call_syms_elf", "0x35e0", &["--option", "swiftcall", "off"]);
     assert!(off.contains("v1 = callfix.Account.fee(for:)(a0);"), "{off}");
 }
