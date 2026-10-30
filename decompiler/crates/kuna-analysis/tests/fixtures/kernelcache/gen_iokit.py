@@ -17,6 +17,8 @@ import struct
 B = 0xFFFFFFF007A00000
 TEXT, EXEC, CONST, DATA, LINKEDIT = 0x0, 0x4000, 0x5000, 0x6000, 0x7000
 CSTRING = 0x3000
+KALLOC_TYPE = CONST + 0x200
+DISPATCH = CONST + 0x240
 
 def u32(*v): return struct.pack("<" + "I" * len(v), *v)
 def u64(*v): return struct.pack("<" + "Q" * len(v), *v)
@@ -29,7 +31,7 @@ def bl(pc, target): return 0x94000000 | (((target - pc) // 4) & 0x3FFFFFF)
 def movw(rd, imm): return 0x52800000 | (imm << 5) | rd
 
 RET = 0xD65F03C0
-names = {"Base": CSTRING, "Derived": CSTRING + 5}
+names = {"Base": CSTRING, "Derived": CSTRING + 5, "site": CSTRING + 13, "sig": CSTRING + 26}
 BASE_META, DERIVED_META = DATA, DATA + 0x40
 
 code = {}
@@ -68,11 +70,16 @@ func("init", init)
 func("Base_getMetaClass", addr_of(0, BASE_META) + [RET])
 func("Derived_getMetaClass", addr_of(0, DERIVED_META) + [RET])
 for n, v in [("Base_D1", 0), ("Base_D0", 0), ("Derived_D1", 0), ("Derived_D0", 0),
-             ("Base_m1", 1), ("Base_m2", 2), ("Derived_m2", 3), ("Derived_m3", 4),
+             ("Base_m1", 1), ("Base_m2", 2), ("Derived_m2", 3),
              ("BaseMeta_D1", 0), ("BaseMeta_D0", 0), ("BaseMeta_alloc", 5),
              ("DerivedMeta_D1", 0), ("DerivedMeta_D0", 0), ("DerivedMeta_alloc", 6), ("Meta_shared", 7)]:
     func(n, [movw(0, v), RET])
+func("Derived_m3", addr_of(8, DISPATCH) + [movw(0, 4), RET])
+for k in range(4):
+    func(f"ext{k}", [movw(0, 0x10 + k), RET])
+func("kalloc_stub", [RET])
 func("meta_of_derived", addr_of(0, DERIVED_META) + [RET])
+func("make_derived", addr_of(0, KALLOC_TYPE) + [lambda p: 0x14000000 | (((code["kalloc_stub"] - p) // 4) & 0x3FFFFFF)])
 text_end = pc
 
 c = code
@@ -102,10 +109,12 @@ def segment(name, addr, size, sections=(), prot=5):
     return u32(0x19, 8 + len(body)) + body
 
 cmds = [
-    segment(b"__TEXT", TEXT, 0x4000, [section(b"__TEXT", b"__cstring", CSTRING, 13, 0x2)]),
+    segment(b"__TEXT", TEXT, 0x4000, [section(b"__TEXT", b"__cstring", CSTRING, 29, 0x2)]),
     segment(b"__TEXT_EXEC", EXEC, 0x1000, [section(b"__TEXT_EXEC", b"__text", EXEC, text_end - EXEC, 0x80000400)]),
     segment(b"__DATA_CONST", CONST, 0x1000, [section(b"__DATA_CONST", b"__mod_init_func", CONST, 8, 0x9),
-                                              section(b"__DATA_CONST", b"__const", CONST_BASE, 0x100)], prot=1),
+                                              section(b"__DATA_CONST", b"__const", CONST_BASE, 0x100),
+                                              section(b"__DATA_CONST", b"__kalloc_type", KALLOC_TYPE, 0x40),
+                                              section(b"__DATA_CONST", b"__const", DISPATCH, 0x60)], prot=1),
     segment(b"__DATA", DATA, 0x1000, [section(b"__DATA", b"__data", DATA, 0x80)], prot=3),
     segment(b"__LINKEDIT", LINKEDIT, len(linkedit), prot=1),
     u32(0x2, 24, symoff, 3, str_off, len(strtab)),
@@ -114,7 +123,12 @@ cmds = [
 image = bytearray(LINKEDIT + len(linkedit))
 def place(off, data): image[off:off + len(data)] = data
 place(0, u32(0xFEEDFACF, 0x0100000C, 0, 0xB, len(cmds), sum(map(len, cmds)), 0x85, 0) + b"".join(cmds))
-place(CSTRING, b"Base\0Derived\0")
+place(CSTRING, b"Base\0Derived\0site.Derived\0" + b"12\0")
+place(KALLOC_TYPE + 0x10, u64(B + names["site"]))
+place(KALLOC_TYPE + 0x20, u64(B + names["sig"]))
+place(KALLOC_TYPE + 0x28, u32(0x61, 0x30))
+for k, (sin, ssz, sout, osz) in enumerate([(1, 0, 0, 0), (0, 0xFFFFFFFF, 0, 0), (2, 0, 1, 0), (0, 0x10, 0, 0x10)]):
+    place(DISPATCH + 0x18 * k, u64(B + c[f"ext{k}"]) + u32(sin, ssz, sout, osz))
 for name, words in blob.items():
     place(c[name], u32(*words))
 place(CONST, u64(B + c["init"]))

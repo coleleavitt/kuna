@@ -864,6 +864,10 @@ Three tiers:
 | gMetaClass objects render as dat_<addr> | [`iokitclasses`](#iokitclasses) |
 | methods reachable only through a vtable are missing from kuna functions | [`iokitclasses`](#iokitclasses) |
 | a kext's vtables are unnamed data | [`iokitclasses`](#iokitclasses) |
+| a user client's external methods are sub_<addr> with no selector numbers | [`xnutables`](#xnutables) |
+| an IOExternalMethodDispatch table renders as dat_<addr> | [`xnutables`](#xnutables) |
+| a kalloc_type_impl call passes dat_<addr> instead of a named view | [`xnutables`](#xnutables) |
+| a got slot in a stripped kext has no name | [`xnutables`](#xnutables) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
 | pdb symbol names not applied to a pe | [`pdb`](#pdb) |
 | a .pdb beside the exe is ignored | [`pdb`](#pdb) |
@@ -3211,6 +3215,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default): a kernel or kext gains class-qualified names for metaclass objects, vtables and virtual methods even when stripped, and its vtable-only methods become functions. Flip off to see only what the symbol table names, or if a non-XNU arm64 image is misdetected.
 - **Where / provenance:** P1/external-refinement · ida · new-analysis · kuna-iokitclasses
 - **Example:** `option iokitclasses off`
+
+### `xnutables` -- on | off, default `on`
+
+- **Symptoms:** a user client's external methods are sub_<addr> with no selector numbers; an IOExternalMethodDispatch table renders as dat_<addr>; a kalloc_type_impl call passes dat_<addr> instead of a named view; a got slot in a stripped kext has no name.
+- **What it does:** Name three kinds of XNU data table on an arm64 kernel or kext (an MH_KEXT_BUNDLE, or an image with a __KLD segment). kalloc_type views: each __kalloc_type record (a 0x40-byte kalloc_type_view) and __kalloc_var record (a 0x50-byte kalloc_type_var_view) is named <Type>::kalloc_type_view / <Type>::kalloc_type_var_view after the site.<type> string its zone view names (struct dropped, * spelled _ptr), so a kalloc_type_impl call shows which type it allocates. IOExternalMethodDispatch tables: runs of at least four 0x18-byte IOExternalMethodDispatch or 0x28-byte IOExternalMethodDispatch2022 records in __const, each a pointer into this image's code with at most 16 scalars each way and struct sizes up to 256 KiB or variable (0xFFFFFFFF), at least one of them variable; the table is named <Owner>::sMethods and each unnamed dispatched function <Owner>::externalMethod_<selector>, where the owner is the class (from iokitclasses' recovery) whose vtable holds a method that computes the table's address, else the class of the table's named functions. Pointer slots: a __got / __auth_got / __auth_ptr slot the indirect-symbol table does not name, whose rebased pointer reaches a named function or object of this image, is named <target>_ptr.
+- **When to flip:** On (default): a user client's selector table and its handlers carry selector numbers even when stripped, and allocation sites name their kalloc_type views. Flip off to see only what the symbol table names.
+- **Where / provenance:** P1/external-refinement · ida · new-analysis · kuna-xnutables
+- **Example:** `option xnutables off`
 
 ### `pdb` -- on | off, default `on`
 

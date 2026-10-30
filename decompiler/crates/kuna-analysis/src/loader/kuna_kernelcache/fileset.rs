@@ -1,11 +1,14 @@
 //! `MH_FILESET` kernel collections: list the `LC_FILESET_ENTRY` images and cut
 //! one out as a standalone thin Mach-O.
 
+use std::collections::HashMap;
+
 use kuna_decomp::kuna_kernelcache::KernelcacheChoice;
 
 use crate::loader::format::macho::resolve_chained_fixups;
 
 mod merge;
+mod prelink;
 
 const MH_MAGIC_64: u32 = 0xfeed_facf;
 const MH_EXECUTE: u32 = 0x2;
@@ -27,6 +30,21 @@ pub(super) struct FilesetEntry {
     pub(super) fileoff: u64,
     /// `MH_EXECUTE` for the kernel, `MH_KEXT_BUNDLE` for a kext.
     pub(super) filetype: u32,
+}
+
+/// A pre-fileset (prelinked) kernelcache loads as the kernel: `list` prints
+/// its `__PRELINK_INFO` kexts, and naming one is refused.
+pub(super) fn legacy(bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<Vec<u8>, String> {
+    let KernelcacheChoice::Entry(name) = choice else { return Ok(bytes) };
+    let Some(kexts) = prelink::kexts(&bytes) else { return Ok(bytes) };
+    if name == "list" {
+        let lines: Vec<String> = kexts.iter().map(prelink::describe).collect();
+        return Err(format!("prelinked kernelcache kexts ({}):\n{}", kexts.len(), lines.join("\n")));
+    }
+    Err(format!(
+        "{name:?}: choosing a kext of a pre-fileset (prelinked) kernelcache is not supported; \
+         `--option kernelcache auto` loads its kernel, `list` prints its kexts"
+    ))
 }
 
 pub(super) fn is_fileset(bytes: &[u8]) -> bool {
@@ -131,10 +149,6 @@ fn select<'a>(all: &'a [FilesetEntry], choice: &KernelcacheChoice) -> Result<&'a
     if let Some(e) = all.iter().find(|e| e.id == *name) {
         return Ok(e);
     }
-    if name == "list" {
-        let ids: Vec<&str> = all.iter().map(|e| e.id.as_str()).collect();
-        return Err(format!("MH_FILESET entries ({}):\n{}", all.len(), ids.join("\n")));
-    }
     let lower = name.to_ascii_lowercase();
     let suffix = format!(".{lower}");
     let hits: Vec<&FilesetEntry> = all
@@ -166,6 +180,13 @@ fn select<'a>(all: &'a [FilesetEntry], choice: &KernelcacheChoice) -> Result<&'a
 /// pointer slot, then copy the entry's header and load commands to offset 0.
 pub(super) fn extract(mut bytes: Vec<u8>, choice: &KernelcacheChoice) -> Result<(Vec<u8>, String), String> {
     let all = entries(&bytes).ok_or("malformed MH_FILESET load commands")?;
+    if *choice == KernelcacheChoice::Entry("list".into()) {
+        let info: HashMap<String, prelink::KextInfo> =
+            prelink::kexts(&bytes).unwrap_or_default().into_iter().map(|k| (k.id.clone(), k)).collect();
+        let lines: Vec<String> =
+            all.iter().map(|e| info.get(&e.id).map_or_else(|| e.id.clone(), prelink::describe)).collect();
+        return Err(format!("MH_FILESET entries ({}):\n{}", all.len(), lines.join("\n")));
+    }
     let chosen = select_many(&all, choice)?;
     let applied = apply_fixups(&mut bytes)?;
     let branch = merge::branch_segments(&bytes).len();

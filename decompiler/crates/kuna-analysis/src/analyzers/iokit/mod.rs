@@ -22,6 +22,9 @@
 //! never discovered).
 
 mod a64;
+mod tables;
+
+pub use tables::XnuTablesPass;
 
 use std::collections::{BTreeMap, HashMap};
 

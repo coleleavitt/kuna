@@ -2569,6 +2569,9 @@ pub struct Architecture {
     /// (kuna) `iokitclasses`: IOKit class and vtable recovery on an XNU kernel
     /// or kext (a commit-gated analysis pass, default on).
     pub analysis_iokitclasses: bool,
+    /// (kuna) `xnutables`: kalloc_type views, IOExternalMethodDispatch tables and
+    /// unnamed pointer slots on an XNU kernel or kext (default on).
+    pub analysis_xnutables: bool,
     /// (kuna) Gate the Swift calling-convention arm of the metadata pass
     /// (`swiftcall`): methods, initializers and accessors bound to the
     /// `__swiftcall` model with their `self` named and typed. Default-on;
@@ -3351,6 +3354,7 @@ impl Architecture {
             loader_param_locks: std::collections::BTreeMap::new(),
             analysis_cfstrings: false,
             analysis_iokitclasses: false,
+            analysis_xnutables: false,
             analysis_swiftcall: true,
             loader_proto_models: Rc::default(),
             loader_input_hints: std::collections::BTreeMap::new(),
@@ -3816,6 +3820,7 @@ impl Architecture {
         self.analysis_swiftmetadata = false; // Swift runtime-metadata recovery default-off (inert without swift5_* sections)
         self.analysis_swifttypes = true; // Swift type layouts default-on, inert unless swiftmetadata is on
         self.analysis_iokitclasses = true; // (kuna) IOKit class recovery, XNU images only
+        self.analysis_xnutables = true; // (kuna) XNU data tables, XNU images only
         self.analysis_cfstrings = false; // Mach-O __cfstring constant-string recovery default-off (Mach-O-only pass)
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)

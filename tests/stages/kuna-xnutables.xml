@@ -1,0 +1,46 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    Kuna `xnutables` option (P1 external refinement): kalloc_type views and
+    IOExternalMethodDispatch tables on an XNU kext.
+
+    The fixture (gen_iokit.py) adds to the iokitclasses kext one
+    __kalloc_type view for site.Derived and a four-record
+    IOExternalMethodDispatch table whose address Derived's own vtable method
+    computes. Nothing of either has a symbol.
+
+    Pass 1 (`option xnutables off`) is the bug: the view is a bare address and
+    the dispatched handler is sub_<addr>. Pass 2 (`on`) names the view
+    kalloc_type_view_Derived and the handler after its owner and selector.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">c0035fd6</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/iokit_kext.macho</com>
+  <com>option xnutables off</com>
+  <com>read symbols</com>
+  <com>load addr 0xfffffff007a04200</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load addr 0xfffffff007a041b0</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/iokit_kext.macho</com>
+  <com>option xnutables on</com>
+  <com>read symbols</com>
+  <com>load addr 0xfffffff007a04200</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function Derived::externalMethod_1</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="XNUTABLES #1: off leaves the kalloc_type view a bare address" min="1" max="1">return 0xfffffff007a05200;</stringmatch>
+<stringmatch name="XNUTABLES #2: off leaves the dispatched handler unnamed" min="1" max="1">^unsigned long sub_fffffff007a041b0\(</stringmatch>
+<stringmatch name="XNUTABLES #3: on names the view after its type" min="1" max="1">return kalloc_type_view_Derived;</stringmatch>
+<stringmatch name="XNUTABLES #4: on names the handler by owner and selector" min="1" max="1">^unsigned long Derived::externalMethod_1\(</stringmatch>
+</decompilertest>

@@ -96,3 +96,18 @@ fn inert_on_a_non_xnu_image() {
     let file = object::File::parse(&*bytes).unwrap();
     assert!(!is_xnu_image(&file, &bytes));
 }
+
+#[test]
+fn names_kalloc_views_and_dispatch_tables() {
+    let bytes = fixture();
+    let file = object::File::parse(&*bytes).unwrap();
+    let img = MachoImage::with_fixups(&file, resolve_chained_fixups(&file, &bytes));
+    let rec = recover(&file, &img);
+    let mut out = AnalysisOutput::default();
+    tables::kalloc_views(&file, &img, &rec, &mut out);
+    tables::dispatch_tables(&file, &img, &rec, &mut out);
+    let data: Vec<(u64, &str, u32)> = out.data_objects.iter().map(|d| (d.addr, d.name.as_str(), d.size)).collect();
+    assert_eq!(data, [(B + 0x5200, "kalloc_type_view_Derived", 0x40), (B + 0x5240, "Derived_sMethods", 0x60)]);
+    let names: Vec<&str> = out.fid_names.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(names, ["Derived::externalMethod_0", "Derived::externalMethod_1", "Derived::externalMethod_2", "Derived::externalMethod_3"]);
+}

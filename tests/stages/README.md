@@ -349,3 +349,6 @@ a vtable-only override gain their names.
 `kuna-kernelcache-merge.xml` loads the synthetic kernel collection's kext alone
 and then together with the kernel (`kernelcache com.apple.kernel,Widget`): only
 the merged image names the kernel object the kext points at.
+
+`kuna-xnutables.xml` decompiles the same synthetic kext with `xnutables` off and
+on: a `kalloc_type` view and an `IOExternalMethodDispatch` handler gain names.

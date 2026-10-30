@@ -862,7 +862,14 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   header it would overwrite. `auto` takes the `MH_EXECUTE` entry (the kernel);
   any other value names an entry by its bundle id, exactly or by a unique
   case-insensitive dotted suffix (`IOSurface`), a miss lists the
-  candidates, and `list` stops the load with every entry id.
+  candidates, and `list` stops the load with every entry id, each followed by
+  what the collection's `__PRELINK_INFO,__info` plist says of it (version, load
+  address, the `IOClass` of each of its `IOKitPersonalities`;
+  `decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelink.rs (kexts)`,
+  a small XML plist reader that resolves `ID`/`IDREF`). A pre-fileset
+  (prelinked) kernelcache loads as its kernel; `list` prints its plist's kexts,
+  and naming one is refused because extracting a prelinked kext is not
+  implemented.
   A comma-separated list or `all` loads several entries as one image
   (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/merge.rs (merge)`):
   their segment commands are concatenated at their collection addresses (one
@@ -4056,6 +4063,31 @@ every other binary's pass list is byte-identical to before the pass existed):
   `vfn_` wherever no ancestor slot is named, except where an abstract class has
   no vtable in the image (AGXG12P: 627 of 1,979 methods are credited to the one
   concrete subclass instead). The pass takes 13 ms on the kernel.
+- **XNU data tables** (kuna, `xnutables`, the same XNU images, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/iokit/tables.rs`): three kinds
+  of table that need no class knowledge to find. Each `__kalloc_type` record (a
+  0x40-byte `kalloc_type_view`, its `site.<type>` name at +0x10) and
+  `__kalloc_var` record (a 0x50-byte `kalloc_type_var_view`) becomes a sized data
+  object under its symbol, or else `kalloc_type_view_<T>` / `kalloc_type_var_view_<T>`
+  (`struct` dropped, `*` spelled `_ptr`); the typed allocator entry points
+  (`kalloc_type_impl`, `IOMallocTypeImpl`, `OSObject_typed_operator_new`, their
+  `var` and `free` forms) get prototypes whose first parameter is a pointer,
+  parked by name and at every address the image calls one at, so the view an
+  allocation passes renders by name. A run of at least four
+  `IOExternalMethodDispatch` (0x18-byte) or `IOExternalMethodDispatch2022`
+  (0x28-byte) records in `__const`, each a pointer into this image's code with
+  at most 16 scalars each way and struct sizes up to 256 KiB or variable, at
+  least one variable (the checks IDA's kcu applies), is a dispatch table: it
+  becomes a data object (its symbol, else `<Owner>_sMethods`) and every unnamed
+  handler `<Owner>::externalMethod_<selector>`, the owner being the class whose
+  vtable holds a method that computes the table's address (`a64::constants`),
+  else the class of the table's named handlers. A `__got` / `__auth_got` /
+  `__auth_ptr` slot the indirect-symbol table does not name, whose rebased
+  pointer reaches a named function or object of this image, is named
+  `<target>_ptr`. On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
+  views, 1,687 var views and 56 dispatch tables (901 records); in IOSurface,
+  `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
+  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)`.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the
