@@ -635,6 +635,8 @@ pub struct Architecture {
     pub fold_boolean_mask: bool,
     /// (kuna `mba`) Simplify linear mixed boolean-arithmetic expressions.
     pub mba: bool,
+    /// (kuna `avxintrinsics`) Print SLEIGH AVX user-ops as Intel intrinsics.
+    pub avx_intrinsics: bool,
     /// Keep mapped global array bases separate from negative element offsets
     /// (option `globalarrayanchor`).
     pub global_array_anchor: bool,
@@ -3036,6 +3038,7 @@ impl Architecture {
             ov_less_simplify: false,
             fold_boolean_mask: false,
             mba: false,
+            avx_intrinsics: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
             simd_lane_fold: false,
@@ -3471,6 +3474,7 @@ impl Architecture {
         self.ov_less_simplify = true; // (kuna) DIV-2 default-on (GH-7190)
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
         self.mba = false;
+        self.avx_intrinsics = true; // (kuna) presentation only; 0/675 datatest assertions move
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`

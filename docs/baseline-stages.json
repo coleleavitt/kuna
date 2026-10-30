@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3384,
-    3384
+    3388,
+    3388
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -986,7 +986,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 357 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 358 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -2046,6 +2046,10 @@
     "data:armfloatreturn #7: off loses the parameter of a float return converted from a double",
     "data:armfloatreturn #8: on keeps the float return in s0 and takes the double parameter",
     "data:armfloatreturn #9: off loses the double parameter of an integer function",
+    "data:avxintrinsics #1: off prints the SLEIGH add user-op",
+    "data:avxintrinsics #2: off prints the SLEIGH FMA user-op",
+    "data:avxintrinsics #3: on prints _mm256_add_epi32",
+    "data:avxintrinsics #4: on prints _mm256_fmadd_ps",
     "data:backing initialization reads the actual ABI parameter",
     "data:backward BLX #1: retains the call",
     "data:backward BLX #2: no invented store",

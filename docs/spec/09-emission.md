@@ -3984,3 +3984,43 @@ variable's Symbol is a structure, array or union, that whole Symbol supplies the
 member type, since the declaration representative covers only the field. A
 scalar local or global keeps the type its declaration prints, which can differ
 from its Symbol's scalar type (`kuna_pointerstorecast.rs (target)`).
+
+## (kuna) Intel intrinsic names for AVX user-ops — `option avxintrinsics`, default on
+
+**`decompiler/crates/kuna-decomp/src/p9_emit/kuna_avxintrin.rs (intrinsic)`,
+called from `printc.rs (op_callother_ir)`.** The x86 SLEIGH spec lifts most
+AVX2, FMA and AVX-512 instructions to opaque user-ops named after the mnemonic
+and its extension: `vpaddd_avx2`, `vfmadd132ps_fma`, `vaddps_avx512f`. When a
+`CALLOTHER` prints in functional form, its name is looked up: a user-op whose
+extension suffix is `avx`, `avx2`, `fma` or an `avx512*` subset, and whose
+mnemonic has a mapping, prints as `_mm<W>_<op>_<type>`. `<W>` comes from the
+result's size (16, 32 or 64 bytes gives "", "256" or "512"), or from the first
+argument when the op has no result. The table covers:
+
+- packed float arithmetic, logic, shuffles and blends (`_mm256_add_ps`,
+  `_mm512_mul_pd`, `_mm256_andnot_ps`);
+- packed integer arithmetic, saturating and unsigned forms, compares, shifts,
+  min/max, averages, packs, unpacks and permutes (`_mm256_adds_epu8`,
+  `_mm256_max_epu8`, `_mm256_cmpgt_epi32`, `_mm256_permutevar8x32_epi32`);
+- the bitwise forms on the whole register (`_mm256_and_si256`).
+
+The FMA family is the one place where the argument order changes. SLEIGH passes
+the instruction's operands `(a, b, c)` in encoding order, and the form number
+says which product is formed: `132` is `a*c + b`, `213` is `b*a + c` and `231`
+is `b*c + a`. `_mm<W>_f<kind>_<ty>(x, y, z)` is `x*y + z`, so the arguments
+print as `(a, c, b)`, `(b, a, c)` and `(b, c, a)`. Scalar forms (`ss`, `sd`) keep
+the 128-bit `_mm_` prefix. IDA 9.5's avxlifter builds its names from the same
+pattern (avxlifter.so 0x1c1a0) and reorders FMA operands the same way
+(0x1f660). A user-op with no mapping keeps its SLEIGH name. The rename is
+display only: the IR keeps the user-op, so every rule that keys on its index
+is unaffected. Changes 0/675 datatest assertions; the stage test
+`gh9184-x86-fma-ymm256.xml` now accepts either spelling of its FMA sanity
+check. Pinned by `tests/stages/kuna-avxintrinsics.xml`.
+
+Not done (the rest of IDA's avxlifter): vector datatypes (`__m256`), re-fusing
+the per-lane SLEIGH bodies of VEX float ops into one vector op, folding
+AVX-512 `conditionalAssign` mask chains into `_mask_`/`_maskz_` forms, and a
+vector-register calling convention. A trial cspec with `YMM0`-`YMM7` input
+entries recovers the second and third `__m256` arguments, but the first one and
+the result stay hidden, because a VEX write zero-extends into `ZMM0` and the
+heritage reads `ZMM0` whole.

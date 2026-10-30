@@ -1324,6 +1324,9 @@ Three tiers:
 | the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl) |
 | a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl) |
 | --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl) |
+| vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
+| fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
+| avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
 | a loop that only reads a stack buffer prints a store into its first element | [`tiedphitrim`](#tiedphitrim) |
 | a while condition tests buf[0] and the loop body assigns a later element into buf[0] | [`tiedphitrim`](#tiedphitrim) |
 | a byte fetched through a pointer is assigned to a stack-offset variable the binary never writes | [`tiedphitrim`](#tiedphitrim) |
@@ -4110,6 +4113,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default (DIV-143). Keep it on when a function's body re-declares one of its own parameters -- the shape is a signature `f(unsigned int a0, ...)` immediately followed by `int4 a0;`, with `&a0` the only use, and the disassembly showing that `&a0` is a `LEA` of the parameter's own frame slot. It is the standard rendering for a parameter passed by address to an API (`CryptDeriveKey`, `GetTokenInformation`, any out-parameter), because the body then never reads the slot as a value and the parameter's storage carries no Varnode. Inert unless an `&symbol` reference resolves to a `function_parameter` Symbol, so any function that does not take the address of a parameter is byte-identical. Flip OFF to restore the duplicate declaration -- worth doing only to confirm that a variable you expected to be a local really is the parameter.
 - **Where / provenance:** P9/naming-policy · kuna · correctness-fix · repipe-address-taken-key-parameter
 - **Example:** `option paramrefdecl off`
+
+### `avxintrinsics` -- on | off, default `on`
+
+- **Symptoms:** vector code prints ghidra user-op names such as vpaddd_avx2; fma prints as vfmadd132ps_fma with the instruction's operand order; avx-512 arithmetic prints as vaddps_avx512f.
+- **What it does:** Print the x86 SLEIGH AVX user-ops as the Intel intrinsics a programmer writes. The x86 spec lifts most AVX2, FMA and AVX-512 instructions to opaque user-ops named after the mnemonic and its extension (`vpaddd_avx2`, `vfmadd132ps_fma`, `vaddps_avx512f`). With this option the printer names each one `_mm<W>_<op>_<type>`, where the width comes from the user-op's result size (16, 32 or 64 bytes): `_mm256_add_epi32`, `_mm512_add_ps`, `_mm256_max_epu8`, `_mm256_shuffle_epi8`, `_mm256_and_si256`. The FMA forms also get the intrinsic's operand order: `vfmadd132ps(a, b, c)` computes `a*c + b` and prints as `_mm256_fmadd_ps(a, c, b)` (213 is `b*a + c`, 231 is `b*c + a`). Display only; the IR keeps the user-op. A user-op without a mapping keeps its SLEIGH name.
+- **When to flip:** On by default: vector code reads as intrinsics. Turn it off to see the SLEIGH user-op names, for example to grep for a mnemonic.
+- **Where / provenance:** P9/naming-policy · kuna · presentation-default · ida95-46
+- **Example:** `--option avxintrinsics off`
 
 ### `tiedphitrim` -- on | off, default `on`
 

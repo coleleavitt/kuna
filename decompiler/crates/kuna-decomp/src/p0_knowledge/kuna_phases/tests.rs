@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_357() {
-    assert_eq!(kuna_num_settables(), 357);
-    assert_eq!(SETTABLE_TABLE.len(), 357);
+fn settable_count_is_358() {
+    assert_eq!(kuna_num_settables(), 358);
+    assert_eq!(SETTABLE_TABLE.len(), 358);
 }
 
 #[test]
-fn tier_counts_are_121_core_135_transform_101_analysis() {
+fn tier_counts_are_122_core_135_transform_101_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_135_transform_101_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 135, 101));
+    assert_eq!((core, transform, analysis), (122, 135, 101));
 }
 
 #[test]
@@ -935,7 +935,7 @@ fn option_values_live_value_present_for_156() {
     // 154 -> 155: +1 for `ptrauthtrap` (live_field = ptrauth_trap).
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
     // 156 -> 157: +1 for `importdata`.
-    assert_eq!(with_live, 160);
+    assert_eq!(with_live, 161);
 }
 
 #[test]
