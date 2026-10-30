@@ -924,6 +924,7 @@ kuna_options! { self, p1;
         ))
     },
     "win32sigs" => on_off!(analysis_win32sigs, "Built-in Win32 API signature table"),
+    "tlsnames" => on_off!(analysis_tlsnames, "Gate the static-TLS naming (`tlsnames`); default on."),
     "uefi" => on_off!(analysis_uefi, "Gate the UEFI module markup pass (`uefi`); default on."),
     "declaredlibcproto" => {
         on_off!(analysis_declaredlibcproto, "Declared-name libc prototype lookup")

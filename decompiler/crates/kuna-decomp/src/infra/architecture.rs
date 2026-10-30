@@ -489,6 +489,8 @@ pub struct Architecture {
     /// on an image the loader proved is a Windows user-mode PE) or `on` (any image
     /// with a Windows compiler spec).  See [`kuna_pebnames`](crate::kuna_pebnames).
     pub peb_names: crate::kuna_pebnames::PebNamesMode,
+    /// (kuna) `tlsnames`: the static TLS block the loader committed.
+    pub tls_layout: Option<std::rc::Rc<crate::p5_types::kuna_tlsnames::TlsLayout>>,
     /// (kuna `structsynth`) Over which bases a structure may be synthesized from
     /// constant-offset dereferences: `off` (the default) or `param` (function
     /// parameters).  See [`kuna_structsynth`](crate::kuna_structsynth).
@@ -1727,6 +1729,8 @@ pub struct Architecture {
     /// (kuna) Gate the built-in Win32 API signature table (`win32sigs`); default
     /// on.  PE/COFF only; the facts are keyed by entry address, not by name.
     pub analysis_win32sigs: bool,
+    /// (kuna) Gate the static-TLS naming (`tlsnames`); default on.
+    pub analysis_tlsnames: bool,
     /// (kuna) `dwarfglobaltypes`: lock a DWARF global's declared type.
     pub analysis_dwarfglobaltypes: bool,
     /// (kuna) `dwarfscopes`: DWARF locals in lexical blocks and location lists.
@@ -3004,6 +3008,7 @@ impl Architecture {
             x64_syscall: crate::kuna_x64syscall::X64SyscallMode::Off, // (kuna) option x64syscall; reset_defaults sets the shipped default
             syscall_regs: crate::kuna_syscallregs::SyscallRegsMode::Off, // (kuna) option syscallregs; reset_defaults sets the shipped default
             image_os_userland: false, // (kuna) a load-time fact; set by the console's `load file`
+            tls_layout: None,
             peb_names: crate::kuna_pebnames::PebNamesMode::Off, // (kuna) option pebnames; reset_defaults sets the shipped default
             struct_synth: crate::kuna_structsynth::StructSynthMode::Off, // (kuna) option structsynth; reset_defaults sets the shipped default
             struct_synth_shard: None,
@@ -3255,6 +3260,7 @@ impl Architecture {
             analysis_libctypes: false,
             analysis_libctypes_glibc: false,
             analysis_win32sigs: false,
+            analysis_tlsnames: false,
             analysis_dwarfglobaltypes: false,
             analysis_dwarfscopes: true,
             analysis_uefi: false,
@@ -3694,6 +3700,7 @@ impl Architecture {
         self.analysis_libctypes_glibc = false;
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
+        self.analysis_tlsnames = true;
         self.analysis_dwarfglobaltypes = true;
         self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
         self.analysis_uefi = true;
@@ -4512,6 +4519,7 @@ impl Architecture {
             crate::kuna_fastfailnoreturn::archid_is_windows(self.get_description()),
             self.image_windows_user,
         ); // (kuna) pebnames
+        ctx.tls_layout = self.tls_layout.clone(); // (kuna) tlsnames
         ctx.struct_synth = self.struct_synth; // (kuna) structsynth
         ctx.struct_synth_shard = self.struct_synth_shard.clone();
         ctx.struct_merge = self.struct_merge; // (kuna) structmerge

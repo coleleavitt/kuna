@@ -899,6 +899,9 @@ Three tiers:
 | a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes) |
 | a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes) |
 | a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes) |
+| a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset | [`tlsnames`](#tlsnames) |
+| thread-local variables of an executable have no names although .symtab has STT_TLS symbols | [`tlsnames`](#tlsnames) |
+| the TLS block is not modelled | [`tlsnames`](#tlsnames) |
 | comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
 | need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
 | &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
@@ -3300,6 +3303,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default: the globals of a -g binary print with their source types (cfg.port, table[i].name). Flip off to see what inference alone recovers for a global, or when a DWARF type is wrong for the code (a global declared as one type and accessed as another through casts in the source).
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-59
 - **Example:** `option dwarfglobaltypes off`
+
+### `tlsnames` -- on | off, default `on`
+
+- **Symptoms:** a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset; thread-local variables of an executable have no names although .symtab has STT_TLS symbols; the TLS block is not modelled.
+- **What it does:** Name an x86 ELF executable's static TLS variables where code reaches them through the thread pointer. A local-exec access to a __thread variable is a load at a constant offset from the thread pointer (x86-64 `mov eax, fs:[-0x10]`), lowered to FS_OFFSET + -0x10 and rendered as `*(int *)(v1 + -0x10)` off an untyped fs_offset input. The x86 TLS ABIs (variant II) put the executable's TLS block immediately below the thread pointer, so the STT_TLS symbol with value v sits at v - align_up(PT_TLS.p_memsz, PT_TLS.p_align). The loader reads PT_TLS and the defined STT_TLS symbols into a layout; in a function that reads FS_OFFSET (x86-64) or GS_OFFSET (x86) and never stores through it, the register input gets a type-locked Symbol `tls`, a pointer relative to a `__tls_block` structure (each TLS symbol a field of its size, the rest holes) that points at the block's end, so the access renders ADJ(tls)->counter. A function that stores through the base, a shared object (whose TLS goes through __tls_get_addr), an image without TLS symbols and every non-x86 target are unchanged.
+- **When to flip:** On by default: an executable's __thread variables read by name (ADJ(tls)->counter += a0) instead of offsets off fs_offset. Flip off to see the raw thread-pointer arithmetic, for example when checking the offsets against the ABI by hand.
+- **Where / provenance:** P5/type-propagation · ida · analysis-enablement · ida95-60
+- **Example:** `option tlsnames off`
 
 ## Core rendering defaults
 

@@ -26,4 +26,5 @@ pub mod rtti;
 pub mod sourcelang;
 pub mod strings;
 pub mod swift;
+pub mod tls;
 pub mod uefi;

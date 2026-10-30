@@ -405,6 +405,8 @@ pub struct AnalysisOutput {
     /// committed in place of their untyped [`DataObjectFact`]s when the option
     /// is on.
     pub dwarf_typed_globals: Vec<TypedDataFact>,
+    /// (kuna `tlsnames`) The executable's static TLS block.
+    pub tls_layout: Option<kuna_decomp::kuna_tlsnames::TlsLayout>,
     /// Discovered function entry points (for stripped targets).
     pub entries: Vec<u64>,
     /// (kuna) Function bodies that describe exactly one function, as `[start, end)`.
@@ -774,6 +776,7 @@ impl AnalysisOutput {
         self.symbols.extend(other.symbols);
         self.data_objects.extend(other.data_objects);
         self.dwarf_typed_globals.extend(other.dwarf_typed_globals);
+        self.tls_layout = self.tls_layout.take().or(other.tls_layout);
         self.typed_data.extend(other.typed_data);
         self.swift_types.typed_data.extend(other.swift_types.typed_data);
         self.swift_types.prototypes.extend(other.swift_types.prototypes);

@@ -25,6 +25,7 @@ pub mod kuna_calltargettype; // (kuna) an indirect call's target takes the funct
 pub mod kuna_boolbyte; // (kuna) type a byte that is only ever a truth value as bool
 pub mod kuna_charbyte; // (kuna) keep char for a byte loaded through a char pointer
 pub mod kuna_charptr; // (kuna) commit a pointer used only on characters to char *
+pub mod kuna_tlsnames; // (kuna) static TLS variables at their thread-pointer offsets
 pub mod kuna_storetype; // (kuna) a global typed from the values stored into it
 pub mod kuna_elemptr; // (kuna) a pointer used only as an array of one element type is T *
 pub mod kuna_floatreg; // (kuna) a value returned in a float register is a float

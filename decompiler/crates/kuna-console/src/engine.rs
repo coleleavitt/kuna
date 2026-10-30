@@ -3025,6 +3025,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // address. Facts computed at LOAD, COMMITTED only when this gate is on, so
         // `off` renders exactly what no Win32 prototype at all renders.
         "win32sigs" => arch.analysis_win32sigs,
+        "tlsnames" => arch.analysis_tlsnames,
         "uefi" => arch.analysis_uefi,
         "strings" => arch.analysis_strings,
         // (kuna `fatstr`) The Rust `&str`-record string pass — gated on the SAME
@@ -4538,6 +4539,9 @@ fn commit_analysis_output(
     }
     // 0d. (kuna `dwarfglobaltypes`) A DWARF global keeps its declared type:
     //     its untyped sized entry is replaced by the typed one.
+    if let Some(layout) = out.tls_layout.take() {
+        prog.arch_mut().tls_layout = Some(Rc::new(layout));
+    }
     let dwarf_globals = std::mem::take(&mut out.dwarf_typed_globals);
     if prog.arch().analysis_dwarfglobaltypes {
         let typed: std::collections::BTreeSet<u64> = dwarf_globals.iter().map(|g| g.addr).collect();
