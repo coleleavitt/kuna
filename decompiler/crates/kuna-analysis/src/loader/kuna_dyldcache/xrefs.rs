@@ -10,8 +10,13 @@
 //!
 //! [`collect`] finds every branch target outside the image and every coalesced
 //! GOT slot holding an address outside it. It follows a stub to its final
-//! target, then names that target from the symbol table of the image holding
-//! it (exports, else the locals in the local-symbols file). The result rides in
+//! target, then names that target. The name the rebuilt image itself imports
+//! comes first (`exporttrie`): each undefined symbol is resolved through the
+//! export trie of the dylib its two-level ordinal names, following re-exports
+//! (`EXPORT_SYMBOL_FLAGS_REEXPORT` and `LC_REEXPORT_DYLIB`), so a call into
+//! `_platform_memmove` reads as the `memmove` the source called. Otherwise the
+//! symbol table of the image holding the target names it (exports, else the
+//! locals in the local-symbols file). The result rides in
 //! the rebuilt image as an `LC_NOTE` owned by [`NOTE_OWNER`].
 //! `macho_stubs` reads the note back as imports, under the `dyldcrossrefs`
 //! option.
@@ -22,6 +27,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::rc::Rc;
 
 use super::extract::{ImageLayout, Nlist};
+use crate::loader::format::macho::exports::{parse_export_trie, ExportTarget};
 use super::{u32_at, u64_at, DyldCache};
 
 /// The `LC_NOTE` `data_owner` of the cross-image reference table.
@@ -120,13 +126,29 @@ pub fn read_note(bytes: &[u8]) -> Vec<Xref> {
 
 /// Collect image `layout`'s references into other images. `view(va, len)`
 /// reads the image's slid bytes. Branches are decoded only for an arm64 image
-/// (`a64`); an x86_64 image gets its GOT slots alone.
+/// (`a64`); an x86_64 image gets its GOT slots alone. With `own_stubs`, calls
+/// to the image's own stubs are named too: a companion image in a merged
+/// rebuild has no indirect-symbol table of its own to name them.
 pub(super) fn collect<'v>(
     cache: &DyldCache,
+    index: usize,
     layout: &ImageLayout,
     a64: bool,
+    own_stubs: bool,
     view: &dyn Fn(u64, usize) -> Option<&'v [u8]>,
 ) -> Vec<Xref> {
+    const S_SYMBOL_STUBS: u32 = 0x8;
+    let stubs: Vec<(u64, u64)> = if own_stubs {
+        layout
+            .segments
+            .iter()
+            .flat_map(|s| &s.sections)
+            .filter(|s| s.section_type() == S_SYMBOL_STUBS)
+            .map(|s| (s.addr, s.addr + s.size))
+            .collect()
+    } else {
+        Vec::new()
+    };
     let mut targets = BTreeSet::new();
     let mut slots = Vec::new();
     for seg in &layout.segments {
@@ -143,7 +165,7 @@ pub(super) fn collect<'v>(
                     if w & 0x7C00_0000 == 0x1400_0000 {
                         let pc = sec.addr + i as u64 * 4;
                         let target = pc.wrapping_add_signed(sign_extend(w & 0x03FF_FFFF, 26) << 2);
-                        if !layout.holds(target) {
+                        if !layout.holds(target) || stubs.iter().any(|&(lo, hi)| target >= lo && target < hi) {
                             targets.insert(target);
                         }
                     }
@@ -163,6 +185,9 @@ pub(super) fn collect<'v>(
         return Vec::new();
     }
     let names = Names::new(cache);
+    if kuna_decomp::kuna_exporttrie::exporttrie_enabled() {
+        names.adopt_imports_of(index);
+    }
     let mut out = Vec::new();
     for target in targets {
         if let Some(name) = names.call_target(target) {
@@ -170,7 +195,7 @@ pub(super) fn collect<'v>(
         }
     }
     for (addr, value) in slots {
-        if let Some(name) = names.at(value) {
+        if let Some(name) = names.imported_as(value).or_else(|| names.at(value)) {
             out.push(Xref { addr, kind: XrefKind::Slot, name });
         }
     }
@@ -215,6 +240,9 @@ fn follow_stub(cache: &DyldCache, addr: u64) -> Option<u64> {
     None
 }
 
+/// The most re-exports a name is followed through.
+const MAX_REEXPORT_DEPTH: usize = 8;
+
 /// The most stubs a call target is followed through before it is left unnamed.
 const MAX_STUB_HOPS: usize = 4;
 
@@ -232,6 +260,11 @@ struct Names<'a> {
     cache: &'a DyldCache,
     ranges: Vec<(u64, u64, usize)>,
     images: RefCell<HashMap<usize, Rc<ImageNames>>>,
+    /// Target address → the name the rebuilt image imports it under, when one
+    /// import alone resolves there (`None` marks a contested address).
+    imports: RefCell<HashMap<u64, Option<Vec<u8>>>>,
+    tries: RefCell<HashMap<usize, Rc<HashMap<String, ExportTarget>>>>,
+    by_path: HashMap<&'a str, usize>,
 }
 
 impl<'a> Names<'a> {
@@ -248,7 +281,85 @@ impl<'a> Names<'a> {
             })
             .collect();
         ranges.sort_unstable();
-        Names { cache, ranges, images: RefCell::default() }
+        let by_path = cache.images().iter().enumerate().map(|(i, image)| (image.path.as_str(), i)).collect();
+        Names { cache, ranges, images: RefCell::default(), imports: RefCell::default(), tries: RefCell::default(), by_path }
+    }
+
+    /// Record, for every symbol image `index` imports, the address its export
+    /// resolves to in the dylib its two-level ordinal names, so a reference to
+    /// that address carries the name the image itself used.
+    fn adopt_imports_of(&self, index: usize) {
+        const N_TYPE: u8 = 0x0e;
+        const N_EXT: u8 = 0x01;
+        let deps = self.cache.image_dependencies(index).unwrap_or_default();
+        let mut imports = self.imports.borrow_mut();
+        for sym in self.cache.image_symbols(index).unwrap_or_default() {
+            if sym.n_type & N_TYPE != 0 || sym.n_type & N_EXT == 0 || sym.name.is_empty() {
+                continue;
+            }
+            let ordinal = usize::from(sym.n_desc >> 8);
+            let Some((_, dep)) = ordinal.checked_sub(1).and_then(|o| deps.get(o)) else {
+                continue;
+            };
+            let Some(&dep) = self.by_path.get(dep.as_str()) else { continue };
+            let Some(target) = self.export_target(dep, &String::from_utf8_lossy(&sym.name), 0) else {
+                continue;
+            };
+            imports
+                .entry(target)
+                .and_modify(|name| {
+                    if name.as_deref() != Some(sym.name.as_slice()) {
+                        *name = None;
+                    }
+                })
+                .or_insert(Some(sym.name));
+        }
+    }
+
+    /// Where `name` lives when imported from image `index`: its export, else a
+    /// re-export followed to the dylib that defines it.
+    fn export_target(&self, index: usize, name: &str, depth: usize) -> Option<u64> {
+        const MH_NO_REEXPORTED_DYLIBS: u32 = 0x0010_0000;
+        const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
+        if depth > MAX_REEXPORT_DEPTH {
+            return None;
+        }
+        let trie = self.trie(index);
+        let layout = self.cache.image_layout(index).ok()?;
+        let deps = || self.cache.image_dependencies(index).unwrap_or_default();
+        match trie.get(name) {
+            Some(ExportTarget::Offset(offset)) => Some(layout.address + offset),
+            Some(ExportTarget::Absolute(_)) => None,
+            Some(ExportTarget::Reexport { ordinal, name: other }) => {
+                let deps = deps();
+                let (_, dep) = deps.get(usize::try_from(*ordinal).ok()?.checked_sub(1)?)?;
+                let dep = *self.by_path.get(dep.as_str())?;
+                self.export_target(dep, other.as_deref().unwrap_or(name), depth + 1)
+            }
+            None if layout.header_flags() & MH_NO_REEXPORTED_DYLIBS == 0 => deps()
+                .iter()
+                .filter(|(cmd, _)| *cmd == LC_REEXPORT_DYLIB)
+                .filter_map(|(_, path)| self.by_path.get(path.as_str()))
+                .find_map(|&dep| self.export_target(dep, name, depth + 1)),
+            None => None,
+        }
+    }
+
+    fn trie(&self, index: usize) -> Rc<HashMap<String, ExportTarget>> {
+        self.tries
+            .borrow_mut()
+            .entry(index)
+            .or_insert_with(|| {
+                let bytes = self.cache.image_export_trie(index).unwrap_or_default();
+                Rc::new(parse_export_trie(&bytes).into_iter().map(|e| (e.name, e.target)).collect())
+            })
+            .clone()
+    }
+
+    /// The name the rebuilt image imports `addr` under, if exactly one import
+    /// resolves there.
+    fn imported_as(&self, addr: u64) -> Option<Vec<u8>> {
+        self.imports.borrow().get(&addr).cloned().flatten()
     }
 
     fn image_at(&self, addr: u64) -> Option<usize> {
@@ -287,7 +398,7 @@ impl<'a> Names<'a> {
     /// import a stub at `addr` is for, else whatever the stub jumps to.
     fn call_target(&self, mut addr: u64) -> Option<Vec<u8>> {
         for _ in 0..MAX_STUB_HOPS {
-            if let Some(name) = self.at(addr).or_else(|| self.stub_import(addr)) {
+            if let Some(name) = self.imported_as(addr).or_else(|| self.at(addr)).or_else(|| self.stub_import(addr)) {
                 return Some(name);
             }
             addr = follow_stub(self.cache, addr)?;

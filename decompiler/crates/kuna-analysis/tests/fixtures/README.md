@@ -917,7 +917,7 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
 
 ## dyld shared cache (`dyld_cache_arm64e/`)
 
-`dyld_cache_arm64e/` (about 29 KB in three files) is a synthetic two-image arm64e
+`dyld_cache_arm64e/` (about 33 KB in three files) is a synthetic three-image arm64e
 dyld shared cache, split the way iOS 16 splits one: `dyld_shared_cache_arm64e`
 (header, image table, `__TEXT`/`__DATA`/`__LINKEDIT` mappings, v3 slide info),
 `.01` (a `__TEXT_STUBS` stub island), and `.symbols` (the local symbols).
@@ -925,6 +925,9 @@ dyld shared cache, split the way iOS 16 splits one: `dyld_shared_cache_arm64e`
 through the island at `0x180008800` and through a coalesced `__got` slot. That
 slot's v3 chain links a plain pointer to an authenticated one. Its `helper_local`
 is a `<redacted>` placeholder in its own symbol table, named only by `.symbols`.
+It imports `_callee_entry` from `/usr/lib/libumbrella.dylib`, which re-exports
+libcallee (`LC_REEXPORT_DYLIB`), whose export trie lists `_callee_entry` as an
+alias of `_callee_add`.
 It drives the `kuna_dyldcache` unit tests and `tests/stages/kuna-dyldcrossrefs.xml`.
 No Apple toolchain is needed: `dyld_cache_arm64e.py` assembles the files from
 the public `dyld_cache_format.h` layouts and hand-encodes the A64 bodies.
@@ -945,6 +948,12 @@ reproduces the layout but not the `LC_UUID`.
 and `_ext_counter`, with no indirect-symbol entry naming either slot, local
 symbols stripped. Built from `macho_bindslots_arm64.c`, whose header has the
 commands.
+
+`macho_trieonly_arm64` (arm64 dylib, 33 KB) is the `exporttrie` witness: its
+symbol table was emptied after linking, so only `LC_DYLD_EXPORTS_TRIE` names
+`_trie_scale` and `_trie_entry`. Built from `macho_trieonly_arm64.c`, then
+patched by `macho_trieonly_arm64.py` (no extension, so `*.dylib` ignore rules
+do not drop it).
 
 ## Mach-O fat/universal + arm64e (PR-8)
 

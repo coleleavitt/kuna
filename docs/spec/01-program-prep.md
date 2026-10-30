@@ -912,7 +912,21 @@ to the object path before reading it whole). The image is chosen by
 sets, and which the console accepts before any image is loaded, since choosing
 the first one is its job). It matches a full install name, then a unique
 basename, then a unique basename minus its last extension (`libobjc.A`), and a
-one-image cache needs no choice. The cache is read through
+one-image cache needs no choice. Several images can share one program: `dyldimage A+B+...` rebuilds `A`
+with the segments of the companions `B...` appended (all but their
+`__LINKEDIT`), their named symbols (exports and `.symbols` locals) added as
+locals with renumbered section ordinals, and the names of their own calls
+(their islands and their own stubs, which `own_stubs` makes `xrefs.rs
+(collect)` resolve through each companion's indirect table) merged into the
+note. A companion's stub and pointer sections are retyped to `S_REGULAR`,
+because the merged indirect-symbol table is `A`'s alone. The merged header and
+load commands no longer fit before `A`'s first section, so they get pages of
+their own and every segment follows them. A Mach-O reader that keeps the last
+`__TEXT` it sees would then take a companion's, so the function-starts and
+`__unwind_info` readers keep the first. On iOS 16.4.1,
+`CoreFoundation+libobjc.A.dylib` loads in 2.6 s and 430 MB, and libobjc's
+`class_copyMethodList` decompiles in that program with every call named, as it
+does on its own. The cache is read through
 file handles, never mapped whole, so the cost follows the image, not the 3 GB
 of the cache. Every header field is read only when it lies below the header's
 own `mappingOffset`, which is how `dyld_cache_format.h` adds fields. That one
@@ -1531,6 +1545,25 @@ funcsym stream:
   `__la_symbol_ptr`/`__got` slots are named too for `-fno-plt`-style indirect
   calls. `INDIRECT_SYMBOL_LOCAL`/`ABS` entries are skipped; the C-ABI leading `_`
   is stripped.
+- **Export tries** (kuna, `exporttrie`, default on, env-bridged):
+  `decompiler/crates/kuna-analysis/src/loader/format/macho/exports.rs (parse_export_trie)`
+  walks a Mach-O export trie (`LC_DYLD_EXPORTS_TRIE`, or the export range of
+  `LC_DYLD_INFO`) iteratively, visiting each node once, and reports each name
+  with its image-relative offset, its absolute value, or the dylib ordinal and
+  name it is re-exported from. Two consumers read it. `macho_stubs.rs
+  (trie_exports)` adds, as exports, the trie names a thin image's symbol table
+  lacks, which is every export of a dylib whose nlists were stripped. In a dyld
+  cache rebuild, `xrefs.rs (Names::adopt_imports_of)` resolves each undefined
+  symbol of the rebuilt image through the trie of the dylib its two-level
+  ordinal names. It follows `EXPORT_SYMBOL_FLAGS_REEXPORT` entries and, unless
+  the dylib is `MH_NO_REEXPORTED_DYLIBS`, its `LC_REEXPORT_DYLIB` umbrellas, up
+  to eight levels. A cross-image call or slot whose target exactly one import
+  resolves to is then named after that import. On iOS 16.4.1 that renames 12 of
+  CoreFoundation's 764 cross-image names and 29 of UIKitCore's 1,457 to the
+  names the source called: `bzero` for `_platform_bzero`, `acos` for its alias
+  `acosl`, `objc_release` for `objc_release_x0`. iOS 14's cross-image calls go
+  through other images' stubs, whose indirect entries already carry the import
+  name, so nothing changes there.
 - **Bound pointer slots** (kuna, `machobinds`, default off, env-bridged):
   `push_bound_slots` in `decompiler/crates/kuna-analysis/src/loader/macho_stubs.rs`
   names every pointer slot a bind record fills that the indirect-symbol table

@@ -3598,7 +3598,9 @@ name (`/usr/lib/libobjc.A.dylib`), else a unique basename (`libobjc.A.dylib`,
 `CoreFoundation`), else a unique basename without its last extension (`libobjc.A`).
 Without `--image`, a cache of one image loads it, and a larger one exits `2` with
 the image count; an unknown or ambiguous name exits `2` with the closest matches.
-`kuna unpack <cache> --list` lists the images.
+`kuna unpack <cache> --list` lists the images. `--image A+B+...` adds companion
+images to the same program: their code, data and symbols are mapped beside `A`'s,
+so a function in `B` that `A` calls can be decompiled in the same run.
 
 ```
 $ kuna decompile dyld_shared_cache_arm64e --image libobjc.A.dylib class_copyMethodList

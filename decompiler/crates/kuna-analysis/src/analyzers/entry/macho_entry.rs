@@ -84,7 +84,7 @@ where
     let mut entryoff: Option<u64> = None;
     while let Ok(Some(command)) = commands.next() {
         if let Ok(Some((segment, _))) = Mach::Segment::from_command(command) {
-            if trim(segment.name()) == b"__TEXT" {
+            if trim(segment.name()) == b"__TEXT" && text_base.is_none() {
                 text_base = Some(segment.vmaddr(endian).into());
             }
             continue;
@@ -150,7 +150,7 @@ where
         // Segments: find `__TEXT` (base) and any `__mod_init_func` section.
         if let Ok(Some((segment, section_data))) = Mach::Segment::from_command(command) {
             let seg_name = trim(segment.name());
-            if seg_name == b"__TEXT" {
+            if seg_name == b"__TEXT" && text_base.is_none() {
                 text_base = Some(segment.vmaddr(endian).into());
             }
             if let Ok(secs) = segment.sections(endian, section_data) {

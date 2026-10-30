@@ -13,7 +13,7 @@ fn opens_a_split_cache_with_its_sub_cache_and_symbols_file() {
     assert_eq!(cache.arch(), "arm64e");
     assert_eq!(cache.base(), 0x1_8000_0000);
     let paths: Vec<&str> = cache.images().iter().map(|i| i.path.as_str()).collect();
-    assert_eq!(paths, ["/usr/lib/libcaller.dylib", "/usr/lib/libcallee.dylib"]);
+    assert_eq!(paths, ["/usr/lib/libcaller.dylib", "/usr/lib/libcallee.dylib", "/usr/lib/libumbrella.dylib"]);
     let stubs = cache.mappings().iter().find(|m| m.flags & MAPPING_TEXT_STUBS != 0).unwrap();
     assert_eq!((stubs.address, stubs.file), (0x1_8000_8000, 1));
 }
@@ -25,7 +25,7 @@ fn image_names_match_by_install_name_basename_then_stem() {
     assert_eq!(cache.select(Some("libcaller.dylib")), Ok(0));
     assert_eq!(cache.select(Some("libcallee")), Ok(1));
     assert!(cache.select(Some("libcall")).unwrap_err().contains("close: /usr/lib/libcaller.dylib"));
-    assert!(cache.select(None).unwrap_err().contains("holds 2 images"));
+    assert!(cache.select(None).unwrap_err().contains("holds 3 images"));
 }
 
 #[test]
@@ -69,9 +69,9 @@ fn cross_image_references_ride_in_the_note() {
     assert_eq!(
         xrefs,
         [
-            call(0x1_8000_8800, b"_callee_add"),
+            call(0x1_8000_8800, b"_callee_entry"),
             slot(0x1_8001_0000, b"_callee_counter"),
-            slot(0x1_8001_0008, b"_callee_add"),
+            slot(0x1_8001_0008, b"_callee_entry"),
         ]
     );
     assert!(read_note(&cache.extract(1).unwrap()).is_empty(), "the callee reaches no other image");
@@ -102,4 +102,21 @@ fn without_its_symbols_file_a_redacted_local_stays_nameless() {
         .collect();
     assert_eq!(at_helper, [""]);
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn a_companion_image_joins_the_rebuild() {
+    let cache = DyldCache::open(&fixture()).unwrap();
+    let bytes = cache.extract_with(0, &[1]).unwrap();
+    let file = object::File::parse(bytes.as_slice()).unwrap();
+    let callee = file.symbols().find(|s| s.name() == Ok("_callee_add")).expect("the companion's symbol");
+    assert_eq!(callee.address(), 0x1_8000_2800);
+    assert!(!callee.is_global(), "a companion's symbols are locals");
+    let text: Vec<u64> = file.sections().filter(|s| s.name() == Ok("__text")).map(|s| s.address()).collect();
+    assert_eq!(text, [0x1_8000_1800, 0x1_8000_2800]);
+    let code = file.sections().find(|s| s.address() == 0x1_8000_2800).unwrap().data().unwrap().to_vec();
+    assert_eq!(&code[..4], &0x0B01_0000u32.to_le_bytes());
+    let exports: Vec<String> =
+        file.exports().unwrap().iter().map(|e| String::from_utf8_lossy(e.name()).into_owned()).collect();
+    assert_eq!(exports, ["_caller_entry", "_caller_indirect"]);
 }

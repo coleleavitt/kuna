@@ -139,18 +139,18 @@ where
     // `reserved1`/`reserved2` and the flat indirect-symbol slice).
     let header = match Mach::parse(bytes, 0) {
         Ok(h) => h,
-        Err(_) => return finish_with_exports(neutral, out),
+        Err(_) => return finish_with_exports(neutral, bytes, out),
     };
     let endian = match header.endian() {
         Ok(e) => e,
-        Err(_) => return finish_with_exports(neutral, out),
+        Err(_) => return finish_with_exports(neutral, bytes, out),
     };
 
     // Build the section list + the symbol table from the load commands in one
     // pass; pull the `LC_DYSYMTAB` indirect-symbol slice from the same walk.
     let mut commands = match header.load_commands(endian, bytes, 0) {
         Ok(c) => c,
-        Err(_) => return finish_with_exports(neutral, out),
+        Err(_) => return finish_with_exports(neutral, bytes, out),
     };
 
     let mut symtab: Option<SymbolTable<Mach>> = None;
@@ -197,7 +197,7 @@ where
 
     let symtab = match symtab {
         Some(st) => st,
-        None => return finish_with_exports(neutral, out),
+        None => return finish_with_exports(neutral, bytes, out),
     };
     let strings = symtab.strings();
 
@@ -282,7 +282,7 @@ where
     if kuna_decomp::kuna_machobinds::machobinds_enabled() {
         push_bound_slots(neutral, bytes, std::mem::size_of::<Mach::Word>() as u64, &mut out);
     }
-    finish_with_exports(neutral, out)
+    finish_with_exports(neutral, bytes, out)
 }
 
 /// (kuna `machobinds`) Name every pointer slot a bind fills that the
@@ -366,13 +366,16 @@ fn is_imported_indirect_symbol(raw: u32) -> bool {
 /// export append.
 fn finish_with_exports(
     neutral: &object::File,
+    bytes: &[u8],
     mut out: MachOIndirectSymbols,
 ) -> MachOIndirectSymbols {
     use object::read::Object;
+    let mut exported = std::collections::HashSet::new();
     if let Ok(exports) = neutral.exports() {
         for e in exports {
             let name = e.name();
             if !name.is_empty() {
+                exported.insert(e.address());
                 out.imports.push(ImportSym {
                     addr: e.address(),
                     name: strip_leading_underscore(name),
@@ -381,7 +384,70 @@ fn finish_with_exports(
             }
         }
     }
+    if kuna_decomp::kuna_exporttrie::exporttrie_enabled() {
+        for (addr, name) in trie_exports(neutral, bytes) {
+            if exported.insert(addr) {
+                out.imports.push(ImportSym { addr, name: strip_leading_underscore(name.as_bytes()), kind: ImportSymKind::Export });
+            }
+        }
+    }
     out
+}
+
+/// (kuna `exporttrie`) The `(address, name)` of every export the image's
+/// export trie places in the image: the names a stripped dylib still carries
+/// once its symbol table is gone. Re-exports and absolute exports name no
+/// address here.
+fn trie_exports(neutral: &object::File, bytes: &[u8]) -> Vec<(u64, String)> {
+    use crate::loader::format::macho::exports::{parse_export_trie, ExportTarget};
+    use object::read::{Object, ObjectSegment};
+    let Some(base) = neutral
+        .segments()
+        .find(|s| s.file_range().0 == 0 && s.file_range().1 > 0)
+        .map(|s| s.address())
+    else {
+        return Vec::new();
+    };
+    let Some((off, size)) = export_trie_range(bytes) else {
+        return Vec::new();
+    };
+    let Some(trie) = bytes.get(off..off.saturating_add(size)) else {
+        return Vec::new();
+    };
+    parse_export_trie(trie)
+        .into_iter()
+        .filter_map(|e| match e.target {
+            ExportTarget::Offset(offset) => Some((base.wrapping_add(offset), e.name)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The file range of a thin little-endian Mach-O's export trie.
+fn export_trie_range(bytes: &[u8]) -> Option<(usize, usize)> {
+    let u32_at = |at: usize| Some(u32::from_le_bytes(bytes.get(at..at + 4)?.try_into().ok()?));
+    let header = match u32_at(0)? {
+        0xfeed_facf => 32,
+        0xfeed_face => 28,
+        _ => return None,
+    };
+    let mut at = header;
+    for _ in 0..u32_at(16)? {
+        let (cmd, size) = (u32_at(at)?, u32_at(at + 4)? as usize);
+        let range = match cmd {
+            0x8000_0033 => (u32_at(at + 8)?, u32_at(at + 12)?),
+            0x22 | 0x8000_0022 => (u32_at(at + 40)?, u32_at(at + 44)?),
+            _ => (0, 0),
+        };
+        if range.1 > 0 {
+            return Some((range.0 as usize, range.1 as usize));
+        }
+        if size < 8 {
+            return None;
+        }
+        at += size;
+    }
+    None
 }
 
 /// Strip the single leading `_` the C ABI prepends to Mach-O symbol names
@@ -412,6 +478,16 @@ mod tests {
     use super::*;
 
     /// `_printf` → `printf`; a name without the C-ABI underscore is untouched.
+    #[test]
+    fn a_stripped_dylib_keeps_its_trie_exports() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_trieonly_arm64");
+        let bytes = std::fs::read(path).unwrap();
+        let file = object::File::parse(bytes.as_slice()).unwrap();
+        let mut exports = trie_exports(&file, &bytes);
+        exports.sort();
+        assert_eq!(exports, [(0x298, "_trie_scale".to_string()), (0x2a4, "_trie_entry".to_string())]);
+    }
+
     #[test]
     fn underscore_strip() {
         assert_eq!(strip_leading_underscore(b"_printf"), b"printf".to_vec());

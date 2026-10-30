@@ -2133,7 +2133,9 @@ mod tests {
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
         // and kuna-machoehframe / a stripped Mach-O's __eh_frame FDE starts join the inventory
         // and kuna-machobinds / a Mach-O pointer slot filled by a bind is named for its import
-        assert_eq!(count, 613, "corpus file count drifted");
+        // and kuna-exporttrie / Mach-O export tries name stripped exports and cross-image imports through re-exports
+        // and kuna-dyldcompanion / companion images join a dyld cache rebuild
+        assert_eq!(count, 615, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

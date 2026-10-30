@@ -62,8 +62,16 @@ pub fn read_selected_image(path: &Path) -> Option<Result<Vec<u8>, String>> {
         return None;
     }
     Some(DyldCache::open(path).and_then(|cache| {
-        let index = cache.select(kuna_decomp::kuna_dyldcache::selected_image().as_deref())?;
-        cache.extract(index)
+        let selection = kuna_decomp::kuna_dyldcache::selected_image();
+        let mut names = selection.as_deref().map(|s| s.split('+').map(str::trim));
+        let index = cache.select(names.as_mut().and_then(|n| n.next()))?;
+        let companions = names
+            .into_iter()
+            .flatten()
+            .filter(|n| !n.is_empty())
+            .map(|n| cache.select(Some(n)))
+            .collect::<Result<Vec<_>, _>>()?;
+        cache.extract_with(index, &companions)
     }))
 }
 
@@ -74,6 +82,7 @@ pub fn image_size(path: &Path, name: Option<&str>) -> Option<Result<u64, String>
     if !is_dyld_cache_file(path) {
         return None;
     }
+    let name = name.map(|n| n.split('+').next().unwrap_or(n).trim());
     Some(DyldCache::open(path).and_then(|cache| {
         let image = cache.image_layout(cache.select(name)?)?;
         Ok(image.segments.iter().filter(|s| s.name != "__LINKEDIT").map(|s| s.filesize).sum())

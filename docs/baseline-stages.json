@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3376,
-    3376
+    3383,
+    3383
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -986,7 +986,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 356 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 357 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -2415,6 +2415,9 @@
     "data:disabled pair partition drops the loaded pair at the first call",
     "data:disabled retains biased literal",
     "data:double is stored in its declared field",
+    "data:dyldcompanion #1: only the merged pass lists the companion's function",
+    "data:dyldcompanion #2: with the companion the callee decompiles",
+    "data:dyldcompanion #3: the primary's call keeps its import name",
     "data:dyldcrossrefs #1: off leaves the island call unnamed",
     "data:dyldcrossrefs #2: off leaves the GOT slot call unnamed",
     "data:dyldcrossrefs #3: on names the island after its target in the other image",
@@ -2465,6 +2468,10 @@
     "data:escaped addresses retain the shared backing",
     "data:escaped scalar storage keeps one physical backing",
     "data:exact signed32-to-double intermediate still combines",
+    "data:exporttrie #1: off names the island after the target's own symbol",
+    "data:exporttrie #2: off leaves the stripped dylib's export unnamed",
+    "data:exporttrie #3: on names the island after the import, through the re-export",
+    "data:exporttrie #4: on names the stripped dylib's export from its trie",
     "data:fieldtype #10: the end pointers take the walking pointers' type, so the loop test needs no cast in either pass",
     "data:fieldtype #11: a union member read as a double and as a pointer stays raw bytes in both passes",
     "data:fieldtype #12: an index read at a table and handed to write stays a number in both passes, so write gets it through a cast",

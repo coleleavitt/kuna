@@ -755,9 +755,6 @@ mod tests {
         assert_eq!(decode_ptr(auth, ptr_format::ARM64E_FIRMWARE, base), (1, Some(base + 0x4020)));
     }
 
-    /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
-    /// the inert path.
-    #[test]
     #[test]
     fn decode_ptr32_rebase_bias_and_bind() {
         let format = Format { id: ptr_format::PTR_32, imagebase: 0x4000, max_valid: 0x0010_0000 };
@@ -778,6 +775,9 @@ mod tests {
         assert_eq!(decode_segmented(5 << 28, &segs), (0, None));
     }
 
+    /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
+    /// the inert path.
+    #[test]
     fn decode_unknown_format_is_inert() {
         let (next, target) = decode_ptr(0xDEAD_BEEF_0000_0000, 999, 0);
         assert_eq!((next, target), (0, None));

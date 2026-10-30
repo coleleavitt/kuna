@@ -995,6 +995,11 @@ kuna_options! { self, p1;
     "unwindstarts" => {
         on_off!(analysis_unwindstarts, "Mach-O __unwind_info function-start discovery")
     },
+    "exporttrie" => {
+        let val = on_or_off(p1)?;
+        crate::kuna_exporttrie::set_exporttrie_env(val);
+        Ok(format!("Mach-O export-trie naming turned {}", if val { "on" } else { "off" }))
+    },
     "machobinds" => {
         let val = on_or_off(p1)?;
         crate::kuna_machobinds::set_machobinds_env(val);
