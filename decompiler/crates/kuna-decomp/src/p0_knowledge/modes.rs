@@ -612,7 +612,11 @@ mod tests {
               "itaniumeh",
               // `mba` targets obfuscated code; on ordinary code it can only
               // refold arithmetic the compiler already chose.
-              "mba"];
+              "mba",
+              // `contextnames` renames loop counters and returned locals that the
+              // CLI tests of other features, which run under `auto`, spell as
+              // `vN`; it joins the preset once those are re-pinned.
+              "contextnames"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open

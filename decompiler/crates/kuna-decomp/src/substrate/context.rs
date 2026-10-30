@@ -1286,6 +1286,9 @@ pub struct ArchContext {
     /// (kuna `libcnames`) Name locals from the library calls they meet.
     /// See [`crate::kuna_libcnames`].
     pub libc_names: bool,
+    /// (kuna `contextnames`) Name loop counters and the returned local.
+    /// See [`crate::kuna_contextnames`].
+    pub context_names: bool,
     /// Opt-in frame-bounded arrays for call-escaped integer storage.
     pub call_array_extent: bool,
     /// (kuna `stackstruct`) Lay out an address-taken frame record as one structure.
@@ -2050,6 +2053,7 @@ impl ArchContext {
             local_stack_views: true,
             stack_views: false, // stackviews (opt-in)
             libc_names: false, // libcnames (opt-in)
+            context_names: false, // contextnames (opt-in)
             guarded_read_trim: false,
             tied_store_keep: false,      // tiedstorekeep (Architecture::reset_defaults sets the shipped default: on)
             loop_counter_store: false,   // loopcounterstore (Architecture::reset_defaults sets the shipped default: on)

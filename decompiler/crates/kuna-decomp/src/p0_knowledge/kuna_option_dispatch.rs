@@ -846,6 +846,7 @@ kuna_options! { self, p1;
     "guardedreadtrim" => on_off!(guarded_read_trim, "guarded stack-read trim placement"),
     "castnarrow" => on_off!(cast_narrow, "implied narrowing-cast elision"),
     "libcnames" => on_off!(libc_names, "library-call local names"),
+    "contextnames" => on_off!(context_names, "loop-counter and result local names"),
     "declorder" => {
         let (mode, msg) = crate::kuna_declorder::OptionDeclOrder.apply(p1)?;
         self.decl_order = mode;
