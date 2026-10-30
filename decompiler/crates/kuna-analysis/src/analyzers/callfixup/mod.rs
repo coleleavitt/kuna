@@ -111,6 +111,9 @@ pub fn target_fixup_map(arch: &Architecture) -> Vec<(String, String)> {
         if fixup_name == kuna_decomp::kuna_msvcftol::FIXUP_NAME && !arch.msvc_ftol {
             continue;
         }
+        if fixup_name.starts_with(kuna_decomp::kuna_arithhelpers::FIXUP_PREFIX) && !arch.arith_helpers {
+            continue;
+        }
         for target in &cf.target_symbol_names {
             if let Ok(target) = std::str::from_utf8(target) {
                 map.push((target.to_string(), fixup_name.to_string()));

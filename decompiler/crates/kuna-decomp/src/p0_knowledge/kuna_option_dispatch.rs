@@ -192,6 +192,7 @@ kuna_options! { self, p1;
     },
     "decodehalt" => on_off!(decode_halt, "Decode-failure halt reporting"),
     "msvcftol" => on_off!(msvc_ftol, "MSVC __ftol-family call-fixup"),
+    "arithhelpers" => on_off!(arith_helpers, "arithmetic runtime-helper call-fixups"),
     "tailcalljump" => {
         let (jumps, tables, msg) = crate::kuna_tailcalljump::tail_call_mode(p1)?;
         self.tail_call_jumps = jumps;
