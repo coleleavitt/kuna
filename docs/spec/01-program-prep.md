@@ -2801,7 +2801,7 @@ moves.
   (`pass.rs (DataObjectFact)`) and the commit maps an `undefined<size>` entry —
   namelocked but *not* typelocked, so inference still recovers the real type —
   matching how IDA Pro and Ghidra name symbol-table globals (`max_width`, not
-  `dat_<addr>`). (kuna `dwarfglobaltypes`, default on) The pass also emits each
+  `dat_<addr>`). (kuna `dwarfglobaltypes`, default off: a `decompile-project` export does not yet declare such a global with its type in the header) The pass also emits each
   such global with its declared type (`pass.rs (AnalysisOutput::dwarf_typed_globals)`)
   when that type is sized, complete and not void; with the option on the commit
   drops the untyped entry for those addresses and maps the typed one,

@@ -304,13 +304,15 @@ fn a_swap_among_three_locals_keeps_every_name() {
 /// name-locked Symbol, so the numbering skips it as it skips a caller's name.
 /// An unrelated local used to take `v1` too, which pushed the source's own `v1`
 /// to `v1_1` (`widest`) or put a `v1_1` beside the parameter `v1` (`same_kind`).
+/// `widest`'s loop counter is declared in the `for` scope, so `dwarfscopes`
+/// names it `i`.
 #[test]
 fn a_source_name_of_the_default_form_keeps_it() {
     for (function, declarations) in [
         ("same_kind", &["int4 same_kind(item *v1,item *v2)", "int4 v3; // eax"][..]),
         (
             "widest",
-            &["int8 v1; // stack - 0x18", "int4 v3; // stack - 0x1c", "v1 = *values;"][..],
+            &["int8 v1; // stack - 0x18", "int4 i; // stack - 0x1c", "v1 = *values;"][..],
         ),
     ] {
         let (code, rejected) = decompile_fixture("dwarfvnames_x86_64", function, &[]);

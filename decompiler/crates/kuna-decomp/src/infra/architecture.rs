@@ -3701,7 +3701,7 @@ impl Architecture {
         // (kuna) DIV-141 built-in Win32 API signature table -- default-ON.
         self.analysis_win32sigs = true;
         self.analysis_tlsnames = true;
-        self.analysis_dwarfglobaltypes = true;
+        self.analysis_dwarfglobaltypes = false;
         self.storetype = crate::kuna_storetype::StoreTypeMode::Uefi;
         self.analysis_uefi = true;
         // (kuna) DIV-139 declared-name libc prototype lookup -- default-ON.

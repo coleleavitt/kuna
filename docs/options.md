@@ -3296,11 +3296,11 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-57
 - **Example:** `option dwarfscopes off`
 
-### `dwarfglobaltypes` -- on | off, default `on`
+### `dwarfglobaltypes` -- on | off, default `off`
 
 - **Symptoms:** a global described by DWARF as a struct renders as raw offsets off its address; a DWARF-typed pointer global is a long or undefined8; a -g binary's globals have names but not types.
 - **What it does:** Give a DWARF global its declared type. The DWARF pass names every CU-level DW_TAG_variable with a DW_OP_addr location, but used its DW_AT_type only to size an undefined<size> symbol, namelocked and not typelocked, so inference re-derived the type at every use: a `struct config` global read as `*(int *)(cfg + 8)`, a `const char *` table as a long. On, a global whose type is complete, sized and not void is committed typelocked and namelocked with that type, in place of the untyped entry; its uses read as fields, elements and pointers of the declared type. An incomplete aggregate or an unsized type keeps the sized untyped entry. A typed global outranks a string literal the scan found inside its bytes, so a `char msg[16]` global prints by name.
-- **When to flip:** On by default: the globals of a -g binary print with their source types (cfg.port, table[i].name). Flip off to see what inference alone recovers for a global, or when a DWARF type is wrong for the code (a global declared as one type and accessed as another through casts in the source).
+- **When to flip:** Off by default: a decompile-project export does not yet declare a typed global with its DWARF type in the generated header, so the exported body would read fields of an untyped object, and four workspace tests that pin global rendering move. Turn on for reading: the globals of a -g binary print with their source types (cfg.port, modes[i]). Leave off when exporting a project.
 - **Where / provenance:** P1/external-refinement · ida · analysis-enablement · ida95-59
 - **Example:** `option dwarfglobaltypes off`
 
