@@ -1139,6 +1139,8 @@ pub struct Architecture {
     pub range_fold: bool,
     /// (kuna) Rewrite a signed division or remainder by a power of two written as a select or a sign-mask shift. (option `pow2select`).
     pub pow2_select: bool,
+    /// (kuna) Recover `continue;` in while-do and do-while loops. (option `whilecontinue`).
+    pub while_continue: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) Region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -3174,6 +3176,7 @@ impl Architecture {
             strlen_scan: false, // (kuna) option strlenscan; reset_defaults sets the shipped default
             range_fold: false, // (kuna) option rangefold; reset_defaults sets the shipped default
             pow2_select: false, // (kuna) option pow2select; reset_defaults sets the shipped default
+            while_continue: false, // (kuna) option whilecontinue; reset_defaults sets the shipped default
             stack_store_guard: false,
             region_structure: true,
             guard_arm: false,
@@ -3658,6 +3661,7 @@ impl Architecture {
         self.decl_order = crate::kuna_declorder::DeclOrder::Natural; // (kuna) option declorder default `natural`: locals declare v1, v2, ..., v10; only the order of declaration lines moves, 0/675 datatest assertions
         self.range_fold = true; // (kuna) option rangefold default-on: folds only a comparison or mask a dominating branch's range decides; 0/675 datatest assertions, speed within noise; see docs/spec/03-ssa-and-simplification.md
         self.pow2_select = true; // (kuna) option pow2select default-on: rewrites only a select or sign-mask shift proved equal to x / 2^k or x % 2^k; 0/675 datatest assertions; see docs/spec/03-ssa-and-simplification.md
+        self.while_continue = true; // (kuna) option whilecontinue default-on: retags only a jump to a while-do condition or a bare do-while test as continue; 0/675 datatest assertions
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
@@ -4534,6 +4538,7 @@ impl Architecture {
         ctx.strlen_scan = self.strlen_scan; // strlenscan
         ctx.range_fold = self.range_fold; // rangefold
         ctx.pow2_select = self.pow2_select; // pow2select
+        ctx.while_continue = self.while_continue; // whilecontinue
         ctx.stack_store_guard = self.stack_store_guard;
         ctx.region_structure = self.region_structure; // regionstructure
         ctx.guard_arm = self.guard_arm; // guardarm

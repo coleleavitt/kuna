@@ -264,6 +264,9 @@ Three tiers:
 | if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts) |
 | a while header carries several comma-separated assignments | [`condstmts`](#condstmts) |
 | want a cap on how many statements a short-circuit operand may print | [`condstmts`](#condstmts) |
+| goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue) |
+| a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue) |
+| continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue) |
 | goto to a label that only returns | [`gotoreduce`](#gotoreduce) |
 | label_N: return; shared tail after an if | [`gotoreduce`](#gotoreduce) |
 | more gotos than angr for the same function | [`gotoreduce`](#gotoreduce) |
@@ -1973,6 +1976,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Lower it when a condition reads as a long comma chain of assignments (`if (a && (v1 = x, v2 = y, v3 = z, f(v1) == v2))`) and you would rather see the assignments as statements; raise it, or set `off`, when the cap trades a compact condition for a goto you do not want. On by default at 3, which keeps every operand with up to three statements in front of its test. 2 splits more operands (measured over the same six binaries: 8 functions change and gotos rise by 4), but it costs a second analysis of each affected function, which is +8% wall time on grep and +26% on libselinux because the affected functions there are large -- that is why the default is 3, not 2. Turning on condfold does not lift the cap: set `condstmts off` (or a larger N) to let condfold's `on`/`wide` budgets apply in full.
 - **Where / provenance:** P8/goto-quality · kuna · presentation-default · kuna-condstmts
 - **Example:** `option condstmts 2`
+
+### `whilecontinue` -- on | off, default `on`
+
+- **Symptoms:** goto label_N; inside a while loop where label_N: is the loop condition; a do-while body jumps to a label in front of the loop test; continue; printed in while(true) loops but goto in while(cond) loops.
+- **What it does:** Print a jump to a while-do or do-while loop's own test as `continue;`. `loopcontinue` retags a goto to the first leaf of the innermost infinite loop as a continue and resets the scope at a conditional loop, because there a `continue;` evaluates the test (or a for-loop's iterate statement) first. With this on, `kuna_loopcontinue::continue_points` gives each conditional loop the leaf its `continue;` resumes at: a while-do's condition block, unless the loop prints as a `for` (an iterate op), and a do-while's last leaf when every op there but the branch prints nothing of its own (not printed, a marker, or an implied output), so the leaf is the test alone. A `BlockGoto` or if-goto of the innermost such loop whose target's front leaf is that leaf becomes `f_continue_goto` before `mark_unstructured`, so its label goes too. A switch between the jump and the loop does not matter: C's `continue` skips switches.
+- **When to flip:** On by default: 0/675 datatest assertions move. Flip off to print the goto to the loop test. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib 1.3.2, libexpat, libyaml): 9 functions change, gotos 9,853 -> 9,838, `continue;` 50 -> 65, every one a `goto label_X;` to an empty `label_X: ;` directly above `} while (...)` (zlib inflate, Lua str_pack, four expat tokenizers). Jumps into the latch of a `while( true )` loop, the commoner shape, are unchanged: they resume after the loop head, not at it.
+- **Where / provenance:** P8/goto-quality · kuna · structure-recovery · kuna-whilecontinue
+- **Example:** `option whilecontinue off`
 
 ### `gotoreduce` -- on | off, default `on`
 

@@ -166,6 +166,19 @@ scope; conditional loops disable recovery because their continue may evaluate
 a condition or iterator rather than restart the first leaf. Other destinations
 retain gotos. `off` restores the original collapse precedence and rendering.
 
+**`whilecontinue` — the continue point of a conditional loop.** With
+`whilecontinue on` (the default, and only while `loopcontinue` is on),
+`kuna_loopcontinue.rs (continue_points)` gives a conditional loop the leaf its
+`continue;` resumes at, and `recover_continues` uses it as the scope instead
+of disabling recovery. A while-do resumes at the front leaf of its condition
+block, unless it prints as a `for` (an iterate op), whose `continue;` would run
+the iterate statement first; in the overflow form the condition block prints
+first inside `while( true ) { ... }`, which is where the jump lands too. A
+do-while resumes at the last leaf of its body only when that leaf prints
+nothing but the loop test: every op besides the branch is not printed, a
+marker, or has an implied output. A jump into any other leaf, including the
+latch of a `while( true )` loop, keeps its goto. `off` restores the reset.
+
 **(angr) `condfold` — folding across a *complex* sibling.** `rule_block_or`
 requires the sibling condition block (upstream's `orblock`, the right operand
 of the prospective `&&`/`||`) to be *non-complex*: `substrate/funcdata_block.rs

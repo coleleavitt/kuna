@@ -833,6 +833,7 @@ kuna_options! { self, p1;
     "gotonext" => on_off!(goto_next, "goto-to-next suppression"),
     "rangefold" => on_off!(range_fold, "dominating-range folding"),
     "pow2select" => on_off!(pow2_select, "power-of-two division select recovery"),
+    "whilecontinue" => on_off!(while_continue, "while-loop continue recovery"),
     "castimplied" => on_off!(cast_implied, "C-implied cast elision"),
     "castsign" => on_off!(cast_sign, "signed declarations for signed-only locals"),
     "castternary" => on_off!(cast_ternary, "conditional-arm cast elision"),

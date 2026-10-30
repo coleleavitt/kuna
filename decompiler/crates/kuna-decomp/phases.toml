@@ -4673,6 +4673,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "whilecontinue"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P8"
+subphase = "goto-quality"
+strength = "HARD"
+rewind = "P8"
+issue = "kuna-whilecontinue"
+summary = "Print a jump to a while-do or do-while loop's own test as `continue;`. `loopcontinue` retags a goto to the first leaf of the innermost infinite loop as a continue and resets the scope at a conditional loop, because there a `continue;` evaluates the test (or a for-loop's iterate statement) first. With this on, `kuna_loopcontinue::continue_points` gives each conditional loop the leaf its `continue;` resumes at: a while-do's condition block, unless the loop prints as a `for` (an iterate op), and a do-while's last leaf when every op there but the branch prints nothing of its own (not printed, a marker, or an implied output), so the leaf is the test alone. A `BlockGoto` or if-goto of the innermost such loop whose target's front leaf is that leaf becomes `f_continue_goto` before `mark_unstructured`, so its label goes too. A switch between the jump and the loop does not matter: C's `continue` skips switches."
+use_when = "On by default: 0/675 datatest assertions move. Flip off to print the goto to the loop test. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib 1.3.2, libexpat, libyaml): 9 functions change, gotos 9,853 -> 9,838, `continue;` 50 -> 65, every one a `goto label_X;` to an empty `label_X: ;` directly above `} while (...)` (zlib inflate, Lua str_pack, four expat tokenizers). Jumps into the latch of a `while( true )` loop, the commoner shape, are unchanged: they resume after the loop head, not at it."
+example = "option whilecontinue off"
+source_decompiler = "kuna"
+inspiration = "expat xmltok little2_attributeValueTok (gcc -O2): `case 7: v1 = &v1[4]; goto label_407fe6;` with `label_407fe6: ;` directly above `} while (2 <= a2 - v1);`"
+change_kind = "structure-recovery"
+tier = "transform"
+symptoms = "goto label_N; inside a while loop where label_N: is the loop condition|a do-while body jumps to a label in front of the loop test|continue; printed in while(true) loops but goto in while(cond) loops"
+live_field = "while_continue"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "gotoreduce"
 values = "on|off"
 default = "on"

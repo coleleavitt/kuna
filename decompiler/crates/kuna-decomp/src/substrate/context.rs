@@ -1328,6 +1328,8 @@ pub struct ArchContext {
     pub range_fold: bool,
     /// (kuna) `pow2select` — rewrite a signed division or remainder by a power of two written as a select or a sign-mask shift.
     pub pow2_select: bool,
+    /// (kuna) `whilecontinue` — recover `continue;` in while-do and do-while loops.
+    pub while_continue: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -2041,6 +2043,7 @@ impl ArchContext {
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)
+            while_continue: false, // whilecontinue (live value copied from the Architecture)
             stack_store_guard: false,
             region_structure: false,     // regionstructure (opt-in default-off)
             guard_arm: false,            // guardarm (opt-in default-off)
