@@ -1292,6 +1292,9 @@ kuna_options! { self, p1;
     "rawdiscover" => {
         on_off!(analysis_rawdiscover, "Raw-image recursive function discovery")
     },
+    "objectview" => {
+        on_off!(analysis_objectview, "Object-file analysis passes on TE and raw images")
+    },
     "noreturn_disc" => {
         on_off!(analysis_noreturn_disc, "Discovered-no-return Listing consumer")
     },

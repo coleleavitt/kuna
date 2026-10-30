@@ -2451,6 +2451,9 @@ pub struct Architecture {
     /// those seeds instead. Raw-container only, so every object-format parity
     /// gate is byte-identical.
     pub analysis_rawdiscover: bool,
+    /// (kuna) Run the object-file analysis passes on a TE or `--raw-image` load
+    /// over a rebuilt PE / ELF view of it (`objectview`); default **on**.
+    pub analysis_objectview: bool,
     /// (kuna) Gate the discovered-no-return consumer (`noreturn_disc`), the first
     /// Listing/xref consumer; default **off**. It is a flow heuristic (a callee is
     /// no-return if ≥3 of its call sites show no valid fall-through, iterated to a
@@ -3545,6 +3548,7 @@ impl Architecture {
             analysis_lazyfuncs: false,
             lazy_entry_starts: Vec::new(),
             analysis_rawdiscover: false,
+            analysis_objectview: false,
             analysis_noreturn_disc: false,
             analysis_noreturn_discstrict: false,
             analysis_noreturn_propagate: false,
@@ -4068,6 +4072,7 @@ impl Architecture {
         self.analysis_lazyfuncs = false;
         self.lazy_entry_starts.clear();
         self.analysis_rawdiscover = true; // (kuna) default-on: a raw image's only discovery. ADDS FUNCTIONS (direct-call targets reached from the --entry seeds). Raw-container only, so every parity gate is byte-identical; restore the seeds-only inventory with `option rawdiscover off`
+        self.analysis_objectview = true; // (kuna) default-on: the object-file analysis passes over a rebuilt PE/ELF view of a TE or raw image. TE/raw containers only, so every parity gate is byte-identical
         self.analysis_noreturn_disc = true; // (kuna) DIV-22 default-on: Ghidra's FindNoReturnFunctionsAnalyzer ≥3-evidence discovered-no-return (default-on in Ghidra). REMOVES CODE (marks a callee no-return from ≥3 dead-fall-through sites → drops post-call dead code at callers). Gated on the Listing (default-off), so every parity gate is byte-identical (real-ELF Listing path only); restore with `option noreturn_disc off`
         self.analysis_noreturn_discstrict = true; // (kuna, GH-312) DIV-92 default-on: drop noreturn_disc's decode-failure evidence arm, keeping the terminal arm + the two positive arms. RESTORES CODE (a forged no-return verdict no longer deletes the caller's tail). Gated on the Listing (default-off), so every parity gate is byte-identical (real-ELF Listing path only); restore the legacy three-arm tally with `option noreturn_discstrict off`
         self.analysis_noreturn_propagate = true; // (kuna) DIV-14 default-on: REMOVES CODE (call-graph no-return propagation drops post-call dead code). Gated on the Listing (default-off), so every parity gate is byte-identical (real-ELF Listing path only); restore with `option noreturn_propagate off`

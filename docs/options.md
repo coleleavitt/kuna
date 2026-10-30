@@ -836,6 +836,9 @@ Three tiers:
 | kuna functions on a --raw-image reports one function whose size is the whole file | [`rawdiscover`](#rawdiscover) |
 | decompile-all on a raw image emits a single enormous body | [`rawdiscover`](#rawdiscover) |
 | a firmware image decompiles only at addresses passed by hand | [`rawdiscover`](#rawdiscover) |
+| kuna strings or functions on a TE image finds no strings and no functions beyond the entry | [`objectview`](#objectview) |
+| a raw firmware image decompiles with every string as a bare address | [`objectview`](#objectview) |
+| prologue-only functions in a raw image are never discovered | [`objectview`](#objectview) |
 | stripped static-linked library function stays sub_<addr> although its fingerprint is known | [`fid`](#fid) |
 | no .fid database renames applied in a stripped binary | [`fid`](#fid) |
 | a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
@@ -3356,6 +3359,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default for --raw-image and TE images. Flip off to restore the seeds-only inventory when the walk follows a decoded call into data and mints entries that are not functions, which a bytes-are-code image with no section table can do. A function no direct call reaches and no --entry names is still undiscovered either way; assert it with --define-function.
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-raw-image-function-discovery
 - **Example:** `kuna functions fw.bin --raw-image --target Cortus:LE:32:APS3:default --base 0x80000000 --entry 0x8000010c --option rawdiscover off`
+
+### `objectview` -- on | off, default `on`
+
+- **Symptoms:** kuna strings or functions on a TE image finds no strings and no functions beyond the entry; a raw firmware image decompiles with every string as a bare address; prologue-only functions in a raw image are never discovered.
+- **What it does:** Run the object-file analysis passes (strings, prologue and entry discovery, the deferred Listing consumers, address tables, crypto constants, ...) on a UEFI TE image or a --raw-image load. Every pass reads an object::File, which neither container has: a TE image is a PE whose DOS, PE and optional headers were stripped to a 40-byte header, and a raw image has none. The loader keeps mapping them as before; at the commit a PE view of the TE (a rewritten header of StrippedSize bytes in front of the TE's section table, so every PointerToRawData stays valid) or an ELF view of the raw image (one PT_LOAD and one read-write-execute .text section at --base, with the language's machine, class and byte order) is handed to the same per-pass list an object image runs, with the same per-pass gates. Word-addressed raw targets keep the old behavior.
+- **When to flip:** On by default for TE and --raw-image loads. Flip off to get only the container entry, the --entry seeds and rawdiscover's call closure, as before this view existed.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-te-raw-object-view
+- **Example:** `kuna functions fw.bin --raw-image --target ARM:LE:32:v7 --base 0x8000000 --entry 0x8000101 --isa thumb --option objectview off`
 
 ### `fid` -- on | off, default `off`
 

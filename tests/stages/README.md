@@ -149,6 +149,7 @@ writeup, not here.
 
 | `re-constselectjump.xml` | RE-friction need `conditional-indirect-branches-hide` | S2 switch model (destination selected between constant addresses by a conditional move) | `option constselectjump on\|off` |
 | `kuna-entryretdispatch.xml` | RE-friction need `entry-point-ret-dispatch` | S2 flow classification (proven entry `push continuation; push target; ret` links become calls) | `option entryretdispatch on\|off` |
+| `kuna-objectview.xml` | a UEFI TE image and a `load raw` image ran no object-file analysis pass, so a string read stayed `*(char *)(v + 0x402000)` and the TE entry kept no UEFI prototype (authored C, fixtures `fixtures/objectview/`, built by `gen_objectview.py`) | P1 program-prep, code-data-partition (`loader/kuna_objectview.rs` PE/ELF views; `engine.rs run_object_view_passes`) | `option objectview on\|off` |
 | `kuna-extent-fallthrough.xml` | [Kuna #850](https://github.com/Noelo-Lab/kuna/issues/850) | S2 flow classification (caller-declared extent vs discovered interior entry) | `option funcboundflow on\|off` |
 | `kuna-extent-direct-branch.xml` | [Kuna #850](https://github.com/Noelo-Lab/kuna/issues/850) | S2 flow classification (in-extent direct and recovered indirect branches vs tail-call inference; out-of-extent veneer control) | `option tailcalljump on\|off` |
 | `kuna-conditional-tail.xml` | Authored bounded conditional forwarding | P2 flow classification (a known out-of-extent entry is called only on the taken path) | `option tailcalljump on\|direct\|off` |

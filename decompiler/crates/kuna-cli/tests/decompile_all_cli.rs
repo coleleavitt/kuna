@@ -940,10 +940,19 @@ fn te_image_discovers_the_entrys_call_closure() {
     }
 
     let (stdout, stderr, ok) = run_kuna(&[
-        "functions", &binary, "--option", "rawdiscover", "off", "--sleighpath", &sp,
+        "functions", &binary, "--option", "rawdiscover", "off", "--option", "objectview", "off",
+        "--sleighpath", &sp,
     ]);
     assert!(ok, "TE functions without discovery failed: {stderr}");
     assert_eq!(stdout.lines().count(), 1, "{stdout}");
+
+    let (stdout, stderr, ok) = run_kuna(&[
+        "functions", &binary, "--option", "rawdiscover", "off", "--sleighpath", &sp,
+    ]);
+    assert!(ok, "TE functions through the PE view alone failed: {stderr}");
+    for entry in ["0x401000", "0x401010", "0x401020"] {
+        assert!(stdout.contains(entry), "{entry} missing from the PE-view inventory:\n{stdout}");
+    }
 }
 
 #[test]
@@ -1000,7 +1009,7 @@ fn te_image_auto_detects_entry_mapping_and_thumb_context() {
     ]);
     assert!(ok, "TE functions with ghidra names failed: {stderr}");
     assert!(stdout.contains("\"count\": 1"), "{stdout}");
-    assert!(stdout.contains("\"name\": \"func_0x00401000\""), "{stdout}");
+    assert!(stdout.contains("\"func_0x00401000\""), "{stdout}");
 
     let (stdout, stderr, ok) = run_kuna(&[
         "read",
@@ -1080,13 +1089,12 @@ fn te_image_auto_detects_entry_mapping_and_thumb_context() {
 }
 
 #[test]
-fn te_object_view_commands_report_capability_errors() {
+fn te_object_view_commands_read_the_pe_view() {
     let path = write_thumb_te();
     let binary = path.to_string_lossy().into_owned();
     let sp = specs();
 
-    // Every object-view consumer answers with the same capability error, never
-    // the object crate's own parse failure.
+    // Every object-view consumer reads the TE through its PE view.
     for (command, flag) in [
         ("functions", vec!["--summary"]),
         ("functions", vec!["--reachable-from", "0x401000"]),
@@ -1099,12 +1107,7 @@ fn te_object_view_commands_report_capability_errors() {
         let mut args = vec![command, &binary, "--sleighpath", &sp];
         args.extend(flag);
         let (_stdout, stderr, ok) = run_kuna(&args);
-        assert!(!ok, "TE {command} unexpectedly succeeded");
-        assert!(
-            stderr.contains("UEFI TE input has no object-file view"),
-            "unexpected TE diagnostic from {command}: {stderr}"
-        );
-        assert!(!stderr.contains("Unknown file magic"), "leaked object parser error: {stderr}");
+        assert!(ok, "TE {command} failed: {stderr}");
     }
     std::fs::remove_file(path).unwrap();
 }
@@ -1798,7 +1801,7 @@ fn raw_image_discovers_called_functions_beyond_its_seeds() {
     let (stdout, stderr, ok) = run_kuna(&[
         "functions", &binary, "--json", "--raw-image", "--target", target, "--base",
         "0x80000000", "--entry", "0x80000000", "--option", "rawdiscover", "off",
-        "--sleighpath", &sp,
+        "--option", "objectview", "off", "--sleighpath", &sp,
     ]);
     assert!(ok, "raw functions with rawdiscover off failed: {stderr}");
     assert!(stdout.contains("\"count\": 1"), "{stdout}");
