@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3703,
-    3703
+    3707,
+    3707
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 414 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 417 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -3109,6 +3109,10 @@
     "data:oxidizer-SecurityCheck #1: the panic helper call is emitted only with the option off",
     "data:oxidizer-SecurityCheck #2: the bounds guard is emitted only with the option off",
     "data:oxidizer-SecurityCheck #3: the guarded load itself is untouched (emitted by both passes)",
+    "data:p69 #1: both passes keep the case fall-through of fall",
+    "data:p69 #2: both passes keep the division by 4 of the power argument path",
+    "data:p69 #3: both passes keep strcase's outer loop exit",
+    "data:p69 #4: fall tests 8 <= a0 in both passes; with the options on arith does too, before its switch",
     "data:panicloc #1: off passes the Location as an address",
     "data:panicloc #2: on names the Location after its position",
     "data:panicloc #3: the message is bounded by its (ptr, len) pair, not glued to the next literal (both passes)",

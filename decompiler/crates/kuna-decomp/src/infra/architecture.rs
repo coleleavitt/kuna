@@ -1199,6 +1199,10 @@ pub struct Architecture {
     /// (kuna) Collapse an inline `repnz scasb` string length into `strlen`
     /// (option `strlenscan`).  See [`crate::p3_dataflow::kuna_strlenscan`].
     pub strlen_scan: bool,
+    /// (kuna) Let a repeated rule-pool sweep visit only the ops near the previous sweep's rewrites. (option `dirtypool`).
+    pub dirty_pool: bool,
+    /// (kuna) Merge identical pure ops that read the same varnode once the rules settle. (option `latecse`).
+    pub late_cse: bool,
     /// (kuna) Sink `if (c) goto L` over the statements it skips and turn a backward goto into a loop. (option `gotosink`).
     pub goto_sink: bool,
     /// (kuna) Merge two comparisons of the same operands, combined by a boolean op or by two branches in a row, into one. (option `cmpmerge`).
@@ -1207,6 +1211,10 @@ pub struct Architecture {
     /// for `loweredswitch` to re-roll it into a switch; 0 = only binary-search
     /// cascades re-roll (option `linearswitch`).
     pub linear_switch: int4,
+    /// (kuna) An expression read more than `max_implied_ref` times still prints
+    /// inline when its terms times its uses is at most this; 0 = off (option
+    /// `implweight`).
+    pub impl_weight: int4,
     /// (kuna) Fold a comparison or mask whose outcome the ranges dominating
     /// branches establish fixes (option `rangefold`).  See
     /// [`crate::p3_dataflow::kuna_rangefold`].
@@ -3352,9 +3360,12 @@ impl Architecture {
             wide_slice_reduce: false, // (kuna) option wideslice; reset_defaults sets the shipped default (on)
             devectorize_reduction: false, // (kuna) option devectorize (opt-in default-off)
             strlen_scan: false, // (kuna) option strlenscan; reset_defaults sets the shipped default
+            dirty_pool: false, // (kuna) option dirtypool; reset_defaults sets the shipped default
+            late_cse: false, // (kuna) option latecse; reset_defaults sets the shipped default
             goto_sink: false, // (kuna) option gotosink; reset_defaults sets the shipped default
             cmp_merge: false, // (kuna) option cmpmerge; reset_defaults sets the shipped default
             linear_switch: 0, // (kuna) option linearswitch; reset_defaults sets the shipped default
+            impl_weight: 0, // (kuna) option implweight; reset_defaults sets the shipped default
             range_fold: false, // (kuna) option rangefold; reset_defaults sets the shipped default
             pow2_select: false, // (kuna) option pow2select; reset_defaults sets the shipped default
             while_continue: false, // (kuna) option whilecontinue; reset_defaults sets the shipped default
@@ -3894,9 +3905,12 @@ impl Architecture {
         self.range_fold = true; // (kuna) option rangefold default-on: folds only a comparison or mask a dominating branch's range decides; 0/675 datatest assertions, speed within noise; see docs/spec/03-ssa-and-simplification.md
         self.pow2_select = true; // (kuna) option pow2select default-on: rewrites only a select or sign-mask shift proved equal to x / 2^k or x % 2^k; 0/675 datatest assertions; see docs/spec/03-ssa-and-simplification.md
         self.while_continue = true; // (kuna) option whilecontinue default-on: retags only a jump to a while-do condition or a bare do-while test as continue; 0/675 datatest assertions
+        self.impl_weight = 0; // (kuna) option implweight
         self.linear_switch = 0; // (kuna) option linearswitch default off: re-rolling linear chains moves 4/675 datatest assertions (copytrim, partial union)
         self.cmp_merge = false; // (kuna) option cmpmerge default off: the merged comparisons move 5/675 datatest assertions (ccmp, bitfields, signed byte)
         self.goto_sink = true; // (kuna) option gotosink default-on: list edits around existing jumps only; 0/675 datatest assertions
+        self.late_cse = false; // (kuna) option latecse
+        self.dirty_pool = false; // (kuna) option dirtypool default off: a repeat sweep limited to the rewritten neighbourhood misses rules that act at a distance (wide-slice, devectorize stage tests)
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.rep_string = true; // (kuna) option repstring default-on: a rep movs/stos loop prints as memcpy/memset
         self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
@@ -4842,9 +4856,12 @@ impl Architecture {
         ctx.wide_slice_reduce = self.wide_slice_reduce; // wideslice
         ctx.devectorize_reduction = self.devectorize_reduction; // devectorize
         ctx.strlen_scan = self.strlen_scan; // strlenscan
+        ctx.dirty_pool = self.dirty_pool; // dirtypool
+        ctx.late_cse = self.late_cse; // latecse
         ctx.goto_sink = self.goto_sink; // gotosink
         ctx.cmp_merge = self.cmp_merge; // cmpmerge
         ctx.linear_switch = self.linear_switch; // linearswitch
+        ctx.impl_weight = self.impl_weight; // implweight
         ctx.range_fold = self.range_fold; // rangefold
         ctx.pow2_select = self.pow2_select; // pow2select
         ctx.while_continue = self.while_continue; // whilecontinue

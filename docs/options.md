@@ -41,6 +41,9 @@ Three tiers:
 | a0 != a1 && !(a0 < a1) on floats | [`cmpmerge`](#cmpmerge) |
 | two branches in a row test the same value against neighbouring constants and jump to one place | [`cmpmerge`](#cmpmerge) |
 | x == 3 or 3 < x printed as two tests | [`cmpmerge`](#cmpmerge) |
+| the same arithmetic expression on the same values is computed twice into two temporaries | [`latecse`](#latecse) |
+| v1 = a + b * 4; ... v2 = a + b * 4; where one would do | [`latecse`](#latecse) |
+| duplicated address arithmetic in both arms of an if | [`latecse`](#latecse) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -296,6 +299,9 @@ Three tiers:
 | a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch) |
 | loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch) |
 | nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch) |
+| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight) |
+| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight) |
+| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight) |
 | a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts) |
 | if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts) |
 | a while header carries several comma-separated assignments | [`condstmts`](#condstmts) |
@@ -563,6 +569,8 @@ Three tiers:
 | numerical integer conversion is stored in a float local | [`fputruncviews`](#fputruncviews) |
 | short call argument uses inverse floating storage unions | [`fputruncviews`](#fputruncviews) |
 | one floating register carries both integers and genuine floating values | [`fputruncviews`](#fputruncviews) |
+| rule pools spend most of their time re-testing ops nothing changed | [`dirtypool`](#dirtypool) |
+| a large function's simplification repeats full sweeps for a handful of rewrites | [`dirtypool`](#dirtypool) |
 | a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel) |
 | a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel) |
 | invoke-range calls lose their arguments | [`dexmodel`](#dexmodel) |
@@ -1635,6 +1643,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-cmpmerge
 - **Example:** `option cmpmerge on`
 
+### `latecse` -- on | off, default `off`
+
+- **Symptoms:** the same arithmetic expression on the same values is computed twice into two temporaries; v1 = a + b * 4; ... v2 = a + b * 4; where one would do; duplicated address arithmetic in both arms of an if.
+- **What it does:** Merge identical pure ops that read the same varnode once the rule pools settle: for every varnode with more than one reader, the readers `get_cse_hash` accepts (unary or binary, no COPY, LOAD, call or other effect) go through `Funcdata::cse_eliminate_list`, which keeps one op in a block dominating both and reads its output at both. An op whose value is a LOAD or STORE address is skipped: type recovery turns each such use into its own field or element access. Runs once per function in group `unreachable` (a rule that later splits the shared value again would otherwise alternate with it); upstream merges only MULTIEQUALs (ActionMultiCse) and SUBPIECE/INT_SRIGHT (RuleSelectCse).
+- **When to flip:** Turn on to see a value the source computed once and the compiler recomputed print once. Default off: over 4,072 x86-64 functions it changes 560 (many through synthesized struct numbering), and the shared values become explicit temporaries, so output grows (lines 180,432 -> 180,724, gotos 8,892 -> 8,940).
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-latecse
+- **Example:** `option latecse on`
+
 ### `strlenscan` -- on | off, default `on`
 
 - **Symptoms:** a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero; if (!v3) break; v3 -= 1; inside a loop that reads one byte per step; ~v3 - 1 or ~v3 - 5 where the source computes a string length; repnz scasb in the disassembly where IDA prints strlen.
@@ -2226,6 +2242,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Set `3` (or a larger count) when nested `if (v != 5) { if (v != 2) ... }` tests on one variable stand for a switch. Default off: re-rolling moves 4/675 datatest assertions (Copy trim #6-#8, Partial union #5). Measured at `3` over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 13 functions change, switch 298 -> 309, if 20,327 -> 20,299, gotos unchanged in total (lua_compare +2, bzip2 compress and uncompress -1 each), lines +69. A switch installed in a session stays when the option is turned off later for the same function (the installed jump table is kept), so compare off before on.
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-linearswitch
 - **Example:** `option linearswitch 3`
+
+### `implweight` -- off | <n>, default `off`
+
+- **Symptoms:** a tiny expression such as a0 + 1 read three times gets its own temporary; many one-use-looking temporaries for small expressions read in several places; want small shared expressions printed inline and large ones kept in a variable.
+- **What it does:** Let an expression read by more than `max_implied_ref` ops still print inline when its terms times its readers is at most N. ActionMarkExplicit takes such a varnode as a multi-reader candidate (max_implied_ref raised to N) and process_multiplier caps its terms at min(max_term_duplication, N / readers), so a small expression read three times prints at each use and a large one keeps its temporary.
+- **When to flip:** Set N (2..64) to inline small shared expressions. Default off (upstream: at most max_implied_ref = 2 readers, any size). At 6 over 4,072 x86-64 functions: 583 change, lines 180,432 -> 179,740, assignments 69,898 -> 69,370; a load read three times then prints three times (no write in between).
+- **Where / provenance:** P6/variable-merging · kuna · presentation-default · kuna-implweight
+- **Example:** `option implweight 8`
 
 ### `condstmts` -- off | 0 | 1 | 2 | 3 | <n>, default `3`
 
@@ -2830,6 +2854,14 @@ The control surface: each of these can make output worse on the wrong source sha
 ## Analysis & loader passes
 
 Program-prep enablement: what is discovered, decoded, and named before any function is decompiled.
+
+### `dirtypool` -- on | off, default `off`
+
+- **Symptoms:** rule pools spend most of their time re-testing ops nothing changed; a large function's simplification repeats full sweeps for a handful of rewrites.
+- **What it does:** A repeated sweep of a rule pool (rule_repeatapply) visits only the ops near the previous sweep's rewrites: when a rule changes an op, the op and every op within two def-use steps of it are recorded; the next sweep runs rules on those ops and on ops created since the previous sweep began, and skips the rest. The first sweep of every pool invocation still visits every op.
+- **When to flip:** Turn on for speed on large functions: lua -O0 (gcc) user time 79.4 s -> 31.2 s. Default off: rules that act more than two steps from the op they match reach a different fixpoint; 31 of 4,072 functions print differently (equivalent forms) and the wide-slice and devectorize stage tests lose their folds.
+- **Where / provenance:** P3/simplification-quiescence · kuna · speed · kuna-dirtypool
+- **Example:** `option dirtypool on`
 
 ### `dexmodel` -- on | off, default `on`
 

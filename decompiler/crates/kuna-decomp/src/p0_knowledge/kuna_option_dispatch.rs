@@ -671,6 +671,20 @@ kuna_options! { self, p1;
         self.cond_fold = val;
         Ok(msg)
     },
+    "implweight" => {
+        let field = p1.trim();
+        if field == "off" {
+            self.impl_weight = 0;
+            return Ok("Implied-expression weight limit turned off".to_string());
+        }
+        match field.parse::<i32>() {
+            Ok(n) if (2..=64).contains(&n) => {
+                self.impl_weight = n;
+                Ok(format!("An expression prints inline while its terms times its uses is at most {n}"))
+            }
+            _ => Err(KunaError::parse("Must specify off or a weight from 2 to 64")),
+        }
+    },
     "linearswitch" => {
         let field = p1.trim();
         if field == "off" {
@@ -861,6 +875,8 @@ kuna_options! { self, p1;
     "javanew" => on_off!(java_new, "Java new T(args) from an allocation and its <init> call"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
+    "dirtypool" => on_off!(dirty_pool, "dirty-op rule scheduling"),
+    "latecse" => on_off!(late_cse, "late common-subexpression elimination"),
     "gotosink" => on_off!(goto_sink, "goto sinking and backward-goto loops"),
     "cmpmerge" => on_off!(cmp_merge, "comparison merge"),
     "importdata" => on_off!(import_data, "import-slot data-read rendering"),

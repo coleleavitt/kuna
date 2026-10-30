@@ -2402,6 +2402,32 @@ the set of `x` sent down it; every positive `x` must reach the unbiased input
 most negative `x` both inputs hold the same value, so those two values may go
 either way. Varnodes are compared through their `COPY` chains.
 
+**latecse, implweight, dirtypool** (all default off).
+`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_latecse.rs
+(ActionLateCse)`, option `latecse`, runs once per function in group
+`unreachable`: for every varnode with more than one reader, the readers that
+`get_cse_hash` accepts (pure unary or binary ops, no COPY or LOAD) go through
+`Funcdata::cse_eliminate_list`, which keeps one op in a block dominating both
+and reads its output at both. An op whose value is a LOAD or STORE address is
+skipped, because type recovery turns each such use into its own field access.
+Once per function, because a rule that splits a shared value again would
+otherwise alternate with it in the repeating fullloop.
+
+Option `implweight N` changes `ActionMarkExplicit`
+(`decompiler/crates/kuna-decomp/src/p6_variables/coreaction_cleanup.rs`):
+a varnode with more readers than `max_implied_ref` becomes a multi-reader
+candidate when it has at most N readers, and `process_multiplier` caps its
+terms at `min(max_term_duplication, N / readers)`, so an expression prints
+inline at every reader while terms times readers stays within N.
+
+Option `dirtypool` changes `ActionPool::apply`
+(`decompiler/crates/kuna-decomp/src/infra/action.rs`): when a rule changes an
+op, that op and every op within two def-use steps of it are recorded, and a
+repeated sweep of the same pool (`rule_repeatapply`) visits only those ops and
+the ops created since the previous sweep began. Rules that act further from
+the op they match can reach a different fixpoint, which is why it is off by
+default.
+
 **cmpmerge** — `decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_cmpmerge.rs
 (RuleCompareMerge, ActionBranchMerge)`, option `cmpmerge`, default off.
 A comparison of `a` and `b` is the set of relations that make it true: `LT`,

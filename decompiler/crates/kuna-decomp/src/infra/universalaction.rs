@@ -633,6 +633,7 @@ pub fn universal_sched(
             act!(ActionConditionalConst::boxed("analysis")),
             act!(crate::p3_dataflow::kuna_rangefold::ActionRangeFold::boxed("unreachable")),
             act!(crate::p3_dataflow::kuna_cmpmerge::ActionBranchMerge::boxed("unreachable")),
+            act!(crate::p3_dataflow::kuna_latecse::ActionLateCse::boxed("unreachable")),
         ],
     };
 
