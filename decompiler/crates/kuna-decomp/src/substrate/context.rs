@@ -1347,6 +1347,8 @@ pub struct ArchContext {
     pub devectorize_reduction: bool,
     /// (kuna) `strlenscan` — collapse an inline `repnz scasb` length into `strlen`.
     pub strlen_scan: bool,
+    /// (kuna) `cmpmerge` — merge two comparisons of the same operands, combined by a boolean op or by two branches in a row, into one.
+    pub cmp_merge: bool,
     /// (kuna) `linearswitch` — the fewest cases a linear equality chain needs to
     /// re-roll into a switch; 0 = off.
     pub linear_switch: int4,
@@ -2094,6 +2096,7 @@ impl ArchContext {
             wide_slice_reduce: false,    // wideslice (Architecture::reset_defaults sets the shipped default: on)
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
+            cmp_merge: false, // cmpmerge (live value copied from the Architecture)
             linear_switch: 0, // linearswitch (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)

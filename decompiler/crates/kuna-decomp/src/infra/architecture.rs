@@ -1199,6 +1199,8 @@ pub struct Architecture {
     /// (kuna) Collapse an inline `repnz scasb` string length into `strlen`
     /// (option `strlenscan`).  See [`crate::p3_dataflow::kuna_strlenscan`].
     pub strlen_scan: bool,
+    /// (kuna) Merge two comparisons of the same operands, combined by a boolean op or by two branches in a row, into one. (option `cmpmerge`).
+    pub cmp_merge: bool,
     /// (kuna) The fewest equality cases a linear compare chain on one variable needs
     /// for `loweredswitch` to re-roll it into a switch; 0 = only binary-search
     /// cascades re-roll (option `linearswitch`).
@@ -3348,6 +3350,7 @@ impl Architecture {
             wide_slice_reduce: false, // (kuna) option wideslice; reset_defaults sets the shipped default (on)
             devectorize_reduction: false, // (kuna) option devectorize (opt-in default-off)
             strlen_scan: false, // (kuna) option strlenscan; reset_defaults sets the shipped default
+            cmp_merge: false, // (kuna) option cmpmerge; reset_defaults sets the shipped default
             linear_switch: 0, // (kuna) option linearswitch; reset_defaults sets the shipped default
             range_fold: false, // (kuna) option rangefold; reset_defaults sets the shipped default
             pow2_select: false, // (kuna) option pow2select; reset_defaults sets the shipped default
@@ -3889,6 +3892,7 @@ impl Architecture {
         self.pow2_select = true; // (kuna) option pow2select default-on: rewrites only a select or sign-mask shift proved equal to x / 2^k or x % 2^k; 0/675 datatest assertions; see docs/spec/03-ssa-and-simplification.md
         self.while_continue = true; // (kuna) option whilecontinue default-on: retags only a jump to a while-do condition or a bare do-while test as continue; 0/675 datatest assertions
         self.linear_switch = 0; // (kuna) option linearswitch default off: re-rolling linear chains moves 4/675 datatest assertions (copytrim, partial union)
+        self.cmp_merge = false; // (kuna) option cmpmerge default off: the merged comparisons move 5/675 datatest assertions (ccmp, bitfields, signed byte)
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.rep_string = true; // (kuna) option repstring default-on: a rep movs/stos loop prints as memcpy/memset
         self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
@@ -4834,6 +4838,7 @@ impl Architecture {
         ctx.wide_slice_reduce = self.wide_slice_reduce; // wideslice
         ctx.devectorize_reduction = self.devectorize_reduction; // devectorize
         ctx.strlen_scan = self.strlen_scan; // strlenscan
+        ctx.cmp_merge = self.cmp_merge; // cmpmerge
         ctx.linear_switch = self.linear_switch; // linearswitch
         ctx.range_fold = self.range_fold; // rangefold
         ctx.pow2_select = self.pow2_select; // pow2select

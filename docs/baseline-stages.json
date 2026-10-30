@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3692,
-    3692
+    3697,
+    3697
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 412 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 413 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -2504,6 +2504,11 @@
     "data:checker-stack-aggregate #2: the low piece keeps the shared name",
     "data:checker-stack-aggregate #3: the high piece keeps the shared name",
     "data:checker-stack-aggregate #4: the address reference that triggered the false sibling remains",
+    "data:cmpmerge #1: by default the two integer branches print as an and-and",
+    "data:cmpmerge #2: merged, a < b || a == b is one test",
+    "data:cmpmerge #3: merged on doubles, the unordered outcome stays (not a1 > a0)",
+    "data:cmpmerge #4: a != b && !(a < b) on doubles is !(a <= b)",
+    "data:cmpmerge #5: the float and-ands print only with the option off",
     "data:coalesced unknown output retains input constants",
     "data:codescalar #1: with the option off the dereferenced byte is typed by the size-1 code pointee -- the bug",
     "data:codescalar #2: and the value stored back through the function pointer is cast to that widthless type",

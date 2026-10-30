@@ -2164,7 +2164,8 @@ mod tests {
         // and kuna-calleeretpurge-x86 / the personal/x86-stack calleeretpurge test, kept beside bugs-misc's
         // and kuna-condfold-default / condfold on by default keeps a loop test
         // and kuna-linearswitch / a linear equality chain re-rolls into a switch
-        assert_eq!(count, 677, "corpus file count drifted");
+        // and kuna-cmpmerge / two comparisons of the same operands merge into one
+        assert_eq!(count, 678, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
