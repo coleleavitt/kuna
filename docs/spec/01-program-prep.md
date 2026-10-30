@@ -7019,6 +7019,14 @@ no-return fact, a call followed by INT3 alone does not establish that its callee
 cannot return. The existing `listing`, `noreturn_propagate`, and `noreturn_reach`
 gates still control this inference.
 
+A seed need not be a function: an import a `-fno-plt` build reaches only through
+its `.got` slot is flagged at the slot's address (§1.3), and the call through it
+names no target the Listing can see. `terminal_slot_calls` therefore decodes each
+x86 `call [rip+disp32]` (x86-64) or `call [abs32]` (i386), `notrack` allowed,
+whose static target is unknown, and a call whose slot is a no-return seed ends its
+path in both rules exactly as a call to a terminal function does, so a `die()`
+ending in `exit()` through the GOT is concluded no-return as its PLT twin is.
+
 Two rules fold into the same fixpoint, both Ghidra-derived:
 
 - **The `error(nonzero,…)` value rule** (`noreturn_error`, DIV-16): glibc `error()`

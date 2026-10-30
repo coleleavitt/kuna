@@ -134,6 +134,10 @@ pub struct Listing {
     a32_extents: Vec<(u64, u64)>,
     /// A resume must rebuild ordinary coverage after optional i386 expansion.
     x86_switch_rebuild: bool,
+    /// Every address the load-time passes flagged no-return
+    /// ([`Listing::with_noreturn_seeds`]), function entry or not: an import's
+    /// `.got` slot is one, and the call through it names no function.
+    noreturn_targets: std::collections::BTreeSet<u64>,
 }
 
 impl Listing {
@@ -191,6 +195,7 @@ impl Listing {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         }
     }
 
@@ -363,6 +368,7 @@ impl Listing {
                     mode_runs: Vec::new(),
                     a32_extents: Vec::new(),
                     x86_switch_rebuild: false,
+                    noreturn_targets: Default::default(),
                 };
             }
         };
@@ -459,6 +465,7 @@ impl Listing {
             mode_runs: st.mode_runs,
             a32_extents: painter.a32_extents().to_vec(),
             x86_switch_rebuild: x86_tables.is_some(),
+            noreturn_targets: Default::default(),
         }
     }
 
@@ -533,6 +540,7 @@ impl Listing {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         }
     }
 
@@ -553,6 +561,7 @@ impl Listing {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         }
     }
 
@@ -574,6 +583,7 @@ impl Listing {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         }
     }
 
@@ -588,6 +598,7 @@ impl Listing {
     /// `DiscoveredFunction` is ignored (additive, never fails).
     #[must_use]
     pub fn with_noreturn_seeds(mut self, noreturn: &[u64], callfixup: &[u64]) -> Listing {
+        self.noreturn_targets.extend(noreturn);
         for &addr in noreturn {
             if let Some(f) = self.funcs.get_mut(&addr) {
                 f.has_no_return = true;
@@ -602,6 +613,12 @@ impl Listing {
             }
         }
         self
+    }
+
+    /// Did the load-time passes flag `addr` no-return? Answers for addresses
+    /// that are no function entry too, such as an import's `.got` slot.
+    pub fn is_noreturn_target(&self, addr: u64) -> bool {
+        self.noreturn_targets.contains(&addr)
     }
 
     // ---- instruction model ----
@@ -904,6 +921,7 @@ mod tests {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         };
         let addrs = |start, end| {
             listing

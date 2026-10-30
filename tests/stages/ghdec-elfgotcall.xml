@@ -28,7 +28,11 @@
     unnamed and carry the funcboundflow truncation warning.
     Pass 2 (`option peimportcall on`) is the FIX: `abort()` and `exit(2)` are
     named and no-return, and the warning raised before the restart is gone.
-    The table read in `pick` stays a table read in both passes.
+    The table read in `pick` stays a table read in both passes. With the
+    Listing built, `die` (whose only exit is the `exit` slot call) is
+    propagated no-return in both passes, so `main`'s `die("usage")` ends its
+    path: the propagation reads the slot's no-return fact, which the binding
+    does not gate.
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 c3
@@ -39,6 +43,7 @@ c3
   <com>clear architecture</com>
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elf_got_noreturn_x86_64</com>
   <com>option peimportcall off</com>
+  <com>option listing on</com>
   <com>read symbols</com>
   <com>load function check</com>
   <com>decompile</com>
@@ -47,11 +52,15 @@ c3
   <com>decompile</com>
   <com>print C</com>
   <com>load function pick</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function main</com>
   <com>decompile</com>
   <com>print C</com>
   <com>clear architecture</com>
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elf_got_noreturn_x86_64</com>
   <com>option peimportcall on</com>
+  <com>option listing on</com>
   <com>read symbols</com>
   <com>load function check</com>
   <com>decompile</com>
@@ -60,6 +69,9 @@ c3
   <com>decompile</com>
   <com>print C</com>
   <com>load function pick</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function main</com>
   <com>decompile</com>
   <com>print C</com>
   <com>quit</com>
@@ -70,5 +82,6 @@ c3
 <stringmatch name="ELFGOTCALL #4: on binds the abort slot and ends the flow there" min="1" max="1">^\s*abort\(\); // no-return$</stringmatch>
 <stringmatch name="ELFGOTCALL #5: on binds the exit slot and ends the flow there" min="1" max="1">^\s*exit\(2\); // no-return$</stringmatch>
 <stringmatch name="ELFGOTCALL #6: on names the other GOT call in die" min="1" max="1">__fprintf_chk\(</stringmatch>
+<stringmatch name="ELFGOTCALL #8: die joins the no-return set through its exit slot, in both passes" min="2" max="2">^\s*die\("usage"\); // no-return$</stringmatch>
 <stringmatch name="ELFGOTCALL #7: the .data.rel.ro function-pointer table stays a table in both passes" min="2" max="2">&amp;classes\[</stringmatch>
 </decompilertest>

@@ -134,7 +134,8 @@ impl AnalysisPass for NoReturnPropagatePass {
         // (`--option noreturn_reach`, default-on, DIV-19); Listing-gated like the rest,
         // so every parity gate stays byte-identical.
         let reach = ctx.arch.analysis_noreturn_reach;
-        for fact in propagate_noreturn(listing, &error_recog, reach) {
+        let slot_calls = terminal_slot_calls(listing, ctx.file);
+        for fact in propagate_noreturn(listing, &error_recog, &slot_calls, reach) {
             out.noreturn.push(fact);
         }
         // (kuna, Ghidra-gap) Emit every `call error(nonzero,…)` site so the decompile
@@ -436,6 +437,7 @@ fn function_is_no_return(
     listing: &Listing,
     entry: u64,
     terminal: &BTreeSet<u64>,
+    slot_calls: &BTreeSet<u64>,
     error_recog: &ErrorRecognizer,
 ) -> bool {
     let next = listing.next_function_after(entry).map(|f| f.entry);
@@ -452,8 +454,9 @@ fn function_is_no_return(
     else {
         return false;
     };
-    let last_is_terminal_transfer = (last.flow.is_call || last.flow.is_jump)
-        && last.flows.iter().any(|t| terminal.contains(t));
+    let last_is_terminal_transfer = ((last.flow.is_call || last.flow.is_jump)
+        && last.flows.iter().any(|t| terminal.contains(t)))
+        || slot_calls.contains(&last_vma);
     // (kuna, decbench F2) …or a tail `call error(nonzero,…)`: glibc error()/
     // error_at_line() with a nonzero constant status calls exit() and never
     // returns, so the wrapper is no-return even though `error` itself is NOT on the
@@ -525,11 +528,12 @@ fn function_reaches_only_noreturn(
     listing: &Listing,
     entry: u64,
     terminal: &BTreeSet<u64>,
+    slot_calls: &BTreeSet<u64>,
     error_recog: &ErrorRecognizer,
 ) -> bool {
     let next = listing.next_function_after(entry).map(|f| f.entry);
     let body = ListingInstructionBody::new(listing, entry, next);
-    reaches_only_noreturn_walk(&body, entry, next, terminal, error_recog)
+    reaches_only_noreturn_walk(&body, entry, next, terminal, slot_calls, error_recog)
 }
 
 /// The reachability walk core (extracted for unit testing): from `entry`, walk the
@@ -543,6 +547,7 @@ fn reaches_only_noreturn_walk<B: InstructionBody + ?Sized>(
     entry: u64,
     next: Option<u64>,
     terminal: &BTreeSet<u64>,
+    slot_calls: &BTreeSet<u64>,
     error_recog: &ErrorRecognizer,
 ) -> bool {
     let in_body = |vma: u64| vma >= entry && next.map_or(true, |n| vma < n);
@@ -590,8 +595,9 @@ fn reaches_only_noreturn_walk<B: InstructionBody + ?Sized>(
 
         // A call/jump whose static target is already no-return (or a value-conditional
         // `error(nonzero,…)` tail) ends this path: its fall-through is dead code.
-        let transfers_to_noreturn = (insn.flow.is_call || insn.flow.is_jump)
-            && insn.flows.iter().any(|t| terminal.contains(t));
+        let transfers_to_noreturn = ((insn.flow.is_call || insn.flow.is_jump)
+            && insn.flows.iter().any(|t| terminal.contains(t)))
+            || slot_calls.contains(&vma);
         // error(nonzero,…): use the same contiguous predecessor chain that the old
         // temporary straight-line window supplied to the argument back-scan.
         let transfers_to_error =
@@ -682,6 +688,49 @@ fn reaches_only_noreturn_walk<B: InstructionBody + ?Sized>(
     hit_noreturn
 }
 
+/// The call sites that call an import no-return through its `.got` slot: an x86
+/// `call qword ptr [rip+disp32]` (x86-64) or `call dword ptr [abs32]` (i386),
+/// optionally `notrack`, whose slot the load-time passes flagged no-return. Such a
+/// call names no function in the Listing, so the static-target test above cannot
+/// see it; without this a `-fno-plt` wrapper ending in `exit()` never joins the
+/// terminal set.
+fn terminal_slot_calls(listing: &Listing, file: &object::File) -> BTreeSet<u64> {
+    use object::read::Object;
+    let mut out = BTreeSet::new();
+    let wide = match file.architecture() {
+        object::Architecture::X86_64 => true,
+        object::Architecture::I386 => false,
+        _ => return out,
+    };
+    for (&vma, insn) in listing.instructions() {
+        if !insn.flow.is_call || !insn.flows.is_empty() {
+            continue;
+        }
+        let Some(bytes) = bytes_at(file, vma, insn.len as usize) else { continue };
+        let op = if bytes.first() == Some(&0x3e) { &bytes[1..] } else { bytes };
+        let [0xff, 0x15, d0, d1, d2, d3] = *op else { continue };
+        let disp = u32::from_le_bytes([d0, d1, d2, d3]);
+        let slot = if wide {
+            vma.wrapping_add(u64::from(insn.len)).wrapping_add(disp as i32 as i64 as u64)
+        } else {
+            u64::from(disp)
+        };
+        if listing.is_noreturn_target(slot) {
+            out.insert(vma);
+        }
+    }
+    out
+}
+
+/// The `len` file bytes at `vma`, from the section that holds them.
+fn bytes_at<'a>(file: &'a object::File, vma: u64, len: usize) -> Option<&'a [u8]> {
+    use object::read::{Object, ObjectSection};
+    let sec = file.sections().find(|s| vma >= s.address() && vma < s.address() + s.size())?;
+    let data = sec.data().ok()?;
+    let start = usize::try_from(vma - sec.address()).ok()?;
+    data.get(start..start.checked_add(len)?)
+}
+
 /// Run the call-graph no-return propagation over the Listing and return the
 /// concluded functions as [`NoReturnFact`]s.
 ///
@@ -693,6 +742,7 @@ fn reaches_only_noreturn_walk<B: InstructionBody + ?Sized>(
 fn propagate_noreturn(
     listing: &Listing,
     error_recog: &ErrorRecognizer,
+    slot_calls: &BTreeSet<u64>,
     reach: bool,
 ) -> Vec<NoReturnFact> {
     let mut discovered: BTreeMap<u64, NoReturnFact> = BTreeMap::new();
@@ -721,8 +771,9 @@ fn propagate_noreturn(
             }
             // The strict tail-call rule first (cheap, proven); then, if enabled, the
             // CFG-reachability generalization (Ghidra's `targetOnlyCallsNoReturn`).
-            let concluded = function_is_no_return(listing, entry, &terminal, error_recog)
-                || (reach && function_reaches_only_noreturn(listing, entry, &terminal, error_recog));
+            let concluded = function_is_no_return(listing, entry, &terminal, slot_calls, error_recog)
+                || (reach
+                    && function_reaches_only_noreturn(listing, entry, &terminal, slot_calls, error_recog));
             if concluded {
                 let name = listing
                     .function_at(entry)
@@ -800,7 +851,7 @@ mod tests {
         let terminal: BTreeSet<u64> = [0x100].into_iter().collect();
         let recog = super::ErrorRecognizer::disabled();
         assert!(
-            !super::reaches_only_noreturn_walk(&body, 0x0, Some(0x100), &terminal, &recog),
+            !super::reaches_only_noreturn_walk(&body, 0x0, Some(0x100), &terminal, &BTreeSet::new(), &recog),
             "a function that returns on the conditional-jump fall-through must NOT be no-return"
         );
 
@@ -809,7 +860,7 @@ mod tests {
         let only = vec![mk_insn(0x0, None, ujump, vec![0x100])];
         let body2: BTreeMap<u64, &crate::listing::model::Insn> = only.iter().map(|i| (i.addr, i)).collect();
         assert!(
-            super::reaches_only_noreturn_walk(&body2, 0x0, Some(0x100), &terminal, &recog),
+            super::reaches_only_noreturn_walk(&body2, 0x0, Some(0x100), &terminal, &BTreeSet::new(), &recog),
             "an unconditional jump whose only target is no-return IS no-return"
         );
     }
@@ -1011,7 +1062,7 @@ mod tests {
         const NEXT: u64 = 0x200;
         let body: BTreeMap<u64, &Insn> = insns.iter().map(|i| (i.addr, i)).collect();
         let terminal: BTreeSet<u64> = [0x50u64].into_iter().collect();
-        reaches_only_noreturn_walk(&body, 0x100, Some(NEXT), &terminal, &ErrorRecognizer::disabled())
+        reaches_only_noreturn_walk(&body, 0x100, Some(NEXT), &terminal, &BTreeSet::new(), &ErrorRecognizer::disabled())
     }
     const ABORT: u64 = 0x50;
 

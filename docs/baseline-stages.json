@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3240,
-    3240
+    3241,
+    3241
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -470,6 +470,7 @@
     "data:ELFGOTCALL #5: on binds the exit slot and ends the flow there",
     "data:ELFGOTCALL #6: on names the other GOT call in die",
     "data:ELFGOTCALL #7: the .data.rel.ro function-pointer table stays a table in both passes",
+    "data:ELFGOTCALL #8: die joins the no-return set through its exit slot, in both passes",
     "data:ELFMAIN #1: off, the entry is an anonymous sub with a body-driven signature",
     "data:ELFMAIN #2: off, the argument vector has no element type, so the string it holds is an integer",
     "data:ELFMAIN #3: default, the libc-start argument is named and declared, in both images",
