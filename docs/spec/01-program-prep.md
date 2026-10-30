@@ -2982,9 +2982,10 @@ moves.
   type survives a later source that leaves the return open. Different shapes
   replace as before, and directive, console and decompile-time prototypes are
   never merged. This is IDA's per-argument `score_tinfo` merge. It is off
-  because on Lua 5.4.8 with DWARF it changed 2,757 lines of `decompile-all`
-  output, mostly for the worse (`char *` parameters became `unsigned char *` with
-  casts, a `StackValue *` parameter became `unsigned long`).
+  because on Lua 5.4.8 with DWARF it changes 4 of 893 signatures and not all for
+  the better: `luaL_checkstack` gains its `char *` message, `luaF_closeupval`
+  loses its `StackValue *` to `unsigned long`, and `bcmp`/`memcmp` take
+  `unsigned char *` where DWARF declares `void *`.
 
 - **Name ladder** (`nameladder`, default-on; kuna;
   `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
