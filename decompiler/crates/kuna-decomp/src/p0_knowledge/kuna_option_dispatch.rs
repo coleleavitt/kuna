@@ -194,6 +194,8 @@ kuna_options! { self, p1;
     "decodehalt" => on_off!(decode_halt, "Decode-failure halt reporting"),
     "msvcftol" => on_off!(msvc_ftol, "MSVC __ftol-family call-fixup"),
     "objcarc" => on_off!(objc_arc, "Objective-C ARC call hiding"),
+    "objcrettype" => on_off!(objc_rettype, "Objective-C message result typed by its receiver"),
+    "objcresolve" => on_off!(objc_resolve, "Objective-C message send resolved to its method"),
     "tailcalljump" => {
         let (jumps, tables, msg) = crate::kuna_tailcalljump::tail_call_mode(p1)?;
         self.tail_call_jumps = jumps;

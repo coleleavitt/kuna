@@ -3797,6 +3797,33 @@ every other binary's pass list is byte-identical to before the pass existed):
     265 stub calls change shape (`setTransitioningDelegate:(v3, delegate)`,
     `presentViewController:animated:completion:(vc, (UIViewController *)v10, 1, NULL)`).
 
+  - **Message sends typed and resolved by their receiver**
+    (`decompiler/crates/kuna-decomp/src/p5_types/kuna_objcrettype.rs (instancetype)`,
+    options **`objcrettype`** and **`objcresolve`**, kuna, default-on, inert
+    unless `objc` is on): the names above are per entry point, so a send still
+    read `objc_msgSend(v1, sel_setInner_, v2)` with `v1` an `objc_object *`
+    from `objc_alloc_init(_OBJC_CLASS_$_Base)`. Hex-Rays walks the receiver
+    instead, and so does this: the analysis hands the engine its class table
+    (every class's own methods by selector — categories included — its
+    superclass, the `class_t` address a class reference folds to, every selector
+    string and selector-reference slot). At P5, `TypeOpCall::getOutputLocal`
+    answers for a send before the stub's locked `id` does: `alloc`,
+    `allocWithZone:`, `new` and the runtime's `objc_alloc`/`objc_alloc_init`/
+    `objc_opt_new` on a class reference return `Base *`; `init…`, `self`,
+    `retain`, `autorelease`, `copy`, `mutableCopy` return their receiver's class
+    pointer, a receiver that is itself a send being asked first so an alloc/init
+    chain types through (`objcrettype`). A method's own locked `id` return still
+    wins where the two meet (`return (objc_object *)v1;`). At P9 the printed
+    callee of a send whose receiver's class is known — a folded class reference,
+    a pointer to a class struct, or a value the P5 walk resolves — is the IMP
+    found along the superclass chain: `-[Base setInner:](v1, sel_setInner_, …)`,
+    `-[Base count](self->inner, sel_count)`, `-[Holder inner](self)` for the
+    `objc_msgSend$inner` stub (`objcresolve`). A selector no class of the chain
+    declares keeps the runtime entry point; the prototype, arguments and the
+    listing's call graph are unchanged (Hex-Rays also adds a code xref, which
+    this does not). The stage test `tests/stages/kuna-objcresolve.xml` runs
+    both fixtures with the options off and on.
+
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of
   every type it holds; with thousands of class structs interned that scan is no

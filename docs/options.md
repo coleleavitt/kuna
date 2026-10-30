@@ -48,6 +48,12 @@ Three tiers:
 | an Objective-C method is mostly objc_retain/objc_release lines | [`objcarc`](#objcarc) |
 | objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long | [`objcarc`](#objcarc) |
 | objc_storeStrong(&self->field, x) where an assignment is meant | [`objcarc`](#objcarc) |
+| [[Foo alloc] init] typed objc_object * or unsigned long | [`objcrettype`](#objcrettype) |
+| every message sent to a freshly allocated object carries a cast | [`objcrettype`](#objcrettype) |
+| an init… call's result loses the receiver's class | [`objcrettype`](#objcrettype) |
+| objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image | [`objcresolve`](#objcresolve) |
+| objc_msgSend$count(v2) on a receiver whose class is known | [`objcresolve`](#objcresolve) |
+| the call graph of an ObjC image stops at objc_msgSend | [`objcresolve`](#objcresolve) |
 | an `if (isCurrentModePrivileged())` block wraps every interrupt-mask or special-register access in Cortex-M firmware | [`cortexmpriv`](#cortexmpriv) |
 | `isCurrentModePrivileged()` appears in the emitted C at all | [`cortexmpriv`](#cortexmpriv) |
 | a Cortex-M function has more basic blocks and branches than its source | [`cortexmpriv`](#cortexmpriv) |
@@ -1470,6 +1476,22 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** An Objective-C method reads as retain/release traffic around the few lines that do the work, or an ARC helper call shows no argument and the value it returned is missing. On by default; flip OFF to audit the reference counting itself.
 - **Where / provenance:** P2/flow-classification · ida · readability · kuna-objcarc
 - **Example:** `option objcarc off`
+
+### `objcrettype` -- on | off, default `on`
+
+- **Symptoms:** [[Foo alloc] init] typed objc_object * or unsigned long; every message sent to a freshly allocated object carries a cast; an init… call's result loses the receiver's class.
+- **What it does:** Type an Objective-C message send's result by its receiver. `objc_msgSend` and the `objc_msgSend$<sel>` stubs are typed once for every receiver, so `[[Foo alloc] init]` is an `objc_object *` (or an `unsigned long`) and everything reached through it is a cast. With the class table the ObjC analysis hands over (`p5_types/kuna_objcrettype.rs`), `TypeOpCall::getOutputLocal` answers for such a call before the stub's locked `id`: `alloc`, `allocWithZone:`, `new` and the runtime's `objc_alloc`/`objc_alloc_init`/`objc_opt_new` on a folded class reference return that class's instance pointer (`Foo *`), and `init…`, `self`, `retain`, `autorelease`, `copy`, `mutableCopy` return their receiver's class pointer — the `instancetype` contract — a receiver that is itself a message send being asked first, so an alloc/init chain types through. Nothing is locked and no call changes shape; the type only applies where the receiver's class is known (a folded `_OBJC_CLASS_$_X` constant or a pointer to a class struct). Off, the stub's `id` stands. Inert unless `objc` is on.
+- **When to flip:** An ObjC method's `[[Foo alloc] init]` result is an `objc_object *` or an integer, and every field read or message sent through it is a cast. On by default; flip OFF to see the stub's declared return.
+- **Where / provenance:** P5/type-propagation · ida · type-inference · kuna-objcrettype
+- **Example:** `option objcrettype off`
+
+### `objcresolve` -- on | off, default `on`
+
+- **Symptoms:** objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image; objc_msgSend$count(v2) on a receiver whose class is known; the call graph of an ObjC image stops at objc_msgSend.
+- **What it does:** Render an Objective-C message send whose receiver's class is known as the method it reaches. `objc_msgSend(v1, sel_setInner_, v2)` and `objc_msgSend$count(v2)` name the selector but not the method; when the receiver is a folded class reference (`+[Foo new]`) or a pointer to a class struct of this image (`self`, an ivar, an alloc/init result typed by `objcrettype`), the selector is looked up along the class's own method lists and then its superclass chain (`p5_types/kuna_objcrettype.rs (ObjcClassTable::resolve)`), and the call prints as that IMP's label — `-[Base setInner:](v1,sel_setInner_,v2)` — the way Hex-Rays rewrites the callee to the method object. Categories of the class count as its own methods; a selector no class of the chain declares (a framework method) keeps the runtime entry point. Presentation only: the call's prototype, arguments and the listing's call graph are unchanged. Inert unless `objc` is on.
+- **When to flip:** Message sends to objects of the image's own classes read as `objc_msgSend(obj, sel_x, ...)` instead of naming the method that runs. On by default; flip OFF to see the runtime entry point at every call.
+- **Where / provenance:** P9/naming-policy · ida · readability · kuna-objcresolve
+- **Example:** `option objcresolve off`
 
 ### `cortexmpriv` -- on | off, default `off`
 

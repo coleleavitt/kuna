@@ -792,6 +792,12 @@ pub struct ArchContext {
     /// `option declhightype`, mirrored from
     /// [`Architecture::decl_high_type`](crate::architecture::Architecture).
     pub decl_high_type: bool,
+    /// (kuna `objcrettype`) A message send's result typed by its receiver.
+    pub objc_rettype: bool,
+    /// (kuna `objcresolve`) A message send rendered as the method it reaches.
+    pub objc_resolve: bool,
+    /// (kuna) The image's Objective-C class table, from the ObjC analysis.
+    pub kuna_objc_classes: Rc<crate::kuna_objcrettype::ObjcClassTable>,
     /// (kuna) GH-558: present canonicalized `INT_LESS(x, c+1)` comparisons in
     /// their original `x <= c` form (C++ `present_lessequal`, DIV-2 default-on).
     /// Read by [`ActionPresentCompareForm`](crate::kuna_compareform::ActionPresentCompareForm).
@@ -1861,6 +1867,9 @@ impl ArchContext {
             dedup_var_decls: false,
             param_ref_decl: false,
             decl_high_type: false,
+            objc_rettype: false,
+            objc_resolve: false,
+            kuna_objc_classes: Rc::new(Default::default()),
             // (kuna) DIV-2 default-on (GH-558): resetDefaults sets present_lessequal=true.
             present_lessequal: true,
             // (kuna) the real arch overwrites each of these in `build_arch_handle`;

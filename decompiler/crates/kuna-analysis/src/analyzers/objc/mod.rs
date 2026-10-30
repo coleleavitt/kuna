@@ -199,6 +199,14 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
 
+        let mut table = kuna_decomp::kuna_objcrettype::ObjcClassTable::default();
+        for (class, name) in &classes {
+            let shown = display_class_name(name);
+            table.class_at.insert(class.addr, shown.clone());
+            table.classes.entry(shown).or_default().superclass =
+                classt::superclass_name(&img, class.addr).map(|s| display_class_name(&s));
+        }
+        out.objc_classes = Some(table);
         for (class, name) in &classes {
             out.symbols.push(SymFact {
                 addr: class.addr,
@@ -239,6 +247,10 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
         let refs = kuna_objcrefs::emit(&img, ctx.file, ctx.arch, &tctx, &mut selectors, &mut out);
+        if let Some(table) = out.objc_classes.as_mut() {
+            table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
+            table.selref_at.extend(selectors.slots.iter().map(|(va, s)| (*va, s.clone())));
+        }
 
         // A chained slot holds its packed fixup word until `dynrelocs` unpacks it
         // at load; with that gate off the slots are named but never folded.
@@ -298,6 +310,10 @@ impl ObjcMetadataPass {
             // own sub_*/FUN_* placeholder with the ObjC method name, never a real
             // symbol.
             out.fid_names.push(FidMatch { addr: m.imp, name: label.clone() });
+            if let Some(table) = out.objc_classes.as_mut() {
+                let shown_owner = display_class_name(owner);
+                table.classes.entry(shown_owner).or_default().methods.insert((kind == '+', m.selector.clone()), label.clone());
+            }
 
             // The typed prototype from the ObjC type encoding (PR-O2): `i20@0:8i16`
             // → `int -[Greeter greet:](id self, SEL _cmd, int n)`. Keyed by the
