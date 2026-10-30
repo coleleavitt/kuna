@@ -562,6 +562,9 @@ pub struct Architecture {
     /// (kuna) The image's Objective-C classes, methods and selector strings,
     /// handed over by the ObjC analysis commit; empty on every other image.
     pub kuna_objc_classes: Rc<crate::kuna_objcrettype::ObjcClassTable>,
+    /// (kuna `xnutables`) The struct each kalloc_type view allocates, by view
+    /// address, handed over by the XNU table analysis; empty elsewhere.
+    pub kuna_kalloc_types: Rc<crate::kuna_kalloctype::KallocTypes>,
     /// (kuna tee-O2 tail-jumps) Recover a direct `jmp` to another function's
     /// entry (e.g. `jmp setlocale@plt`) as a tail call (CALL + RETURN) instead of
     /// flowing into the callee (`option tailcalljump on|direct`).
@@ -3191,6 +3194,7 @@ impl Architecture {
             objc_rettype: false, // (kuna) option objcrettype; reset_defaults sets the shipped default
             objc_resolve: false, // (kuna) option objcresolve; reset_defaults sets the shipped default
             kuna_objc_classes: Rc::new(Default::default()),
+            kuna_kalloc_types: Rc::new(Default::default()),
             tail_call_jumps: false,
             tail_call_tables: false, // (kuna) option tailcalljump; reset_defaults sets the shipped default
             tail_call_frame: false, // (kuna) option tailcallframe; reset_defaults sets the shipped default
@@ -4686,6 +4690,7 @@ impl Architecture {
         ctx.objc_rettype = self.objc_rettype;
         ctx.objc_resolve = self.objc_resolve;
         ctx.kuna_objc_classes = Rc::clone(&self.kuna_objc_classes);
+        ctx.kuna_kalloc_types = Rc::clone(&self.kuna_kalloc_types);
         // (kuna GH-558) carry the comparison-presentation gate so the
         // `compareform canonical|original` option reaches
         // `ActionPresentCompareForm` via `glb` (the ArchContext read site).

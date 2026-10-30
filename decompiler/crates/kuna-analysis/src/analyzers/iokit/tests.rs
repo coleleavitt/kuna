@@ -103,13 +103,46 @@ fn names_kalloc_views_and_dispatch_tables() {
     let file = object::File::parse(&*bytes).unwrap();
     let img = MachoImage::with_fixups(&file, resolve_chained_fixups(&file, &bytes));
     let rec = recover(&file, &img);
+    let types = kuna_decomp::dtype::TypeFactoryImpl::new();
+    types.set_default_alignment_map();
+    types.set_max_basetype_size(8);
+    types.setup_sizes(Some(8), 8, 4);
+    types.cache_core_types().unwrap();
     let mut out = AnalysisOutput::default();
-    tables::kalloc_views(&file, &img, &rec, &mut out);
-    tables::dispatch_tables(&file, &img, &rec, &mut out);
+    tables::kalloc_views(&file, &img, &rec, &types, &mut out);
+    tables::dispatch_tables(&file, &img, &rec, &types, &mut out);
     let data: Vec<(u64, &str, u32)> = out.data_objects.iter().map(|d| (d.addr, d.name.as_str(), d.size)).collect();
-    assert_eq!(data, [(B + 0x5200, "kalloc_type_view_Derived", 0x40), (B + 0x5240, "Derived_sMethods", 0x60)]);
+    assert_eq!(data, [(B + 0x5200, "kalloc_type_view_Derived", 0x40)]);
     let names: Vec<&str> = out.fid_names.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Derived::externalMethod_0", "Derived::externalMethod_1", "Derived::externalMethod_2", "Derived::externalMethod_3"]);
+
+    let (view, derived) = &out.kalloc_types[0];
+    assert_eq!(*view, B + 0x5200);
+    assert_eq!((derived.get_name(), derived.get_size()), ("Derived", 0x30));
+    use kuna_decomp::dtype::type_metatype::{TYPE_PTR, TYPE_UNKNOWN};
+    let fields: Vec<(String, i32, kuna_decomp::dtype::type_metatype)> = (0..6)
+        .map(|i| derived.get_field(i).unwrap())
+        .map(|f| (f.name.clone(), f.offset, f.field_type.get_metatype()))
+        .collect();
+    let field = |n: &str, o: i32, t| (n.to_string(), o, t);
+    assert_eq!(
+        fields,
+        [
+            field("vtable", 0, TYPE_PTR),
+            field("field_0x8", 8, TYPE_UNKNOWN),
+            field("field_0x10", 0x10, TYPE_PTR),
+            field("field_0x18", 0x18, TYPE_PTR),
+            field("field_0x20", 0x20, TYPE_PTR),
+            field("field_0x28", 0x28, TYPE_UNKNOWN),
+        ]
+    );
+    assert!(derived.get_field(6).is_none());
+    let table = &out.typed_data[0];
+    assert_eq!((table.addr, table.name.as_str(), table.type_.get_size()), (B + 0x5240, "Derived_sMethods", 0x60));
+    let record = table.type_.get_array_base().unwrap();
+    assert_eq!((record.get_name(), record.get_size()), ("IOExternalMethodDispatch", 0x18));
+    assert_eq!(record.get_field(4).map(|f| f.name.as_str()), Some("checkStructureOutputSize"));
+    assert!(record.get_field(5).is_none());
 }
 
 #[test]

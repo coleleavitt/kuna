@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3688,
-    3688
+    3693,
+    3693
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2107,6 +2107,11 @@
     "data:XNUTABLES #2: off leaves the dispatched handler unnamed",
     "data:XNUTABLES #3: on names the view after its type",
     "data:XNUTABLES #4: on names the handler by owner and selector",
+    "data:XNUTABLES #5: off leaves the allocation an untyped word",
+    "data:XNUTABLES #6: off reads the dispatch table as a bare word",
+    "data:XNUTABLES #7: on types the allocation from the view's signature",
+    "data:XNUTABLES #8: on stores through the synthesized fields",
+    "data:XNUTABLES #9: on types the dispatch table as records",
     "data:ZEROIDIOMUSE #1: off, the watchdog call inside the loop has an empty argument list",
     "data:ZEROIDIOMUSE #2: on, both loaded registers reach the call as arguments",
     "data:ZEROIDIOMUSE #3: the zeroing idiom itself is folded to the constants reader is called with in BOTH passes, so the option moved no other call",

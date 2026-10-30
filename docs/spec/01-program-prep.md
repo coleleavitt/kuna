@@ -4655,21 +4655,46 @@ every other binary's pass list is byte-identical to before the pass existed):
   (`kalloc_type_impl`, `IOMallocTypeImpl`, `OSObject_typed_operator_new`, their
   `var` and `free` forms) get prototypes whose first parameter is a pointer,
   parked by name and at every address the image calls one at, so the view an
-  allocation passes renders by name. A run of at least four
+  allocation passes renders by name. A fixed-size view also describes what it
+  allocates: its `kt_signature` (+0x20) spells the type one character per
+  8-byte granule (`1` a pointer, `8` a signed pointer, `2` data, `4` either,
+  `0` padding; a data-only type has an empty signature) and `kt_size` (+0x2c)
+  is `sizeof` the type. The pass builds a struct `<T>` of that size from it
+  (`tables.rs (allocated_struct)`): a `void *` field per pointer granule, an
+  `undefined8` per data granule, a trailing `undefined1[n]` where the size is
+  not a multiple of eight, each named `field_0x<off>` except the first pointer
+  of a class `iokitclasses` recovered, which is its `vtable`; a name another
+  size already holds becomes `<T>_<size>` (template instances, `ExpansionData`),
+  and a same-size struct of the name is reused. The view-to-struct map is
+  handed to the engine (`Architecture::kuna_kalloc_types`), where
+  `TypeOpCall::getOutputLocal`
+  (`decompiler/crates/kuna-decomp/src/p5_types/kuna_kalloctype.rs (allocated_type)`)
+  answers for a call to one of the allocators whose view argument folds to a
+  known view with `<T> *`, ahead of the prototype's locked `void *`: the
+  allocation is declared `<T> *` and the stores into it are field accesses.
+  A run of at least four
   `IOExternalMethodDispatch` (0x18-byte) or `IOExternalMethodDispatch2022`
   (0x28-byte) records in `__const`, each a pointer into this image's code with
   at most 16 scalars each way and struct sizes up to 256 KiB or variable, at
   least one variable (the checks IDA's kcu applies), is a dispatch table: it
-  becomes a data object (its symbol, else `<Owner>_sMethods`) and every unnamed
+  becomes a typed data object (its symbol, else `<Owner>_sMethods`) whose type
+  is an array of the record struct (`tables.rs (dispatch_struct)`:
+  `function`, a pointer to `int (void *target, void *reference, void *arguments)`,
+  the four `check…` counts, and for 2022 `allowAsync` and `checkEntitlement`),
+  so a read of a slot is `sMethods[2].function`, and every unnamed
   handler `<Owner>::externalMethod_<selector>`, the owner being the class whose
   vtable holds a method that computes the table's address (`a64::constants`),
   else the class of the table's named handlers. A `__got` / `__auth_got` /
   `__auth_ptr` slot the indirect-symbol table does not name, whose rebased
   pointer reaches a named function or object of this image, is named
   `<target>_ptr`. On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
-  views, 1,687 var views and 56 dispatch tables (901 records); in IOSurface,
+  views (4,140 distinct structs; the kernel's 1,088 views build 533), 1,687 var
+  views and 56 dispatch tables (901 records); in IOSurface,
   `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
-  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)`.
+  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)` and its
+  result an `IOSurfaceSharedEventListener *`; 48 of the kext's 1,806 functions
+  carry a view-derived type, and the struct building adds nothing measurable
+  to the kernel's 4.9 s `kuna functions`.
 - **DriverKit class records** (kuna, `osclassinfo`, Mach-O with an
   `__osclassinfo` section, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/iokit/osclassinfo.rs (classes)`):

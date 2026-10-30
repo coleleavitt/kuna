@@ -7,8 +7,14 @@ __mod_init_func initializer that calls an unnamed OSMetaClass constructor
 with (&X::gMetaClass, "X", &Super::gMetaClass, size) and then stores the
 X::MetaClass vtable into X::gMetaClass. Each class has a vtable
 [0, 0, ~X, ~X, X::getMetaClass, m1, m2(, m3)] in __DATA_CONST,__const.
-Derived overrides m2 and adds m3. Only meta_of_derived, Base::m1 and
-Base::m2 have symbols. Pointers are plain absolute words (no fixups).
+Derived overrides m2 and adds m3. Only meta_of_derived, Base::m1,
+Base::m2, kalloc_type_impl and alloc_derived have symbols. Pointers are plain absolute
+words (no fixups).
+
+For xnutables: one __kalloc_type view for site.Derived (signature 121112,
+0x30 bytes), alloc_derived allocating through kalloc_type_impl and storing
+into the result, a four-record IOExternalMethodDispatch table Derived::m3
+addresses and dispatch_lookup reads a function pointer out of.
 
 Run from this directory: python3 gen_iokit.py
 """
@@ -80,6 +86,9 @@ for k in range(4):
 func("kalloc_stub", [RET])
 func("meta_of_derived", addr_of(0, DERIVED_META) + [RET])
 func("make_derived", addr_of(0, KALLOC_TYPE) + [lambda p: 0x14000000 | (((code["kalloc_stub"] - p) // 4) & 0x3FFFFFF)])
+func("alloc_derived", [0xA9BF7BFD, 0x910003FD] + addr_of(0, KALLOC_TYPE) + [movw(1, 1), lambda p: bl(p, code["kalloc_stub"]),
+                       0xF9000C1F, movw(8, 5), 0xF9000408, 0xA8C17BFD, RET])
+func("dispatch_lookup", addr_of(8, DISPATCH) + [0xF9401900, RET])
 text_end = pc
 
 c = code
@@ -92,13 +101,14 @@ vtables = {
 
 strtab = b"\0"
 stroff = {}
-for n in [b"_meta_of_derived", b"__ZN4Base2m1Ev", b"__ZN4Base2m2Ev"]:
+for n in [b"_meta_of_derived", b"__ZN4Base2m1Ev", b"__ZN4Base2m2Ev", b"_kalloc_type_impl", b"_alloc_derived"]:
     stroff[n] = len(strtab)
     strtab += n + b"\0"
 strtab = strtab.ljust((len(strtab) + 7) & ~7, b"\0")
 syms = b"".join(u32(stroff[n]) + bytes([0x0F, 2]) + struct.pack("<H", 0) + u64(B + c[f])
                 for n, f in [(b"_meta_of_derived", "meta_of_derived"), (b"__ZN4Base2m1Ev", "Base_m1"),
-                             (b"__ZN4Base2m2Ev", "Base_m2")])
+                             (b"__ZN4Base2m2Ev", "Base_m2"), (b"_kalloc_type_impl", "kalloc_stub"),
+                             (b"_alloc_derived", "alloc_derived")])
 symoff, str_off = LINKEDIT, LINKEDIT + len(syms)
 linkedit = syms + strtab
 
@@ -109,7 +119,7 @@ def segment(name, addr, size, sections=(), prot=5):
     return u32(0x19, 8 + len(body)) + body
 
 cmds = [
-    segment(b"__TEXT", TEXT, 0x4000, [section(b"__TEXT", b"__cstring", CSTRING, 29, 0x2)]),
+    segment(b"__TEXT", TEXT, 0x4000, [section(b"__TEXT", b"__cstring", CSTRING, 33, 0x2)]),
     segment(b"__TEXT_EXEC", EXEC, 0x1000, [section(b"__TEXT_EXEC", b"__text", EXEC, text_end - EXEC, 0x80000400)]),
     segment(b"__DATA_CONST", CONST, 0x1000, [section(b"__DATA_CONST", b"__mod_init_func", CONST, 8, 0x9),
                                               section(b"__DATA_CONST", b"__const", CONST_BASE, 0x100),
@@ -117,13 +127,13 @@ cmds = [
                                               section(b"__DATA_CONST", b"__const", DISPATCH, 0x60)], prot=1),
     segment(b"__DATA", DATA, 0x1000, [section(b"__DATA", b"__data", DATA, 0x80)], prot=3),
     segment(b"__LINKEDIT", LINKEDIT, len(linkedit), prot=1),
-    u32(0x2, 24, symoff, 3, str_off, len(strtab)),
-    u32(0xB, 80, 0, 0, 0, 3, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    u32(0x2, 24, symoff, 5, str_off, len(strtab)),
+    u32(0xB, 80, 0, 0, 0, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
 ]
 image = bytearray(LINKEDIT + len(linkedit))
 def place(off, data): image[off:off + len(data)] = data
 place(0, u32(0xFEEDFACF, 0x0100000C, 0, 0xB, len(cmds), sum(map(len, cmds)), 0x85, 0) + b"".join(cmds))
-place(CSTRING, b"Base\0Derived\0site.Derived\0" + b"12\0")
+place(CSTRING, b"Base\0Derived\0site.Derived\0" + b"121112\0")
 place(KALLOC_TYPE + 0x10, u64(B + names["site"]))
 place(KALLOC_TYPE + 0x20, u64(B + names["sig"]))
 place(KALLOC_TYPE + 0x28, u32(0x61, 0x30))

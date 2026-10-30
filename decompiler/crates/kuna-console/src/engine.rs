@@ -5572,6 +5572,11 @@ fn commit_analysis_output(
             prog.arch_mut().kuna_objc_classes = Rc::new(table);
         }
     }
+    // (kuna `xnutables`) The kalloc_type views' structs the engine types a
+    // typed allocation's result with.
+    if !out.kalloc_types.is_empty() {
+        prog.arch_mut().kuna_kalloc_types = Rc::new(out.kalloc_types.iter().cloned().collect());
+    }
     for mut pieces in out.prototypes {
         if let Some(st) = self_types.get(&pieces.name) {
             if let Some(first) = pieces.intypes.first_mut() {
