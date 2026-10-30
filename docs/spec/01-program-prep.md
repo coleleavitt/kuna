@@ -5203,6 +5203,15 @@ and tested but **left out of the registered pass list** (`passes.rs` keeps its
 registration commented out), because a pointer-run scanner over-accepts and the
 relocation guard that defends it is weak on non-PIE executables.
 
+The scanner's one live consumer is the reference walk behind `kuna xrefs`
+(`decompiler/crates/kuna-analysis/src/listing/xrefs.rs (XrefIndex)`). Under
+`--option addrtable on` (and so `--mode aggressive`) each table slot is filed as a
+`data` reference from the slot to the code it holds — the reference Ghidra's
+`AddressTable.makeTable` creates — so `kuna xrefs --to` a function reached only
+through a pointer table names the slot instead of answering zero references. A
+slot is data, so the reference is attributed to no function. Emitted C is
+unaffected: no fact is committed.
+
 ## 1.6 The Listing tier
 
 The Listing model (`listing`, default-off as an engine option;

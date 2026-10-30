@@ -59,7 +59,10 @@
 //! carry no relocation), so the non-PIE `switchtab_x86_64` fixture exercises the
 //! heuristic path (min-run + executable-target check + string guard), not the
 //! relocation-guided path. The scanner is exercised directly by the unit tests
-//! below; it is inert in the bootstrap until a future increment enables it.
+//! below; it commits no facts in the bootstrap. Its one live consumer is the
+//! reference walk behind `kuna xrefs` ([`crate::listing::xrefs`]): under
+//! `--option addrtable on` every table slot is filed as a `data` reference from
+//! the slot to the code it holds, the reference `AddressTable.makeTable` creates.
 //!
 //! ## Scope / LOSS vs Ghidra (documented divergence)
 //!
@@ -369,7 +372,7 @@ pub fn scan_address_tables(file: &object::File, min_run: usize, ptr_size: usize)
 
 /// Choose the pointer width for `file`: 8 for ELFCLASS64, else 4. Faithful to
 /// `AddressTable.getByteLength` reading the program's default pointer size.
-fn ptr_width(file: &object::File) -> usize {
+pub(crate) fn ptr_width(file: &object::File) -> usize {
     if file.is_64() {
         8
     } else {
