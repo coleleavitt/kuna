@@ -2129,7 +2129,8 @@ mod tests {
         // and kuna-unwindstarts / a stripped Mach-O's __unwind_info starts join the inventory
         // and kuna-dyldcrossrefs / a dyld shared cache image names its calls into other images
         // and kuna-dedupitetail-gototarget / a goto into an unwrapped if clause keeps its target
-        assert_eq!(count, 609, "corpus file count drifted");
+        // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
+        assert_eq!(count, 610, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
