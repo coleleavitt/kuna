@@ -2371,6 +2371,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "relronoreturn"
+values = "on|off"
+default = "off"
+destructive = false
+phase = "P2"
+subphase = "flow-classification"
+strength = "HARD"
+rewind = "P2"
+issue = "kuna-relro-noreturn-restart"
+summary = "Make a call through a relocated read-only slot direct while the flow is followed, when the function the slot holds never returns. A PIE built without a PLT (rustc's default, gcc/clang `-fno-plt`) calls its own functions as `call *slot(%rip)` through a `.got` word an `R_*_RELATIVE` relocation fills; `ActionDeindirect` folds the RELRO word and binds the call, and when the callee is no-return upstream restarts the whole function so the re-followed flow plants the halt. A Rust panic helper sits behind most bounds and overflow checks, so with the Rust no-return paths in place nearly every such function decompiles twice. On: when the CALLIND reads a word inside a relocated read-only range (`dynreloc_const`) whose value is the entry of a function flagged no-return, the call is made direct and halted during flow, and no restart happens. Only no-return callees are taken, so every other call keeps the upstream path. The output is not byte-identical to the restart path: the restart also hands the second pass every other call the first pass bound and every lesson it recorded, which this skips."
+use_when = "Off by default: the restart it avoids also improves the rendering. MEASURED on a 1.1 MB Rust PIE (bcp, 1343 functions): decompile-all user time 528 s -> 342 s, but 468 functions change and gotos rise 8,318 -> 8,650 (lines 149,240 -> 153,329); clap Validator::validate 49 s -> 24 s. Turn ON for latency-sensitive whole-binary runs over large no-PLT PIEs, especially Rust; leave off for the best structure. Inert on images without relocated read-only slots (every datatest, 0/675) and on calls whose slot holds a function that returns."
+example = "option relronoreturn on"
+source_decompiler = "kuna"
+inspiration = "a Rust function whose panic helper became no-return took 22 s -> 55 s: the deindirect restart re-ran the whole pipeline"
+change_kind = "opt-in-tool"
+tier = "transform"
+symptoms = "decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return|a function restarts once for every no-return callee reached through a .got slot"
+live_field = "relro_noreturn"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "fastfailnoreturn"
 values = "on|off"
 default = "on"

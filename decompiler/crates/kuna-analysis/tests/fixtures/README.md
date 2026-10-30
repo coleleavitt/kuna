@@ -721,6 +721,18 @@ exe is the only non-ELF binary in this tree large enough to statically link the
 MinGW CRT (≈0.5 MB), on par with the existing `mcount_x86_64` (0.9 MB).
 **Pin the VMAs as test consts** (`x86_64-w64-mingw32-objdump -d/-p`).
 
+`rust_noreturn_pie_x86_64` (10776 B, source `rust_noreturn_pie_x86_64.rs`) is the same `no_std`
+source linked as a PIE (`-C relocation-model=pie`, `-z relro,-z now`): `opt`, `sum` and `add` reach
+their panic helpers through `R_X86_64_RELATIVE` `.got` slots, the shape `option relronoreturn`
+resolves during flow (`tests/stages/ghdec-noreturnnames.xml`).
+
+```bash
+rustc --edition 2021 -C opt-level=2 -C overflow-checks=on -C panic=abort -C relocation-model=pie \
+    -C link-arg=-nostartfiles -C link-arg=-nostdlib -C link-arg=-Wl,--build-id=none \
+    -C link-arg=-Wl,-z,relro,-z,now -C strip=debuginfo \
+    -o rust_noreturn_pie_x86_64 rust_noreturn_pie_x86_64.rs
+```
+
 `noreturn_names_x86_64` (16184 B, ELF x86-64 PIE, source `noreturn_names_x86_64.cc`) and
 `rust_noreturn_v0_x86_64` (9328 B, static `no_std` ELF x86-64, source
 `rust_noreturn_v0_x86_64.rs`) are the **no-return name** fixtures

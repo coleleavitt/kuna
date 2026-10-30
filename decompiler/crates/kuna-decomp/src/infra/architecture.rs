@@ -465,6 +465,11 @@ pub struct Architecture {
     /// Default on (`option fastfailnoreturn`).  See
     /// [`kuna_fastfailnoreturn`](crate::kuna_fastfailnoreturn).
     pub fastfail_noreturn: bool,
+    /// (kuna `relronoreturn`) Make a call through a relocated read-only slot
+    /// direct while the flow is followed when the function the slot holds never
+    /// returns, instead of after `ActionDeindirect` and a restart. Default off
+    /// (`option relronoreturn`).
+    pub relro_noreturn: bool,
     /// (kuna `int3pad`) How a decoded `int3` is handled.  x86 SLEIGH lifts it to
     /// `intloc = swi(3); call [intloc]`, which the printer renders as an ordinary
     /// indirect call; `warn` (the default) buffers the `// int3-pad` warning that
@@ -2918,6 +2923,7 @@ impl Architecture {
             add_carry_chain: false,
             v850_indirect_branch: false,
             fastfail_noreturn: false, // (kuna) option fastfailnoreturn; reset_defaults sets the shipped default
+            relro_noreturn: false, // (kuna) option relronoreturn, default off
             int3_pad: crate::kuna_int3pad::Int3PadMode::Off, // (kuna) option int3pad; reset_defaults sets the shipped default
             x64_syscall: crate::kuna_x64syscall::X64SyscallMode::Off, // (kuna) option x64syscall; reset_defaults sets the shipped default
             syscall_regs: crate::kuna_syscallregs::SyscallRegsMode::Off, // (kuna) option syscallregs; reset_defaults sets the shipped default
@@ -3349,6 +3355,7 @@ impl Architecture {
         self.struct_headless = crate::kuna_structheadless::StructHeadlessMode::Off; // (kuna) structheadless default `off`: a closed function's parameter read at two or more constant offsets, none of them zero, is declared `struct_N *` with filler over the bytes before its first access; `option structheadless closed` turns it on
         self.decode_halt = true; // (kuna) DIV-151 default-on: a `CPUI_RETURN` kuna planted because it could NOT decode the bytes renders as upstream `PrintC::opReturn`'s `halt_baddata()`/`halt_unimplemented()`/`halt_missing()` pseudo-call rather than a bare `return;`, and carries the upstream truncation + header warnings. Reachable only through the three decode-failure halt types, which no datatest function produces, so it is byte-identical there (0/675); `option decodehalt off` restores the silent `return;`
         self.fastfail_noreturn = true; // (kuna) DIV-119 default-on: REMOVES CODE. Ends the flow at a Windows `int 0x29` (`__fastfail`), whose SLEIGH lifting is a call with no matching push and so gains 8 bytes of stack pointer from the cspec's `extrapop` at every site. Windows-cspec-gated and shape-gated on `swi(0x29:1)`, so it is structurally inert on the datatest corpus and byte-identical there (0/675); restore the unbalanced fall-through with `option fastfailnoreturn off`
+        self.relro_noreturn = false; // (kuna) option relronoreturn: default off, a speed trade (see its catalog row)
         self.msvc_ftol = true; // (kuna) DIV-74 default-on: x86-32-only, and inert unless the binary imports an `__ftol`/`__ftol2`/`__ftol2_sse` symbol. Byte-identical (0/675) — no corpus function carries one of those names. Restore the un-fixed `__ftol()` rendering with `option msvcftol off`
         self.tail_call_jumps = true; // (kuna) DIV-13 default-on (angr tail-call recovery; per-test opt-out on Long double #1/#2)
         self.tail_call_tables = true; // (kuna) GH-781 default `tailcalljump on`: a veneer whose one destination is another function's entry is a tail call when the destination is outside a declared extent, or the callee's prototype is stated and its return value (if any) reaches a stated output. 0/675 byte-identical on the datatest corpus; `option tailcalljump direct` restores the flow into the destination

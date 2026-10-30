@@ -497,7 +497,18 @@ itself
 (`decompiler/crates/kuna-decomp/src/p4_calls/kuna_calleeprotostack.rs
 (resolve_declared_extra_pop)`), so a
 `__thiscall` or `__stdcall` import pops what its declaration says instead of
-what the push run in front of it suggests.
+what the push run in front of it suggests. (kuna `relronoreturn`, default off)
+A third CALLIND can be made direct there: one whose target is the word read from
+a relocated read-only slot (an `R_*_RELATIVE` `.got` word inside the image's
+`dynreloc_const` ranges), when that word holds the entry of a function flagged
+no-return (`p2_lift/kuna_msvcimportcall.rs (call_slot)` finds the slot,
+`infra/decompile_drive.rs (relro_noreturn_call)` reads it). The halt is then
+planted during this flow, where upstream binds the call in `ActionDeindirect`
+and restarts the whole function to plant it. A PIE without a PLT reaches every
+Rust panic helper that way, so the restart roughly doubled the cost of such a
+function; the option removes it, at the price of the second pass's other
+benefits (every other call the first pass bound is direct from its flow on),
+which is why it is not the default.
 `flow.rs (FlowInfo::check_for_flow_modification)` then
 applies the callee's flow effects: an *inline* callee queues the op for
 injection; a *no-return* callee gets an artificial halt planted directly after

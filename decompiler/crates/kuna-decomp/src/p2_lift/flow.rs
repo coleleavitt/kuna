@@ -364,6 +364,15 @@ pub trait FlowEnvironment {
         None
     }
 
+    /// (kuna) The function the CALLIND `op` reaches through a relocated read-only
+    /// slot (a RELRO `.got` word the loader filled), when that function never
+    /// returns, so the call is direct and halts from the flow on. The default
+    /// shell reports `None` (upstream behavior: `ActionDeindirect` resolves the
+    /// folded slot later and the function restarts to plant the halt).
+    fn relro_noreturn_call(&self, _fd: &Funcdata, _op: OpId) -> Option<Address> {
+        None
+    }
+
     /// (kuna `msvcsig`) Does `entry` carry a locked MSVC prototype? Such a callee's
     /// copied prototype gets the stack adjustment its parameter list implies, as
     /// `ActionDefaultParams` gives a declared callee it seeds itself
@@ -2801,6 +2810,9 @@ truncating the fall-through here"
         let mut direct = self.data.get_override().find_indirect_override(&op_addr).cloned();
         if direct.is_none() {
             direct = self.env.msvc_import_slot(&self.data, op);
+        }
+        if direct.is_none() {
+            direct = self.env.relro_noreturn_call(&self.data, op);
         }
 
         // C++ flow.cc:730-731: `if (fc != 0 && fc->getEntryAddress() ==
