@@ -1311,6 +1311,9 @@ Three tiers:
 | a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract) |
 | a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract) |
 | return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract) |
+| locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor) |
+| a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor) |
+| the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -4384,6 +4387,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path.
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-extra-tail-thunk
 - **Example:** `option tailcontract off`
+
+### `stackexitanchor` -- on | off, default `on`
+
+- **Symptoms:** locals after an indirect callee-cleans call are off by the arguments it popped; a stdcall callee reached through a pointer shifts every stack slot after it; the stack pointer at the epilogue disagrees with the one the guesses produced.
+- **What it does:** Tie each return's stack pointer to the entry one when StackSolver runs (a prototype model whose extrapop is unknown: x86win, x86borland, x86delphi, x86-16, avr32a, M16C_60). The solver propagates exact equations from the input stack pointer and then fills every unknown call's purge with a guess, first come first served; nothing tied the function's own exit to its entry, so the guess for the last unknown call on a path decided every stack offset after it even where the epilogue states the answer. The return instruction pops the return address the caller pushed, so the stack pointer entering it equals the input one; the constant adjustments between the last call and the return are read off the raw p-code before dead-code elimination removes them, and the call's stack-pointer value is anchored at minus their sum, after the exact equations and before any guess (an anchor never overrides an exact value), so the purge of the last unknown call on each path is then solved backward from the epilogue instead of guessed. A cycle whose deltas still disagree after the solve (a call with a wrong known extrapop inside a loop) gets a warning at the first broken equation instead of a silent first-path value. IDA's SP solver uses the same hard row (real ret = entry depth, pc.so 0x78bc0).
+- **When to flip:** On by default. Keep it on when a callee-cleans call with no prototype (an indirect call, a Borland/Delphi or 16-bit callee) leaves the locals after it off by the arguments it popped. Flip OFF to get the guess-only solve back.
+- **Where / provenance:** P6/stack-pointer-flow · kuna · correctness-fix · ida95-9-stacksolver
+- **Example:** `option stackexitanchor off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

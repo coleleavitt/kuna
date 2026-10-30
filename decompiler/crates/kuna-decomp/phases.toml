@@ -4472,6 +4472,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "stackexitanchor"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P6"
+subphase = "stack-pointer-flow"
+strength = "HARD"
+rewind = "P6"
+issue = "ida95-9-stacksolver"
+summary = "Tie each return's stack pointer to the entry one when StackSolver runs (a prototype model whose extrapop is unknown: x86win, x86borland, x86delphi, x86-16, avr32a, M16C_60). The solver propagates exact equations from the input stack pointer and then fills every unknown call's purge with a guess, first come first served; nothing tied the function's own exit to its entry, so the guess for the last unknown call on a path decided every stack offset after it even where the epilogue states the answer. The return instruction pops the return address the caller pushed, so the stack pointer entering it equals the input one; the constant adjustments between the last call and the return are read off the raw p-code before dead-code elimination removes them, and the call's stack-pointer value is anchored at minus their sum, after the exact equations and before any guess (an anchor never overrides an exact value), so the purge of the last unknown call on each path is then solved backward from the epilogue instead of guessed. A cycle whose deltas still disagree after the solve (a call with a wrong known extrapop inside a loop) gets a warning at the first broken equation instead of a silent first-path value. IDA's SP solver uses the same hard row (real ret = entry depth, pc.so 0x78bc0)."
+use_when = "On by default. Keep it on when a callee-cleans call with no prototype (an indirect call, a Borland/Delphi or 16-bit callee) leaves the locals after it off by the arguments it popped. Flip OFF to get the guess-only solve back."
+example = "option stackexitanchor off"
+source_decompiler = "kuna"
+inspiration = "IDA 9.5 pc.so SP solver hard rows (entry = 0, real ret = 0), ida95-x86-pc-hexx64-clp section 5.1; upstream StackSolver (coreaction.cc:48)"
+change_kind = "correctness-fix"
+tier = "core"
+symptoms = "locals after an indirect callee-cleans call are off by the arguments it popped|a stdcall callee reached through a pointer shifts every stack slot after it|the stack pointer at the epilogue disagrees with the one the guesses produced"
+live_field = "stack_exit_anchor"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "calleeretpreserves"
 values = "on|off"
 default = "on"

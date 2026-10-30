@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_411() {
-    assert_eq!(kuna_num_settables(), 411);
-    assert_eq!(SETTABLE_TABLE.len(), 411);
+fn settable_count_is_412() {
+    assert_eq!(kuna_num_settables(), 412);
+    assert_eq!(SETTABLE_TABLE.len(), 412);
 }
 
 #[test]
-fn tier_counts_are_130_core_153_transform_128_analysis() {
+fn tier_counts_are_131_core_153_transform_128_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_153_transform_128_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 153, 128));
+    assert_eq!((core, transform, analysis), (131, 153, 128));
 }
 
 #[test]
@@ -996,7 +996,8 @@ fn option_values_live_value_present_for_187() {
     // 157 -> 158: +1 for `calleeretpurge` (live_field).
     // 158 -> 159: +1 for `switchtrim` (live_field).
     // 159 -> 160: +1 for `tailcontract` (live_field).
-    assert_eq!(with_live, 187);
+    // 187 -> 188: +1 for `stackexitanchor` (live_field).
+    assert_eq!(with_live, 188);
 }
 
 #[test]
@@ -1247,7 +1248,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `ehcold`.
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
-    assert_eq!(json.matches("},\n").count(), 410);
+    // +1 for `stackexitanchor`.
+    assert_eq!(json.matches("},\n").count(), 411);
 }
 
 #[test]

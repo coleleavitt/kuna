@@ -157,6 +157,7 @@ kuna_options! { self, p1;
     "outlinedinline" => on_off!(outlined_inline, "MachineOutliner fragment inlining"),
     "calleeretpurge" => on_off!(callee_ret_purge, "Callee `ret imm16` extrapop"),
     "tailcontract" => on_off!(tail_contract, "Tail-callee prototype bootstrap"),
+    "stackexitanchor" => on_off!(stack_exit_anchor, "Stack-solver return anchor"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;

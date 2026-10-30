@@ -697,6 +697,7 @@ impl Action for ActionExtraPopSetup {
         };
         let sb_addr = Address::new(point_space, point.offset);
         let sb_size = point.size as int4;
+        crate::p6_variables::kuna_stackexitanchor::record(data, &sb_addr);
 
         for i in 0..data.num_calls() {
             let extrapop = crate::p4_calls::kuna_calleeretpurge::effective_extra_pop(data, i);

@@ -1003,6 +1003,9 @@ pub struct Architecture {
     /// (kuna) A single-function drive states each tail-called callee's prototype
     /// first (option `tailcontract`).
     pub tail_contract: bool,
+    /// (kuna) Tie each return's stack pointer to the entry one in the stack
+    /// solver (option `stackexitanchor`).
+    pub stack_exit_anchor: bool,
     /// (kuna) The x87 stack depth proves ST0 empty at returns (option
     /// `x87depth`). See [`crate::p4_calls::kuna_x87depth`].
     pub x87_depth: bool,
@@ -3299,6 +3302,7 @@ impl Architecture {
             callee_preserves: true,
             callee_ret_purge: true,
             tail_contract: true,
+            stack_exit_anchor: true,
             x87_depth: true,
             trap_after_call: true,
             retpoline_thunk: true,
@@ -3781,7 +3785,8 @@ impl Architecture {
         self.zero_call_regs = true; // (kuna) default-on (0/675 ablation): a register a -fzero-call-used-regs epilogue clears before the return is no part of the value
         self.global_call_ranges = true;
         self.callee_ret_purge = true;
-        self.tail_contract = true; // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
+        self.tail_contract = true;
+        self.stack_exit_anchor = true; // (kuna) default-on: the stack solver ties each return's stack pointer to the entry one // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.x87_depth = true;
         self.trap_after_call = true;
         self.retpoline_thunk = true;
@@ -4957,6 +4962,7 @@ impl Architecture {
         // (`option switchmultipred`) so `JumpBasic::checkUnrolledGuard` reaches it.
         ctx.switch_multi_pred = self.switch_multi_pred;
         ctx.switch_trim = self.switch_trim;
+        ctx.stack_exit_anchor = self.stack_exit_anchor;
         // (kuna, angr) carry the interleaved unrolled-guard partial-flow gate
         // (`option unrolledguard`) so `FlowInfo::collectEdges` reaches it.
         ctx.unrolled_guard = self.unrolled_guard;

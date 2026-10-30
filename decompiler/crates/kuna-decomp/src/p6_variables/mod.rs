@@ -48,6 +48,7 @@ pub mod kuna_guardedreadtrim;
 pub mod kuna_calleepop;
 pub mod kuna_calleepopslot;
 pub mod kuna_calleepopframe;
+pub mod kuna_stackexitanchor; // (kuna) the epilogue settles the last unknown call's purge
 pub mod kuna_cookiescramble;
 pub mod kuna_nulterminator;
 pub mod kuna_endptrbound;
