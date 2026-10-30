@@ -808,6 +808,19 @@ mod tests {
         assert_eq!(decode_ptr(auth, ptr_format::ARM64E_FIRMWARE, base), (1, Some(base + 0x4020)));
     }
 
+    /// The pointer-format ids are the ones `mach-o/fixup-chains.h` assigns: an
+    /// arm64e USERLAND24 segment (12, what ld64 emits for arm64e) and a USERLAND
+    /// one (9) both rebase, and 15 is no format at all.
+    #[test]
+    fn userland_format_ids_match_fixup_chains_h() {
+        let imagebase = 0x1_0000_0000;
+        let raw = 0x8050;
+        for format in [9, 12] {
+            assert_eq!(decode_ptr(raw, format, imagebase), (0, Some(0x1_0000_8050)), "{format}");
+        }
+        assert_eq!(decode_ptr(raw, 15, imagebase), (0, None));
+    }
+
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
     /// the inert path.
     #[test]
