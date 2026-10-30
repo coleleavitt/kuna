@@ -2826,7 +2826,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 
 - **Symptoms:** absolute function-pointer table in rodata never recognized; indirect calls through an unrecovered address table in a stripped target.
 - **What it does:** Run the address-table analysis pass: scan .rodata/.data for a run of pointer-width values landing inside an executable section (an absolute address/jump table) and emit Data symbols + a readonly range. DISABLED by default (matches Ghidra AddressTableAnalyzer.setDefaultEnablement(false); the pointer-run scanner over-accepts).
-- **When to flip:** Off (default, parity + over-acceptance risk); flip on to recover absolute pointer tables in a stripped target.
+- **When to flip:** Off (default, parity + over-acceptance risk). The pass commits no facts yet; flipped on, kuna xrefs files each absolute pointer-table slot as a data reference to the code it holds, so --to a function reached only through a table names the slot.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-addrtable
 - **Example:** `option addrtable on`
 
