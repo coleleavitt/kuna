@@ -392,6 +392,12 @@ pub struct Architecture {
     /// (kuna `callerreads`) Every direct call the Listing walked, as `(callee
     /// entry, address the call returns to)`, sorted. Empty without the Listing.
     pub kuna_call_returns: Vec<(u64, u64)>,
+    /// (kuna `itaniumeh`) Give each call covered by a `.gcc_except_table`
+    /// call-site record an exceptional edge to its landing pad.
+    pub itanium_eh: bool,
+    /// (kuna `itaniumeh`) The image's Itanium call-site table, installed by the
+    /// analysis commit from `AnalysisOutput::eh_call_sites`. Empty without it.
+    pub eh_table: Rc<crate::kuna_itaniumeh::EhTable>,
     /// (kuna `boolbyte`) Offer `bool` as a `getLocalType` candidate for a byte
     /// whose every read is a truth test.  Implementation:
     /// [`kuna_boolbyte`](crate::p5_types::kuna_boolbyte).
@@ -2972,6 +2978,8 @@ impl Architecture {
             kuna_float_scan_batch: false,
             caller_reads: true, // (kuna) option callerreads; reset_defaults sets the shipped default
             kuna_call_returns: Vec::new(),
+            itanium_eh: false,
+            eh_table: Rc::new(crate::kuna_itaniumeh::EhTable::default()),
             bool_byte: true, // (kuna) option boolbyte; reset_defaults sets the shipped default
             float_bits: false, // (kuna) option floatbits; reset_defaults sets the shipped default
             partial_concat: true,
@@ -3617,6 +3625,7 @@ impl Architecture {
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
+        self.itanium_eh = false;
         self.caller_reads = true; // (kuna) option callerreads default-on: inert without the Listing, so 0/675 datatest assertions move
         self.call_target_type = false; // (kuna) option calltargettype: default-OFF in the catalog because the XML datatest corpus pins the upstream `code *` spellings and applies no mode; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for every real binary
         self.ptrdepthcap = false; // (kuna) DIV-108: default-OFF in the catalog because it changes INFERRED types and the datatest corpus pins the upstream spellings; ON in the `aggressive` preset, which `auto` selects under 500 KiB, so the cap is the default rendering for every real binary
@@ -4608,6 +4617,7 @@ impl Architecture {
         // slots so `ActionVarnodeProps` folds those loads with global read-only
         // propagation still off. `Rc` clone: the list is built once at load.
         ctx.dynreloc_const = Rc::clone(&self.dynreloc_const);
+        ctx.eh_table = self.itanium_eh.then(|| Rc::clone(&self.eh_table));
         ctx.litpool_const = Rc::clone(&self.litpool_const);
         ctx.litpoolconst = self.litpoolconst; // litpoolconst (in-code literal-pool folding)
         // Carry the data-type-splitting toggle bits (C++ `glb->split_datatype_config`)
@@ -5445,6 +5455,14 @@ impl Architecture {
             userops.register_builtin(BUILTIN_SYSCALL_ERROR, &adapter)?;
             // (kuna strlenscan) the length an inline `repnz scasb` computes.
             userops.register_builtin(BUILTIN_STRLEN, &adapter)?;
+            // (kuna itaniumeh) the exceptional-edge test and the two pad values.
+            for id in [
+                crate::userop::BUILTIN_EH_UNWINDING,
+                crate::userop::BUILTIN_EH_EXCEPTION,
+                crate::userop::BUILTIN_EH_SELECTOR,
+            ] {
+                userops.register_builtin(id, &adapter)?;
+            }
             Ok(())
         })();
         self.userops = userops;
@@ -7798,6 +7816,9 @@ impl crate::userop::UseropTypeArchitecture for BuiltinTypeArch {
         self.types
             .get_type_char(self.types.get_size_of_wchar())
             .expect("builtin: getTypeChar(wchar)")
+    }
+    fn get_type_bool(&self) -> Rc<crate::dtype::Datatype> {
+        self.types.get_base(1, type_metatype::TYPE_BOOL).expect("builtin: getBase(BOOL)")
     }
 }
 

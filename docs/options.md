@@ -546,6 +546,11 @@ Three tiers:
 | c++ catch/cleanup landing pads missing from a stripped binary's function list | [`eh_frame_full`](#eh_frame_full) |
 | exception-handler code never discovered as entries | [`eh_frame_full`](#eh_frame_full) |
 | gcc_except_table call-site targets left unexplored | [`eh_frame_full`](#eh_frame_full) |
+| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh) |
+| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh) |
+| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh) |
+| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh) |
+| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -2551,6 +2556,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default) limits .eh_frame use to FDE pcBegin function starts. Flip on to also discover exception-handler landing pads (catch/cleanup blocks) from the .gcc_except_table LSDA in a C++ try/catch binary.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-ehframe-lsda
 - **Example:** `--option eh_frame_full on`
+
+### `itaniumeh` -- on | off, default `off`
+
+- **Symptoms:** catch block missing from a c++ function; destructor calls on the exception path are missing; __cxa_begin_catch never appears in the pseudocode; _Unwind_Resume never appears although the binary calls it; a c++ function with try/catch shows only the normal return.
+- **What it does:** Show Itanium C++ catch and cleanup code. Each call covered by a .gcc_except_table call-site record gets an exceptional successor: `if (eh_unwinding()) goto pad;` right after the call. At the landing pad the exception pointer register is defined by `eh_exception()` and, when the pad has a catch clause, the selector register by `eh_selector()`, so `__cxa_begin_catch(eh_exception())` and the `eh_selector() == N` tests read as written. A comment at each pad lists its clauses by selector value (`catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`, or `cleanup`), with catch types named from their typeinfo symbols. Without it the pads are unreachable and catch bodies, destructor calls and `_Unwind_Resume` vanish from the pseudocode. ELF only (x86, x86-64, AArch64, ARM).
+- **When to flip:** Off (default) shows only the normal path, as upstream Ghidra and IDA do for Itanium code. Turn it on to see what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows.
+- **Where / provenance:** P2/flow-classification · kuna · new-analysis · ida95-44
+- **Example:** `--option itaniumeh on`
 
 ### `unwindstarts` -- on | off, default `off`
 

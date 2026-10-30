@@ -126,6 +126,9 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         // instructions are NOT recovered — kuna's S5/S7 frame analysis already
         // recovers the stack frame from the code, so CFI is inherited, not rebuilt.
         Box::new(crate::entry::EhFrameLsdaPass),
+        // (kuna `itaniumeh`) The call-site table with each landing pad's clauses,
+        // for the decompiler's exceptional edges. Commit gated, default-OFF.
+        Box::new(crate::entry::kuna_itaniumeh::ItaniumEhPass),
         // (kuna `unwindstarts`) S1 Mach-O `__unwind_info` function-start discovery:
         // the linker-built second-level pages of `__TEXT,__unwind_info` list every
         // function the unwinder can describe, by start offset. The section survives

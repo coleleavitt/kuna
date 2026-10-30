@@ -3037,6 +3037,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (output-changing: adds entries), so a default run never commits them and
         // the discovery set is byte-identical to FDE-pcBegin-only.
         "eh_frame_full" => arch.analysis_eh_frame_full,
+        "itaniumeh" => arch.itanium_eh,
         // (kuna) Mach-O `__unwind_info` function-start discovery — facts computed
         // at LOAD, COMMITTED only when this gate is on. Default-off (output-
         // changing: adds entries), so a default run is byte-identical and an image
@@ -4884,6 +4885,28 @@ fn commit_analysis_output(
         sites.sort_unstable();
         sites.dedup();
         prog.arch_mut().error_noreturn_callsites = sites;
+    }
+
+    // (kuna `itaniumeh`) Park the call-site table and the two registers the
+    // unwinder fills at a pad. Empty unless the gate is on.
+    if !out.eh_call_sites.is_empty() {
+        let mut table = kuna_decomp::kuna_itaniumeh::EhTable::new(out.eh_call_sites.clone());
+        let arch = prog.arch();
+        let reg = |names: &[&str]| {
+            names.iter().find_map(|n| arch.get_register_varnode(n.as_bytes()).ok()).map(|v| (v.get_addr(), v.size as i32))
+        };
+        let (exc, sel): (&[&str], &[&str]) = if arch.archid.starts_with("x86:LE:64") {
+            (&["RAX"], &["RDX"])
+        } else if arch.archid.starts_with("x86") {
+            (&["EAX"], &["EDX"])
+        } else if arch.archid.starts_with("AARCH64") {
+            (&["x0"], &["x1"])
+        } else {
+            (&["r0"], &["r1"])
+        };
+        table.exception_reg = reg(exc);
+        table.selector_reg = reg(sel);
+        prog.arch_mut().eh_table = std::rc::Rc::new(table);
     }
 
     // (kuna `callerreads`) Park where each direct call returns to. Empty without
