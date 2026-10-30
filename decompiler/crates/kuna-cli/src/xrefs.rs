@@ -229,7 +229,7 @@ fn query(args: &XrefArgs) -> Result<String, String> {
         &args.binary,
         kuna_analysis::loader::macho_fat::slice_pref(args.slice.as_deref(), args.target.as_deref()),
     )?;
-    if kuna_analysis::loadimage_dex::is_dex(&bytes) || kuna_analysis::loadimage_dex::is_apk(&bytes) {
+    if kuna_analysis::loadimage_dex::is_dex_image(&bytes) {
         return dex_query(args, bytes);
     }
     let file = kuna_analysis::loadimage_object::parse_object(&bytes)

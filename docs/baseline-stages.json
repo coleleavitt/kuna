@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3700,
-    3700
+    3704,
+    3704
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2594,6 +2594,10 @@
     "data:dex apk #1: classes2.dex calls a static method of classes.dex",
     "data:dex apk #2: classes2.dex strings come from its own pool",
     "data:dex apk #3: classes.dex methods load too",
+    "data:dex containers #1: an ODEX's method decompiles",
+    "data:dex containers #2: a VDEX's DEX section decompiles",
+    "data:dex containers #3: an OAT's embedded DEX decompiles",
+    "data:dex containers #4: a compact DEX keeps its code items and try items",
     "data:dexmodel #10: a long parameter takes a register pair",
     "data:dexmodel #1: off leaves the constant pool unresolved",
     "data:dexmodel #2: off loses the signature and its parameter",

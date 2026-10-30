@@ -1159,6 +1159,28 @@ loaded files that way, and `kuna xrefs` answers from it for DEX and APK input
 calls, a framework method that no loaded file defines appearing by name with
 no address).
 
+The on-device forms of a DEX file load the same way, through
+`loadimage_dex.rs (load_dex_models)`. A **compact DEX** file (`cdex` and a
+three-digit version, ART's `compact_dex_file.h`) is parsed by the same reader
+(`kuna_dex/format.rs (DexFile)`): its header is 0x88 bytes, the offsets of its
+string data, type lists, class data and code items count from the header's
+`data_off`, and a code item packs registers, ins, outs and tries into four 4-bit
+fields and the instruction count into 11 bits, with a preheader of 16-bit
+additions before the item for larger values (`DexFile::read_code_item`). An
+**ODEX** (`dey\n`) wraps one DEX file at its `DexOptHeader`'s `dexOffset`; it
+decodes with `Dalvik:LE:32:ODEX_KitKat`, whose tables hold the quickened
+instructions an optimized file may contain (`loadimage_dex.rs (dex_language)`).
+A version-027 **VDEX** (Android 12 and later) lists its sections in its header;
+the DEX section holds one DEX file per checksum, each 4-byte aligned after the
+previous one's `file_size`, and runs to the section's end so a compact DEX file's
+shared data stays reachable. An **OAT** file is an ELF whose `oatdata` dynamic
+symbol starts with `oat\n` and a version; up to Android 7 it embeds the DEX
+files, which are found by their own headers (a DEX magic on a 4-byte boundary
+whose header size, endian tag and file size hold up), since the `OatDexFile`
+records that locate them change with every OAT version. Every form is
+synthesized from `tests/stages/fixtures/dex/hello.dex` and `tries.dex` by
+`tests/stages/fixtures/dex/containers.py`.
+
 (kuna) **A stripped ELF's separate debug information** (`debuglink`,
 default on, a load-time gate read through `KUNA_DEBUGLINK`). Distributions
 strip their binaries and ship the symbol table and DWARF in a separate file.
