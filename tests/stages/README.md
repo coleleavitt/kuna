@@ -10,6 +10,10 @@ whose block holds unread flag writes once the register space has had a heritage
 pass (`deadcode delay register 50` keeps those writes alive). Before the fix the
 second `if (x)` stayed.
 
+`kuna-switchsingle.xml` checks that a jump table whose four entries all name one
+block becomes straight-line code with the "all go to same destination" warning
+instead of a `switch` with only a `default` arm.
+
 `kuna-stack-byte-copy.xml` checks pushed scratch bytes, partial reads and a
 saved snapshot with `stackstoreguard` off and on. Its CLI companion compiles
 and executes the exact C at O2 in default, stackviews and stackalias modes, and checks
