@@ -13,6 +13,8 @@
 
     Pass 1 (default) prints alloca(...); pass 2 (dynalloca off) the stack
     pointer arithmetic.
+
+    `alloca` (default on) recognises the same stack move earlier, so this test runs with it off.
 -->
 <bytechunk space="ram" offset="0x401000" readonly="true">
 f30f1efa4088374863f60fbe4437ffc3f30f1efa554863c74889c64883c00f4883e0f04889e54829c44889e7e8cfffffffc9c3
@@ -21,6 +23,7 @@ f30f1efa4088374863f60fbe4437ffc3f30f1efa554863c74889c64883c00f4883e0f04889e54829
 <symbol space="ram" offset="0x401010" name="vla"/>
 </binaryimage>
 <script>
+  <com>option alloca off</com>
   <com>lo fu vla</com>
   <com>decompile</com>
   <com>print C</com>

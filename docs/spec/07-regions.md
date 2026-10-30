@@ -609,3 +609,6 @@ amount (`sub rsp, rax`); once types are in, the new stack pointer value is
 into the typed builtin `alloca(n)` (`void *`), as Hex-Rays prints `alloca` for a
 run-time stack move. gcc `-O2` `vla(int n) { char buf[n]; return use(buf, n); }`
 reads `v1 = alloca((long)a0 + 0xfU & 0xfffffffffffffff0); return use(v1,(long)a0);`.
+The P3 `alloca` option rewrites the same stack move before heritage; with it
+on (the default) the PTRADD never forms, so this rule is the fallback for
+functions `alloca` declines or with `alloca` off. Both use `BUILTIN_ALLOCA`.

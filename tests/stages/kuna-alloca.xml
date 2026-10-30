@@ -26,6 +26,8 @@
     Stage: P3 dataflow (RuleAlloca, RuleAllocaProbe) and the raw
     `sub rsp,reg` rewrite at ActionStart, option alloca off|on. Pass 1 (off)
     pins the bug, pass 2 (on, the default) the fix.
+
+    `dynalloca` (default on) is the later fallback for the same stack move, so this test runs with it off.
 -->
 <bytechunk space="ram" offset="0x401140">
 f30f1efac3
@@ -37,6 +39,7 @@ f30f1efa554863c74889c24883c00f4889c64881e600f0ffff4889e14889e54829f14839cc741548
 <symbol space="ram" offset="0x401150" name="vla"/>
 </binaryimage>
 <script>
+  <com>option dynalloca off</com>
   <com>option alloca off</com>
   <com>lo fu vla</com>
   <com>decompile</com>
