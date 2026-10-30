@@ -4215,7 +4215,7 @@ pub fn bootstrap_from_object_with_isa(
     // by release (go1.23's g.syscallbp, go1.25's dropped gobuf.ret). Carry it
     // on the loadtime-env tier; a non-Go image clears the variable so a stale
     // value from an earlier load in this process cannot leak in.
-    match kuna_analysis::loader::gobuildinfo::go_toolchain_version(&bytes) {
+    match kuna_analysis::loader::gobuildinfo::go_version_any(&bytes) {
         Some((maj, min)) => {
             std::env::set_var(kuna_decomp::kuna_goreg::GOVERSION_ENV, format!("{maj}.{min}"))
         }

@@ -250,7 +250,13 @@ its default model (`set_default_model("abi0")`). The cspec's `abi0` has no
 output, because a Go stack result sits after the arguments at an offset the
 model cannot state, so the callee's result is still not shown. Measured on a
 stripped go1.16.15 build: `main.main` went from `main.add3(); os.Exit();` to
-`main.add3(dat_4e7748,2,7); os.Exit(v1);`.
+`main.add3(dat_4e7748,2,7); os.Exit(v1);`. The same version decides `goreg`:
+before the register ABI `g` lived in thread-local storage and R14/x28 were
+ordinary registers, so `kuna_goreg::goroutine_register` returns `None` for an
+image the bootstrap's `KUNA_GOVERSION` places before go1.17 (amd64) or go1.18
+(arm64); that variable is now set from either build-info form
+(`go_version_any`). In the same go1.16 build, a function at 0x404140 used R14
+as scratch and printed `g = a4;`; it now prints a plain local.
 
 (kuna) **Function ends come from the `pcsp` table**
 (`decompiler/crates/kuna-analysis/src/analyzers/pclntab/mod.rs
