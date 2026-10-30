@@ -953,6 +953,11 @@ impl Funcdata {
         std::mem::take(&mut self.pending_comments)
     }
 
+    /// Discard the buffered comments of any type in `types`.
+    pub fn drop_pending_comments(&mut self, types: kuna_base::types::uint4) {
+        self.pending_comments.retain(|(tp, _, _)| tp & types == 0);
+    }
+
     /// Read-only view of the buffered analysis comments (the
     /// `(comment_type, placement_address, text)` triples that
     /// [`Self::drain_pending_comments`] will hand to the console `Architecture`'s

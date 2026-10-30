@@ -61,20 +61,103 @@ pub(crate) struct PltSym {
 ///
 /// `bytes` is the raw image, used only by the `PT_DYNAMIC` fallback below.
 pub(crate) fn resolve_plt_imports(file: &object::File, bytes: &[u8]) -> Vec<PltSym> {
-    let out = resolve_from_sections(file);
+    resolve_plt_imports_and_slots(file, bytes).0
+}
+
+/// [`resolve_plt_imports`] plus the set of GOT slots its stubs jump through.
+fn resolve_plt_imports_and_slots(file: &object::File, bytes: &[u8]) -> (Vec<PltSym>, HashSet<u64>) {
+    let mut named_got = HashSet::new();
+    let out = resolve_from_sections(file, &mut named_got);
     if !out.is_empty() {
-        return out;
+        return (out, named_got);
     }
     // Every input above is keyed on the section table, so an ELF without one
     // yields nothing at all.  Re-derive the same facts from `PT_DYNAMIC`, which
     // is how the run-time loader finds them.  See [`resolve_from_dynamic_segment`].
-    resolve_from_dynamic_segment(file, bytes)
+    let out = resolve_from_dynamic_segment(file, bytes, &mut named_got);
+    (out, named_got)
+}
+
+/// The PLT stubs of [`resolve_plt_imports`] plus one entry per GOT slot that
+/// holds the address of an imported function no PLT stub jumps through.
+///
+/// A `-fno-plt` (or `-z now` relaxed) call is `call *slot(%rip)`: there is no
+/// stub to name, so the import is reachable only through its slot. The second
+/// vector names those slots, the ELF counterpart of the Mach-O symbol-pointer
+/// slots `macho_stubs` names. A slot qualifies when it lies in a `.got*`
+/// section and a dynamic relocation with no addend binds it to an undefined
+/// `STT_FUNC` `.dynsym` entry. MIPS and PowerPC are left out: their GOTs are resolved
+/// through their own layouts above, not through call-site slots.
+pub(crate) fn resolve_imports_with_got_slots(
+    file: &object::File,
+    bytes: &[u8],
+) -> (Vec<PltSym>, Vec<PltSym>) {
+    let (stubs, plt_slots) = resolve_plt_imports_and_slots(file, bytes);
+    let slots = if matches!(
+        file.architecture(),
+        Architecture::Mips | Architecture::Mips64 | Architecture::PowerPc | Architecture::PowerPc64
+    ) {
+        Vec::new()
+    } else {
+        got_call_slots(file, &plt_slots)
+    };
+    (stubs, slots)
+}
+
+/// The `[slot, slot + ptr)` ranges of [`resolve_imports_with_got_slots`]'s
+/// `.got` call slots.
+pub(crate) fn got_call_slot_ranges(file: &object::File, bytes: &[u8]) -> Vec<(u64, u64)> {
+    let width = if file.is_64() { 8 } else { 4 };
+    resolve_imports_with_got_slots(file, bytes).1.into_iter().map(|p| (p.addr, p.addr + width)).collect()
+}
+
+/// The GOT slots bound to an undefined function symbol, minus `plt_slots`.
+///
+/// Only words inside a `.got*` section count: the same relocation also fills a
+/// function pointer stored in program data (a `.data.rel.ro` dispatch table),
+/// and that word is an object of the program, not an import slot.
+fn got_call_slots(file: &object::File, plt_slots: &HashSet<u64>) -> Vec<PltSym> {
+    let got: Vec<(u64, u64)> = file
+        .sections()
+        .filter(|s| s.name().is_ok_and(|n| n.starts_with(".got")))
+        .map(|s| (s.address(), s.address().saturating_add(s.size())))
+        .collect();
+    if got.is_empty() {
+        return Vec::new();
+    }
+    let mut funcs: HashMap<usize, Vec<u8>> = HashMap::new();
+    for s in file.dynamic_symbols() {
+        if s.is_undefined() && s.kind() == object::SymbolKind::Text {
+            if let Ok(n) = s.name_bytes() {
+                if !n.is_empty() {
+                    funcs.insert(s.index().0, strip_version(n));
+                }
+            }
+        }
+    }
+    let Some(relocs) = file.dynamic_relocations() else { return Vec::new() };
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for (slot, reloc) in relocs {
+        let RelocationTarget::Symbol(idx) = reloc.target() else { continue };
+        let Some(name) = funcs.get(&idx.0) else { continue };
+        if reloc.addend() != 0
+            || plt_slots.contains(&slot)
+            || !got.iter().any(|&(lo, hi)| (lo..hi).contains(&slot))
+        {
+            continue;
+        }
+        if seen.insert(slot) {
+            out.push(PltSym { addr: slot, name: name.clone() });
+        }
+    }
+    out
 }
 
 /// The section-driven resolution: `.dynsym`/`SHT_RELA` for the names, `.plt*`
 /// for the stubs.  Unchanged behavior for any image whose section table is
 /// intact — which is every image that ever reached this code before.
-fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
+fn resolve_from_sections(file: &object::File, named_got: &mut HashSet<u64>) -> Vec<PltSym> {
     let arch = file.architecture();
     if arch == Architecture::PowerPc {
         return super::kuna_ppc32_imports::resolve(file);
@@ -100,10 +183,9 @@ fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
     }
 
     let mut out: Vec<PltSym> = Vec::new();
-    // GOT slots already named, so an import that appears in both `.plt.sec` (the
-    // CET call target) and `.plt` (the lazy-resolution stub) is named once, at
-    // the higher-priority section.
-    let mut named_got: HashSet<u64> = HashSet::new();
+    // `named_got` holds the GOT slots already named, so an import that appears in
+    // both `.plt.sec` (the CET call target) and `.plt` (the lazy-resolution stub)
+    // is named once, at the higher-priority section.
 
     // Scan PLT-bearing sections, `.plt.sec`/`.plt.got` before `.plt` so the
     // actual call target (CET `.plt.sec`) wins over the lazy `.plt` stub.
@@ -141,7 +223,7 @@ fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
     };
 
     for (vma, data, _) in plt_secs {
-        decode_plt_section(arch, vma, data, i386_got_base, &got_to_name, &mut out, &mut named_got);
+        decode_plt_section(arch, vma, data, i386_got_base, &got_to_name, &mut out, named_got);
     }
 
     // (kuna ifuncfpret) Name the x86-64 `.plt.sec`/`.iplt` IFUNC (IRELATIVE) stubs
@@ -166,7 +248,7 @@ fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
                         &ifunc,
                         &got_to_name,
                         &mut out,
-                        &mut named_got,
+                        named_got,
                     );
                 }
             }
@@ -179,7 +261,7 @@ fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
     // separately — they are TOC-relative, so they need the TOC base, which the
     // per-section scan above does not carry.  See [`decode_ppc64_text`].
     if matches!(arch, Architecture::PowerPc64 | Architecture::PowerPc) {
-        decode_ppc_text(file, arch, &got_to_name, &mut out, &mut named_got);
+        decode_ppc_text(file, arch, &got_to_name, &mut out, named_got);
         out.extend(super::elfv1_imports::resolve(file));
     }
 
@@ -206,7 +288,11 @@ fn resolve_from_sections(file: &object::File) -> Vec<PltSym> {
 /// at all (PowerPC's stubs are TOC-relative and inline in `.text`, MIPS carries
 /// the correspondence in its GOT layout), so both need a section-derived anchor
 /// this path cannot supply.
-fn resolve_from_dynamic_segment(file: &object::File, bytes: &[u8]) -> Vec<PltSym> {
+fn resolve_from_dynamic_segment(
+    file: &object::File,
+    bytes: &[u8],
+    named_got: &mut HashSet<u64>,
+) -> Vec<PltSym> {
     let arch = file.architecture();
     if matches!(
         arch,
@@ -235,7 +321,6 @@ fn resolve_from_dynamic_segment(file: &object::File, bytes: &[u8]) -> Vec<PltSym
     };
 
     let mut out: Vec<PltSym> = Vec::new();
-    let mut named_got: HashSet<u64> = HashSet::new();
     for (vma, data) in super::elf_dynseg::exec_segments(bytes) {
         decode_plt_section(
             arch,
@@ -244,7 +329,7 @@ fn resolve_from_dynamic_segment(file: &object::File, bytes: &[u8]) -> Vec<PltSym
             i386_got_base,
             &imports.got_to_name,
             &mut out,
-            &mut named_got,
+            named_got,
         );
     }
     out
