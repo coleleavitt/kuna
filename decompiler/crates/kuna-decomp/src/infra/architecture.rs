@@ -1682,6 +1682,9 @@ pub struct Architecture {
     /// (kuna `calleeretpurge`) Per-image cache of each direct callee's decoded
     /// return purge, keyed by `(space index, entry offset)`.
     pub kuna_callee_purge_cache: std::collections::HashMap<(int4, uintb), Option<int4>>,
+    /// (kuna `importvote`) The direct call sites of each PLT import, by stub
+    /// `(space index, offset)`, committed by the analysis tier.
+    pub kuna_import_sites: Rc<std::collections::HashMap<(int4, u64), Vec<u64>>>,
     /// (kuna `bejoin evidence`) Per-image cache of the wide-return proof
     /// ([`crate::kuna_bejoin::seed_wide_returns`]): the model's pair, each
     /// function's verdict, keyed by its `(space index, entry offset)` so a
@@ -2035,6 +2038,8 @@ pub struct Architecture {
     /// (kuna) Withhold an exception-cleanup `.cold` fragment from the function
     /// list (option `ehcold`).  See `kuna_analysis::entry::kuna_ehcold`.
     pub analysis_ehcold: bool,
+    /// (kuna) State an undeclared import's call-site vote (option `importvote`).
+    pub analysis_importvote: bool,
     /// (kuna) Reject a discovered function entry that falls strictly inside a
     /// single-function `.pdata` `RUNTIME_FUNCTION` body (`pdatainterior`);
     /// default **on**. The PE half of [`Self::analysis_fdeinterior`] and the same
@@ -3422,6 +3427,7 @@ impl Architecture {
             kuna_fn_deadline: None, // (kuna) set per drive from kuna_fn_budget
             kuna_callee_write_cache: std::collections::HashMap::new(),
             kuna_callee_purge_cache: std::collections::HashMap::new(),
+            kuna_import_sites: Rc::new(std::collections::HashMap::new()),
             kuna_wide: crate::kuna_bejoin::WideCache::default(),
             kuna_callwide: crate::p4_calls::kuna_callwide::ProofSlot::default(),
             kuna_callee_dead_cache: std::collections::HashMap::new(),
@@ -3491,6 +3497,7 @@ impl Architecture {
             analysis_fdeinterior: false,
             analysis_coldentry: false,
             analysis_ehcold: false,
+            analysis_importvote: false,
             analysis_pdatainterior: false,
             analysis_pdbinterior: false,
             analysis_funcstart_patterns: false,
@@ -4015,7 +4022,8 @@ impl Architecture {
         // (kuna) DIV-61 `.eh_frame` FDE-interior entry suppression — default-ON.
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;
-        self.analysis_ehcold = true; // (kuna) an EH cleanup .cold part reached only from its owner's landing pads is not a function
+        self.analysis_ehcold = true;
+        self.analysis_importvote = true; // (kuna) an undeclared import takes what its other call sites pass // (kuna) an EH cleanup .cold part reached only from its owner's landing pads is not a function
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — default-ON.
         self.analysis_pdatainterior = true;
         // (kuna) PDB-procedure-interior entry suppression — default-ON.

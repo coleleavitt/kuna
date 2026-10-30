@@ -447,6 +447,9 @@ pub struct AnalysisOutput {
     /// part; every entry inside one is dropped at the commit. Produced only by
     /// [`crate::entry::kuna_ehcold`] (`ehcold`).
     pub eh_cold: Vec<(u64, u64)>,
+    /// (kuna) The direct call sites of each PLT import, by stub address.
+    /// Produced only by [`crate::protos::kuna_importvote`] (`importvote`).
+    pub import_call_sites: Vec<(u64, Vec<u64>)>,
     /// (kuna) PDB procedure extents that describe exactly one function, as
     /// `[start, end)`, sorted and disjoint. Applied after [`Self::fde_bodies`],
     /// only where a function is committed at `start` (a `static` function has an
@@ -852,6 +855,7 @@ impl AnalysisOutput {
         self.fde_bodies.extend(other.fde_bodies);
         self.fde_interior_entries.extend(other.fde_interior_entries);
         self.eh_cold.extend(other.eh_cold);
+        self.import_call_sites.extend(other.import_call_sites);
         self.pdb_bodies.extend(other.pdb_bodies);
         self.entry_names.extend(other.entry_names);
         self.noreturn.extend(other.noreturn);

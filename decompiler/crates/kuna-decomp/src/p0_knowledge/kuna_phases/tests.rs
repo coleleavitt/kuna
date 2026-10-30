@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_412() {
-    assert_eq!(kuna_num_settables(), 412);
-    assert_eq!(SETTABLE_TABLE.len(), 412);
+fn settable_count_is_413() {
+    assert_eq!(kuna_num_settables(), 413);
+    assert_eq!(SETTABLE_TABLE.len(), 413);
 }
 
 #[test]
-fn tier_counts_are_131_core_153_transform_128_analysis() {
+fn tier_counts_are_131_core_153_transform_129_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_131_core_153_transform_128_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (131, 153, 128));
+    assert_eq!((core, transform, analysis), (131, 153, 129));
 }
 
 #[test]
@@ -366,6 +366,7 @@ fn option_values_live_value_present_for_187() {
         // no codegen live reader. Default-ON.
         "coldentry",
         "ehcold",
+        "importvote",
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — the PE half
         // of `fdeinterior`, an analysis-pass gate with no codegen live reader.
         // Default-ON.
@@ -1249,7 +1250,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
     // +1 for `stackexitanchor`.
-    assert_eq!(json.matches("},\n").count(), 411);
+    // +1 for `importvote`.
+    assert_eq!(json.matches("},\n").count(), 412);
 }
 
 #[test]

@@ -625,6 +625,9 @@ Three tiers:
 | many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold) |
 | a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold) |
 | a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold) |
+| a tail jump to an undeclared import drops an argument the function passes through | [`importvote`](#importvote) |
+| a forwarder to a library function prints void and no return | [`importvote`](#importvote) |
+| return helper() with fewer arguments than the other calls to helper pass | [`importvote`](#importvote) |
 | spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
 | a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
 | function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
@@ -2943,6 +2946,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default. Keep it on for gcc -O2 C++ binaries, where cleanup ladders otherwise flood the function list with sub_<addr> fragments that start from an undefined register and end in _Unwind_Resume(). Flip OFF to list and decompile the cold cleanup code on its own (to read what a destructor chain frees).
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-22-ehcold
 - **Example:** `--option ehcold off`
+
+### `importvote` -- on | off, default `on`
+
+- **Symptoms:** a tail jump to an undeclared import drops an argument the function passes through; a forwarder to a library function prints void and no return; return helper() with fewer arguments than the other calls to helper pass.
+- **What it does:** Give an import with no declaration the arguments its other call sites pass. A tail jump to an import (`add esi,1; jmp ext3@plt`) forwards every argument register the function leaves untouched, and nothing in the function names them: without a prototype the forwarded rdx was no argument, so `int g(int a,int b,int c){ return ext3(a, b+1, c); }` printed `void g(a0,a1) { ext3(a0,a1 + 1); }`. The import has no body, but the image calls it elsewhere. On an x86-64 ELF the analysis tier records every direct call rel32 to a PLT stub; when a function tail-calls an import that no libc/Win32/DWARF/demangled declaration and no statement reached, the drive decodes a window around each of that import's call sites: the argument registers written since the previous call or branch (at most 16 instructions back) and whether the return register is read in the 8 instructions after. A site's arity runs through the last SysV argument register it writes (an earlier one it leaves alone is its own parameter passed through); the vote is the largest site arity and whether any site reads the result. It is stated the way protoorder states a decompiled callee, marked as a callers' vote, so passthrough takes its registers at the tail call: `int g(a0,a1,a2) { return ext3(a0,(unsigned int)(a1 + 1),a2); }`.
+- **When to flip:** On by default. Keep it on for shared objects that call into libraries kuna has no signatures for: a forwarder or thunk to such an import keeps the arguments it passes through and the result it returns. Flip OFF when a caller sets an argument register for its own use right before a call and the vote over-counts an import's arity.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · analysis-enablement · ida95-extra-plt-passthrough
+- **Example:** `option importvote off`
 
 ### `fdeinterior` -- on | off, default `on`
 

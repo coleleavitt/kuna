@@ -1051,6 +1051,7 @@ kuna_options! { self, p1;
         on_off!(analysis_coldentry, "Multi-entry .cold fragment entry discovery")
     },
     "ehcold" => on_off!(analysis_ehcold, "Exception-cleanup .cold fragment suppression"),
+    "importvote" => on_off!(analysis_importvote, "Undeclared import call-site vote"),
     "fdeinterior" => {
         on_off!(analysis_fdeinterior, ".eh_frame FDE-interior entry suppression")
     },

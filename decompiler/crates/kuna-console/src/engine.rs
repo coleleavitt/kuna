@@ -2821,7 +2821,8 @@ impl ConsoleProgram {
         // load it swept the whole image on every binary and was discarded whenever
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
-        let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
+        let want_coldentry =
+            self.arch().analysis_coldentry || self.arch().analysis_ehcold || self.arch().analysis_importvote;
         if (want_listing
             || want_fast_funcdisc
             || want_operand_refs
@@ -3152,6 +3153,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "fdeinterior" => arch.analysis_fdeinterior,
         "coldentry" => arch.analysis_coldentry,
         "ehcold" => arch.analysis_ehcold,
+        "importvote" => arch.analysis_importvote,
         "pdatainterior" => arch.analysis_pdatainterior,
         // (kuna) PDB-procedure-interior entry suppression — the extents come out of
         // the `.pdb`, so switching `pdb` off withdraws them too.
@@ -5682,6 +5684,15 @@ fn commit_analysis_output(
     for (addr, pieces) in out.cpp_dwarf.prototypes {
         let a = Address::new(Rc::clone(code_space), addr);
         prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
+    }
+
+    // 5e. (kuna `importvote`) The call sites of every PLT import, read by the
+    //     engine when a function tail-calls one no declaration reached.
+    let space = code_space.get_index();
+    let sites: std::collections::HashMap<(i32, u64), Vec<u64>> =
+        out.import_call_sites.into_iter().map(|(stub, sites)| ((space, stub), sites)).collect();
+    if !sites.is_empty() {
+        prog.arch_mut().kuna_import_sites = Rc::new(sites);
     }
 
     // 6. Processor-context decode-mode paints (the kuna analog of ARM's
