@@ -881,6 +881,8 @@ kuna_options! { self, p1;
     "x87depth" => on_off!(x87_depth, "x87 stack depth at returns"),
     "trapaftercall" => on_off!(trap_after_call, "no-return evidence from a trap after a call"),
     "retpolinethunk" => on_off!(retpoline_thunk, "retpoline thunks recognized by their body"),
+    "varargsave" => on_off!(vararg_save, "System V register save area of variadic functions"),
+    "alloca" => on_off!(alloca_calls, "dynamic stack allocation as alloca(size)"),
     "codescalar" => on_off!(codescalar, "code-pointee scalar-value guard"),
     "boolbyte" => on_off!(bool_byte, "truth-valued byte typing"),
     "floatbits" => on_off!(float_bits, "float typing of helpers that work on a float's bits"),

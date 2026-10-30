@@ -94,6 +94,15 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
                 return t;
             }
         }
+        // (kuna alloca) `void *alloca(size_t)`.
+        if in0_off == crate::userop::BUILTIN_ALLOCA as u64 {
+            if let Some(tlst) = arch.types() {
+                let ws = arch.manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
+                if let Ok(ptr) = tlst.get_type_void().and_then(|v| tlst.get_type_pointer(out_size, v, ws)) {
+                    return ptr;
+                }
+            }
+        }
         // (kuna itaniumeh) the exceptional-edge test is a `bool`.
         if in0_off == crate::userop::BUILTIN_EH_UNWINDING as u64 {
             if let Some(Ok(t)) = arch.types().map(|t| t.get_base(out_size, type_metatype::TYPE_BOOL)) {
@@ -181,6 +190,22 @@ fn input_type_local_with(data: &Funcdata, op: OpId, slot: int4, recovered: bool)
             let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
             if let Ok(ptr) = tlst.get_type_char(1).and_then(|c| tlst.get_type_pointer(in_size, c, ws)) {
                 return ptr;
+            }
+        }
+    }
+
+    // (kuna varargsave) `va_start(__va_list_tag *)`.
+    if opcode == OpCode::CPUI_CALLOTHER
+        && slot == 1
+        && in_size == 8
+        && o.get_in(0).and_then(|v| data.vbank().get(v)).map(|v| v.get_offset())
+            == Some(crate::userop::BUILTIN_VA_START as u64)
+    {
+        if let Some(tlst) = arch.types() {
+            if let Ok(ptr) = tlst.get_type_struct("__va_list_tag").and_then(|t| tlst.get_type_pointer(8, t, 1)) {
+                if ptr.get_ptr_to().is_some_and(|t| t.get_size() == 24) {
+                    return ptr;
+                }
             }
         }
     }

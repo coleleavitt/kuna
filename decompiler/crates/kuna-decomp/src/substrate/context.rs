@@ -630,6 +630,10 @@ pub struct ArchContext {
     pub x87_empty_storage: Option<crate::p4_calls::kuna_x87emptyreturn::Storage>,
     /// (kuna `x87depth`) Prove ST0 empty at returns from the x87 stack depth.
     pub x87_depth: bool,
+    /// (kuna `varargsave`) The System V argument registers, when the pass applies.
+    pub vararg_regs: Option<crate::p4_calls::kuna_varargsave::Regs>,
+    /// (kuna `alloca`) Read by [`RuleAlloca`](crate::kuna_alloca::RuleAlloca).
+    pub alloca_calls: bool,
     /// (kuna `trapaftercall`) A trap after an x86 call marks the call no-return.
     pub trap_after_call: bool,
 
@@ -1852,6 +1856,8 @@ impl ArchContext {
             min_laned_register_size: 4,
             x87_empty_storage: None,
             x87_depth: false,
+            vararg_regs: None,
+            alloca_calls: false,
             trap_after_call: false,
             lanerecords: Vec::new(),
             split_records: Vec::new(),

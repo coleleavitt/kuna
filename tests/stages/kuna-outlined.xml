@@ -25,7 +25,8 @@
     `__chkstk_darwin` and returns an undefined `v1 + 1`, `_sum2` returns
     `_OUTLINED_FUNCTION_0() + 3`, `_bail` tail-calls `_OUTLINED_FUNCTION_1`.
     Pass 2 (both on, the shipped defaults) is the FIX: `_probe` returns
-    `a0 + 1`, `_sum2` returns `(a0 + a1) * 2 + 3`, `_bail` calls `exit(7)`.
+    `a0 + 1` (its `sub sp,sp,x9` with `x9 = x0 << 4` prints as
+    `alloca(a0 << 4)` under `option alloca`, which reads x0 at 64 bits), `_sum2` returns `(a0 + a1) * 2 + 3`, `_bail` calls `exit(7)`.
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 c0035fd6
@@ -62,7 +63,7 @@ c0035fd6
   <com>quit</com>
 </script>
 <stringmatch name="OUTLINED #1: off keeps the stack probe call" min="1" max="1">__chkstk_darwin\(</stringmatch>
-<stringmatch name="OUTLINED #2: on returns the argument kept across the probe" min="1" max="1">return a0 \+ 1;</stringmatch>
+<stringmatch name="OUTLINED #2: on returns the argument kept across the probe" min="1" max="1">return (\(int4\))?a0 \+ 1;</stringmatch>
 <stringmatch name="OUTLINED #3: off calls the fragment" min="1" max="1">return _OUTLINED_FUNCTION_0\(.*\) \+ 3;</stringmatch>
 <stringmatch name="OUTLINED #4: on inlines the fragment's arithmetic" min="1" max="1">return \(a0 \+ a1\) \* 2 \+ 3;</stringmatch>
 <stringmatch name="OUTLINED #5: off tail-calls the fragment" min="1" max="1">_OUTLINED_FUNCTION_1\(</stringmatch>
