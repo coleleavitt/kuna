@@ -3398,6 +3398,16 @@ place; the recovered parameter takes the hinted name. A hint with no type
 names the parameter only. A body that never reads the register declares
 nothing.
 
+A function with no signature and no name to say so still states its
+convention by what it calls (`kuna_swiftcall::callee_evidence`, read in the
+decompile drive before the model is set): a body that calls `swift_willThrow`
+throws, one that calls the task runtime's suspension entry points
+(`swift_task_alloc` / `swift_task_dealloc` / `swift_task_switch`,
+`swift_continuation_*`, `swift_asyncLet_*`, the task-group and future waits)
+is `async`, and the metadata's binding is upgraded to the matching model —
+`__swiftasynccall` with a nameless `async_context` hint on the `swiftasync`
+register — so a stripped image's resume partials take their context.
+
 Two call-site rules read the image's Swift registers
 (`decompiler/crates/kuna-decomp/src/p4_calls/kuna_swiftcall.rs`,
 `ArchContext::swift_abi`, present only when the pass bound the convention).

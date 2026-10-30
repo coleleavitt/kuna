@@ -2005,10 +2005,12 @@ it `a1`, while `peek` gains no `self`. With `swiftcall off` the methods read
 `self` from an unnamed r13 and `run` returns the throwing call's result
 unchecked.
 
-### `swift_sigs_syms_elf` — declared Swift signatures, four-word returns, async (`swiftcall`)
+### `swift_sigs_syms_elf` / `swift_sigs_elf` — declared Swift signatures, four-word returns, async (`swiftcall`)
 
 `swift_sigs_syms_elf` (x86-64 ELF, 26 KB, symbols kept) is the declared-prototype
-fixture (`tests/stages/kuna-swiftsigs.xml`). Its source
+fixture (`tests/stages/kuna-swiftsigs.xml`); `swift_sigs_elf` is the same binary
+after `llvm-strip --strip-all` (`tests/stages/kuna-swiftasync.xml`: the async
+context from what the body calls, with no name to say so). Its source
 `swift_sigs_syms_elf.swift` declares a class `Box` whose methods return a
 three-word struct (`triple`, back in `rcx:rdx:rax`), a five-word struct (`wide`,
 through the indirect result register, rax on x86-64 Swift), a payload-less enum

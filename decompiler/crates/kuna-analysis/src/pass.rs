@@ -267,7 +267,7 @@ pub struct SwiftTypeFacts {
     /// (kuna `swiftcall`) Declared prototypes from mangled names.
     pub declared: Vec<SwiftDeclaredFact>,
     /// The `swiftself` and `swifterror` registers, once a convention is bound.
-    pub regs: Option<(&'static str, &'static str)>,
+    pub regs: Option<(&'static str, &'static str, &'static str)>,
 }
 
 /// The function at `func_addr` follows the cspec prototype model `model`,

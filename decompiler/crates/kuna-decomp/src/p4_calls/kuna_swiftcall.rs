@@ -41,15 +41,76 @@ use crate::context::OpId;
 use crate::fspec::ProtoModel;
 use crate::funcdata::Funcdata;
 
-/// The Swift registers of the image and the model that returns the error.
+/// The Swift registers of the image and its four models.
 #[derive(Debug)]
 pub struct SwiftAbi {
     pub self_reg: (Address, int4),
     pub error_reg: (Address, int4),
+    pub async_reg: (Address, int4),
     pub throws: Rc<ProtoModel>,
+    /// `__swiftcall`, `__swiftasynccall`, `__swiftasynccall_throws`.
+    pub plain: Rc<ProtoModel>,
+    pub asynccall: Rc<ProtoModel>,
+    pub asynccall_throws: Rc<ProtoModel>,
     /// The bound callees that may or may not take `swiftself`, by entry
     /// `(space index, offset)`.
     pub maybe_self: BTreeSet<(int4, uintb)>,
+}
+
+impl SwiftAbi {
+    /// The model for a function that is `async` and/or `throws`.
+    pub fn model(&self, is_async: bool, throws: bool) -> Rc<ProtoModel> {
+        Rc::clone(match (is_async, throws) {
+            (true, true) => &self.asynccall_throws,
+            (true, false) => &self.asynccall,
+            (false, true) => &self.throws,
+            (false, false) => &self.plain,
+        })
+    }
+}
+
+/// Runtime entry points only an `async` function's frames call.
+const ASYNC_CALLEES: [&str; 12] = [
+    "swift_task_switch",
+    "swift_task_alloc",
+    "swift_task_dealloc",
+    "swift_continuation_await",
+    "swift_continuation_init",
+    "swift_asyncLet_begin",
+    "swift_asyncLet_get",
+    "swift_asyncLet_get_throwing",
+    "swift_asyncLet_finish",
+    "swift_taskGroup_wait_next_throwing",
+    "swift_task_future_wait",
+    "swift_task_future_wait_throwing",
+];
+
+/// What a function's own calls say about its convention: a call to
+/// `swift_willThrow` means it throws, a call to the task runtime's
+/// suspension entry points means it is `async` — the shape a stripped
+/// image keeps when no name says so. `callee_name` names the function a
+/// direct call enters.
+pub fn callee_evidence(
+    data: &Funcdata,
+    callee_name: impl Fn(&Address) -> Option<String>,
+) -> (bool, bool) {
+    let (mut is_async, mut throws) = (false, false);
+    for i in 0..data.num_calls() {
+        let entry = data.get_call_specs(i).get_entry_address();
+        if entry.is_invalid() {
+            continue;
+        }
+        let Some(name) = callee_name(entry) else {
+            continue;
+        };
+        let name = name.trim_start_matches('_');
+        if name == "swift_willThrow" || name == "swift_willThrowTypedImpl" {
+            throws = true;
+        } else if ASYNC_CALLEES.contains(&name) {
+            is_async = true;
+        }
+    }
+    (is_async, throws)
 }
 
 fn overlaps(a: &Address, asize: int4, b: &Address, bsize: int4) -> bool {

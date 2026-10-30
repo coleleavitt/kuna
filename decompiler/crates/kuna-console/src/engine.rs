@@ -5559,13 +5559,17 @@ fn commit_analysis_output(
         for (entry, list) in hints {
             prog.arch_mut().loader_input_hints.insert(entry, Rc::new(list));
         }
-        let throws = prog.arch().get_model(kuna_decomp::kuna_swiftcall::SWIFTCALL_THROWS).cloned();
+        use kuna_decomp::kuna_swiftcall::{SWIFTASYNCCALL, SWIFTASYNCCALL_THROWS, SWIFTCALL, SWIFTCALL_THROWS};
+        let model = |name: &str| prog.arch().get_model(name).cloned();
         let reg = |name: &str| {
             let loc = prog.arch().get_register_varnode(name.as_bytes()).ok()?;
             Some((Address::new(loc.space.clone()?, loc.offset), loc.size as i32))
         };
-        if let (Some((self_reg, error_reg)), Some(throws)) = (out.swift_types.regs, throws) {
-            if let (Some(self_reg), Some(error_reg)) = (reg(self_reg), reg(error_reg)) {
+        let models = (model(SWIFTCALL), model(SWIFTCALL_THROWS), model(SWIFTASYNCCALL), model(SWIFTASYNCCALL_THROWS));
+        if let (Some((self_reg, error_reg, async_reg)), (Some(plain), Some(throws), Some(asynccall), Some(asynccall_throws))) =
+            (out.swift_types.regs, models)
+        {
+            if let (Some(self_reg), Some(error_reg), Some(async_reg)) = (reg(self_reg), reg(error_reg), reg(async_reg)) {
                 let maybe_self = out
                     .swift_types
                     .models
@@ -5576,7 +5580,11 @@ fn commit_analysis_output(
                 prog.arch_mut().loader_swift_abi = Some(Rc::new(kuna_decomp::kuna_swiftcall::SwiftAbi {
                     self_reg,
                     error_reg,
+                    async_reg,
                     throws,
+                    plain,
+                    asynccall,
+                    asynccall_throws,
                     maybe_self,
                 }));
             }

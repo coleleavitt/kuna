@@ -603,7 +603,7 @@ pub fn bind(
     b.conformances();
     let mut stats = Stats::default();
     if !b.bound.is_empty() {
-        out.swift_types.regs = Some((regs.self_reg, regs.error_reg));
+        out.swift_types.regs = Some((regs.self_reg, regs.error_reg, regs.async_reg));
     }
     let context_t = types
         .tf
