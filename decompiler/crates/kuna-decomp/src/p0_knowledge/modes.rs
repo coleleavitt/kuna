@@ -602,7 +602,12 @@ mod tests {
               // `libgccsigs` costs a SPARC32 caller that returns arithmetic on
               // the `__divdi3` quotient its low word or its whole return (see its
               // catalog row), so the preset must not turn it on.
-              "libgccsigs"];
+              "libgccsigs",
+              // `flirt` needs signature files named by KUNA_FLIRT_SIGS; without them it
+              // is inert, so the preset has nothing to turn on.
+              "flirt",
+              // `protomerge` measured worse on Lua 5.4.8 with DWARF (see its row).
+              "protomerge"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open
@@ -618,6 +623,12 @@ mod tests {
         /// asked for was run over the 110 stripped non-x86-64 decbench twins and all
         /// four passed it, so they are in `AGGRESSIVE_OVERRIDES` above.
         const UNEVALUATED: &[&str] = &[
+            // Landed with fixture measurements only: `funcchunks` changes only FID's
+            // input, `tailcallentryall` was measured on Lua and the LLVM tools, and
+            // `bitidioms` rewrites one datatest and two PowerPC stage cases.
+            "funcchunks",
+            "tailcallentryall",
+            "bitidioms",
             // Stack-address liveness can be incidental; synthetic regressions and
             // a local speed measurement do not justify a broad preset flip.
             "stackaddrargtrial",
