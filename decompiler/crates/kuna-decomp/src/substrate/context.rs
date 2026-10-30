@@ -753,6 +753,8 @@ pub struct ArchContext {
     /// (kuna) `option fatstr` mode; read by [`crate::p5_types::kuna_fatstr`].
     /// Copied from the engine `Architecture` in `build_arch_handle`.
     pub fat_str: u8,
+    /// (kuna) `option swiftstr` mode; read by [`crate::p5_types::kuna_swiftstr`].
+    pub swift_str: u8,
     /// (kuna) `option gomorestack` mode; read by
     /// [`crate::p2_lift::kuna_gomorestack`].  Copied from the engine
     /// `Architecture` in `build_arch_handle`.
@@ -1840,6 +1842,7 @@ impl ArchContext {
             // (kuna) `option fatstr` default auto; the real value is copied
             // from the engine Architecture in `build_arch_handle`.
             fat_str: 1,
+            swift_str: 1,
             // (kuna) `option gomorestack` default auto; the real value is
             // copied from the engine Architecture in `build_arch_handle`.
             go_morestack: 1,

@@ -248,6 +248,11 @@ kuna_options! { self, p1;
         self.fat_str = mode.as_u8();
         Ok(msg)
     },
+    "swiftstr" => {
+        let (mode, msg) = crate::kuna_swiftstr::parse_mode(p1).map_err(KunaError::parse)?;
+        self.swift_str = mode.as_u8();
+        Ok(msg)
+    },
     "gobool" => {
         let (mode, msg) = crate::kuna_gobool::parse_gobool_mode(p1).map_err(KunaError::parse)?;
         self.go_bool = mode.as_u8();
@@ -1301,6 +1306,7 @@ kuna_options! { self, p1;
     "swifttypes" => on_off!(analysis_swifttypes, "Swift type layouts from static metadata"),
     "cfstrings" => on_off!(analysis_cfstrings, "Mach-O __cfstring constant-string recovery pass"),
     "swiftcall" => on_off!(analysis_swiftcall, "Swift calling convention on methods and witnesses"),
+    "swiftruntime" => on_off!(analysis_swiftruntime, "Swift runtime prototypes"),
     "pdb" => on_off!(analysis_pdb, "PE PDB metadata recovery pass"),
     "relocobjects" => {
         let val = on_or_off(p1)?;

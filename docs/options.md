@@ -448,6 +448,9 @@ Three tiers:
 | rust or go string argument renders as a raw rodata address beside its length instead of the literal text | [`fatstr`](#fatstr) |
 | takes_str(&DAT_00102000, 15) where the 15 bytes at that address are plainly the string | [`fatstr`](#fatstr) |
 | string literals recovered on C binaries but never on rust or go ones | [`fatstr`](#fatstr) |
+| swift string literal shows as two 64-bit constants (0xe500000000000000 and 0x6570616873) instead of its text | [`swiftstr`](#swiftstr) |
+| 0x8000000100xxxxxx object word and 0xd000000000000028 count stored beside each other | [`swiftstr`](#swiftstr) |
+| string literals recovered on C binaries but never on swift ones | [`swiftstr`](#swiftstr) |
 | every function of a Go binary opens with if (condition) { runtime_morestack_noctxt(); } inside a loop to the entry | [`gomorestack`](#gomorestack) |
 | go function parameters recovered as phi-fed locals or missing because the entry is a loop head | [`gomorestack`](#gomorestack) |
 | do-while wrapping an entire go function body with a morestack call in its latch | [`gomorestack`](#gomorestack) |
@@ -858,6 +861,9 @@ Three tiers:
 | calls to swift methods drop the self they pass | [`swiftcall`](#swiftcall) |
 | a try? error path or a do/catch after a throwing call folds away | [`swiftcall`](#swiftcall) |
 | swift struct mutating methods write through an untyped register | [`swiftcall`](#swiftcall) |
+| swift_retain / swift_release / swift_allocObject calls show recovered arguments and untyped returns | [`swiftruntime`](#swiftruntime) |
+| swift_getGenericMetadata's result is used as a raw word instead of .metadata | [`swiftruntime`](#swiftruntime) |
+| swift runtime calls in a stripped swift binary carry no signature | [`swiftruntime`](#swiftruntime) |
 | core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings) |
 | a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
@@ -2340,6 +2346,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P5/const-pointer · kuna · type-inference · kuna-multilang-fatstr
 - **Example:** `option fatstr always`
 
+### `swiftstr` -- off | auto | always, default `auto`
+
+- **Symptoms:** swift string literal shows as two 64-bit constants (0xe500000000000000 and 0x6570616873) instead of its text; 0x8000000100xxxxxx object word and 0xd000000000000028 count stored beside each other; string literals recovered on C binaries but never on swift ones.
+- **What it does:** Render a Swift string literal's two constant words as the literal. A Swift.String is two words, _countAndFlagsBits and _object: a literal of up to 15 UTF-8 bytes is a small string whose bytes live in the words themselves (the first eight in the count word, the next seven in the low bytes of the object word, whose top byte is the discriminator with the count in its low nibble and the isASCII flag in bit 4), a longer one an immortal native string whose object word's top nibble is 8 and whose low 60 bits point 32 bytes before the NUL-terminated UTF-8 payload in the image, the count word 0xd000... (ASCII) or 0x1000... over the byte count. The rule finds an object word among a STORE's value, a COPY's source, a CALL's or RETURN's inputs or a PIECE's high half, pairs it with the count word the same code writes beside it (the slot eight bytes below, the previous input, the low half), decodes the literal (bytes past the count zero, the ASCII flag true to the bytes, UTF-8 text, an immortal payload read-only in the image and of the stated count) and replaces the object word with the bounded literal (Funcdata::get_internal_string, the fatstr mechanism), so the text prints where the constant did: *(ulong *)&v1[8] = "shape" where it read 0xe500000000000000. The count word is left: the code really stores it. At auto (default) the rule acts only when the image's source language is Swift (the sourcelang fact); always drops the language test (stage-test bytechunks); off keeps the constants.
+- **When to flip:** Leave auto: on a Swift binary every string literal built in registers or stored to a struct or the stack prints as its text instead of two magic words. Use always on a carved bytechunk with no language signal. Flip off when auditing the exact _StringObject bit patterns.
+- **Where / provenance:** P5/const-pointer · kuna · type-inference · kuna-swift-strings
+- **Example:** `option swiftstr always`
+
 ### `gomorestack` -- off | auto | always, default `auto` (destructive opt-in)
 
 - **Symptoms:** every function of a Go binary opens with if (condition) { runtime_morestack_noctxt(); } inside a loop to the entry; go function parameters recovered as phi-fed locals or missing because the entry is a loop head; do-while wrapping an entire go function body with a morestack call in its latch.
@@ -3191,6 +3205,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off to see a swiftmetadata-named binary under the C model: methods without self, calls without the self they pass, and try? error paths folded away. On (default) when swiftmetadata is on: self typed in methods, initializers, accessors and witnesses, passed at direct calls, and the error a throwing call returns tested where the binary tests it.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftcall
 - **Example:** `option swiftcall off`
+
+### `swiftruntime` -- on | off, default `on`
+
+- **Symptoms:** swift_retain / swift_release / swift_allocObject calls show recovered arguments and untyped returns; swift_getGenericMetadata's result is used as a raw word instead of .metadata; swift runtime calls in a stripped swift binary carry no signature.
+- **What it does:** Bind the Swift runtime's entry points to the signatures the runtime's public headers give them (swift/Runtime/HeapObject.h, Metadata.h, Casting.h, Exclusivity.h), by name, so a call into the runtime reads as what it is: swift_allocObject(metadata, size, alignMask) takes a swift.type_metadata * and two sizes and returns the object (a void *: its type is the metadata's, which a swift.HeapObject * would hide behind obj[1].isa for the first stored property), swift_getGenericMetadata / swift_checkMetadataState / swift_getSingletonMetadata return a swift.MetadataResponse (the metadata and its state, two words, so the metadata is .metadata where the caller read x0), swift_allocBox and swift_allocError a swift.BoxPair, swift_dynamicCast a bool, swift_getObjectType a swift.type_metadata *, the retain/release families (native, unknown-object, bridge-object, unowned, error, the _n counts) their object. About 180 entry points: allocation and refcounting, boxes and errors, metadata accessors and instantiation, casting, exclusivity, weak and unowned references, enum tags, array bulk operations, class/struct/enum metadata initialization, the task allocator. The runtime is C under the platform convention, so these are plain prototypes; the swiftcc entry points whose arguments ride in the Swift registers (swift_task_switch, the key-path accessors) are left to recovery. Registered for a Swift-detected image (Mach-O or ELF) and applied by name to import stubs, GOT slots and an unstripped runtime alike. Default-ON: the prototypes are the headers' facts, the XML corpus never runs the pass (0/675), and the cost is 180 prototype rows.
+- **When to flip:** Leave on. Off to see a runtime call's arguments and return as recovered from the call site alone, or when a binary carries its own differently-shaped functions under runtime names.
+- **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftruntime
+- **Example:** `option swiftruntime off`
 
 ### `cfstrings` -- on | off, default `off`
 

@@ -3576,6 +3576,35 @@ test for no-signal corpora (a stage-test bytechunk); `off` keeps the raw
 pointer. Failure mode mirrors `rodatastring`: any guard miss declines
 silently and the output is byte-identical to `off`.
 
+**Swift string literals (kuna, option [`swiftstr`](../options.md), default
+auto).** `decompiler/crates/kuna-decomp/src/p5_types/kuna_swiftstr.rs
+(RuleSwiftString)` covers the fifth shape: the string is two constant words
+that never point at text at all. A `Swift.String` is `_countAndFlagsBits` and
+`_object`; a literal of up to 15 UTF-8 bytes is a **small string** whose
+bytes live in the words themselves (the first eight in the count word, the
+next seven in the low bytes of the object word, whose top byte is the
+discriminator — `0xa0..0xaf` non-ASCII, `0xe0..0xef` ASCII, the count in its
+low nibble), and a longer one an **immortal native string** whose object
+word's top nibble is `8` and whose low 60 bits point 32 bytes before the
+NUL-terminated payload in the image, the count word `0xd000…` (ASCII) or
+`0x1000…` over the byte count. The rule finds an object word among a
+`STORE`'s value, a `COPY`'s source, a `CALL`'s or `RETURN`'s inputs or a
+`PIECE`'s high half (through the `COPY` that loaded a register with it),
+pairs it with the count word the same code writes beside it — the slot eight
+bytes below, through a chain of `PTRSUB`/`PTRADD`/`INT_ADD` by constants from
+one base, the register or join piece eight bytes below, the previous input,
+the low half — and decodes the literal: every byte past the count zero, the
+ASCII flag true to the bytes, UTF-8; an immortal payload read-only in the
+image, text, and of the count the partner states (without a partner, at
+least three bytes). The object word's constant is then replaced, where it
+is written, by the bounded literal (`get_internal_string`, as `fatstr`), so
+`*(ulong *)&v1[8] = 0xe500000000000000` prints as `"shape"` and a struct
+store of `0x80000001038e4750` as its forty-byte text; the count word is left,
+because the code really stores it. At `auto` the rule acts when the image's
+source language is Swift; `always` drops the language test; `off` keeps the
+constants. The stage test `tests/stages/kuna-swiftstr.xml` runs the stripped
+`swift_types_elf` off and on.
+
 The **language-facet table** the rule consults is the multilang W3 plane's
 first slice (`decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_langfacet.rs
 (LangFacet)`): a name-keyed side record on the type factory

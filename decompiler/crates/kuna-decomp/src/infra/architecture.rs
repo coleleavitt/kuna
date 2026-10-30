@@ -719,6 +719,10 @@ pub struct Architecture {
     /// `(ptr, len)` constant call-argument pair into a bounded string literal.
     /// Default auto (act when `source_lang` is Rust or Go).
     pub fat_str: u8,
+    /// (kuna) `option swiftstr` mode (`FatStrMode` as u8): render a Swift
+    /// string literal's two constant words as the literal. Default auto (act
+    /// when `source_lang` is Swift).
+    pub swift_str: u8,
     /// (kuna) `option gomorestack` mode (`GoMorestackMode` as u8): fold the Go
     /// stack-growth entry guard.  Default auto (fold when `source_lang` is Go).
     pub go_morestack: u8,
@@ -2571,6 +2575,9 @@ pub struct Architecture {
     /// `__swiftcall` model with their `self` named and typed. Default-on;
     /// inert unless `swiftmetadata` is on.
     pub analysis_swiftcall: bool,
+    /// (kuna `swiftruntime`) The Swift runtime's entry points bound to their
+    /// header signatures, by name. Default-on; Swift-detected images only.
+    pub analysis_swiftruntime: bool,
     /// (kuna) The calling convention the analysis tier bound to a function
     /// without declaring its signature, by entry `(space index, offset)`.
     /// The function's own parameters, and those of every direct call to it,
@@ -3046,6 +3053,7 @@ impl Architecture {
             source_lang_detected: Default::default(), // (kuna) a load-time fact; set by the console's `load file`
             source_lang_forced: None, // (kuna) option sourcelang; reset_defaults restores auto
             fat_str: 0, // (kuna) option fatstr; reset_defaults sets the shipped default (auto)
+            swift_str: 0, // (kuna) option swiftstr; reset_defaults sets the shipped default (auto)
             go_morestack: 0, // (kuna) option gomorestack; reset_defaults sets the shipped default (auto)
             go_bool: 0, // (kuna) option gobool; reset_defaults sets the shipped default (auto)
             go_write_barrier: 0, // (kuna) option gowritebarrier; reset_defaults sets the shipped default (auto)
@@ -3348,6 +3356,7 @@ impl Architecture {
             loader_param_locks: std::collections::BTreeMap::new(),
             analysis_cfstrings: false,
             analysis_swiftcall: true,
+            analysis_swiftruntime: true,
             loader_proto_models: Rc::default(),
             loader_input_hints: std::collections::BTreeMap::new(),
             loader_swift_abi: None,
@@ -3478,6 +3487,7 @@ impl Architecture {
         self.rust_abi = 0; // (kuna) option rustabi default off: the pair-keeping rules are opt-in this round
         self.source_lang_forced = None; // (kuna) option sourcelang default auto; the detected fact survives resets
         self.fat_str = crate::kuna_fatstr::FatStrMode::Auto.as_u8(); // (kuna) bounded (ptr,len) literals on Rust/Go images
+        self.swift_str = crate::kuna_fatstr::FatStrMode::Auto.as_u8(); // (kuna) Swift two-word string literals on Swift images
         self.go_morestack = crate::kuna_gomorestack::GoMorestackMode::Auto.as_u8(); // (kuna) fold the Go entry guard on Go images
         self.go_bool = crate::kuna_gobool::GoBoolMode::Auto.as_u8(); // (kuna) narrow Go boolean returns on Go images
         self.go_write_barrier = crate::kuna_gowritebarrier::GoWriteBarrierMode::Auto.as_u8(); // (kuna) fold the Go write barrier on Go images
@@ -3813,6 +3823,7 @@ impl Architecture {
         self.analysis_swifttypes = true; // Swift type layouts default-on, inert unless swiftmetadata is on
         self.analysis_cfstrings = false; // Mach-O __cfstring constant-string recovery default-off (Mach-O-only pass)
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
+        self.analysis_swiftruntime = true; // Swift runtime prototypes default-on (Swift-detected images only)
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
         self.macho_arm64e = false; // arm64e Apple-Silicon spec selection default-off (opt-in)
     }
@@ -4314,6 +4325,7 @@ impl Architecture {
         ctx.rust_abi = self.rust_abi;
         ctx.source_lang = self.source_lang();
         ctx.fat_str = self.fat_str;
+        ctx.swift_str = self.swift_str;
         ctx.go_morestack = self.go_morestack;
         ctx.go_bool = self.go_bool;
         ctx.go_write_barrier = self.go_write_barrier;
@@ -6726,15 +6738,18 @@ impl Architecture {
         let regs = crate::kuna_swiftcall::swift_registers(|name| {
             self.translate.probe_register_varnode(name.as_bytes()).map(|v| v.size as int4)
         });
-        if let (Some(el), Some((self_reg, error_reg))) = (default_el, regs) {
-            for (name, error) in [
-                (crate::kuna_swiftcall::SWIFTCALL, None),
-                (crate::kuna_swiftcall::SWIFTCALL_THROWS, Some(error_reg)),
-            ] {
+        if let (Some(el), Some((self_reg, error_reg, async_reg))) = (default_el, regs) {
+            for (name, throws, is_async) in crate::kuna_swiftcall::MODELS {
                 if byname.contains_key(name) {
                     continue;
                 }
-                let derived = Rc::new(crate::kuna_swiftcall::derive_model(&el, name, self_reg, error));
+                let derived = Rc::new(crate::kuna_swiftcall::derive_model(
+                    &el,
+                    name,
+                    self_reg,
+                    throws.then_some(error_reg),
+                    is_async.then_some(async_reg),
+                ));
                 if let Ok(model) = self.decode_proto_model(&derived, root) {
                     let rc = Rc::new(model);
                     byname.insert(name.to_string(), Rc::clone(&rc));
