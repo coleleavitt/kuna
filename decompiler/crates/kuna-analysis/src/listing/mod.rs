@@ -902,6 +902,7 @@ impl Listing {
             mode_runs: Vec::new(),
             a32_extents: Vec::new(),
             x86_switch_rebuild: false,
+            noreturn_targets: Default::default(),
         }
     }
 }
