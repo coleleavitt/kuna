@@ -8181,3 +8181,17 @@ image's source language is Go; `always` drops the language test (the
 stage-test bytechunk); `off` keeps the faithful concatenation. Pinned by
 `tests/stages/kuna-gobool.xml` (two-pass over a hand-assembled
 `mov %rdi,%rax; cmp $1,%rdi; sete %al; ret`).
+
+**Helper-call roles** (`helperroles`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p4_calls/kuna_helperrole.rs (role_of)`,
+`(RuleStrcpyChain)`): a `CALL` is tagged with a role (memcpy, memmove, memset,
+memcmp, strlen, strcpy, strncpy, strcmp) from its callee's name with decorations
+stripped (`_memcpy`, `j_strlen`, `__imp_memcpy`, `memcpy@GLIBC`, a `builtin_`
+prefix), and a `CALLOTHER` from its builtin id (the copy/fill/strlen builtins and
+the `bitidioms` byte-swap, rotate, abs and ctz ones), Hex-Rays' `funcrole_t`.
+`RuleStrcpyChain` reads the roles: `memcpy(d, s, strlen(s) + 1)` becomes the
+typed builtin `strcpy(d, s)` (`char *` in and out) when the length's source and
+the copy's source are one value through copies, extensions and the `INDIRECT`s
+a call leaves on a preserved register; the call spec of a rewritten `CALL` is
+deleted, and a `strlen` whose length nobody reads is removed (it has no other
+effect). On `-O2 -fno-builtin` `dup_into` the two calls print as `strcpy(a0,a1)`.

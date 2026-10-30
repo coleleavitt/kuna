@@ -22,6 +22,8 @@ Three tiers:
 | a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms) |
 | bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms) |
 | hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
+| memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s) | [`helperroles`](#helperroles) |
+| an inlined strcpy shows as a strlen call followed by a memcpy | [`helperroles`](#helperroles) |
 | a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
 | `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
 | a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
@@ -1596,6 +1598,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see the raw shift-and-mask expressions, the cmov/cneg abs diamond and the one-instruction bsf/bsr loops, for example to check which bits a hand-written partial swap moves.
 - **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-bitidioms
 - **Example:** `--option bitidioms off`
+
+### `helperroles` -- on | off, default `on`
+
+- **Symptoms:** memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s); an inlined strcpy shows as a strlen call followed by a memcpy.
+- **What it does:** Tag helper calls with a role (memcpy, memmove, memset, memcmp, strlen, strcpy, strncpy, strcmp, byte swap, rotate, abs, count-trailing-zeros) from the callee's name with its decorations stripped (_memcpy, j_strlen, __imp_memcpy, memcpy@GLIBC, builtin_ prefix) or a CALLOTHER builtin's id, and rewrite on the roles: memcpy(d, s, strlen(s) + 1) becomes strcpy(d, s) (either half a library call or a builtin; the arguments compared through copies, extensions and the INDIRECTs a call leaves on a preserved register), and a strlen whose length nobody reads is dropped. Hex-Rays' funcrole_t tags and the chain in minsn_t::optimize_subtree.
+- **When to flip:** On (default). Flip off to keep the memcpy/strlen pair as the binary spells it.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-helperroles
+- **Example:** `--option helperroles off`
 
 ### `mulblob` -- on | off, default `on`
 

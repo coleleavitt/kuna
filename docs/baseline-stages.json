@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3689,
-    3689
+    3692,
+    3692
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1142,6 +1142,9 @@
     "data:KUNA-REGIONS #7: the loop's enclosing acyclic region pairs the cyclic self-loop with its 0x40a exit block",
     "data:KUNA-REGIONS #8: the cyclic self-loop region wraps exactly the single 0x3e0 block",
     "data:KUNA-RESTARTS #2: a function that never restarts reports none",
+    "data:KUNA-STRCPYCHAIN #1: memcpy(d, s, strlen(s) + 1) is strcpy(d, s) (default)",
+    "data:KUNA-STRCPYCHAIN #2: helperroles off keeps the memcpy",
+    "data:KUNA-STRCPYCHAIN #3: the strlen survives only with helperroles off",
     "data:KUNA-STRUCTDEFS #1: the struct definition is printed exactly once, by the ON pass",
     "data:KUNA-STRUCTDEFS #2: every member of the referenced struct is spelled",
     "data:KUNA-STRUCTDEFS #3: the tag gets the forward declaration the project header gives it",
