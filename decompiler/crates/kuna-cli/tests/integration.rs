@@ -665,3 +665,6 @@ mod dwarf_global_addresses;
 
 #[path = "dwarf_compressed_sections.rs"]
 mod dwarf_compressed_sections;
+
+#[path = "addrtable_xrefs.rs"]
+mod addrtable_xrefs;
