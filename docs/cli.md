@@ -1116,8 +1116,8 @@ table.
 
 ### DEX files
 
-A `.dex` file (Android bytecode, `dex\n035`..`039`) loads like any other
-image: the file is mapped at address 0, every method with code is a function
+A `.dex` file (Android bytecode, `dex\n035`..`039`) or an `.apk` loads like any
+other image: the file is mapped at address 0, every method with code is a function
 named `pkg::Class::method` (a method name shared by several overloads gets
 `_<addr>` appended), and its DEX prototype is its signature. The output
 language defaults to Java (`--language c` gives C).
@@ -1145,9 +1145,10 @@ pool, a method's arguments are read from its input registers, and
 `--option jumpassist off` show the raw SLEIGH lifting instead). An object is
 created by `new(T)` and initialized by a separate `<init>` call, as the bytecode
 does it. The language is `Dalvik:LE:32:DEX_Android12`; `--target` selects another
-`Dalvik:` language. An APK is a zip: extract its `classes*.dex` and load each one;
-a call into a class defined in another of them prints by name. CDEX, ODEX, OAT
-and VDEX files are not supported.
+`Dalvik:` language. An APK loads directly: its `classes.dex`, `classes2.dex`, ...
+are inflated and mapped one after another, each at a 64 KiB boundary, so one
+run covers the whole app and a call from one file into a class of another
+prints by name. CDEX, ODEX, OAT and VDEX files are not supported.
 
 ### Headerless raw images
 

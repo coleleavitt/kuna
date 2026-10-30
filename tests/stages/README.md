@@ -2,7 +2,8 @@
 
 `kuna-dex.xml` loads the committed DEX fixture (`fixtures/dex/hello.dex`, built
 from `fixtures/dex/Hello.java` as its header says) and checks the Java output
-with `dexmodel` and `jumpassist` off and on.
+with `dexmodel` and `jumpassist` off and on. `kuna-dex-apk.xml` loads
+`fixtures/dex/two.apk`, that file plus the DEX of `fixtures/dex/Other.java`.
 
 `kuna-callwide.xml` loads the committed sealed MIPS32-BE ELF and checks the
 four-byte OFF result against the proved eight-byte result and high-piece callers.

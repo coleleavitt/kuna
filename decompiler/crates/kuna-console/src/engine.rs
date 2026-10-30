@@ -2176,9 +2176,9 @@ impl ConsoleProgram {
     /// `this` and the parameters in the input registers, the DEX types, the
     /// `__thiscall` model for an instance method.
     fn lock_dex_prototypes(&mut self) {
-        let Some(model) = self.arch().dex_model().cloned() else { return };
+        let models = self.arch().dex_models().to_vec();
         let Some(space) = self.arch().manage().get_default_code_space().cloned() else { return };
-        for function in model.functions() {
+        for (model, function) in models.iter().flat_map(|m| m.functions().into_iter().map(move |f| (m, f))) {
             let Ok((pieces, name)) =
                 model.method_prototype(function.method_idx, function.is_static, false, self.arch().types())
             else {
@@ -4019,16 +4019,20 @@ fn reader_is_te_image(reader: &mut impl std::io::Read) -> std::io::Result<bool> 
 fn file_is_dex(path: &str) -> bool {
     use std::io::Read;
     let mut prefix = [0u8; 0x70];
-    std::fs::File::open(path)
-        .and_then(|mut file| file.read_exact(&mut prefix))
-        .is_ok_and(|()| kuna_analysis::loadimage_dex::is_dex(&prefix))
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    if file.read_exact(&mut prefix).is_err() {
+        return false;
+    }
+    kuna_analysis::loadimage_dex::is_dex(&prefix)
+        || (prefix.starts_with(b"PK\x03\x04")
+            && std::fs::read(path).is_ok_and(|bytes| kuna_analysis::loadimage_dex::is_apk(&bytes)))
 }
 
-/// (kuna `dexmodel`) Bootstrap a DEX file: the file mapped read-only at
-/// address 0 for the Dalvik spec, one function per method with code, and the
-/// [`kuna_decomp::kuna_dex::DexModel`] the engine asks for constant-pool
-/// records and register payloads. The method prototypes are locked at the
-/// analysis commit, after the `option` lines.
+/// (kuna `dexmodel`) Bootstrap a DEX file, or an APK's `classes*.dex` files:
+/// each mapped read-only for the Dalvik spec, one function per method with
+/// code, and a [`kuna_decomp::kuna_dex::DexModel`] per file that the engine
+/// asks for constant-pool records and register payloads. The method
+/// prototypes are locked at the analysis commit, after the `option` lines.
 pub fn bootstrap_from_dex_bytes(
     path: &str,
     bytes: Vec<u8>,
@@ -4037,8 +4041,8 @@ pub fn bootstrap_from_dex_bytes(
 ) -> KunaResult<ConsoleProgram> {
     let target = kuna_analysis::loadimage_object::explicit_language_target(target).unwrap_or("");
     let registry = build_registry();
-    let model = Rc::new(kuna_decomp::kuna_dex::DexModel::parse(bytes)?);
-    let mut loader = kuna_analysis::loadimage_dex::DexLoadImage::new(path, Rc::clone(&model));
+    let models = kuna_analysis::loadimage_dex::load_dex_models(bytes)?;
+    let mut loader = kuna_analysis::loadimage_dex::DexLoadImage::new(path, models.clone());
     let mut sleigh = build_sleigh_for_loader(
         path,
         target,
@@ -4050,9 +4054,9 @@ pub fn bootstrap_from_dex_bytes(
     let code_space = default_code_space(&sleigh)?;
     loader.attach_to_space(Rc::clone(&code_space));
     let readonly_ranges = loader_readonly_ranges(&loader, sleigh.base().unwrap().manage());
-    let symbols = model
-        .functions()
-        .into_iter()
+    let symbols = models
+        .iter()
+        .flat_map(|model| model.functions())
         .map(|function| ProgramSymbol {
             name: function.name,
             addr: Address::new(Rc::clone(&code_space), function.addr),
@@ -4063,7 +4067,7 @@ pub fn bootstrap_from_dex_bytes(
         .collect();
     let arch = sleigh.base_mut().unwrap();
     arch.set_loader(Box::new(loader));
-    arch.dex = Some(model);
+    arch.dex = models;
     // The file is immutable at run time, so a switch payload's key and size
     // fold to the constants a jump-table model needs.
     arch.readonlypropagate = true;
@@ -5613,7 +5617,7 @@ pub fn bootstrap_from_file(
             .flatten();
         return bootstrap_from_te_bytes(path, &bytes, target, spec_roots, isa);
     }
-    if kuna_analysis::loadimage_dex::is_dex(&bytes) {
+    if kuna_analysis::loadimage_dex::is_dex(&bytes) || kuna_analysis::loadimage_dex::is_apk(&bytes) {
         return bootstrap_from_dex_bytes(path, bytes, target, spec_roots);
     }
     if is_object_binary(&bytes) {

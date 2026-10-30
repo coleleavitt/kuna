@@ -2,7 +2,7 @@ use super::*;
 
 fn hello() -> DexModel {
     let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/stages/fixtures/dex/hello.dex"));
-    DexModel::parse(bytes.to_vec()).unwrap()
+    DexModel::parse(bytes.to_vec(), 0).unwrap()
 }
 
 fn function<'a>(functions: &'a [DexFunction], name: &str) -> &'a DexFunction {
@@ -48,6 +48,6 @@ fn descriptors_spell_as_java() {
 #[test]
 fn rejects_truncated_files() {
     let bytes = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../tests/stages/fixtures/dex/hello.dex"));
-    assert!(DexModel::parse(bytes[..0x80].to_vec()).is_err());
-    assert!(DexModel::parse(b"dex\n035\0".to_vec()).is_err());
+    assert!(DexModel::parse(bytes[..0x80].to_vec(), 0).is_err());
+    assert!(DexModel::parse(b"dex\n035\0".to_vec(), 0).is_err());
 }

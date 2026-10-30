@@ -850,9 +850,18 @@ installs one function symbol per method with code, named as the DEX model does
 `readonlypropagate` for the image. At the analysis commit each method's DEX
 prototype is locked onto its symbol, after the `option` lines, so `dexmodel off`
 also leaves the signatures to recovery. No analysis pass runs over a DEX image:
-the method table is the complete function inventory. A multi-DEX APK is
-several files; each is loaded on its own, and a call into another file's class
-resolves by name through the constant pool but not to a function.
+the method table is the complete function inventory.
+
+An APK is a zip; `loadimage_dex.rs (is_apk)` claims one whose central directory
+lists a root `classes.dex`. `loadimage_dex.rs (load_dex_models)` inflates
+`classes.dex`, `classes2.dex`, ... in that order (stored or deflated entries;
+zip64 and other methods are refused) and maps each at the next 64 KiB boundary
+after the previous one, one DEX model per file. Index spaces are per file, so
+each function's snapshot carries the model whose mapping holds its entry
+(`architecture.rs (Architecture::build_arch_handle_for_entry)`): a constant-pool
+index resolves in the method's own file. A call into a class defined in another
+file of the APK prints by name through that pool, but the call is not linked to
+the other file's function.
 
 (kuna) **UEFI TE images take a bounded container path of their own.**
 `decompiler/crates/kuna-analysis/src/loadimage_te.rs (TeLoadImage)` parses a

@@ -2115,7 +2115,8 @@ mod tests {
         // and kuna-ppc64-ldarx-encoding / generic PowerPC ldx and ldarx decode at their own opcodes
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-dex / a DEX file's constant pool, entry copies and sparse switches
-        assert_eq!(count, 593, "corpus file count drifted");
+        // and kuna-dex-apk / an APK's classes*.dex files mapped one after another
+        assert_eq!(count, 594, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

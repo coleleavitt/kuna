@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3243,
-    3243
+    3246,
+    3246
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2335,6 +2335,9 @@
     "data:devectorize #5: three loops in all: two in the compiler's shape, one after the re-roll",
     "data:devectorize effects #1: both passes keep the vector arm of both functions",
     "data:devectorize effects #2: both passes keep the early return's store of 1",
+    "data:dex apk #1: classes2.dex calls a static method of classes.dex",
+    "data:dex apk #2: classes2.dex strings come from its own pool",
+    "data:dex apk #3: classes.dex methods load too",
     "data:dexmodel #10: a long parameter takes a register pair",
     "data:dexmodel #1: off leaves the constant pool unresolved",
     "data:dexmodel #2: off loses the signature and its parameter",
