@@ -34,6 +34,9 @@ Three tiers:
 | if (x < 10) { if (x > 20) ... } keeps the dead branch | [`rangefold`](#rangefold) |
 | x & 0xff kept on a value an earlier range check bounds below 256 | [`rangefold`](#rangefold) |
 | a range check repeated inside the branch of the same check | [`rangefold`](#rangefold) |
+| v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4 | [`pow2select`](#pow2select) |
+| a signed remainder by a power of two prints as a select between x & m and -(-x & m) | [`pow2select`](#pow2select) |
+| (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4 | [`pow2select`](#pow2select) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -63,6 +66,15 @@ Three tiers:
 | __aeabi_uldivmod() / __aeabi_idiv() / __aeabi_lmul() called with missing or reordered arguments on ARM | [`arithhelpers`](#arithhelpers) |
 | __alldiv / __allrem called and the caller returns void on an MSVC x86-32 image | [`arithhelpers`](#arithhelpers) |
 | a 64-bit division on a 32-bit target prints as a helper call | [`arithhelpers`](#arithhelpers) |
+| an Objective-C method is mostly objc_retain/objc_release lines | [`objcarc`](#objcarc) |
+| objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long | [`objcarc`](#objcarc) |
+| objc_storeStrong(&self->field, x) where an assignment is meant | [`objcarc`](#objcarc) |
+| [[Foo alloc] init] typed objc_object * or unsigned long | [`objcrettype`](#objcrettype) |
+| every message sent to a freshly allocated object carries a cast | [`objcrettype`](#objcrettype) |
+| an init… call's result loses the receiver's class | [`objcrettype`](#objcrettype) |
+| objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image | [`objcresolve`](#objcresolve) |
+| objc_msgSend$count(v2) on a receiver whose class is known | [`objcresolve`](#objcresolve) |
+| the call graph of an ObjC image stops at objc_msgSend | [`objcresolve`](#objcresolve) |
 | an `if (isCurrentModePrivileged())` block wraps every interrupt-mask or special-register access in Cortex-M firmware | [`cortexmpriv`](#cortexmpriv) |
 | `isCurrentModePrivileged()` appears in the emitted C at all | [`cortexmpriv`](#cortexmpriv) |
 | a Cortex-M function has more basic blocks and branches than its source | [`cortexmpriv`](#cortexmpriv) |
@@ -461,6 +473,9 @@ Three tiers:
 | ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall) |
 | an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method | [`arm64evcall`](#arm64evcall) |
 | c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls | [`arm64evcall`](#arm64evcall) |
+| obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b | [`mba`](#mba) |
+| xor and and terms combined with additions and multiplications by 2 | [`mba`](#mba) |
+| ollvm or tigress instruction substitution in the output | [`mba`](#mba) |
 | heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
 | dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
 | caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
@@ -590,6 +605,14 @@ Three tiers:
 | c++ catch/cleanup landing pads missing from a stripped binary's function list | [`eh_frame_full`](#eh_frame_full) |
 | exception-handler code never discovered as entries | [`eh_frame_full`](#eh_frame_full) |
 | gcc_except_table call-site targets left unexplored | [`eh_frame_full`](#eh_frame_full) |
+| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh) |
+| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh) |
+| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh) |
+| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh) |
+| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh) |
+| a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc) |
+| panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc) |
+| rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -1457,6 +1480,9 @@ Three tiers:
 | the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl) |
 | a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl) |
 | --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl) |
+| vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
+| fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
+| avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
 | a loop that only reads a stack buffer prints a store into its first element | [`tiedphitrim`](#tiedphitrim) |
 | a while condition tests buf[0] and the loop body assigns a later element into buf[0] | [`tiedphitrim`](#tiedphitrim) |
 | a byte fetched through a pointer is assigned to a stack-offset variable the binary never writes | [`tiedphitrim`](#tiedphitrim) |
@@ -1572,6 +1598,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-rangefold
 - **Example:** `option rangefold off`
 
+### `pow2select` -- on | off, default `on`
+
+- **Symptoms:** v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4; a signed remainder by a power of two prints as a select between x & m and -(-x & m); (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4.
+- **What it does:** Rewrite a signed division or remainder by a power of two that the compiler wrote as a select or a sign-mask shift. Signed `x / 2^k` rounds toward zero, so a negative x is biased by `2^k - 1` before the arithmetic shift. With a conditional move (x86-64 cmov, AArch64 csel) the bias lifts as a branch and a MULTIEQUAL, printed `v = x + 3; if (0 <= x) v = x; return v >> 2;`; the -O0 branch form is the same graph. AArch64 writes `x % 2^k` with csneg as a select between `x & m` and `-(-x & m)` (`-(x & 1)` for `x % 2`). ARM writes the division as `(x + ((x s>> 31) >> (32 - k))) s>> k`. `RuleSelectDiv` (oppool1) rewrites the shift to `x / 2^k` and replaces the MULTIEQUAL of the remainder with `x % 2^k`. A select is taken only when the CBRANCH of the MULTIEQUAL block's immediate dominator sends each input down its own out-edge (directly or through one block between) and compares x or -x against a constant whose CircleRange pull-back puts every positive x on the unbiased input and every negative x on the other; at x = 0 and the most negative x both inputs agree, so either edge is fine. Inputs are matched through COPY chains.
+- **When to flip:** On by default: 0/675 datatest assertions move; four stage assertions that pinned the select (`kuna-storealias` #1/#2/#4, `kuna-globalvalue` #17, whose fixtures return `gi / 16`) now read the division. Flip off to see the select or shift the compiler emitted. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib, libexpat, libyaml): 15 functions change, ` / ` 142 -> 166, `if` statements 22,188 -> 22,163, lines 184,891 -> 184,802, e.g. bzip2 sendMTFValues `nBytes / 8` and fallbackSort `nblock / 32`. Near misses (a test other than the sign, a bias other than 2^k - 1, `-(-x & 7)` chosen only below -4) keep their select.
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-pow2select
+- **Example:** `option pow2select off`
+
 ### `strlenscan` -- on | off, default `on`
 
 - **Symptoms:** a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero; if (!v3) break; v3 -= 1; inside a loop that reads one byte per step; ~v3 - 1 or ~v3 - 5 where the source computes a string length; repnz scasb in the disassembly where IDA prints strlen.
@@ -1643,6 +1677,30 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** A 32-bit x86 or ARM caller shows `__udivdi3(...)`, `__aeabi_uldivmod()`, `__aeabi_idiv(a)` or `__alldiv(a0,a1,a2,a3)` where the source has `/`, `%`, `*` or a shift on `long long` (or an `int` division on ARM). On by default; flip OFF to see the helper calls.
 - **Where / provenance:** P2/flow-classification · kuna · correctness-fix · kuna-arithhelpers
 - **Example:** `option arithhelpers off`
+
+### `objcarc` -- on | off, default `on`
+
+- **Symptoms:** an Objective-C method is mostly objc_retain/objc_release lines; objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long; objc_storeStrong(&self->field, x) where an assignment is meant.
+- **What it does:** Hide Objective-C ARC bookkeeping. An ARC-compiled method is strewn with `objc_retain(x)`, `objc_release(x)`, `v = objc_retainAutoreleasedReturnValue(v)` and `objc_storeStrong(&slot, x)`; with the runtime entry points untyped the value they hand on is also lost (`v2 = objc_retainAutoreleasedReturnValue();` with no argument). Synthesized `<callfixup>` payloads (`p2_lift/kuna_objcarc.rs`, the msvcftol mechanism) replace each call with what it stands for in p-code: a pass-through (`objc_retain`, `objc_autorelease*`, `objc_retainAutoreleasedReturnValue`, `objc_claimAutoreleasedReturnValue`, `objc_retainBlock`, …) is an incidental copy so its result keeps the argument's variable, `objc_release` has no effect, `objc_storeStrong(slot, value)` is the store `*slot = value`, and clang's outlined arm64 `objc_retain_x<N>`/`objc_release_x<N>` (the object in and out of `x<N>`) are the same per register. The payloads are registered for arm64 and x86-64 (the x86-64 bodies pop the CALL's pushed return address); the install is by name on the image's import stubs and local symbols. Off, every ARC call is shown as the call it is. Inert on an image that names no ARC entry point (0/675 datatests).
+- **When to flip:** An Objective-C method reads as retain/release traffic around the few lines that do the work, or an ARC helper call shows no argument and the value it returned is missing. On by default; flip OFF to audit the reference counting itself.
+- **Where / provenance:** P2/flow-classification · ida · readability · kuna-objcarc
+- **Example:** `option objcarc off`
+
+### `objcrettype` -- on | off, default `on`
+
+- **Symptoms:** [[Foo alloc] init] typed objc_object * or unsigned long; every message sent to a freshly allocated object carries a cast; an init… call's result loses the receiver's class.
+- **What it does:** Type an Objective-C message send's result by its receiver. `objc_msgSend` and the `objc_msgSend$<sel>` stubs are typed once for every receiver, so `[[Foo alloc] init]` is an `objc_object *` (or an `unsigned long`) and everything reached through it is a cast. With the class table the ObjC analysis hands over (`p5_types/kuna_objcrettype.rs`), `TypeOpCall::getOutputLocal` answers for such a call before the stub's locked `id`: `alloc`, `allocWithZone:`, `new` and the runtime's `objc_alloc`/`objc_alloc_init`/`objc_opt_new` on a folded class reference return that class's instance pointer (`Foo *`), and `init…`, `self`, `retain`, `autorelease`, `copy`, `mutableCopy` return their receiver's class pointer — the `instancetype` contract — a receiver that is itself a message send being asked first, so an alloc/init chain types through. Nothing is locked and no call changes shape; the type only applies where the receiver's class is known (a folded `_OBJC_CLASS_$_X` constant or a pointer to a class struct). Off, the stub's `id` stands. Inert unless `objc` is on.
+- **When to flip:** An ObjC method's `[[Foo alloc] init]` result is an `objc_object *` or an integer, and every field read or message sent through it is a cast. On by default; flip OFF to see the stub's declared return.
+- **Where / provenance:** P5/type-propagation · ida · type-inference · kuna-objcrettype
+- **Example:** `option objcrettype off`
+
+### `objcresolve` -- on | off, default `on`
+
+- **Symptoms:** objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image; objc_msgSend$count(v2) on a receiver whose class is known; the call graph of an ObjC image stops at objc_msgSend.
+- **What it does:** Render an Objective-C message send whose receiver's class is known as the method it reaches. `objc_msgSend(v1, sel_setInner_, v2)` and `objc_msgSend$count(v2)` name the selector but not the method; when the receiver is a folded class reference (`+[Foo new]`) or a pointer to a class struct of this image (`self`, an ivar, an alloc/init result typed by `objcrettype`), the selector is looked up along the class's own method lists and then its superclass chain (`p5_types/kuna_objcrettype.rs (ObjcClassTable::resolve)`), and the call prints as that IMP's label — `-[Base setInner:](v1,sel_setInner_,v2)` — the way Hex-Rays rewrites the callee to the method object. Categories of the class count as its own methods; a selector no class of the chain declares (a framework method) keeps the runtime entry point. Presentation only: the call's prototype, arguments and the listing's call graph are unchanged. Inert unless `objc` is on.
+- **When to flip:** Message sends to objects of the image's own classes read as `objc_msgSend(obj, sel_x, ...)` instead of naming the method that runs. On by default; flip OFF to see the runtime entry point at every call.
+- **Where / provenance:** P9/naming-policy · ida · readability · kuna-objcresolve
+- **Example:** `option objcresolve off`
 
 ### `cortexmpriv` -- on | off, default `off`
 
@@ -2524,6 +2582,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P1/external-refinement · kuna · structure-recovery · kuna-apple-arm64evcall
 - **Example:** `option arm64evcall off`
 
+### `mba` -- on | off, default `off`
+
+- **Symptoms:** obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b; xor and and terms combined with additions and multiplications by 2; ollvm or tigress instruction substitution in the output.
+- **What it does:** Simplify linear mixed boolean-arithmetic (MBA) expressions, the obfuscation that hides `x + y` as `(x ^ y) + 2*(x & y)`. RuleMbaSimplify collects the tree under an arithmetic root (interior ops with one reader inlined, up to 4 distinct leaves), requires the linear-MBA shape (+, -, negation and multiplication by a constant over bitwise subterms of leaves) with at least one arithmetic and one bitwise op, evaluates it on the 2^n points where each leaf is 0 or 1, and Möbius-inverts those values into conjunction-basis coefficients. For a linear MBA, agreement on those points implies equality at every width, so no SMT solver is needed. The replacement is the cheapest of: a linear sum of the leaves, k + c*g(x,y) for one two-variable boolean function g, or the conjunction sum; it is applied only when it has fewer ops and 64 pseudo-random full-width evaluations agree.
+- **When to flip:** Off by default. Turn it on for obfuscated code (Tigress, OLLVM substitution) whose arithmetic reads as xor/and/or soup, such as `(a0 ^ a1) + (a0 & a1) * 2`.
+- **Where / provenance:** P3/simplification-quiescence · kuna · new-analysis · ida95-45
+- **Example:** `--option mba on`
+
 ### `noreturn_disc` -- on | off, default `on`
 
 - **Symptoms:** heavily-called custom die()/fatal() wrapper still treated as returning; dead code after a stripped sub_ wrapper that never falls through at 3+ call sites; caller swallows the next function after a wrapper call.
@@ -2815,6 +2881,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default) limits .eh_frame use to FDE pcBegin function starts. Flip on to also discover exception-handler landing pads (catch/cleanup blocks) from the .gcc_except_table LSDA in a C++ try/catch binary.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-ehframe-lsda
 - **Example:** `--option eh_frame_full on`
+
+### `itaniumeh` -- on | off, default `off`
+
+- **Symptoms:** catch block missing from a c++ function; destructor calls on the exception path are missing; __cxa_begin_catch never appears in the pseudocode; _Unwind_Resume never appears although the binary calls it; a c++ function with try/catch shows only the normal return.
+- **What it does:** Show Itanium C++ catch and cleanup code. Each call covered by a .gcc_except_table call-site record gets an exceptional successor: `if (eh_unwinding()) goto pad;` right after the call. At the landing pad the exception pointer register is defined by `eh_exception()` and, when the pad has a catch clause, the selector register by `eh_selector()`, so `__cxa_begin_catch(eh_exception())` and the `eh_selector() == N` tests read as written. A comment at each pad lists its clauses by selector value (`catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`, or `cleanup`), with catch types named from their typeinfo symbols. Without it the pads are unreachable and catch bodies, destructor calls and `_Unwind_Resume` vanish from the pseudocode. ELF only (x86, x86-64, AArch64, ARM).
+- **When to flip:** Off (default) shows only the normal path, as upstream Ghidra and IDA do for Itanium code. Turn it on to see what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows.
+- **Where / provenance:** P2/flow-classification · kuna · new-analysis · ida95-44
+- **Example:** `--option itaniumeh on`
+
+### `panicloc` -- on | off, default `on`
+
+- **Symptoms:** a rust panic call passes a bare address as its last argument; panic_bounds_check shows a hex constant instead of a source location; rust unwrap_failed or expect_failed location argument is an unnamed address.
+- **What it does:** Type and name Rust panic `Location` records. Every panic site passes `&'static core::panic::Location { file: &str, line: u32, col: u32 }`, which rustc emits in read-only data, so a bounds check read `panic_bounds_check(a2,a1,0x51150)`. A record is recognized by shape, as IDA 9.5's rust plugin does: the file pointer (the R_*_RELATIVE addend on a PIE) reaches read-only text of 1..=0x1000 bytes ending in `.rs`, 1 <= line <= 0xffffff and col <= 0xfff. Each record becomes a data symbol typed `core::panic::Location` (the `&str` file field included) and named after its position (`panic_loc_src_main_rs_10_5`), and the file name becomes a bounded string of exact length. Registered for rustc-detected images only.
+- **When to flip:** On by default for Rust binaries: panic and bounds-check calls show the source position they report. Turn it off to see the raw record addresses.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
+- **Example:** `--option panicloc off`
 
 ### `unwindstarts` -- on | off, default `off`
 
@@ -3315,7 +3397,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `itaniumrtti` -- on | off, default `off`
 
 - **Symptoms:** gcc/clang c++ class names missing and vtables left as unnamed DAT_ data; no Class::vtable or typeinfo labels in a stripped elf with polymorphic classes; virtual dispatch slot resolves to sub_<addr> with no class.
-- **What it does:** Run the Itanium (GCC/Clang) RTTI + vtable recovery pass -- a capability Ghidra does NOT have (its RttiAnalyzer is a Microsoft-PE analyzer, and its GCC class recovery is script-tier: RecoverClassesFromRTTIScript / RTTIGccClassRecoverer, never auto-analysis), so on a stripped g++ binary Ghidra leaves the Shape vtable as DAT_00107a80. IDA Pro does reconstruct it, and this is kuna's analog, built against the Itanium C++ ABI. On an ELF, discovery is EXACT rather than a byte-pattern scan: the three __cxxabiv1 typeinfo vtables live in libstdc++, so every _ZTI... typeinfo object's leading vptr word is an UND dynamic relocation naming __class_type_info / __si_class_type_info / __vmi_class_type_info with addend 2*ptr -- the relocation's r_offset IS the typeinfo address and its symbol IS the flavour, and `.rela.dyn` is a loader input that `strip --strip-all` cannot remove from a shared object. A defined _ZTI... OBJECT symbol is a second discovery source (unstripped / static link), its flavour sniffed from the object's shape. Each typeinfo's _ZTS... type-name string is demangled to the class name by wrapping it back into the _ZTS symbol form and reusing the existing cpp_demangle Itanium arm (the exact analog of the MSVC ??_R0...@8 wrap; ZERO new demangler code), and its base list gives the inheritance DISPLACEMENTS. Vtables are then reached from the typeinfo, not guessed: one scan finds every pointer slot holding a discovered typeinfo address (a sub-vtable's second header word), and two exact ABI constraints reject the coincidental hits -- offset-to-top is always <= 0, and a real sub-vtable has >= 1 slot pointing into an executable section. A slot whose file word is 0 but which carries a dynamic relocation is an IMPORTED virtual method (__cxa_pure_virtual, a base method in another image); the walk steps over it instead of terminating, so an abstract interface keeps its true extent. Emits Data symbols `<C>::typeinfo`, `<C>::typeinfo_name`, `<C>::vtable`, and for a secondary sub-vtable the base subobject its displacement identifies (`Widget::vtable_for_Drawable`); a Function symbol `<C>::vtable_<i>` per virtual slot, with an inherited slot attributed to the class that DEFINES it rather than to whichever vtable the scan reached first (so Shape::perimeter, repeated in Circle's and Square's tables, is named once for Shape); and the slot arrays as read-only ranges. ELF-only (registered in passes_for only for BinaryFormat::Elf, and the pass self-gates on ELF in run). DISABLED by default (real-ELF path only, output-changing: it adds named data and function symbols, so every XML parity gate is byte-identical).
+- **What it does:** Run the Itanium (GCC/Clang) RTTI + vtable recovery pass -- a capability Ghidra does NOT have (its RttiAnalyzer is a Microsoft-PE analyzer, and its GCC class recovery is script-tier: RecoverClassesFromRTTIScript / RTTIGccClassRecoverer, never auto-analysis), so on a stripped g++ binary Ghidra leaves the Shape vtable as DAT_00107a80. IDA Pro does reconstruct it, and this is kuna's analog, built against the Itanium C++ ABI. On an ELF, discovery is EXACT rather than a byte-pattern scan: the three __cxxabiv1 typeinfo vtables live in libstdc++, so every _ZTI... typeinfo object's leading vptr word is an UND dynamic relocation naming __class_type_info / __si_class_type_info / __vmi_class_type_info with addend 2*ptr -- the relocation's r_offset IS the typeinfo address and its symbol IS the flavour, and `.rela.dyn` is a loader input that `strip --strip-all` cannot remove from a shared object. A defined _ZTI... OBJECT symbol is a second discovery source (unstripped / static link), its flavour sniffed from the object's shape. Each typeinfo's _ZTS... type-name string is demangled to the class name by wrapping it back into the _ZTS symbol form and reusing the existing cpp_demangle Itanium arm (the exact analog of the MSVC ??_R0...@8 wrap; ZERO new demangler code), and its base list gives the inheritance DISPLACEMENTS. Vtables are then reached from the typeinfo, not guessed: one scan finds every pointer slot holding a discovered typeinfo address (a sub-vtable's second header word), and two exact ABI constraints reject the coincidental hits -- offset-to-top is always <= 0, and a real sub-vtable has >= 1 slot pointing into an executable section. A slot whose file word is 0 but which carries a dynamic relocation is an IMPORTED virtual method (__cxa_pure_virtual, a base method in another image); the walk steps over it instead of terminating, so an abstract interface keeps its true extent. Emits Data symbols `<C>::typeinfo`, `<C>::typeinfo_name`, `<C>::vtable`, and for a secondary sub-vtable the base subobject its displacement identifies (`Widget::vtable_for_Drawable`); a Function symbol `<C>::vtable_<i>` per virtual slot, with an inherited slot attributed to the class that DEFINES it rather than to whichever vtable the scan reached first (so Shape::perimeter, repeated in Circle's and Square's tables, is named once for Shape); and the slot arrays as read-only ranges. ELF and Mach-O (registered in passes_for for both and self-gated in run). On a Mach-O every LC_DYLD_CHAINED_FIXUPS slot is first resolved into a copy of the sections (a rebase's target, 0 for a bind); the anchor is a bind to __ZTVN10__cxxabiv1..._type_infoE with addend 2*ptr, and a name pointer's bit 63 (Apple's non-unique-typeinfo flag) is cleared. DISABLED by default (real-ELF path only, output-changing: it adds named data and function symbols, so every XML parity gate is byte-identical).
 - **When to flip:** Off (default; no Itanium RTTI pass runs and there is zero behavior change). Flip on for a GCC/Clang-built C++ ELF carrying polymorphic classes -- especially a STRIPPED one, where the relocation anchor is the only surviving type information -- to recover the class names, the inheritance graph and the vtables (an unnamed DAT_* vtable slot becomes `Shape::vtable_2`, the raw .data.rel.ro bytes become `Shape::typeinfo` / `Shape::vtable`). It recovers NOTHING from a binary built -fno-rtti (google/leveldb is such a build: 18 _ZTV symbols, zero _ZTI/_ZTS, zero __cxxabiv1 relocations), and nothing from plain C.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-itaniumrtti
 - **Example:** `option itaniumrtti on`
@@ -3491,7 +3573,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `goabi` -- auto | off, default `auto`
 
 - **Symptoms:** go function parameters missing or void while the body reads rax/rbx locals that are never assigned; a go function returning two values loses the second and the statements computing it; go output full of unassigned register-commented locals; multi-return go call sites read registers the call never defines.
-- **What it does:** Select the vendored golang compiler spec for a Go image. Go does not use the platform C ABI: since 1.17 its register ABI (abi-internal) passes arguments in RAX,RBX,RCX,RDI,RSI,R8-R11 on x86-64 and returns multiple values in those same registers, so under the default gcc model a Go function's parameters are invisible (RAX/RBX are scratch to SysV), a second return value is dead-coded away, and the statements computing it are DELETED - `func pair(a,b int) (int,int)` decompiles as `long pair(void){ return v1 + v2; }` with both locals unassigned and the product gone. Ghidra vendors golang cspecs (abi-internal default, abi0 the stack ABI, the write-barrier and duff helper models) for x86-64, x86-32 and AArch64; kuna ships them compiled and nothing selected them. At `auto` (default) an image whose effective source language is Go (the sourcelang fact, KUNA_SOURCELANG force included) composes the `:golang` compiler field in its SLEIGH language id on those three little-endian architectures; every other architecture and every non-Go image is untouched, and the engine's default-model retry covers a spec that fails to resolve. The id is composed inside `load file`, so the option travels as the KUNA_GOABI environment variable (the rexthunk/sourcelang loadtime pattern). The golang cspec also registers the `abi0` stack-ABI model, and a function or callee whose name ends `.abi0` (Go's dual-ABI stack alias - an unstripped go1.22 hello-world carries 115 such .symtab names; the pclntab carries none, so a stripped image keeps abi-internal everywhere) takes that model at the model-selection seams; the binding self-gates on the model being registered, so an explicit `--target ...:golang` gets it even with goabi off.
+- **What it does:** Select the vendored golang compiler spec for a Go image. Go does not use the platform C ABI: since 1.17 its register ABI (abi-internal) passes arguments in RAX,RBX,RCX,RDI,RSI,R8-R11 on x86-64 and returns multiple values in those same registers, so under the default gcc model a Go function's parameters are invisible (RAX/RBX are scratch to SysV), a second return value is dead-coded away, and the statements computing it are DELETED - `func pair(a,b int) (int,int)` decompiles as `long pair(void){ return v1 + v2; }` with both locals unassigned and the product gone. Ghidra vendors golang cspecs (abi-internal default, abi0 the stack ABI, the write-barrier and duff helper models) for x86-64, x86-32 and AArch64; kuna ships them compiled and nothing selected them. At `auto` (default) an image whose effective source language is Go (the sourcelang fact, KUNA_SOURCELANG force included) composes the `:golang` compiler field in its SLEIGH language id on those three little-endian architectures; every other architecture and every non-Go image is untouched, and the engine's default-model retry covers a spec that fails to resolve. The id is composed inside `load file`, so the option travels as the KUNA_GOABI environment variable (the rexthunk/sourcelang loadtime pattern). The golang cspec also registers the `abi0` stack-ABI model, and a function or callee whose name ends `.abi0` (Go's dual-ABI stack alias - an unstripped go1.22 hello-world carries 115 such .symtab names; the pclntab carries none, so a stripped image keeps abi-internal everywhere) takes that model at the model-selection seams; the binding self-gates on the model being registered, so an explicit `--target ...:golang` gets it even with goabi off. A Go image built before the register ABI reached its CPU (amd64 before go1.17, arm64 before go1.18) takes `abi0` as the default model instead: the build-info version decides (the inline go1.18+ form or the older pointer form), and without one the pclntab magic gives a range (0xfffffffb is go1.2-1.15, so stack; 0xfffffffa is go1.16-1.17, stack on arm64 and undecided on amd64).
 - **When to flip:** Leave auto: on a Go binary the golang cspec is the difference between invisible parameters with deleted statements and recovered register arguments with the multi-return join; flip off to read a Go image under the platform C model (comparing against another tool, or triaging a suspected cspec defect). Non-Go binaries never see the option either way.
 - **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-multilang-goabi
 - **Example:** `option goabi off`
@@ -4587,6 +4669,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default (DIV-143). Keep it on when a function's body re-declares one of its own parameters -- the shape is a signature `f(unsigned int a0, ...)` immediately followed by `int4 a0;`, with `&a0` the only use, and the disassembly showing that `&a0` is a `LEA` of the parameter's own frame slot. It is the standard rendering for a parameter passed by address to an API (`CryptDeriveKey`, `GetTokenInformation`, any out-parameter), because the body then never reads the slot as a value and the parameter's storage carries no Varnode. Inert unless an `&symbol` reference resolves to a `function_parameter` Symbol, so any function that does not take the address of a parameter is byte-identical. Flip OFF to restore the duplicate declaration -- worth doing only to confirm that a variable you expected to be a local really is the parameter.
 - **Where / provenance:** P9/naming-policy · kuna · correctness-fix · repipe-address-taken-key-parameter
 - **Example:** `option paramrefdecl off`
+
+### `avxintrinsics` -- on | off, default `on`
+
+- **Symptoms:** vector code prints ghidra user-op names such as vpaddd_avx2; fma prints as vfmadd132ps_fma with the instruction's operand order; avx-512 arithmetic prints as vaddps_avx512f.
+- **What it does:** Print the x86 SLEIGH AVX user-ops as the Intel intrinsics a programmer writes. The x86 spec lifts most AVX2, FMA and AVX-512 instructions to opaque user-ops named after the mnemonic and its extension (`vpaddd_avx2`, `vfmadd132ps_fma`, `vaddps_avx512f`). With this option the printer names each one `_mm<W>_<op>_<type>`, where the width comes from the user-op's result size (16, 32 or 64 bytes): `_mm256_add_epi32`, `_mm512_add_ps`, `_mm256_max_epu8`, `_mm256_shuffle_epi8`, `_mm256_and_si256`. The FMA forms also get the intrinsic's operand order: `vfmadd132ps(a, b, c)` computes `a*c + b` and prints as `_mm256_fmadd_ps(a, c, b)` (213 is `b*a + c`, 231 is `b*c + a`). Display only; the IR keeps the user-op. A user-op without a mapping keeps its SLEIGH name.
+- **When to flip:** On by default: vector code reads as intrinsics. Turn it off to see the SLEIGH user-op names, for example to grep for a mnemonic.
+- **Where / provenance:** P9/naming-policy · kuna · presentation-default · ida95-46
+- **Example:** `--option avxintrinsics off`
 
 ### `tiedphitrim` -- on | off, default `on`
 

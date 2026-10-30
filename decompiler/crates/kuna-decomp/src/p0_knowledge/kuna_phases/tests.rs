@@ -44,7 +44,7 @@ fn settable_count_is_408() {
 }
 
 #[test]
-fn tier_counts_are_127_core_152_transform_127_analysis() {
+fn tier_counts_are_127_core_153_transform_128_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_168() {
+fn option_values_live_value_present_for_184() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;

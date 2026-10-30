@@ -647,6 +647,9 @@ mod tests {
             "funcchunks",
             "tailcallentryall",
             "bitidioms",
+            // `dwarfglobaltypes` was turned off by default in its own branch after
+            // landing; it has no preset sweep yet.
+            "dwarfglobaltypes",
             // Stack-address liveness can be incidental; synthetic regressions and
             // a local speed measurement do not justify a broad preset flip.
             "stackaddrargtrial",
