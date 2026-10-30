@@ -177,6 +177,8 @@ Three tiers:
 | 'jump-as-call' on a switchAssist or lookupswitch user-op | [`jumpassist`](#jumpassist) |
 | 'Too many branches' jumptable failure where a cbranch range guard bounds the index | [`switchguardbound`](#switchguardbound) |
 | computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound) |
+| a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ... | [`switchguardmerge`](#switchguardmerge) |
+| a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
 | pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
 | 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
@@ -1944,6 +1946,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Set on PER PROGRAM when a switch reports 'Could not recover jumptable ... Too many branches' and renders as a computed (code *)() call AND the dispatch is range-guarded (vs the modulo form switchmodbound handles); DESTRUCTIVE as a global default (the guard-to-index correspondence is asserted across a stack spill it cannot prove in dataflow, so it may over-bound an unrelated indirect jump).
 - **Where / provenance:** P2/switch-model · angr · opt-in-tool · angr-missing-function-call
 - **Example:** `option switchguardbound on`
+
+### `switchguardmerge` -- on | off, default `on`
+
+- **Symptoms:** a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ...; a case value outside the jump table is tested after the switch.
+- **What it does:** Merge an equality test that a switch's range guard (or its default) leads to into the switch as more cases. gcc and clang lower a switch with a far outlier (case 100 beside case 0..6) to a jump table behind a range guard plus `x == 100` tests on the guard's other side, which printed as `if (a0 <= 6) { switch(a0) {...} } if (a0 != 100) return -1; ...`. With this on, the guard is evaluated on the outliers and on every case label (each must keep its path), the blocks on the way must only compute, and the default must read the same values either way; then each outlier becomes a case and the guard goes. The same holds for a chain of tests that is the switch's own default (clang).
+- **When to flip:** On (default). Flip off to see the guard and the separate equality tests the compiler emitted.
+- **Where / provenance:** P2/switch-model · kuna · presentation-default · kuna-switchguardmerge
+- **Example:** `--option switchguardmerge off`
 
 ### `switchsharedcase` -- on | off, default `on` (destructive opt-in)
 

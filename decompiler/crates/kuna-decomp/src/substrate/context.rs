@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
+    pub switch_guard_merge: bool,
     /// Keep mapped global array bases separate from negative element offsets.
     pub global_array_anchor: bool,
     /// (kuna) Fold an exact one-byte modular cancellation around a bounded
@@ -1949,6 +1951,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            switch_guard_merge: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)
             ret_split_global: false,     // retsplitglobal (the ArchSeam carries the real default)

@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3694,
-    3694
+    3701,
+    3701
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1152,6 +1152,13 @@
     "data:KUNA-STRUCTDEFS #3: the tag gets the forward declaration the project header gives it",
     "data:KUNA-STRUCTDEFS #4: the signature is unchanged by the flip",
     "data:KUNA-STRUCTDEFS #5: the body is unchanged by the flip",
+    "data:KUNA-SWITCHGUARDMERGE #1: the outliers are cases of the switch (default)",
+    "data:KUNA-SWITCHGUARDMERGE #2: both outliers are cases (default)",
+    "data:KUNA-SWITCHGUARDMERGE #3: switchguardmerge off keeps the range guard",
+    "data:KUNA-SWITCHGUARDMERGE #4: one switch per pass",
+    "data:KUNA-SWITCHGUARDMERGE-DEFAULT #1: the outlier is a case (default)",
+    "data:KUNA-SWITCHGUARDMERGE-DEFAULT #2: the last miss is the default (default)",
+    "data:KUNA-SWITCHGUARDMERGE-DEFAULT #3: switchguardmerge off tests the outlier after the switch",
     "data:KUNA-THUMBSWITCH #1: the bhi-guarded dispatcher is a function in both passes",
     "data:KUNA-THUMBSWITCH #2: the bhi-guarded case body is a function only with the option off",
     "data:KUNA-THUMBSWITCH #3: the bcs-guarded dispatcher is a function in both passes",

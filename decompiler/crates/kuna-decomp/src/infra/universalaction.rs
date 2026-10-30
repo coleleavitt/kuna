@@ -649,6 +649,7 @@ pub fn universal_sched(
             act!(ActionDeadCode::boxed_narrowing("deadcode")),
             act!(ActionDoNothing::boxed("deadcontrolflow")),
             act!(ActionSwitchNorm::boxed("switchnorm")),
+            act!(crate::kuna_switchguardmerge::ActionSwitchGuardMerge::boxed("switchnorm")),
             SchedNode::Action(Box::new(move || {
                 Box::new(crate::kuna_loweredswitch::ActionLowerSwitchDetect::with_store(
                     false,

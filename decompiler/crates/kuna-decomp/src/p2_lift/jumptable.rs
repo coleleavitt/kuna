@@ -5683,6 +5683,42 @@ impl JumpTable {
         Ok(())
     }
 
+    /// (kuna `switchguardmerge`) Fold out-edge `from` into out-edge `into`:
+    /// every table entry reaching `from` now reaches `into` (at `into_addr`),
+    /// and the out-edges after `from` move down one, as removing that edge
+    /// leaves them.
+    pub fn kuna_merge_out_edge(&mut self, from: int4, into: int4, into_addr: &Address) {
+        let shift = |p: int4| if p > from { p - 1 } else { p };
+        for pair in &self.block2addr {
+            if pair.block_position == from {
+                self.addresstable[pair.address_index as usize] = into_addr.clone();
+            }
+        }
+        for pair in &mut self.block2addr {
+            if pair.block_position == from {
+                pair.block_position = into;
+            }
+            pair.block_position = shift(pair.block_position);
+        }
+        self.block2addr.sort();
+        for (pos, _) in &mut self.case_values {
+            if *pos == from {
+                *pos = into;
+            }
+            *pos = shift(*pos);
+        }
+        self.case_values.sort();
+        self.case_values.dedup();
+        for edge in [&mut self.default_block, &mut self.last_block] {
+            if *edge == from {
+                *edge = into;
+            }
+            if *edge >= 0 {
+                *edge = shift(*edge);
+            }
+        }
+    }
+
     /// Return the number of address table entries that target the given block
     /// (C++ `JumpTable::numIndicesByBlock`, `jumptable.cc:2588`).
     pub fn num_indices_by_block(&self, fd: &Funcdata, bl: BlockId) -> KunaResult<int4> {
