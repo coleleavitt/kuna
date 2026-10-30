@@ -409,6 +409,13 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         passes.push(Box::new(crate::loader::kuna_elfgotimports::ElfGotImportPass));
     }
 
+    // (kuna `machobinds`) S1 Mach-O bound pointer slots: name each slot a bind
+    // fills that no indirect entry names, through the same symbol-table-only
+    // channel, and paint it `externref`. Committed only when `machobinds` is on.
+    if format == object::BinaryFormat::MachO {
+        passes.push(Box::new(crate::loader::kuna_machobinds::MachoBindSlotsPass));
+    }
+
     // S1 Go pclntab function-name recovery (GoPclntabPass): when the binary is Go
     // (`detect_compiler == Go`, via `.go.buildinfo`/`.note.go.buildid` — the same
     // gate the Go no-return list uses), parse the embedded `pclntab` and emit a
@@ -1882,7 +1889,7 @@ mod tests {
         assert!(macho.contains(&"objc"), "Mach-O must carry the objc pass");
         // Compare the format-neutral base after dropping each format's gated
         // additions: `itaniumrtti` and `elfgotimports` for ELF and `peimportcall`,
-        // `authptrcall`, `cfstrings` and `objc` for Mach-O.
+        // `authptrcall`, `cfstrings`, `machobinds` and `objc` for Mach-O.
         let elf_neutral: Vec<&str> = elf
             .iter()
             .copied()
@@ -1891,7 +1898,7 @@ mod tests {
         let macho_neutral: Vec<&str> = macho
             .iter()
             .copied()
-            .filter(|&p| !matches!(p, "peimportcall" | "authptrcall" | "cfstrings" | "objc"))
+            .filter(|&p| !matches!(p, "peimportcall" | "authptrcall" | "cfstrings" | "machobinds" | "objc"))
             .collect();
         assert!(!elf_neutral.contains(&"itaniumrtti"));
         assert_eq!(

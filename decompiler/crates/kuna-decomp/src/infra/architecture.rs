@@ -1752,6 +1752,8 @@ pub struct Architecture {
     /// (kuna) Gate the Mach-O `__eh_frame` FDE function-start pass
     /// (`machoehframe`); default **on**.
     pub analysis_machoehframe: bool,
+    /// (kuna) Gate the Mach-O bound-slot naming pass (`machobinds`); default **on**.
+    pub analysis_machobinds: bool,
     /// (kuna) Refuse a function entry at a direct CALL target the Listing walk's
     /// own out-of-bounds gate forbids it to decode (`unmappedentry`); default
     /// **on**. The recursive-descent walk gates every instruction address on the
@@ -3269,6 +3271,7 @@ impl Architecture {
             analysis_eh_frame_full: false,
             analysis_unwindstarts: false,
             analysis_machoehframe: false,
+            analysis_machobinds: false,
             analysis_fdeinterior: false,
             analysis_coldentry: false,
             analysis_pdatainterior: false,
@@ -3731,6 +3734,9 @@ impl Architecture {
         self.analysis_unwindstarts = false;
         // (kuna) Mach-O `__eh_frame` FDE starts — default-ON, as `.eh_frame` is on ELF.
         self.analysis_machoehframe = true;
+        // (kuna) Mach-O bound pointer slots named for their import — default-ON
+        // (symbol-table names only; the function inventory is unchanged).
+        self.analysis_machobinds = true;
         // (kuna) DIV-61 `.eh_frame` FDE-interior entry suppression — default-ON.
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;

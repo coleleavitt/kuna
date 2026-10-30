@@ -40,8 +40,6 @@ pub mod kuna_objcsdk;
 // (kuna) dyld shared cache image selection + cross-image naming gates
 // (load-time, env-bridged).
 pub mod kuna_dyldcache;
-// (kuna) Mach-O bound-slot import naming gate (load-time, env-bridged).
-pub mod kuna_machobinds;
 // (kuna) Mach-O export-trie naming gate (load-time, env-bridged).
 pub mod kuna_exporttrie;
 // (kuna) The Go runtime-type harvest gate (load-time, env-bridged).
