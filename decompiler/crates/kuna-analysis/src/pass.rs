@@ -236,6 +236,19 @@ pub struct ParamLockFact {
     pub type_: std::rc::Rc<kuna_decomp::dtype::Datatype>,
 }
 
+/// (kuna `swiftcall`) A symbol-named Swift member's declared prototype:
+/// `pieces` under `model`, with the parameter at `self_slot` (the last one)
+/// pinned to `self_reg`, the `swiftself` register, which the commit resolves
+/// and stores as the prototype's explicit input storage.
+#[derive(Clone, Debug)]
+pub struct SwiftDeclaredFact {
+    pub func_addr: u64,
+    pub model: &'static str,
+    pub self_slot: Option<i32>,
+    pub self_reg: &'static str,
+    pub pieces: kuna_decomp::fspec::PrototypePieces,
+}
+
 /// (kuna `swifttypes`) The facts the Swift type-layout arm produces, kept
 /// apart so the commit can drop them whole under `option swifttypes off`:
 /// the typed metadata records, the accessor prototypes and the
@@ -251,6 +264,8 @@ pub struct SwiftTypeFacts {
     /// and accessor, and the name and type of its `self`.
     pub models: Vec<ModelFact>,
     pub input_hints: Vec<InputHintFact>,
+    /// (kuna `swiftcall`) Declared prototypes from mangled names.
+    pub declared: Vec<SwiftDeclaredFact>,
     /// The `swiftself` and `swifterror` registers, once a convention is bound.
     pub regs: Option<(&'static str, &'static str)>,
 }
@@ -775,6 +790,7 @@ impl AnalysisOutput {
         self.swift_types.param_locks.extend(other.swift_types.param_locks);
         self.swift_types.models.extend(other.swift_types.models);
         self.swift_types.input_hints.extend(other.swift_types.input_hints);
+        self.swift_types.declared.extend(other.swift_types.declared);
         self.swift_types.regs = self.swift_types.regs.or(other.swift_types.regs);
         self.entries.extend(other.entries);
         self.fde_bodies.extend(other.fde_bodies);
