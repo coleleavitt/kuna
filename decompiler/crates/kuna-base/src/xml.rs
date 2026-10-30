@@ -2130,7 +2130,8 @@ mod tests {
         // and kuna-dyldcrossrefs / a dyld shared cache image names its calls into other images
         // and kuna-dedupitetail-gototarget / a goto into an unwrapped if clause keeps its target
         // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
-        assert_eq!(count, 610, "corpus file count drifted");
+        // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
+        assert_eq!(count, 611, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

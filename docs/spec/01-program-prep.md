@@ -3708,7 +3708,24 @@ every other binary's pass list is byte-identical to before the pass existed):
     properties the same way, `self->swiftRUMMonitor`). A class that got no
     layout — one of another image behind a category, or one with no field of
     its own — still types `self` as a pointer to its declared record, so the
-    receiver is a `<Class> *` even when it is opaque. Off (the option is read
+    receiver is a `<Class> *` even when it is opaque. A Swift class registers
+    with the runtime as `_TtC6Toyota3Foo`; every type the ObjC pass interns or
+    declares for it — the instance struct, the embedded superclass, a
+    `@"_TtC…"` pointer, the typed `self` — goes through the one
+    runtime-to-shown name mapping
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_swiftclassnames.rs (display_class_name)`,
+    `Toyota.Foo` under `swiftdemangle`, the runtime spelling off), the same
+    mapping the method labels use, while the lookups between the ObjC tables
+    keep the runtime spelling. On a Swift image (one with `__swift5_fieldmd`)
+    under `swifttypes`, a Swift class's layout is left to the field descriptors:
+    the ivar list encodes Swift-typed stored properties as nothing, so the ObjC
+    pass only declares the record and `swifttypes` completes it with the Swift
+    names and types — one struct per class (Toyota: `Toyota.AddMileageViewController`
+    once, `Toyota.AddMileageViewModel *viewModel` and `bool nativePush` where
+    the ivar list gave `unsigned long` and `char`; before, 3,114 `_TtC…`
+    structs sat beside 4,886 demangled ones). The stage test
+    `tests/stages/kuna-swiftclassnames.xml` proves both spellings on
+    `macho_swift_classnames_arm64`. Off (the option is read
     at load as `KUNA_OBJCIVARS` for the structs and at the commit for `self`
     and the fold, so it is set before the `load file` it applies to), no class
     struct is interned, `self` stays `id`, the offset variable keeps its name

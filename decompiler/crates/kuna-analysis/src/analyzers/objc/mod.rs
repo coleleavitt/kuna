@@ -55,6 +55,8 @@ pub mod classt;
 pub mod encoding;
 pub mod kuna_objccats;
 pub mod kuna_objcivars;
+mod kuna_swiftclassnames;
+use kuna_swiftclassnames::display_class_name;
 pub mod kuna_objcprops;
 pub mod kuna_objcprotos;
 pub mod kuna_objcrefs;
@@ -136,9 +138,16 @@ impl AnalysisPass for ObjcMetadataPass {
         // The layouts are built only under `objcivars` (its load-time half): off,
         // no class struct is interned and no offset variable reported constant.
         let objcivars = kuna_decomp::kuna_objcivars::objcivars_enabled();
+        // A Swift class's layout is left to `swifttypes` when that is on and the
+        // image carries field descriptors: they give the Swift names and types
+        // the ivar list encodes as nothing. The record is declared here (the
+        // typed `self`, the `@"…"` pointers) and completed there.
+        let swifttypes = ctx.arch.analysis_swifttypes
+            && ctx.file.section_by_name(super::swift::descriptors::MACHO_SECTIONS.fieldmd).is_some();
         let layouts: HashMap<String, kuna_objcivars::Layout> = classes
             .iter()
             .filter(|_| objcivars)
+            .filter(|(_, name)| !(swifttypes && kuna_swiftclassnames::is_swift_runtime_name(name)))
             .filter_map(|(class, name)| kuna_objcivars::layout(&img, class, name).map(|l| (name.clone(), l)))
             .collect();
         let structs = kuna_objcivars::Structs::build(&tctx, &layouts);
@@ -337,18 +346,6 @@ fn emit_ivars(ivars: &[classt::Ivar], class: &str, objcivars: bool, out: &mut An
     }
 }
 
-/// The class name the labels render: the Swift demangling of an ObjC runtime
-/// name (`_TtC6Toyota3Foo` → `Toyota.Foo`) when `swiftdemangle` is on and the
-/// name is in the demangler's coverage, else the runtime spelling as is.
-fn display_class_name(runtime_name: &str) -> String {
-    if runtime_name.starts_with("_Tt") && kuna_decomp::kuna_swiftdemangle::swiftdemangle_enabled() {
-        if let Some(d) = crate::demangle::kuna_swift::demangle_swift_name(runtime_name) {
-            return d;
-        }
-    }
-    runtime_name.to_string()
-}
-
 /// Turn a selector (`greet:`, `setFoo:bar:`) into a symbol-name-safe token for a
 /// `sel_<...>` Data symbol: colons → underscores, every other non-alphanumeric →
 /// underscore. The selector text itself is preserved in the IMP rename label.
@@ -369,14 +366,6 @@ mod tests {
         assert_eq!(p.phase(), Phase::P1);
     }
 
-    #[test]
-    fn swift_runtime_class_names_demangle_for_labels() {
-        assert_eq!(display_class_name("Greeter"), "Greeter");
-        assert_eq!(display_class_name("_TtC6Toyota24AddMileageViewController"), "Toyota.AddMileageViewController");
-        assert_eq!(display_class_name("_TtCC6Toyota5Outer5Inner"), "Toyota.Outer.Inner");
-        // Outside the demangler's coverage the runtime spelling stays.
-        assert_eq!(display_class_name("_TtC1"), "_TtC1");
-    }
 
     #[test]
     fn sanitize_selector_replaces_colons() {
