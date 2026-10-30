@@ -662,3 +662,6 @@ mod ppc32_imports;
 
 #[path = "dwarf_global_addresses.rs"]
 mod dwarf_global_addresses;
+
+#[path = "dwarf_compressed_sections.rs"]
+mod dwarf_compressed_sections;
