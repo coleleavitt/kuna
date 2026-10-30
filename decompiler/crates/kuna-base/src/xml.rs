@@ -2132,7 +2132,8 @@ mod tests {
         // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
         // and kuna-swiftclassnames / a Swift class's struct and pointers under its demangled name
         // and kuna-machoehframe / a stripped Mach-O's __eh_frame FDE starts join the inventory
-        assert_eq!(count, 612, "corpus file count drifted");
+        // and kuna-machobinds / a Mach-O pointer slot filled by a bind is named for its import
+        assert_eq!(count, 613, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

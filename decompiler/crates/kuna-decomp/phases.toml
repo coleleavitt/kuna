@@ -7687,6 +7687,25 @@ tier = "analysis"
 symptoms = "calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island|a cache image's __got loads name nothing|cross-library calls of an ios framework have no names"
 
 [[settable]]
+option = "machobinds"
+values = "on|off"
+default = "off"
+destructive = false
+phase = "P1"
+subphase = "environment-binding"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-analysis-machobinds"
+summary = "Name every Mach-O pointer slot a bind record fills that the LC_DYSYMTAB indirect-symbol table does not already name: chained-fixup binds (LC_DYLD_CHAINED_FIXUPS) and classic LC_DYLD_INFO bind opcodes alike, as IDA names each <sym>_ptr. A C function or data pointer initialized to an import, an arm64e __auth_ptr, a vtable or Swift witness slot otherwise read as an anonymous dat_<addr>. A bind with an addend is skipped (the slot holds &sym + addend, not the import), and so are __objc_* and __cfstring, whose own passes name their slots. Each slot becomes an import slot, so peimportcall binds a call through it and importdata names a data read through it. The names are added while the loader resolves imports inside `load file`, so the gate travels as the KUNA_MACHOBINDS environment variable. Off by default: on a Swift-heavy app the binds name tens of thousands of metadata slots (71,257 on the 84 MB Toyota app), and every import slot joins the function inventory."
+use_when = "Turn on to name calls and reads through bound data pointers - (*dat_<slot>)() becomes ext_handler(), *dat_<slot> becomes ext_counter with importdata. Leave off when the function inventory should list code only."
+example = "--option machobinds on"
+source_decompiler = "kuna"
+inspiration = "IDA 9.5 macho.so bind apply (0x24df0) and chained bind apply (0x27370): every bound slot gets <sym>_ptr, a pointer type and an import target"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "a call through a mach-o function pointer bound to an import renders (*dat_<addr>)()|a mach-o data pointer bound to an external symbol reads as *dat_<addr>|arm64e __auth_ptr or vtable slots bound to imports have no names"
+
+[[settable]]
 option = "sourcelang"
 values = "auto|c|rust|go|swift"
 default = "auto"

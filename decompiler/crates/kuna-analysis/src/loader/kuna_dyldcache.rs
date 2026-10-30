@@ -138,6 +138,8 @@ struct LocalSymbols {
 /// An opened dyld shared cache.
 pub struct DyldCache {
     files: Vec<CacheFile>,
+    /// A 64-bit cache; `arm64_32`, `armv7k` and `i386` caches hold 32-bit images.
+    wide: bool,
     mappings: Vec<Mapping>,
     images: Vec<CacheImage>,
     base: u64,
@@ -279,8 +281,11 @@ impl DyldCache {
         }
         let locals = Self::open_local_symbols(path, &h, &mut files, &open)?;
         let images = Self::read_images(&files[0], &h)?;
+        let arch = h.arch();
+        let wide = !(arch == "arm64_32" || arch.starts_with("armv") || arch == "i386");
         Ok(DyldCache {
             files,
+            wide,
             mappings,
             images,
             base,
@@ -454,13 +459,15 @@ impl DyldCache {
             return Ok(Vec::new());
         };
         let file = &self.files[locals.file];
-        let raw = file.read_at(locals.nlist_offset + start as u64 * 16, count as usize * 16)?;
+        let size = if self.wide { 16 } else { 12 };
+        let raw = file.read_at(locals.nlist_offset + start as u64 * size as u64, count as usize * size)?;
         let pool = StringPool::read(
             &|off, len| file.read_at(locals.strings_offset + off, len),
+            size,
             locals.strings_size,
             &raw,
         )?;
-        Ok(extract::Nlist::parse_all(&raw, &pool))
+        Ok(extract::Nlist::parse_all(&raw, size, &pool))
     }
 }
 
@@ -530,10 +537,11 @@ impl StringPool {
     /// `nlists` name.
     pub(crate) fn read(
         read: &dyn Fn(u64, usize) -> Result<Vec<u8>, String>,
+        nlist_size: usize,
         size: u64,
         nlists: &[u8],
     ) -> Result<StringPool, String> {
-        Self::read_at(read, size, nlists.chunks_exact(16).map(|n| u32_at(n, 0) as u64))
+        Self::read_at(read, size, nlists.chunks_exact(nlist_size).map(|n| u32_at(n, 0) as u64))
     }
 
     /// Read the spans of a `size`-byte pool around the strings at `offsets`.

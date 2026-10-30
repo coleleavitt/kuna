@@ -995,6 +995,11 @@ kuna_options! { self, p1;
     "unwindstarts" => {
         on_off!(analysis_unwindstarts, "Mach-O __unwind_info function-start discovery")
     },
+    "machobinds" => {
+        let val = on_or_off(p1)?;
+        crate::kuna_machobinds::set_machobinds_env(val);
+        Ok(format!("Mach-O bound-slot import naming turned {}", if val { "on" } else { "off" }))
+    },
     "machoehframe" => {
         on_off!(analysis_machoehframe, "Mach-O __eh_frame FDE function-start discovery")
     },

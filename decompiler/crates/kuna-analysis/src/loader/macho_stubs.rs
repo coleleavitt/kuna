@@ -185,7 +185,7 @@ where
     if kuna_decomp::kuna_dyldcache::dyldcrossrefs_enabled() {
         for xref in super::kuna_dyldcache::xrefs::read_note(bytes) {
             if xref.kind == super::kuna_dyldcache::xrefs::XrefKind::Slot {
-                out.import_slots.push((xref.addr, xref.addr + 8));
+                out.import_slots.push((xref.addr, xref.addr + std::mem::size_of::<Mach::Word>() as u64));
             }
             out.imports.push(ImportSym {
                 addr: xref.addr,
@@ -279,7 +279,44 @@ where
     if header.filetype(endian) == object::macho::MH_KEXT_BUNDLE {
         push_kext_bound_imports(&symtab, endian, &mut out);
     }
+    if kuna_decomp::kuna_machobinds::machobinds_enabled() {
+        push_bound_slots(neutral, bytes, std::mem::size_of::<Mach::Word>() as u64, &mut out);
+    }
     finish_with_exports(neutral, out)
+}
+
+/// (kuna `machobinds`) Name every pointer slot a bind fills that the
+/// indirect-symbol table does not already name: chained-fixup binds and
+/// classic `LC_DYLD_INFO` bind opcodes alike, as IDA names each `<sym>_ptr`. A
+/// bind with an addend is skipped (the slot holds `&sym + addend`, not the
+/// import), and so are the ObjC and CFString sections, whose own passes name
+/// their slots.
+fn push_bound_slots(neutral: &object::File, bytes: &[u8], ptr_size: u64, out: &mut MachOIndirectSymbols) {
+    use object::read::{Object, ObjectSection};
+    let owned: Vec<(u64, u64)> = neutral
+        .sections()
+        .filter(|s| s.name().is_ok_and(|n| n.starts_with("__objc_") || n == "__cfstring"))
+        .map(|s| (s.address(), s.address() + s.size()))
+        .collect();
+    let named: std::collections::HashSet<u64> = out.imports.iter().map(|i| i.addr).collect();
+    let chained = crate::loader::format::macho::resolve_chained_fixups(neutral, bytes);
+    let classic = crate::loader::format::macho::resolve_dyld_info_bind_slots(neutral, bytes);
+    let mut binds: Vec<(u64, &str)> = chained
+        .binds()
+        .filter(|&(slot, _)| chained.bind(slot).is_some_and(|(_, addend)| addend == 0))
+        .chain(classic.iter().filter(|(_, (_, addend))| *addend == 0).map(|(&slot, (name, _))| (slot, name.as_str())))
+        .filter(|&(slot, _)| !named.contains(&slot) && !owned.iter().any(|&(lo, hi)| slot >= lo && slot < hi))
+        .collect();
+    binds.sort_unstable();
+    binds.dedup_by_key(|b| b.0);
+    for (slot, name) in binds {
+        out.imports.push(ImportSym {
+            addr: slot,
+            name: strip_leading_underscore(name.as_bytes()),
+            kind: ImportSymKind::Import,
+        });
+        out.import_slots.push((slot, slot + ptr_size));
+    }
 }
 
 /// (kuna `kernelcache`) A kext cut out of a kernel collection carries each

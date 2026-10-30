@@ -940,6 +940,12 @@ uncalled `eh_*` functions whose only start records are `__TEXT,__eh_frame` FDEs
 from `macho_ehframe_only_arm64.s`, whose header has the commands; a rebuild
 reproduces the layout but not the `LC_UUID`.
 
+`macho_bindslots_arm64` (arm64, 33 KB) is the `machobinds` witness: two
+`__DATA,__data` pointers bound by chained fixups to the undefined `_ext_handler`
+and `_ext_counter`, with no indirect-symbol entry naming either slot, local
+symbols stripped. Built from `macho_bindslots_arm64.c`, whose header has the
+commands.
+
 ## Mach-O fat/universal + arm64e (PR-8)
 
 The fat/universal + arm64e gate (`kuna-console/tests/verify_macho_fat.rs`, design

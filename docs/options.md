@@ -836,6 +836,9 @@ Three tiers:
 | calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island | [`dyldcrossrefs`](#dyldcrossrefs) |
 | a cache image's __got loads name nothing | [`dyldcrossrefs`](#dyldcrossrefs) |
 | cross-library calls of an ios framework have no names | [`dyldcrossrefs`](#dyldcrossrefs) |
+| a call through a mach-o function pointer bound to an import renders (*dat_<addr>)() | [`machobinds`](#machobinds) |
+| a mach-o data pointer bound to an external symbol reads as *dat_<addr> | [`machobinds`](#machobinds) |
+| arm64e __auth_ptr or vtable slots bound to imports have no names | [`machobinds`](#machobinds) |
 | rust binary renders with c output and no rust abi handling because a stripped image lost its language signals | [`sourcelang`](#sourcelang) |
 | a c binary is detected as another language and language-gated rules misfire | [`sourcelang`](#sourcelang) |
 | go runtime passes do not run on a go binary whose buildinfo section was stripped | [`sourcelang`](#sourcelang) |
@@ -3145,6 +3148,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Leave on: CoreFoundation's 9,136 calls into stub islands render as __stack_chk_fail(), os_unfair_lock_lock_with_options(...) instead of sub_18c99b570(). Turn off to see the raw island addresses, for example to check a call against the cache's island layout.
 - **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-apple-dyldcache
 - **Example:** `option dyldcrossrefs off`
+
+### `machobinds` -- on | off, default `off`
+
+- **Symptoms:** a call through a mach-o function pointer bound to an import renders (*dat_<addr>)(); a mach-o data pointer bound to an external symbol reads as *dat_<addr>; arm64e __auth_ptr or vtable slots bound to imports have no names.
+- **What it does:** Name every Mach-O pointer slot a bind record fills that the LC_DYSYMTAB indirect-symbol table does not already name: chained-fixup binds (LC_DYLD_CHAINED_FIXUPS) and classic LC_DYLD_INFO bind opcodes alike, as IDA names each <sym>_ptr. A C function or data pointer initialized to an import, an arm64e __auth_ptr, a vtable or Swift witness slot otherwise read as an anonymous dat_<addr>. A bind with an addend is skipped (the slot holds &sym + addend, not the import), and so are __objc_* and __cfstring, whose own passes name their slots. Each slot becomes an import slot, so peimportcall binds a call through it and importdata names a data read through it. The names are added while the loader resolves imports inside `load file`, so the gate travels as the KUNA_MACHOBINDS environment variable. Off by default: on a Swift-heavy app the binds name tens of thousands of metadata slots (71,257 on the 84 MB Toyota app), and every import slot joins the function inventory.
+- **When to flip:** Turn on to name calls and reads through bound data pointers - (*dat_<slot>)() becomes ext_handler(), *dat_<slot> becomes ext_counter with importdata. Leave off when the function inventory should list code only.
+- **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-analysis-machobinds
+- **Example:** `--option machobinds on`
 
 ### `sourcelang` -- auto | c | rust | go | swift, default `auto`
 

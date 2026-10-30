@@ -1531,6 +1531,19 @@ funcsym stream:
   `__la_symbol_ptr`/`__got` slots are named too for `-fno-plt`-style indirect
   calls. `INDIRECT_SYMBOL_LOCAL`/`ABS` entries are skipped; the C-ABI leading `_`
   is stripped.
+- **Bound pointer slots** (kuna, `machobinds`, default off, env-bridged):
+  `push_bound_slots` in `decompiler/crates/kuna-analysis/src/loader/macho_stubs.rs`
+  names every pointer slot a bind record fills that the indirect-symbol table
+  does not: chained-fixup binds and classic `LC_DYLD_INFO` bind opcodes alike,
+  the way IDA names each `<sym>_ptr`. A C function or data pointer initialized
+  to an import, an arm64e `__auth_ptr`, a vtable or Swift witness slot all read
+  as anonymous `dat_<addr>` without it. A bind with an addend is skipped (the
+  slot holds `&sym + addend`), and so are `__objc_*` and `__cfstring`, whose own
+  passes name their slots. Each slot becomes an import slot, so `peimportcall`
+  binds a call through it and `importdata` names a read through it. Off by
+  default: on the 84 MB Toyota app it names 71,257 slots (Swift metadata and
+  witness tables, ObjC metaclass and `_objc_empty_cache` words), every one of
+  which joins the function inventory as an import slot.
 - **dyld shared cache cross-image references** (kuna, `dyldcrossrefs`,
   default on, env-bridged): an image rebuilt from a dyld shared cache calls into
   other images past its own stubs. The cache builder sends a `bl` to a stub

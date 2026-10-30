@@ -26,7 +26,11 @@
 //! - **Plain rebase** — handled for every common pointer format:
 //!   `DYLD_CHAINED_PTR_64` (2), `DYLD_CHAINED_PTR_64_OFFSET` (6),
 //!   `DYLD_CHAINED_PTR_ARM64E` (1) non-auth + `DYLD_CHAINED_PTR_ARM64E_USERLAND`
-//!   (9) / `_USERLAND24` (12).
+//!   (9) / `_USERLAND24` (12), the 32-bit `DYLD_CHAINED_PTR_32` (3, armv7k and
+//!   arm64_32 userland, including its biased small integers above
+//!   `max_valid_pointer`) and `_32_FIRMWARE` (5), and `ARM64E_SEGMENTED` (14).
+//!   `PTR_32_CACHE` (4) and `ARM64E_SHARED_CACHE` (13) occur only inside a
+//!   dyld shared cache, whose slide info kuna applies instead.
 //! - **arm64e auth-rebase** — handled: the PAC/diversity/key/auth bits are
 //!   *stripped* and the 32-bit image-base-relative target is rebased to a real
 //!   VMA. (Pointer authentication is a runtime concept; statically the resolved
@@ -86,6 +90,16 @@ mod ptr_format {
     /// `DYLD_CHAINED_PTR_ARM64E_FIRMWARE` — the arm64e layout with a 4-byte
     /// stride; a non-auth target is a full vmaddr, as in `ARM64E`.
     pub const ARM64E_FIRMWARE: u16 = 10;
+    /// `DYLD_CHAINED_PTR_32` — 32-bit words, 4-byte stride: a 26-bit vmaddr (or,
+    /// above `max_valid_pointer`, a biased small integer), or a 20-bit ordinal
+    /// with a 6-bit addend. armv7k and arm64_32 userland.
+    pub const PTR_32: u16 = 3;
+    /// `DYLD_CHAINED_PTR_32_FIRMWARE` — 32-bit words, a 26-bit vmaddr and a 6-bit
+    /// next, no binds.
+    pub const PTR_32_FIRMWARE: u16 = 5;
+    /// `DYLD_CHAINED_PTR_ARM64E_SEGMENTED` — 4-byte stride; the target is a
+    /// 28-bit offset into the segment a 4-bit index names, no binds.
+    pub const ARM64E_SEGMENTED: u16 = 14;
 }
 
 /// Import-table formats from `fixup-chains.h` (`DYLD_CHAINED_IMPORT*`): the
@@ -385,6 +399,7 @@ fn walk_segment(
     let Some(page_size) = rd_u16(blob, p + 4) else { return };
     let Some(pointer_format) = rd_u16(blob, p + 6) else { return };
     let Some(segment_offset) = rd_u64(blob, p + 8) else { return };
+    let Some(max_valid) = rd_u32(blob, p + 16) else { return };
     let Some(page_count) = rd_u16(blob, p + 20) else { return };
     if page_size == 0 {
         return;
@@ -398,7 +413,10 @@ fn walk_segment(
         | ptr_format::PTR_64_OFFSET
         | ptr_format::ARM64E_KERNEL
         | ptr_format::ARM64E_FIRMWARE
-        | ptr_format::PTR_64_KERNEL_CACHE => 4,
+        | ptr_format::PTR_64_KERNEL_CACHE
+        | ptr_format::PTR_32
+        | ptr_format::PTR_32_FIRMWARE
+        | ptr_format::ARM64E_SEGMENTED => 4,
         ptr_format::X86_64_KERNEL_CACHE => 1,
         // An unhandled format: leave its chains unresolved (the inert path).
         _ => return,
@@ -419,7 +437,7 @@ fn walk_segment(
         }
         let page_va = imagebase + segment_offset + (pi as u64) * (page_size as u64);
         if page_start & PTR_START_MULTI == 0 {
-            walk_chain(file, segs, page_va + page_start as u64, stride, pointer_format, imagebase, imports, out);
+            walk_chain(file, segs, page_va + page_start as u64, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out);
             continue;
         }
         // Several chains on one page: the low bits index the overflow list
@@ -428,7 +446,7 @@ fn walk_segment(
         for _ in 0..0x8000u32 {
             let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
             let offset = (start & !PTR_START_LAST) as u64;
-            walk_chain(file, segs, page_va + offset, stride, pointer_format, imagebase, imports, out);
+            walk_chain(file, segs, page_va + offset, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out);
             if start & PTR_START_LAST != 0 {
                 break;
             }
@@ -440,26 +458,40 @@ fn walk_segment(
 /// Follow one fixup chain from `first_va`, hopping `next * stride` until `next ==
 /// 0`, decoding + recording each **rebase** slot. Bounded against a corrupt
 /// `next` cycle by a hop cap.
+/// What a chain's words mean: the pointer format, the image base the offset
+/// formats add, and the `max_valid_pointer` of `DYLD_CHAINED_PTR_32`.
+#[derive(Clone, Copy)]
+struct Format {
+    id: u16,
+    imagebase: u64,
+    max_valid: u32,
+}
+
 fn walk_chain(
     file: &[u8],
     segs: &[SegInfo],
     first_va: u64,
     stride: u64,
-    pointer_format: u16,
-    imagebase: u64,
+    format: Format,
     imports: &[(Rc<str>, i64)],
     out: &mut ChainedFixups,
 ) {
     let mut va = first_va;
+    let narrow = matches!(format.id, ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE);
     // A defensive cap: no real page chain is longer than page_size/stride; this
     // just bounds a hostile/corrupt header (the inert/no-op contract).
     for _ in 0..0x10000u32 {
         let Some(fo) = va_to_fileoff(segs, va) else { return };
-        let Some(raw) = rd_u64(file, fo as usize) else { return };
-        let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
+        let raw = if narrow { rd_u32(file, fo as usize).map(u64::from) } else { rd_u64(file, fo as usize) };
+        let Some(raw) = raw else { return };
+        let (next, decoded) = match format.id {
+            ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE => decode_ptr32(raw as u32, format),
+            ptr_format::ARM64E_SEGMENTED => decode_segmented(raw, segs),
+            _ => decode_ptr(raw, format.id, format.imagebase),
+        };
         if let Some(target) = decoded {
             out.rebases.insert(va, target);
-        } else if let Some((ordinal, addend)) = bind_entry(raw, pointer_format) {
+        } else if let Some((ordinal, addend)) = bind_entry(raw, format.id) {
             if let Some((name, import_addend)) = imports.get(ordinal).filter(|(n, _)| !n.is_empty()) {
                 out.binds.insert(va, (Rc::clone(name), import_addend.wrapping_add(addend)));
             }
@@ -545,6 +577,35 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
     }
 }
 
+/// Decode a 32-bit chained word (`PTR_32`, `PTR_32_FIRMWARE`): `(next, rebase
+/// value)`, `None` for a bind. A `PTR_32` target above `max_valid_pointer` is
+/// not an address but a small integer, stored biased by
+/// `(0x0400_0000 + max_valid_pointer) / 2`.
+fn decode_ptr32(raw: u32, format: Format) -> (u64, Option<u64>) {
+    let target = raw & 0x03FF_FFFF;
+    if format.id == ptr_format::PTR_32_FIRMWARE {
+        return (u64::from(raw >> 26), Some(u64::from(target)));
+    }
+    let next = u64::from((raw >> 26) & 0x1F);
+    if raw >> 31 != 0 {
+        return (next, None);
+    }
+    if format.max_valid != 0 && target > format.max_valid {
+        let bias = (0x0400_0000 + format.max_valid) / 2;
+        return (next, Some(u64::from(target.wrapping_sub(bias))));
+    }
+    (next, Some(u64::from(target)))
+}
+
+/// Decode a `DYLD_CHAINED_PTR_ARM64E_SEGMENTED` word: the target is an offset
+/// into the file-backed segment its index names.
+fn decode_segmented(raw: u64, segs: &[SegInfo]) -> (u64, Option<u64>) {
+    let next = (raw >> 51) & 0xFFF;
+    let offset = raw & 0x0FFF_FFFF;
+    let index = ((raw >> 28) & 0xF) as usize;
+    (next, segs.get(index).map(|s| s.vmaddr + offset))
+}
+
 /// The import ordinal and inline addend of a **bind** word, or `None` for a
 /// rebase. The arm64e variants differ in the ordinal width (16 bits, 24 for
 /// `_USERLAND24`); an authenticated bind carries its PAC context where the plain
@@ -555,6 +616,7 @@ fn bind_entry(raw: u64, pointer_format: u16) -> Option<(usize, i64)> {
         ptr_format::PTR_64 | ptr_format::PTR_64_OFFSET => {
             ((raw >> 63) & 1 == 1).then_some(((raw & 0xFF_FFFF) as usize, ((raw >> 24) & 0xFF) as i64))
         }
+        ptr_format::PTR_32 => ((raw >> 31) & 1 == 1).then_some(((raw & 0xF_FFFF) as usize, ((raw >> 20) & 0x3F) as i64)),
         ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24 => {
             if (raw >> 62) & 1 == 0 {
                 return None;
@@ -696,6 +758,26 @@ mod tests {
     /// An unhandled pointer format resolves nothing and stops the chain (next=0) —
     /// the inert path.
     #[test]
+    #[test]
+    fn decode_ptr32_rebase_bias_and_bind() {
+        let format = Format { id: ptr_format::PTR_32, imagebase: 0x4000, max_valid: 0x0010_0000 };
+        assert_eq!(decode_ptr32((3 << 26) | 0x8020, format), (3, Some(0x8020)));
+        let bias = (0x0400_0000 + 0x0010_0000) / 2;
+        assert_eq!(decode_ptr32(bias + 7, format), (0, Some(7)));
+        let bind = (1u32 << 31) | (2 << 26) | (5 << 20) | 9;
+        assert_eq!(decode_ptr32(bind, format), (2, None));
+        assert_eq!(bind_entry(u64::from(bind), ptr_format::PTR_32), Some((9, 5)));
+        let firmware = Format { id: ptr_format::PTR_32_FIRMWARE, ..format };
+        assert_eq!(decode_ptr32((1 << 26) | 0x1234, firmware), (1, Some(0x1234)));
+    }
+
+    #[test]
+    fn decode_segmented_adds_the_named_segment() {
+        let segs = [SegInfo { vmaddr: 0x1000, fileoff: 0, filesize: 0x100 }, SegInfo { vmaddr: 0x9000, fileoff: 0x100, filesize: 0x100 }];
+        assert_eq!(decode_segmented((2 << 51) | (1 << 28) | 0x44, &segs), (2, Some(0x9044)));
+        assert_eq!(decode_segmented(5 << 28, &segs), (0, None));
+    }
+
     fn decode_unknown_format_is_inert() {
         let (next, target) = decode_ptr(0xDEAD_BEEF_0000_0000, 999, 0);
         assert_eq!((next, target), (0, None));
