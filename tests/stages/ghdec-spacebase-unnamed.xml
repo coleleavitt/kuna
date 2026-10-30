@@ -65,6 +65,7 @@ b42600000000
 <symbol space="ram" offset="0x405af0" name="scan_textfile"/>
 </binaryimage>
 <script>
+  <com>option stackexitanchor off</com>
   <com>lo fu scan_textfile</com>
   <com>decompile</com>
   <com>print C</com>

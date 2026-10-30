@@ -5443,7 +5443,25 @@ headerless image (`--raw-image`), where the object-file passes cannot run, the
 same option sweeps the image's executable bytes with the pattern set of the
 target's language id (`patterns/mod.rs (for_language)`) and seeds `rawdiscover`'s
 call-target walk with the starts it finds, so a function reached only through a
-pointer table is in the inventory too.
+pointer table is in the inventory too. A raw image needs no `--entry` at all
+then: the pattern starts are the seeds, and the driver turns the option on for
+a headerless image the way it does for any non-x86-64 one (IDA's own default
+case). The raw sweep also takes the weak tier below.
+
+The pattern set is chosen by format as well as architecture (`for_object`): an
+ELF or Mach-O x86 image is SysV-compiled and takes the gcc patterns alone, not
+the gcc+windows union, and a big-endian ARM image takes `ARM_BE`. After a start
+is accepted, the scan resumes past the prologue that matched, so no second
+start is reported inside it (IDA patfind). A pair whose action is an
+unconditional `<possiblefuncstart/>` is a weak hit (`scan_hits`). It is used
+only by a set that has nothing stronger (AArch64, PowerPC): where `<funcstart/>`
+pairs exist, they carry the confident shapes already. On an ELF a weak hit is
+taken only outside every FDE body, because the unwind table already describes
+the functions it covers. A Mach-O or PE
+image's own function tables list everything such a hint could add, so the weak
+tier is not used there. A directory named by `KUNA_PATTERN_DIR` (IDA's
+`PATTERN_SEARCH_DIR`) can replace any vendored pattern file with a file of the
+same name (`patterns/mod.rs (user_file)`).
 
 **LSDA landing pads** (`eh_frame_full`, default-off): the deeper
 `GccExceptionAnalyzer` markup — follow each FDE's CIE `L` augmentation to its
@@ -5532,6 +5550,24 @@ FDE). The commit drops every discovered entry inside such a body, its start
 included, after the `coldentry` entries are added. A cold throw path reached by
 an ordinary branch (`may_throw.cold`) is not a landing-pad target and stays a
 function. x86/x86-64 ELF only.
+
+**(kuna) The pads that stay hidden are named** (`ehnote`, default-**on**;
+`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_itaniumeh.rs (eh_notes)`).
+Unless `itaniumeh` shows them, a landing pad is unreachable code: the cleanups
+and catch bodies of every call that can throw vanish from the pseudocode. For
+every FDE with an LSDA the pass decodes the call-site table and the action
+chains, and commits a function header comment such as
+`/* eh: 3 call sites unwind to C++ landing pads (3 cleanup); not shown */`.
+Catch types are the demangled `typeinfo` names, `...` is a catch-all, and a
+negative filter is an exception specification. The runtime is the CIE `P`
+personality routine (`entry/mod.rs (Personality)`), read directly or through
+its `DW.ref`/GOT slot, as IDA's `eh_parse` does: `__gxx_personality_v0` (C++),
+`rust_eh_personality`, `__objc_personality_v0`, `__gnat_personality_v0`,
+`__gcc_personality_v0` (C cleanups). An SjLj personality (`*_sj0`) keeps
+call-site indices, not code ranges, in its table. So every LSDA walker skips it
+(`for_each_fde_lsda`), and its function is noted as having an SjLj table. A
+personality whose name cannot be read is read as Itanium. With `itaniumeh` on,
+the pads are shown and no note is attached.
 
 **(kuna) `.pdata` interiors are not function starts either** (`pdatainterior`,
 default-**on**, DIV-155;

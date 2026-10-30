@@ -3221,6 +3221,31 @@ outgoing-argument slot that lands inside the caller's `localrange` once the
 frame is the right size is scored no-use by `checkInputTrialUse` (§4.4) and the
 argument is dropped, which is visible on deep-frame MSVC CRT helpers.
 
+The guesses fill in only what the exact equations leave open, and nothing used
+to tie a path's exit to the entry. So the guess for the last unknown call before
+a return decided every offset after it even where the epilogue states the
+answer (option `stackexitanchor`, default on;
+`p6_variables/kuna_stackexitanchor.rs (record)`). The return instruction pops
+the return address the caller pushed, so the stack pointer entering it equals
+the input one. The adjustments between the last call and the return
+(`add esp,0x38; pop ebx`) are constants, but dead-code elimination removes them
+before the solver runs, because nothing reads the stack pointer after them. So
+`ActionExtraPopSetup` reads the relation first, from the raw p-code. It walks
+back from each `RETURN` over its block and, at a block start, over every
+predecessor, summing the constant adds to the stack pointer until it reaches a
+call. The stack pointer after that call is then minus the sum. A path that
+writes the stack pointer any other way (`mov esp,ebp`, `leave`, an alignment
+`and`) records nothing. The solver applies these anchors to the calls'
+stack-pointer `INDIRECT` outputs after the exact equations and before any guess,
+so an anchor never overrides a value the exact equations fixed. The purge of
+the last unknown call on each path is then solved backward from the epilogue
+instead of guessed: a pointer call to a callee that pops two arguments gets
+both, where the push-run guess credited it with one. When the solved values
+still break an exact equation (a stack-pointer cycle whose deltas disagree,
+such as a wrong known extrapop inside a loop), the first broken equation gets a
+warning instead of a silent first-path value. IDA's SP solver carries the same
+hard row (`ret` = entry depth).
+
 
 Register assertion symbols participate in the merge's required-symbol identity
 checks before names are emitted. A usepoint-scoped register entry identifies a

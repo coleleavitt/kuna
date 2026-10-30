@@ -2618,7 +2618,8 @@ impl ConsoleProgram {
                 for &(lo, hi) in &exec {
                     let Ok(size) = usize::try_from(hi - lo) else { continue };
                     if let Some(bytes) = self.read_bytes(lo, size) {
-                        seeds.extend(set.scan(lo, &bytes));
+                        let weak_ok = set.only_weak();
+                        seeds.extend(set.scan_hits(lo, &bytes).into_iter().filter(|h| weak_ok || !h.weak).map(|h| h.vma));
                     }
                 }
                 seeds.sort_unstable();
@@ -2763,7 +2764,7 @@ impl ConsoleProgram {
         if std::mem::take(&mut self.pending_dex_prototypes) {
             self.lock_dex_prototypes();
         }
-        if !self.pending_synthetic_entries.is_empty() {
+        if !self.pending_synthetic_entries.is_empty() || self.container == ProgramContainer::Raw {
             // (kuna `rawdiscover`) A headerless or TE image reaches this point
             // holding only the `--entry` addresses or the container entry,
             // because the object-file discovery tier below declines without an
@@ -2859,7 +2860,8 @@ impl ConsoleProgram {
         // load it swept the whole image on every binary and was discarded whenever
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
-        let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
+        let want_coldentry =
+            self.arch().analysis_coldentry || self.arch().analysis_ehcold || self.arch().analysis_importvote;
         let want_addrtable = self.arch().analysis_addrtable;
         if (want_listing
             || want_fast_funcdisc
@@ -2980,6 +2982,11 @@ impl ConsoleProgram {
         // ranges.
         let mut fde_bodies = std::mem::take(&mut merged.fde_bodies);
         fde_bodies.sort_unstable();
+        // A PE function's `.pdata` record can be one chunk of a chained function,
+        // so only the other images' extents bound flow.
+        if !self.arch().get_description().contains("windows") {
+            self.arch_mut().kuna_fde_extents = Rc::new(fde_bodies.clone());
+        }
         kuna_analysis::entry::kuna_fdeinterior::suppress_interior_entries(
             &mut merged.entries,
             &fde_bodies,
@@ -3160,6 +3167,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // the discovery set is byte-identical to FDE-pcBegin-only.
         "eh_frame_full" => arch.analysis_eh_frame_full,
         "itaniumeh" => arch.itanium_eh,
+        "ehnote" => arch.analysis_ehnote && !arch.itanium_eh,
         // (kuna) Mach-O `__unwind_info` function-start discovery — facts computed
         // at LOAD, COMMITTED only when this gate is on. Default-off (output-
         // changing: adds entries), so a default run is byte-identical and an image
@@ -3195,6 +3203,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "fdeinterior" => arch.analysis_fdeinterior,
         "coldentry" => arch.analysis_coldentry,
         "ehcold" => arch.analysis_ehcold,
+        "importvote" => arch.analysis_importvote,
         "pdatainterior" => arch.analysis_pdatainterior,
         // (kuna) PDB-procedure-interior entry suppression — the extents come out of
         // the `.pdb`, so switching `pdb` off withdraws them too.
@@ -3967,11 +3976,6 @@ pub fn bootstrap_from_raw(
     if target.trim().is_empty() {
         return Err(KunaError::lowlevel(
             "raw image input requires --target <SLEIGH-language-id>",
-        ));
-    }
-    if entries.is_empty() {
-        return Err(KunaError::lowlevel(
-            "raw image input requires at least one --entry or --addr",
         ));
     }
 
@@ -5737,6 +5741,15 @@ fn commit_analysis_output(
         prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
 
+    // 5e. (kuna `importvote`) The call sites of every PLT import, read by the
+    //     engine when a function tail-calls one no declaration reached.
+    let space = code_space.get_index();
+    let sites: std::collections::HashMap<(i32, u64), Vec<u64>> =
+        out.import_call_sites.into_iter().map(|(stub, sites)| ((space, stub), sites)).collect();
+    if !sites.is_empty() {
+        prog.arch_mut().kuna_import_sites = Rc::new(sites);
+    }
+
     // 6. Processor-context decode-mode paints (the kuna analog of ARM's
     //    `ARM_ElfExtension`/`ArmSymbolAnalyzer` `programContext.setValue(TMode,…)`).
     //    Paint each over the engine's ContextDatabase BEFORE any instruction is
@@ -6115,6 +6128,10 @@ fn commit_analysis_output(
     //    `add_comment_no_duplicate` (the script also de-dups via `appendComment`).
     //    Produced only by the `dwarf_lines` pass (default-off); empty otherwise, so
     //    the default output is byte-identical to before this arm.
+    for fact in out.header_comments {
+        let fad = Address::new(Rc::clone(code_space), fact.func_addr);
+        prog.arch_mut().commentdb.add_comment_no_duplicate(kuna_decomp::comment::comment_type::HEADER, &fad, &fad, &fact.text);
+    }
     for fact in out.comments {
         let fad = Address::new(Rc::clone(code_space), fact.func_addr);
         let ad = Address::new(Rc::clone(code_space), fact.addr);

@@ -157,6 +157,8 @@ kuna_options! { self, p1;
     "outlinedinline" => on_off!(outlined_inline, "MachineOutliner fragment inlining"),
     "calleeretpurge" => on_off!(callee_ret_purge, "Callee `ret imm16` extrapop"),
     "tailcontract" => on_off!(tail_contract, "Tail-callee prototype bootstrap"),
+    "stackexitanchor" => on_off!(stack_exit_anchor, "Stack-solver return anchor"),
+    "fdeflowbound" => on_off!(fde_flow_bound, "Unwind-extent fall-through bound"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;
@@ -1052,6 +1054,8 @@ kuna_options! { self, p1;
         on_off!(analysis_coldentry, "Multi-entry .cold fragment entry discovery")
     },
     "ehcold" => on_off!(analysis_ehcold, "Exception-cleanup .cold fragment suppression"),
+    "importvote" => on_off!(analysis_importvote, "Undeclared import call-site vote"),
+    "ehnote" => on_off!(analysis_ehnote, "Hidden landing-pad note"),
     "fdeinterior" => {
         on_off!(analysis_fdeinterior, ".eh_frame FDE-interior entry suppression")
     },

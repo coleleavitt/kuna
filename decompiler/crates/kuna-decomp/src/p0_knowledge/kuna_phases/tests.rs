@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_416() {
-    assert_eq!(kuna_num_settables(), 416);
-    assert_eq!(SETTABLE_TABLE.len(), 416);
+fn settable_count_is_420() {
+    assert_eq!(kuna_num_settables(), 420);
+    assert_eq!(SETTABLE_TABLE.len(), 420);
 }
 
 #[test]
-fn tier_counts_are_134_core_153_transform_129_analysis() {
+fn tier_counts_are_136_core_153_transform_131_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_134_core_153_transform_129_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (134, 153, 129));
+    assert_eq!((core, transform, analysis), (136, 153, 131));
 }
 
 #[test]
@@ -368,6 +368,8 @@ fn option_values_live_value_present_for_189() {
         // no codegen live reader. Default-ON.
         "coldentry",
         "ehcold",
+        "importvote",
+        "ehnote",
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — the PE half
         // of `fdeinterior`, an analysis-pass gate with no codegen live reader.
         // Default-ON.
@@ -1004,7 +1006,9 @@ fn option_values_live_value_present_for_189() {
     // 157 -> 158: +1 for `calleeretpurge` (live_field).
     // 158 -> 159: +1 for `switchtrim` (live_field).
     // 159 -> 160: +1 for `tailcontract` (live_field).
-    assert_eq!(with_live, 189);
+    // 187 -> 188: +1 for `stackexitanchor` (live_field).
+    // 188 -> 189: +1 for `fdeflowbound` (live_field).
+    assert_eq!(with_live, 191);
 }
 
 #[test]
@@ -1256,7 +1260,11 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
     // +1 for `objectview`, beside `rawdiscover`; +1 for `mapglobalsyms`.
-    assert_eq!(json.matches("},\n").count(), 415);
+    // +1 for `stackexitanchor`.
+    // +1 for `importvote`.
+    // +1 for `fdeflowbound`.
+    // +1 for `ehnote`.
+    assert_eq!(json.matches("},\n").count(), 419);
 }
 
 #[test]

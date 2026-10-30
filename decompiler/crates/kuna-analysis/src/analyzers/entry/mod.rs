@@ -339,18 +339,26 @@ pub fn full_pattern_starts(file: &object::File) -> Vec<u64> {
 /// [`full_pattern_starts`], with the `TMode` value the matching ARM pattern
 /// pair sets (`<setcontext name="TMode">`), so a Thumb start decodes as Thumb.
 pub fn full_pattern_starts_with_mode(file: &object::File) -> Vec<(u64, Option<u32>)> {
-    let Some(set) =
-        patterns::for_arch(file.architecture(), file.is_little_endian())
-    else {
+    let Some(set) = patterns::for_object(file) else {
         return Vec::new();
     };
     let execs = executable_sections(file);
     let funcsyms = existing_function_addrs_for_file(file);
+    // A `<possiblefuncstart/>` start is taken only on an ELF and only outside
+    // every FDE body: there the unwind table describes the functions it covers,
+    // and a Mach-O or PE image's own function tables (LC_FUNCTION_STARTS,
+    // .pdata) already list what such a weak hint could add.
+    let weak_ok = set.only_weak() && matches!(file.format(), object::BinaryFormat::Elf);
+    let bodies = if weak_ok { kuna_fdeinterior::scan_fde_bodies(file) } else { Vec::new() };
 
-    // Sweep every executable section with the full pattern set.
     let mut cand: Vec<(u64, Option<u32>)> = Vec::new();
     for (addr, _hi, data) in &execs {
-        cand.extend(set.scan_with_mode(*addr, data));
+        for hit in set.scan_hits(*addr, data) {
+            if hit.weak && (!weak_ok || kuna_fdeinterior::is_interior(&bodies, hit.vma)) {
+                continue;
+            }
+            cand.push((hit.vma, hit.mode));
+        }
     }
 
     let mut out: Vec<(u64, Option<u32>)> = cand
@@ -1847,6 +1855,8 @@ struct CieAug {
     /// (the `L` data is the LSDA pointer; `P`/`R` consume CIE aug-data, not FDE
     /// aug-data) — so always 0 in practice; kept explicit for faithfulness.
     fde_lsda_off: usize,
+    /// The `P` personality pointer's encoding and its offset in the CIE record.
+    personality: Option<(u8, usize)>,
 }
 
 /// As [`scan_eh_frame_starts`] but, for `--option eh_frame_full on`, return the
@@ -1894,6 +1904,115 @@ pub fn scan_eh_frame_landing_pads_owned(file: &object::File) -> Vec<(u64, u64)> 
 /// Call `on_lsda(pc_begin, lsda_ptr)` for every `.eh_frame` FDE that carries a
 /// non-null LSDA pointer.
 pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &mut dyn FnMut(u64, u64)) {
+    for_each_fde_lsda_classified(file, ptr_size, &mut |pc_begin, lsda, personality| {
+        if personality.reads_itanium_lsda() {
+            on_lsda(pc_begin, lsda);
+        }
+    });
+}
+
+/// The language runtime an FDE's CIE personality routine belongs to, which
+/// decides the LSDA's format (IDA eh_parse 0xab60).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Personality {
+    /// `__gxx_personality_v0`.
+    Cxx,
+    /// `rust_eh_personality`.
+    Rust,
+    /// `__objc_personality_v0`.
+    ObjC,
+    /// `__gnat_personality_v0`.
+    Gnat,
+    /// `__gcc_personality_v0`: C cleanups (`__attribute__((cleanup))`).
+    GccC,
+    /// `__gxx_personality_sj0` and friends: setjmp/longjmp unwinding, whose
+    /// call-site table holds indices, not code ranges.
+    SjLj,
+    /// No personality, or one with no name kuna can read.
+    Unknown,
+}
+
+impl Personality {
+    /// Classify a personality routine by name.
+    pub fn of_name(name: &str) -> Personality {
+        let n = name.strip_prefix("DW.ref.").unwrap_or(name);
+        let n = n.split('@').next().unwrap_or(n);
+        if n.ends_with("_sj0") {
+            Personality::SjLj
+        } else if n.contains("gxx_personality") {
+            Personality::Cxx
+        } else if n.contains("rust_eh_personality") {
+            Personality::Rust
+        } else if n.contains("objc_personality") {
+            Personality::ObjC
+        } else if n.contains("gnat_personality") {
+            Personality::Gnat
+        } else if n.contains("gcc_personality") {
+            Personality::GccC
+        } else {
+            Personality::Unknown
+        }
+    }
+
+    /// Does the LSDA carry the Itanium call-site ranges the walkers decode?
+    /// Everything but SjLj does; an unnamed personality is read as Itanium.
+    pub fn reads_itanium_lsda(self) -> bool {
+        self != Personality::SjLj
+    }
+
+    /// The runtime's name in a note.
+    pub fn label(self) -> &'static str {
+        match self {
+            Personality::Cxx => "C++",
+            Personality::Rust => "Rust",
+            Personality::ObjC => "Objective-C",
+            Personality::Gnat => "Ada",
+            Personality::GccC => "C cleanup",
+            Personality::SjLj => "SjLj",
+            Personality::Unknown => "unknown",
+        }
+    }
+}
+
+/// Symbol names by address and by dynamically relocated slot.
+struct PersonalityNames {
+    at: std::collections::HashMap<u64, String>,
+    slot: std::collections::HashMap<u64, String>,
+}
+
+impl PersonalityNames {
+    fn new(file: &object::File) -> PersonalityNames {
+        use object::ObjectSymbolTable;
+        let mut at = std::collections::HashMap::new();
+        for sym in file.symbols().chain(file.dynamic_symbols()) {
+            if let Ok(name) = sym.name() {
+                if sym.address() != 0 && name.contains("personality") {
+                    at.insert(sym.address(), name.to_string());
+                }
+            }
+        }
+        let mut slot = std::collections::HashMap::new();
+        if let (Some(relocs), Some(dynsym)) = (file.dynamic_relocations(), file.dynamic_symbol_table()) {
+            for (off, r) in relocs {
+                if let object::RelocationTarget::Symbol(idx) = r.target() {
+                    if let Some(name) = dynsym.symbol_by_index(idx).ok().and_then(|s| s.name().ok().map(str::to_string)) {
+                        slot.insert(off, name);
+                    }
+                }
+            }
+        }
+        PersonalityNames { at, slot }
+    }
+
+    fn classify(&self, value: u64, indirect: bool) -> Personality {
+        let name = if indirect { self.slot.get(&value).or_else(|| self.at.get(&value)) } else { self.at.get(&value) };
+        name.map_or(Personality::Unknown, |n| Personality::of_name(n))
+    }
+}
+
+/// [`for_each_fde_lsda`], with the personality of the FDE's CIE, including the
+/// SjLj LSDAs it skips.
+pub(crate) fn for_each_fde_lsda_classified(file: &object::File, ptr_size: usize, on_lsda: &mut dyn FnMut(u64, u64, Personality)) {
     if !matches!(file.format(), object::BinaryFormat::Elf) {
         return;
     }
@@ -1917,6 +2036,8 @@ pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &
     // faithful given CIEs precede their FDEs in gcc output. A forward-referencing
     // CIE is missed (documented LOSS, same as the FDE-start scan).
     let mut cie_aug: Vec<(usize, CieAug)> = Vec::new();
+    let mut cie_personality: Vec<(usize, Personality)> = Vec::new();
+    let names = PersonalityNames::new(file);
 
     let mut o = 0usize;
     while o + 4 <= data.len() {
@@ -1945,7 +2066,13 @@ pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &
         if cie_id == 0 {
             // CIE: decode the FDE + LSDA encodings from its augmentation.
             if let Some(aug) = parse_cie_aug(&data[o..next], ptr_size) {
+                let personality = aug.personality.map_or(Personality::Unknown, |(enc, off)| {
+                    let field = o + off;
+                    decode_eh_pointer(enc & 0x7f, sec_vma + field as u64, sec_vma, data, field, ptr_size)
+                        .map_or(Personality::Unknown, |v| names.classify(v, enc & 0x80 != 0))
+                });
                 cie_aug.push((o, aug));
+                cie_personality.push((o, personality));
             }
         } else {
             // FDE: locate its CIE by the relative back-pointer.
@@ -2004,7 +2131,8 @@ pub(crate) fn for_each_fde_lsda(file: &object::File, ptr_size: usize, on_lsda: &
             }
             // Decode the `.gcc_except_table` LSDA at `lsda_ptr`. lpStart defaults to
             // the FDE's pcBegin when the LSDA omits its own lpStart.
-            on_lsda(pc_begin, lsda_ptr);
+            let personality = cie_personality.iter().find(|&&(co, _)| co == cie_off).map_or(Personality::Unknown, |&(_, p)| p);
+            on_lsda(pc_begin, lsda_ptr, personality);
         }
         o = next;
     }
@@ -2134,7 +2262,7 @@ fn parse_cie_aug(rec: &[u8], ptr_size: usize) -> Option<CieAug> {
     let mut has_lsda = false;
     let mut lsda_enc = DW_EH_PE_ABSPTR;
     if aug.first() != Some(&b'z') {
-        return Some(CieAug { fde_enc, has_lsda, lsda_enc, fde_lsda_off: 0 });
+        return Some(CieAug { fde_enc, has_lsda, lsda_enc, fde_lsda_off: 0, personality: None });
     }
     let (aug_len, np) = read_uleb128(rec, p)?;
     p = np;
@@ -2142,6 +2270,7 @@ fn parse_cie_aug(rec: &[u8], ptr_size: usize) -> Option<CieAug> {
     let aug_data_end = (aug_data_start + aug_len as usize).min(rec.len());
 
     let mut dp = aug_data_start;
+    let mut personality = None;
     for &c in &aug[1..] {
         match c {
             b'R' => {
@@ -2156,6 +2285,7 @@ fn parse_cie_aug(rec: &[u8], ptr_size: usize) -> Option<CieAug> {
             b'P' => {
                 let enc = *rec.get(dp)?;
                 dp += 1;
+                personality = Some((enc, dp));
                 dp += encoded_size(enc, ptr_size, rec.get(dp..).unwrap_or(&[]));
             }
             b'S' => {}
@@ -2168,7 +2298,7 @@ fn parse_cie_aug(rec: &[u8], ptr_size: usize) -> Option<CieAug> {
     // The FDE aug-data LSDA pointer is the FIRST FDE aug-data field for the
     // `zL`/`zPL`/`zPLR` augmentations gcc emits (the `R` char only sizes the FDE
     // pcBegin/pcRange; `P`'s personality is CIE aug-data). Offset 0.
-    Some(CieAug { fde_enc, has_lsda, lsda_enc, fde_lsda_off: 0 })
+    Some(CieAug { fde_enc, has_lsda, lsda_enc, fde_lsda_off: 0, personality })
 }
 
 /// Advance past a DW_EH_PE-encoded value at `bytes[off..]`, returning the next

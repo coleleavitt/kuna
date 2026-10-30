@@ -1016,6 +1016,15 @@ pub struct Architecture {
     /// (kuna) A single-function drive states each tail-called callee's prototype
     /// first (option `tailcontract`).
     pub tail_contract: bool,
+    /// (kuna) Tie each return's stack pointer to the entry one in the stack
+    /// solver (option `stackexitanchor`).
+    pub stack_exit_anchor: bool,
+    /// (kuna) Stop fall-through at the end of the function's own unwind-table
+    /// extent (option `fdeflowbound`).
+    pub fde_flow_bound: bool,
+    /// (kuna `fdeflowbound`) Every single-function unwind-table extent
+    /// `[start, end)`, sorted, committed by the analysis tier.
+    pub kuna_fde_extents: Rc<Vec<(u64, u64)>>,
     /// (kuna) The x87 stack depth proves ST0 empty at returns (option
     /// `x87depth`). See [`crate::p4_calls::kuna_x87depth`].
     pub x87_depth: bool,
@@ -1698,6 +1707,9 @@ pub struct Architecture {
     /// (kuna `calleeretpurge`) Per-image cache of each direct callee's decoded
     /// return purge, keyed by `(space index, entry offset)`.
     pub kuna_callee_purge_cache: std::collections::HashMap<(int4, uintb), Option<int4>>,
+    /// (kuna `importvote`) The direct call sites of each PLT import, by stub
+    /// `(space index, offset)`, committed by the analysis tier.
+    pub kuna_import_sites: Rc<std::collections::HashMap<(int4, u64), Vec<u64>>>,
     /// (kuna `bejoin evidence`) Per-image cache of the wide-return proof
     /// ([`crate::kuna_bejoin::seed_wide_returns`]): the model's pair, each
     /// function's verdict, keyed by its `(space index, entry offset)` so a
@@ -2053,6 +2065,10 @@ pub struct Architecture {
     /// (kuna) Withhold an exception-cleanup `.cold` fragment from the function
     /// list (option `ehcold`).  See `kuna_analysis::entry::kuna_ehcold`.
     pub analysis_ehcold: bool,
+    /// (kuna) State an undeclared import's call-site vote (option `importvote`).
+    pub analysis_importvote: bool,
+    /// (kuna) Note a function's hidden landing pads in its header (option `ehnote`).
+    pub analysis_ehnote: bool,
     /// (kuna) Reject a discovered function entry that falls strictly inside a
     /// single-function `.pdata` `RUNTIME_FUNCTION` body (`pdatainterior`);
     /// default **on**. The PE half of [`Self::analysis_fdeinterior`] and the same
@@ -3328,6 +3344,9 @@ impl Architecture {
             callee_preserves: true,
             callee_ret_purge: true,
             tail_contract: true,
+            stack_exit_anchor: true,
+            fde_flow_bound: true,
+            kuna_fde_extents: Rc::new(Vec::new()),
             x87_depth: true,
             trap_after_call: true,
             retpoline_thunk: true,
@@ -3449,6 +3468,7 @@ impl Architecture {
             kuna_fn_deadline: None, // (kuna) set per drive from kuna_fn_budget
             kuna_callee_write_cache: std::collections::HashMap::new(),
             kuna_callee_purge_cache: std::collections::HashMap::new(),
+            kuna_import_sites: Rc::new(std::collections::HashMap::new()),
             kuna_wide: crate::kuna_bejoin::WideCache::default(),
             kuna_callwide: crate::p4_calls::kuna_callwide::ProofSlot::default(),
             kuna_callee_dead_cache: std::collections::HashMap::new(),
@@ -3519,6 +3539,8 @@ impl Architecture {
             analysis_fdeinterior: false,
             analysis_coldentry: false,
             analysis_ehcold: false,
+            analysis_importvote: false,
+            analysis_ehnote: false,
             analysis_pdatainterior: false,
             analysis_pdbinterior: false,
             analysis_funcstart_patterns: false,
@@ -3815,7 +3837,9 @@ impl Architecture {
         self.zero_call_regs = true; // (kuna) default-on (0/675 ablation): a register a -fzero-call-used-regs epilogue clears before the return is no part of the value
         self.global_call_ranges = true;
         self.callee_ret_purge = true;
-        self.tail_contract = true; // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
+        self.tail_contract = true;
+        self.stack_exit_anchor = true;
+        self.fde_flow_bound = true; // (kuna) default-on: fall-through stops at the end of the function's own FDE // (kuna) default-on: the stack solver ties each return's stack pointer to the entry one // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.x87_depth = true;
         self.trap_after_call = true;
         self.retpoline_thunk = true;
@@ -4048,6 +4072,8 @@ impl Architecture {
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;
         self.analysis_ehcold = true; // (kuna) an EH cleanup .cold part reached only from its owner's landing pads is not a function
+        self.analysis_importvote = true; // (kuna) an undeclared import takes what its other call sites pass
+        self.analysis_ehnote = true; // (kuna) a function whose landing pads flow does not show says so
         // (kuna) `.pdata` RUNTIME_FUNCTION-interior entry suppression — default-ON.
         self.analysis_pdatainterior = true;
         // (kuna) PDB-procedure-interior entry suppression — default-ON.
@@ -5000,6 +5026,9 @@ impl Architecture {
         // (`option switchmultipred`) so `JumpBasic::checkUnrolledGuard` reaches it.
         ctx.switch_multi_pred = self.switch_multi_pred;
         ctx.switch_trim = self.switch_trim;
+        ctx.stack_exit_anchor = self.stack_exit_anchor;
+        ctx.fde_flow_bound = self.fde_flow_bound;
+        ctx.kuna_fde_extents = Rc::clone(&self.kuna_fde_extents);
         // (kuna, angr) carry the interleaved unrolled-guard partial-flow gate
         // (`option unrolledguard`) so `FlowInfo::collectEdges` reaches it.
         ctx.unrolled_guard = self.unrolled_guard;

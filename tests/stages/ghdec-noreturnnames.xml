@@ -43,6 +43,7 @@ c3
   <com>option noreturn_known off</com>
   <com>option noreturn_extern off</com>
   <com>option noreturn_externmatch off</com>
+  <com>option fdeflowbound off</com>
   <com>read symbols</com>
   <com>load function quit_now</com>
   <com>decompile</com>
@@ -70,6 +71,7 @@ c3
   <com>option noreturn_known off</com>
   <com>option noreturn_extern off</com>
   <com>option noreturn_externmatch off</com>
+  <com>option fdeflowbound off</com>
   <com>read symbols</com>
   <com>load function opt</com>
   <com>decompile</com>

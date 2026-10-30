@@ -96,6 +96,8 @@ fn decompile_sh(bin: &str, option: Option<&str>) -> String {
         .expect("bootstrap go fixture with built processor specs");
     if let Some(v) = option {
         prog.arch_mut().set_kuna_option("gonoreturn", v).expect("gonoreturn option applies");
+        // The unwind-extent bound stops the same fall-through on its own.
+        prog.arch_mut().set_kuna_option("fdeflowbound", v).expect("fdeflowbound option applies");
     }
     prog.commit_pending_analysis().expect("analysis commit succeeds");
     let cmds: Vec<String> =

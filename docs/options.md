@@ -625,6 +625,12 @@ Three tiers:
 | many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold) |
 | a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold) |
 | a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold) |
+| a tail jump to an undeclared import drops an argument the function passes through | [`importvote`](#importvote) |
+| a forwarder to a library function prints void and no return | [`importvote`](#importvote) |
+| return helper() with fewer arguments than the other calls to helper pass | [`importvote`](#importvote) |
+| a c++ function's cleanups and catch bodies are missing with no hint | [`ehnote`](#ehnote) |
+| nothing says which calls can throw | [`ehnote`](#ehnote) |
+| a rust drop-glue landing pad disappears silently | [`ehnote`](#ehnote) |
 | spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
 | a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
 | function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
@@ -1327,6 +1333,12 @@ Three tiers:
 | a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract) |
 | a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract) |
 | return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract) |
+| locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor) |
+| a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor) |
+| the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor) |
+| pseudocode continues past a call that does not return into the next fragment's code | [`fdeflowbound`](#fdeflowbound) |
+| a function returns a constant that belongs to the bytes after it | [`fdeflowbound`](#fdeflowbound) |
+| _Unwind_Resume() is followed by more statements | [`fdeflowbound`](#fdeflowbound) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -2962,6 +2974,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-22-ehcold
 - **Example:** `--option ehcold off`
 
+### `importvote` -- on | off, default `on`
+
+- **Symptoms:** a tail jump to an undeclared import drops an argument the function passes through; a forwarder to a library function prints void and no return; return helper() with fewer arguments than the other calls to helper pass.
+- **What it does:** Give an import with no declaration the arguments its other call sites pass. A tail jump to an import (`add esi,1; jmp ext3@plt`) forwards every argument register the function leaves untouched, and nothing in the function names them: without a prototype the forwarded rdx was no argument, so `int g(int a,int b,int c){ return ext3(a, b+1, c); }` printed `void g(a0,a1) { ext3(a0,a1 + 1); }`. The import has no body, but the image calls it elsewhere. On an x86-64 ELF the analysis tier records every direct call rel32 to a PLT stub; when a function tail-calls an import that no libc/Win32/DWARF/demangled declaration and no statement reached, the drive decodes a window around each of that import's call sites: the argument registers written since the previous call or branch (at most 16 instructions back) and whether the return register is read in the 8 instructions after. A site's arity runs through the last SysV argument register it writes (an earlier one it leaves alone is its own parameter passed through); the vote is the largest site arity and whether any site reads the result. It is stated the way protoorder states a decompiled callee, marked as a callers' vote, so passthrough takes its registers at the tail call: `int g(a0,a1,a2) { return ext3(a0,(unsigned int)(a1 + 1),a2); }`.
+- **When to flip:** On by default. Keep it on for shared objects that call into libraries kuna has no signatures for: a forwarder or thunk to such an import keeps the arguments it passes through and the result it returns. Flip OFF when a caller sets an argument register for its own use right before a call and the vote over-counts an import's arity.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · analysis-enablement · ida95-extra-plt-passthrough
+- **Example:** `option importvote off`
+
+### `ehnote` -- on | off, default `on`
+
+- **Symptoms:** a c++ function's cleanups and catch bodies are missing with no hint; nothing says which calls can throw; a rust drop-glue landing pad disappears silently.
+- **What it does:** Say in a function's pseudocode that it has landing pads flow does not show. Unless itaniumeh is on, a landing pad is unreachable code: the cleanups and catch bodies of every call that can throw vanish, and nothing in the output says so. For every FDE with an LSDA the analysis tier decodes the call-site table and the action chains and attaches a comment at the function's entry: `eh: 4 call sites unwind to C++ landing pads (3 cleanup; catch std::bad_alloc, ...); not shown`. The runtime is the CIE personality routine (`__gxx_personality_v0`, `rust_eh_personality`, `__objc_personality_v0`, `__gnat_personality_v0`, `__gcc_personality_v0`), resolved directly or through its DW.ref/GOT slot; an SjLj personality's table holds call-site indices, not ranges, so it is noted as such and no walker reads it as ranges. Catch types are the demangled typeinfo names. With itaniumeh on the pads are shown and no note is attached. IDA's Hex-Rays prints the same kind of header warning ("C++ exceptions not shown").
+- **When to flip:** On by default. Turn it off to drop the `eh:` comment lines, e.g. when diffing against output from before the option existed.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · ida95-43-ehnote
+- **Example:** `option ehnote off`
+
 ### `fdeinterior` -- on | off, default `on`
 
 - **Symptoms:** spurious sub_<addr> functions inside a c++ function that uses try/catch; a decompiled function body dereferences an uninitialised frame pointer so every local is garbage; function count inflated by unwinder-only landing pads; a function entry lands in the middle of an instruction; extra entries between two real functions in a binary built with exceptions.
@@ -4429,6 +4457,22 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path.
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-extra-tail-thunk
 - **Example:** `option tailcontract off`
+
+### `stackexitanchor` -- on | off, default `on`
+
+- **Symptoms:** locals after an indirect callee-cleans call are off by the arguments it popped; a stdcall callee reached through a pointer shifts every stack slot after it; the stack pointer at the epilogue disagrees with the one the guesses produced.
+- **What it does:** Tie each return's stack pointer to the entry one when StackSolver runs (a prototype model whose extrapop is unknown: x86win, x86borland, x86delphi, x86-16, avr32a, M16C_60). The solver propagates exact equations from the input stack pointer and then fills every unknown call's purge with a guess, first come first served; nothing tied the function's own exit to its entry, so the guess for the last unknown call on a path decided every stack offset after it even where the epilogue states the answer. The return instruction pops the return address the caller pushed, so the stack pointer entering it equals the input one; the constant adjustments between the last call and the return are read off the raw p-code before dead-code elimination removes them, and the call's stack-pointer value is anchored at minus their sum, after the exact equations and before any guess (an anchor never overrides an exact value), so the purge of the last unknown call on each path is then solved backward from the epilogue instead of guessed. A cycle whose deltas still disagree after the solve (a call with a wrong known extrapop inside a loop) gets a warning at the first broken equation instead of a silent first-path value. IDA's SP solver uses the same hard row (real ret = entry depth, pc.so 0x78bc0).
+- **When to flip:** On by default. Keep it on when a callee-cleans call with no prototype (an indirect call, a Borland/Delphi or 16-bit callee) leaves the locals after it off by the arguments it popped. Flip OFF to get the guess-only solve back.
+- **Where / provenance:** P6/stack-pointer-flow · kuna · correctness-fix · ida95-9-stacksolver
+- **Example:** `option stackexitanchor off`
+
+### `fdeflowbound` -- on | off, default `on`
+
+- **Symptoms:** pseudocode continues past a call that does not return into the next fragment's code; a function returns a constant that belongs to the bytes after it; _Unwind_Resume() is followed by more statements.
+- **What it does:** Stop fall-through at the end of the function's own unwind-table extent. An `.eh_frame` FDE (and a Go functab entry, the same channel fdeinterior reads; a PE .pdata record is not used because it can be one chunk of a chained function) states where its function ends. A call to an import kuna does not know is no-return (`call mydie@plt` as a function's last instruction, `call [GOT _Unwind_Resume]` closing a cleanup rung) is taken to return, and flow then walks off the function's end into whatever bytes follow: the next cleanup rung, padding, or code no known entry names, which funcboundflow cannot bound. With the option on, when the function's entry is the start of a single-function extent, fall-through to an address at or past the extent's end is truncated the way funcboundflow truncates at a foreign entry, with its own warning. A declared extent (`--define-function S-E`) still wins. IDA queries the same region (find_syseh) for its function bounds.
+- **When to flip:** On by default. Keep it on when a function's pseudocode continues past a call that never returns into code that is not part of it (`mydie(); return 7;` where the 7 is the next fragment's). Flip OFF to follow fall-through past the unwind extent, e.g. for a hand-written FDE that covers less than its function.
+- **Where / provenance:** P2/flow-classification · kuna · correctness-fix · ida95-43-fdeflowbound
+- **Example:** `option fdeflowbound off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

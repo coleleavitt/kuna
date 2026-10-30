@@ -2340,6 +2340,19 @@ feeds an image-base add) reads no table at all. Fewer than two rows is no
 table, and the jump stays a computed call. A bounded table
 never reaches this arm.
 
+**`fdeflowbound`, default on** (`flow.rs (leaves_own_fde)`). An unwind-table
+extent (an `.eh_frame` FDE or a Go `functab` entry: the extents the analysis tier
+hands `fdeinterior`) states where its function ends. A PE `.pdata` record is
+not used, because it can be one chunk of a chained function. A call to
+an import that kuna cannot know never returns (`call mydie@plt` as a function's
+last instruction, `call [GOT _Unwind_Resume]` closing a cleanup rung) is taken
+to return. Flow then walks off the function's end into whatever bytes follow:
+the next cleanup rung, padding, or code no known entry names, which
+`funcboundflow` cannot bound. When the function's entry starts a
+single-function extent, fall-through to an address at or past the extent's end
+is truncated the way `funcboundflow` truncates at a foreign entry, with its own
+warning. A declared extent (`--define-function S-E`) still wins.
+
 ## 2.4 No-return at lift time
 
 The mechanism is §2.1's halt plant: if `check_for_flow_modification` believes a

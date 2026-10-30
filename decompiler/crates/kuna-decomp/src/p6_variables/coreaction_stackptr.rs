@@ -83,6 +83,12 @@ struct StackSolver {
     missedvariables: int4,
     /// (kuna) `calleepopslot`: the pops settled so far, by INDIRECT output.
     settled: crate::kuna_calleepopslot::SettledPops,
+    /// (kuna `stackexitanchor`) `(variable, value)` read off the epilogue:
+    /// applied after the exact equations and before any guess.
+    anchors: Vec<(int4, int4)>,
+    /// (kuna `stackexitanchor`) The variable each unknown-purge call's
+    /// stack-pointer INDIRECT defines, by call op.
+    call_out: std::collections::HashMap<OpId, int4>,
 }
 
 impl StackSolver {
@@ -95,6 +101,8 @@ impl StackSolver {
             soln: Vec::new(),
             missedvariables: 0,
             settled: crate::kuna_calleepopslot::SettledPops::new(),
+            anchors: Vec::new(),
+            call_out: std::collections::HashMap::new(),
         }
     }
 
@@ -149,6 +157,10 @@ impl StackSolver {
         self.duplicate();
 
         self.propagate(0, 0); // We know one variable (the input)
+        for i in 0..self.anchors.len() {
+            let (var, value) = self.anchors[i];
+            self.propagate(var, value);
+        }
         let size = self.guess.len();
         let mut lastcount = size as int4 + 2;
         loop {
@@ -182,6 +194,15 @@ impl StackSolver {
     /// see the module note.
     fn index_of(&self, othervn: VarnodeId) -> Option<int4> {
         self.vnlist.iter().position(|&v| v == othervn).map(|i| i as int4)
+    }
+
+    /// The first exact equation the solution breaks, if any: a stack-pointer
+    /// cycle whose deltas do not sum to zero.
+    fn inconsistent(&self) -> Option<int4> {
+        self.eqs.iter().find_map(|e| {
+            let (a, b) = (self.soln[e.var1 as usize], self.soln[e.var2 as usize]);
+            (a != UNKNOWN_SOLN && b != UNKNOWN_SOLN && a - b != e.rhs).then_some(e.var1)
+        })
     }
 
     /// C++ `StackSolver::build` (`coreaction.cc:162`): collect spacebase
@@ -304,6 +325,7 @@ impl StackSolver {
                             .map(|v| v.get_addr().get_offset());
                         if let Some(off) = off {
                             let iop = crate::funcdata_varnode::op_iop_decode(off);
+                            self.call_out.insert(iop, i as int4);
                             if let Some(fc_idx) = data.get_call_specs_index(iop) {
                                 callee = Some(fc_idx);
                                 let extrapop = data.get_call_specs(fc_idx).get_extra_pop();
@@ -398,6 +420,13 @@ impl StackSolver {
                 }
                 _ => {
                     self.missedvariables += 1;
+                }
+            }
+        }
+        if data.get_arch().stack_exit_anchor {
+            for &(call, value) in data.kuna_stack_exit_anchors() {
+                if let Some(&var) = self.call_out.get(&call) {
+                    self.anchors.push((var, value));
                 }
             }
         }
@@ -731,6 +760,19 @@ pub(crate) fn analyze_extra_pop(
         return 0;
     }
     solver.solve();
+    if data.get_arch().stack_exit_anchor {
+        if let Some(var) = solver.inconsistent() {
+            let at = data
+                .vbank()
+                .get(solver.vnlist[var as usize])
+                .and_then(|v| v.get_def())
+                .and_then(|op| data.obank().get(op))
+                .map(|o| o.get_addr().clone());
+            if let Some(at) = at {
+                data.warning("Stack pointer deltas disagree around this point; the first path's value was kept", &at);
+            }
+        }
+    }
 
     let invn = solver.vnlist[0];
     let mut changed: int4 = 0;
