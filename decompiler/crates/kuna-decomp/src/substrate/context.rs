@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
+    pub loop_rotate: bool,
     /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
     pub post_increment: bool,
     /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
@@ -1957,6 +1959,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            loop_rotate: false,
             post_increment: false,
             va_start: false,
             type_vote: false,

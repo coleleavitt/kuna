@@ -672,6 +672,8 @@ pub struct Architecture {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
     pub dyn_alloca: bool,
+    /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
+    pub loop_rotate: bool,
     /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
     pub post_increment: bool,
     /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
@@ -3237,6 +3239,7 @@ impl Architecture {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            loop_rotate: false,
             post_increment: false,
             va_start: false,
             type_vote: false,
@@ -3740,6 +3743,7 @@ impl Architecture {
         self.bit_idioms = true;
         self.helper_roles = true;
         self.dyn_alloca = true;
+        self.loop_rotate = true;
         self.post_increment = true;
         self.va_start = true;
         self.type_vote = true;
@@ -4740,6 +4744,7 @@ impl Architecture {
         ctx.bit_idioms = self.bit_idioms;
         ctx.helper_roles = self.helper_roles;
         ctx.dyn_alloca = self.dyn_alloca;
+        ctx.loop_rotate = self.loop_rotate;
         ctx.post_increment = self.post_increment && self.print.out_lang() == crate::kuna_lang::OutLang::C;
         ctx.va_start = self.va_start;
         ctx.type_vote = self.type_vote;

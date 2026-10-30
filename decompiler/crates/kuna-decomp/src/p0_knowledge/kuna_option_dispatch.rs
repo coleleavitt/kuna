@@ -109,6 +109,7 @@ kuna_options! { self, p1;
     "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
     "helperroles" => on_off!(helper_roles, "Role-tagged helper-call rewrites"),
     "dynalloca" => on_off!(dyn_alloca, "Run-time stack moves as alloca"),
+    "looprotate" => on_off!(loop_rotate, "Guarded do-while loops rotated to while loops"),
     "postinc" => on_off!(post_increment, "Pointer steps folded into *p++"),
     "vastart" => on_off!(va_start, "va_start prologue as one call"),
     "typevote" => on_off!(type_vote, "Type vote for leftover undefined varnodes"),

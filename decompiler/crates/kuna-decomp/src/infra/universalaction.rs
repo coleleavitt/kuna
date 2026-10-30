@@ -625,6 +625,7 @@ pub fn universal_sched(
             stackstall,
             act!(crate::p6_variables::kuna_savedregisterspills::ActionRestrictLocalSavedLanes::boxed()),
             act!(ActionRedundBranch::boxed("deadcontrolflow")),
+            act!(crate::kuna_looprotate::ActionLoopRotate::boxed("blockrecovery")),
             act!(ActionBlockStructure::boxed("blockrecovery")),
             act!(ActionConstantPtr::boxed("typerecovery")),
             SchedNode::Pool { flags: REPEAT, name: "oppool2", rules: oppool2_rules },

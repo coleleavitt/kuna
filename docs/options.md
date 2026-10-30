@@ -184,6 +184,8 @@ Three tiers:
 | a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
 | a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
 | a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
+| if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate) |
+| a while loop prints as an if around a do-while | [`looprotate`](#looprotate) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
 | pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
 | 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
@@ -1983,6 +1985,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see each pointer step as its own statement.
 - **Where / provenance:** P9/readability-rewrites · kuna · presentation-default · kuna-postinc
 - **Example:** `--option postinc off`
+
+### `looprotate` -- on | off, default `on`
+
+- **Symptoms:** if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop; a while loop prints as an if around a do-while.
+- **What it does:** Rotate a guarded do-while loop into a while loop (loop un-inversion). Compilers turn while (c) body into if (c) { do body while (c); }; with this on, when the guard is the tail's condition evaluated on the values entering the loop (operands compared op by op), or the loop counts by one from x0 to an exit at i + 1 == n behind a guard x0 < n (then i + 1 != n is i + 1 < n on every iteration), and the code between guard and loop has no side effect and each exit value is available at the top, the header's MULTIEQUALs move to a new header block that tests the condition and the guard's and tail's branches go. The for recovery then prints for (i = 0; i < n; i = i + 1). Two return blocks that return the same thing on the entry values (the guard's return 0, the loop's return c) count as one exit.
+- **When to flip:** On (default). Flip off to see the guard and the do-while the compiler emitted.
+- **Where / provenance:** P8/loop-refinement · kuna · presentation-default · kuna-looprotate
+- **Example:** `--option looprotate off`
 
 ### `switchsharedcase` -- on | off, default `on` (destructive opt-in)
 
