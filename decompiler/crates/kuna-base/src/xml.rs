@@ -2125,7 +2125,8 @@ mod tests {
         // and kuna-importdata / a data read through an import slot renders as the import
         // and kuna-elfgotimports / an ELF GOT data import renders as the import
         // and kuna-cfstrings / a Mach-O __cfstring reference renders its string literal
-        assert_eq!(count, 604, "corpus file count drifted");
+        // and kuna-kernelcache / IMG4 + MH_FILESET kernelcache loading
+        assert_eq!(count, 605, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

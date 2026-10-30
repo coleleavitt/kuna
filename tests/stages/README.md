@@ -330,3 +330,9 @@ with undefined-behavior checks and exercises every case and signed boundaries.
 and checks that its compound initializer converts the integer carrier back to a
 pointer. The CLI companion compiles fresh PE32/ELF64 examples with Clang and runs
 the Linux native/recompiled functions at O0/O2. Source: `src/pointer_storage_literal.c`.
+
+`kuna-kernelcache.xml` loads a synthetic arm64 kernel collection three ways: the
+bare MH_FILESET with `kernelcache off` (one image, no symbols), its kext out of an
+IMG4(IM4P(LZFSE)) wrapper, and its kernel out of a bare IM4P(complzss). The
+fixtures and their generator live in
+`decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/`.
