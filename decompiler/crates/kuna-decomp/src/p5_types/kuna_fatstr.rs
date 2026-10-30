@@ -233,14 +233,28 @@ impl Rule for RuleFatStr {
 fn constant_pair(data: &Funcdata, op: OpId, i: int4, ptr_size: int4) -> Option<(u64, u64)> {
     let o = data.obank().get(op)?;
     let ptr_vn = data.vbank().get(o.get_in(i)?)?;
-    if !ptr_vn.is_constant() || ptr_vn.get_size() != ptr_size {
+    if ptr_vn.get_size() != ptr_size {
         return None;
     }
+    let ptr = if ptr_vn.is_constant() { ptr_vn.get_offset() } else { global_ptrsub(data, ptr_vn)? };
     let len_vn = data.vbank().get(o.get_in(i + 1)?)?;
     if !len_vn.is_constant() {
         return None;
     }
-    Some((ptr_vn.get_offset(), len_vn.get_offset()))
+    Some((ptr, len_vn.get_offset()))
+}
+
+/// The address a `PTRSUB(0, addr)` names: the form a pointer constant takes
+/// once a symbol (here, typically the NUL-scan string row that glues this
+/// literal to the next) covers its target.
+fn global_ptrsub(data: &Funcdata, vn: &crate::varnode::Varnode) -> Option<u64> {
+    let def = data.obank().get(vn.get_def().filter(|_| vn.is_written())?)?;
+    if def.code() != OpCode::CPUI_PTRSUB {
+        return None;
+    }
+    let base = data.vbank().get(def.get_in(0)?)?;
+    let off = data.vbank().get(def.get_in(1)?)?;
+    (base.is_constant() && base.get_offset() == 0 && off.is_constant()).then(|| off.get_offset())
 }
 
 /// Does the pointer argument's facing type carry a text facet (W3)?

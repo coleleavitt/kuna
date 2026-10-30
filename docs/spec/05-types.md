@@ -3576,6 +3576,13 @@ test for no-signal corpora (a stage-test bytechunk); `off` keeps the raw
 pointer. Failure mode mirrors `rodatastring`: any guard miss declines
 silently and the output is byte-identical to `off`.
 
+The pointer half may also be `PTRSUB(0, addr)`, the form a constant pointer
+takes once a global symbol covers its target. That is the usual case for a
+Rust panic message: the NUL-run scan has already planted a string symbol over
+the message glued to the literal after it, so the call printed
+`panic("seven is not allowedtiny.rs",0x14,..)`. The rule reads `addr` from the
+`PTRSUB` the same way and prints `panic("seven is not allowed",0x14,..)`.
+
 The **language-facet table** the rule consults is the multilang W3 plane's
 first slice (`decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_langfacet.rs
 (LangFacet)`): a name-keyed side record on the type factory
