@@ -6,10 +6,12 @@ use std::path::Path;
 use std::process::Command;
 
 fn decompile(path: &Path, frames: &str, pools: &str) -> Value {
+    // `aifdataveto` also refuses the literal as code; the uncorrected pass
+    // turns it off with the pool check so the phantom entry is reproduced.
     let out = Command::new(env!("CARGO_BIN_EXE_kuna"))
         .args(["decompile-all", path.to_str().unwrap(), "--json", "--jobs", "1",
                "--mode", "reliable", "--option", "armframes", frames,
-               "--option", "aifpoolslide", pools])
+               "--option", "aifpoolslide", pools, "--option", "aifdataveto", pools])
         .output()
         .expect("run source-built kuna");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
