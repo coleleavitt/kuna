@@ -1268,7 +1268,13 @@ kuna_options! { self, p1;
     },
     "tailcallentry" => {
         on_off!(analysis_tailcallentry, "Tail-call function-entry recovery Listing consumer")
+    },    "funcchunks" => {
+        on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
+    },    "tailcallentryall" => {
+        on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
     },
+
+
     "gopclntab" => {
         on_off!(analysis_gopclntab, "Go pclntab function-name recovery pass")
     },

@@ -805,6 +805,13 @@ Three tiers:
 | a shared ISR handler is swallowed by the two-instruction stub that branches to it | [`tailcallentry`](#tailcallentry) |
 | function entry missing where the previous function ends in an unconditional branch | [`tailcallentry`](#tailcallentry) |
 | kuna emits one oversized function where the ground truth has two | [`tailcallentry`](#tailcallentry) |
+| fid misses a library function whose body is split by the compiler | [`funcchunks`](#funcchunks) |
+| a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks) |
+| a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks) |
+| a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks) |
+| a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
+| a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
+| tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
 | a uefi te entry function decompiles as garbage a32 although its entry address is odd | [`entrythumbflow`](#entrythumbflow) |
 | a callee reached by bl from a thumb entry decodes as a32 | [`entrythumbflow`](#entrythumbflow) |
 | a32 code in the same section as a thumb entry decodes as thumb | [`entrythumbflow`](#entrythumbflow) |
@@ -3063,6 +3070,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off in the shipped catalog (it discovers more functions, so it changes emitted C by construction), but the `aggressive` preset carries it together with `listing` (DIV-93) and `auto` selects `aggressive` under 500 KiB, so on the whole-binary surfaces it is live by default for a stripped image of that size; the catalog default is what the datatest corpus and an explicit `--mode reliable` see. Flip on (with option listing on) on stripped ARM firmware when a routine reached only by a tail `B` — a shared ISR stub's handler, a `pop {r4,lr} ; b helper` tail call, a jump-thunk target — produces no output at all because the walk absorbed it into an earlier function. Measured on 96 Cortex-M images: +561 ground-truth functions, 94.6% of the new entries are real function starts, zero real bodies split, zero entries lost.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-tailcallentry
 - **Example:** `option listing on --option tailcallentry on`
+
+### `funcchunks` -- on | off, default `off`
+
+- **Symptoms:** fid misses a library function whose body is split by the compiler; a function's body in the inventory absorbs the function after it; a shared epilogue is counted in only one function; a .cold part after the next function is not part of its parent's fingerprint.
+- **What it does:** Give every discovered function a body made of chunks instead of the address clip [entry, next entry). After the Listing walk, a function's body is the flow closure of its entry: fall-through and branch targets, never a call target, and never another function's entry (a jump there is a tail call). The body is cut into address runs (undecoded alignment padding of up to 16 bytes joins two runs). The run that holds the entry is the main chunk; every other run is a tail. An instruction reached from several entries is a shared tail and lists every function that reaches it as an owner, the way IDA's func_t keeps tails with a referer list. The FID matcher hashes this body (main chunk plus tails, ascending, Ghidra's func.getBody() order) instead of the clip, so a function whose error path or epilogue sits after the next function, or that shares a tail with another function, hashes the instructions it really runs. Requires the Listing (option listing on) and only changes FID's input; inert without both.
+- **When to flip:** Flip on with listing on and fid on when FID misses a library function whose body is not one contiguous run (a gcc .cold split, a shared epilogue, an outlined error path after the next function), or when the clip makes a function absorb a neighbour that the walk never reaches from its entry. Off keeps the [entry, next) clip.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-funcchunks
+- **Example:** `--option listing on --option fid on --option funcchunks on`
+
+### `tailcallentryall` -- on | off, default `off`
+
+- **Symptoms:** a static function reached only by a tail jmp is missing from a stripped x86 function list; a stripped aarch64 binary emits a tail-called helper inside its caller; tailcallentry does nothing on x86 or aarch64.
+- **What it does:** Run tailcallentry on AArch64, x86 (32 and 64 bit) and RISC-V images as well as ARM. tailcallentry admits an unconditional-branch target as a new function entry when every predecessor is an unconditional branch, the branch crosses another discovered entry, the target's flow reaches a return or computed jump, and the target does not open with a stack restore. The four guards are architecture-neutral; only the stack-restore test reads mnemonics, and it now also knows x86 pop / leave / add rsp, AArch64 ldp x29,x30 and post-indexed loads off sp, and RISC-V ld/lw ra,(sp) and addi sp,sp,+n. This is IDA's tail-call split for jumps that leave the current function on every processor (a jump to code outside the function becomes a separate function unless it is a tail of the function). Inert unless tailcallentry and listing are on.
+- **When to flip:** Flip on with listing on and tailcallentry on for a stripped x86, AArch64 or RISC-V binary when a static function reached only by a tail jmp / b is missing from the function list and its body is emitted inside the function that jumps to it. Off keeps tailcallentry ARM-only, as it was measured.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-tailcallentryall
+- **Example:** `--option listing on --option tailcallentry on --option tailcallentryall on`
 
 ### `entrythumbflow` -- on | off, default `on`
 

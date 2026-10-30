@@ -2500,6 +2500,10 @@ pub struct Architecture {
     /// (`--option listing on` builds it); a no-op when the Listing is absent, so
     /// every parity gate is byte-identical.
     pub analysis_tailcallentry: bool,
+    /// (kuna) Function bodies as chunks with shared tails (`funcchunks`); the FID matcher hashes the chunk body. Default off.
+    pub analysis_funcchunks: bool,
+    /// (kuna) Run `tailcallentry` on AArch64, x86 and RISC-V as well as ARM (`tailcallentryall`). Default off.
+    pub analysis_tailcallentryall: bool,
     /// (kuna) Gate the Go `pclntab` function-name recovery pass (`gopclntab`); the
     /// kuna analog of Ghidra's `GolangSymbolAnalyzer` (name-recovery half). Default
     /// **on**, but the pass is registered ONLY for a Go binary
@@ -3337,6 +3341,8 @@ impl Architecture {
             analysis_aifnoppad: true,
             analysis_aifpoolslide: true,
             analysis_tailcallentry: false,
+            analysis_funcchunks: false,
+            analysis_tailcallentryall: false,
             analysis_gopclntab: false,
             analysis_gotypes: false,
             analysis_gonoreturn: false,
@@ -3803,6 +3809,8 @@ impl Architecture {
         // (kuna, GH-299) AIF literal-pool slide -- default-ON; inert without `aif`.
         self.analysis_aifpoolslide = true;
         self.analysis_tailcallentry = false; // tail-call function-entry recovery default-off
+        self.analysis_funcchunks = false;
+        self.analysis_tailcallentryall = false;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)

@@ -1275,7 +1275,11 @@ pub fn run_listing_consumers_replaying(
     if arch.analysis_listing && arch.analysis_tailcallentry {
         let mut tce_out = AnalysisOutput::default();
         tce_out.entries =
-            crate::listing::kuna_tailcallentry::tail_call_entries(&file, &listing);
+            crate::listing::kuna_tailcallentry::tail_call_entries(
+                &file,
+                &listing,
+                arch.analysis_tailcallentryall,
+            );
         out.push(("tailcallentry", tce_out));
     }
 

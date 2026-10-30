@@ -423,6 +423,12 @@ mod verify_symbolstream;
 #[path = "verify_tailcallentry.rs"]
 mod verify_tailcallentry;
 
+#[path = "verify_funcchunks.rs"]
+mod verify_funcchunks;
+
+#[path = "verify_tailcallentryall.rs"]
+mod verify_tailcallentryall;
+
 #[path = "verify_tailcallframe.rs"]
 mod verify_tailcallframe;
 

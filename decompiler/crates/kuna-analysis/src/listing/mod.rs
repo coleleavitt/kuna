@@ -38,6 +38,7 @@ pub mod kuna_callbackentry;
 pub mod kuna_callerreads;
 pub mod kuna_entrythumbflow;
 pub mod kuna_floatglobals;
+pub mod kuna_funcchunks;
 pub mod kuna_pdecode;
 pub mod kuna_rawdiscover;
 pub mod kuna_tailcallentry;
@@ -867,6 +868,24 @@ impl Listing {
     /// Iterate the functions in address order.
     pub fn functions(&self) -> impl Iterator<Item = (&u64, &DiscoveredFunction)> {
         self.funcs.iter()
+    }
+
+    /// A Listing over hand-built instructions and entries, for unit tests of
+    /// the post-walk consumers.
+    #[cfg(test)]
+    pub(crate) fn from_parts_for_test(insns: Vec<Insn>, entries: &[u64]) -> Listing {
+        Listing {
+            insns: insns.into_iter().map(|i| (i.addr, i)).collect(),
+            refs: kuna_compactrefs::ReferenceIndex::default(),
+            funcs: entries.iter().map(|&e| (e, walk::discovered(e))).collect(),
+            exec_ranges: Vec::new(),
+            has_assembly: false,
+            has_refs: false,
+            stack_callback_refs: Vec::new(),
+            mode_runs: Vec::new(),
+            a32_extents: Vec::new(),
+            x86_switch_rebuild: false,
+        }
     }
 }
 

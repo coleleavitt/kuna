@@ -216,7 +216,7 @@ fn a_partition_only_listing_yields_no_tail_call_entries() {
     let full = build(ListingDetail::FULL);
     let lean = build(ListingDetail::PARTITION_ONLY);
 
-    let accepted = tail_call_entries(&file, &full);
+    let accepted = tail_call_entries(&file, &full, false);
     assert!(
         accepted.contains(&TAIL_VMA),
         "the full build must accept {TAIL_VMA:#x} or the comparison is vacuous \
@@ -230,7 +230,7 @@ fn a_partition_only_listing_yields_no_tail_call_entries() {
         lean.num_instructions()
     );
     assert!(
-        tail_call_entries(&file, &lean).is_empty(),
+        tail_call_entries(&file, &lean, false).is_empty(),
         "a partition-only Listing carries neither model the guards read, so the \
          pass must yield nothing rather than accept on vacuous evidence"
     );

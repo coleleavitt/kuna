@@ -6299,7 +6299,33 @@ one that enables the models, so the check is invisible there; it is what keeps a
 later change to either gate from quietly reducing the four guards to the rule
 they replaced. Output-changing (more functions), hence default-off; ARM-only and Listing-tier, so
 it is a strict no-op on every other architecture, with `listing off`, and on the
-XML datatest path.
+XML datatest path. `tailcallentryall` (default-off; kuna) lifts the ARM gate for AArch64, x86
+(32 and 64 bit) and RISC-V, IDA's tail-call split on every processor. The four
+guards do not depend on the instruction set; only the stack-restore test reads
+mnemonics, and it also knows x86 `pop` / `leave` / `add rsp`, AArch64
+`ldp x29,x30` and post-indexed loads off `sp`, and RISC-V `ld`/`lw ra,(sp)` and
+`addi sp,sp,+n`. Measured against the symbol tables of unstripped twins, Lua 5.4.8
+built `-O2` gains 5 functions on x86-64 and 12 on AArch64, every one a real
+function start, with no entry lost.
+
+**Function chunks** (`funcchunks`, default-off; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
+gives a discovered function a body. The Listing keys a function by its entry,
+and every consumer that needs a body clips `[entry, next entry)`; that clip
+mis-assigns the two shapes compilers produce most: a tail several functions jump
+into (a shared epilogue or error path) and a part placed after another function.
+The chunk model is IDA's `func_t` with tails, computed after the walk from the
+decoded flow. A function's body is the flow closure of its entry over
+fall-through and branch targets; a call target is never followed, and neither is
+another function's entry, because a jump there is a tail call. The body is cut
+into address runs, where up to 16 undecoded bytes of alignment padding join two
+runs and any decoded instruction between them splits them. The run holding the
+entry is the main chunk and every other run is a tail. An instruction reached
+from several entries is shared, and the model keeps the list of every function
+that reaches it, as IDA's tail keeps its referers. With the option on, the FID
+matcher hashes this body (all chunks, ascending, Ghidra's `func.getBody()`
+order) instead of the clip. Analysis-tier and Listing-only; it changes FID's
+input and nothing else, so it is inert on the XML datatest path.
 
 **Literal-pool inference** (`poolentry`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/analyzers/aif/kuna_poolentry.rs`) is aimed at
