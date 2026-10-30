@@ -550,6 +550,8 @@ Three tiers:
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
 | functions the unwinder describes in __unwind_info missing from the inventory | [`unwindstarts`](#unwindstarts) |
+| a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame | [`machoehframe`](#machoehframe) |
+| functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory | [`machoehframe`](#machoehframe) |
 | functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry) |
 | a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry) |
 | gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry) |
@@ -2559,6 +2561,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default) keeps Mach-O function starts from LC_FUNCTION_STARTS, LC_MAIN, exports and __mod_init_func. Flip on for a Mach-O whose LC_FUNCTION_STARTS was stripped (a common App-Store app) and whose function list is almost empty - the tell-tale is an inventory of a few named entries and many __stubs/__got slots over a large __text that holds real code. Inert on any image that still carries LC_FUNCTION_STARTS, where the unwind starts are already a subset of what is discovered.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-unwindstarts
 - **Example:** `--option unwindstarts on`
+
+### `machoehframe` -- on | off, default `on`
+
+- **Symptoms:** a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame; functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory.
+- **What it does:** Extend Mach-O function discovery with the FDE starts in __TEXT,__eh_frame. A Mach-O describes most functions' unwinding in __unwind_info and falls back to a DWARF FDE in __eh_frame for a function the compact encoding cannot describe; every FDE pcBegin is a function start, exactly as on ELF, where kuna already reads .eh_frame in its always-on entry discovery. The section lives in __TEXT, so it survives the strip that removes LC_FUNCTION_STARTS. The walk is the ELF one (CIE augmentation R pointer encoding, pcrel/sdata4 in practice) pointed at __eh_frame; starts outside an executable section or already named are dropped. IDA runs the same eh_frame parse on every Mach-O load.
+- **When to flip:** Leave on: on an image that keeps LC_FUNCTION_STARTS the FDE starts are already known and nothing changes; on a stripped one they are starts nothing else records. Turn off to see discovery without them.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-machoehframe
+- **Example:** `--option machoehframe off`
 
 ### `coldentry` -- on | off, default `on`
 

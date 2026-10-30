@@ -58,6 +58,7 @@ pub fn read_image_sliced(
     let bytes = super::macho_fat::peel_fat_image(bytes, pref);
     let bytes = tolerate_unusable_section_table(bytes).0;
     let bytes = super::pe_dosmagic::tolerate_corrupt_dos_magic(bytes).0;
+    let bytes = super::kuna_machotolerance::clamp_out_of_file_ranges(bytes).0;
     Ok(super::pe_datadirs::tolerate_oversized_data_directories(bytes).0)
 }
 

@@ -93,6 +93,8 @@ pub mod kuna_armlibcmain;
 pub mod kuna_elfmain;
 pub mod kuna_machomain;
 pub mod kuna_unwindinfo;
+// (kuna `machoehframe`) Mach-O `__eh_frame` FDE function starts.
+pub mod kuna_machoehframe;
 pub mod kuna_pemain;
 pub mod kuna_cortexmvectors;
 pub mod kuna_coldentry;
@@ -1692,7 +1694,8 @@ const DW_EH_PE_PCREL: u8 = 0x10;
 const DW_EH_PE_DATAREL: u8 = 0x30;
 const DW_EH_PE_OMIT: u8 = 0xff;
 
-/// Scan `.eh_frame` and return every FDE `pcBegin` (each is a function start) —
+/// Scan `.eh_frame` (a Mach-O's `__eh_frame`) and return every FDE `pcBegin`
+/// (each is a function start) —
 /// the byproduct of Ghidra's `FrameDescriptionEntry.create`'s
 /// `CreateFunctionCmd(pcBeginAddr)` (FrameDescriptionEntry.java:473), scoped to
 /// the FDE-start decode (NOT pcRange/CFI/LSDA).
@@ -1712,10 +1715,12 @@ pub fn scan_eh_frame_starts(file: &object::File) -> Vec<u64> {
 /// As [`scan_eh_frame_starts`] but with an explicit absptr pointer size.
 fn scan_eh_frame_starts_sized(file: &object::File, ptr_size: usize) -> Vec<u64> {
     let mut out: Vec<u64> = Vec::new();
-    if !matches!(file.format(), object::BinaryFormat::Elf) {
-        return out;
-    }
-    let Some(sec) = file.section_by_name(".eh_frame") else {
+    let name = match file.format() {
+        object::BinaryFormat::Elf => ".eh_frame",
+        object::BinaryFormat::MachO => "__eh_frame",
+        _ => return out,
+    };
+    let Some(sec) = file.section_by_name(name) else {
         return out;
     };
     let sec_vma = sec.address();

@@ -934,6 +934,12 @@ Regenerate with:
 python3 dyld_cache_arm64e.py
 ```
 
+`macho_ehframe_only_arm64` (arm64, 16 KB) is the `machoehframe` witness: three
+uncalled `eh_*` functions whose only start records are `__TEXT,__eh_frame` FDEs
+(and `__unwind_info`), in an image linked with `-no_function_starts -x`. Built
+from `macho_ehframe_only_arm64.s`, whose header has the commands; a rebuild
+reproduces the layout but not the `LC_UUID`.
+
 ## Mach-O fat/universal + arm64e (PR-8)
 
 The fat/universal + arm64e gate (`kuna-console/tests/verify_macho_fat.rs`, design

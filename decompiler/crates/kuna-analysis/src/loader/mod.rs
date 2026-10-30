@@ -89,6 +89,9 @@ pub(crate) mod kuna_peordinal;
 // selection for Apple kernelcaches.
 pub mod kuna_kernelcache;
 pub mod macho_fat;
+// (kuna) Mach-O load tolerance: out-of-file segment/section ranges clamped,
+// FairPlay-encrypted images named.
+pub mod kuna_machotolerance;
 // (kuna) The dyld shared cache: one image rebuilt as a thin Mach-O, its
 // references into other images named (`dyldimage`, `dyldcrossrefs`).
 pub mod kuna_dyldcache;

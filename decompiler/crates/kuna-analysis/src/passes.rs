@@ -137,6 +137,10 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         // byte-identical and an image carrying `LC_FUNCTION_STARTS` gains nothing
         // (unwind starts are a strict subset there). After EntryDiscoveryPass.
         Box::new(crate::entry::kuna_unwindinfo::UnwindInfoStartsPass),
+        // (kuna `machoehframe`) S1 Mach-O `__eh_frame` FDE function starts, the
+        // Mach-O arm of the ELF `.eh_frame` oracle. Commit gated by
+        // `--option machoehframe on|off` (default-ON).
+        Box::new(crate::entry::kuna_machoehframe::MachoEhFrameStartsPass),
         // (kuna `entrymainproto`) S1 PE CRT entry-function prototype recovery: the
         // function `__scrt_common_main_seh` calls immediately after the named
         // argc/argv/envp CRT accessors gets the prototype that call site

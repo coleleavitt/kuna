@@ -1749,6 +1749,9 @@ pub struct Architecture {
     /// starts the linker recorded in `__TEXT,__unwind_info`, which matter only on
     /// an image whose `LC_FUNCTION_STARTS` was stripped).
     pub analysis_unwindstarts: bool,
+    /// (kuna) Gate the Mach-O `__eh_frame` FDE function-start pass
+    /// (`machoehframe`); default **on**.
+    pub analysis_machoehframe: bool,
     /// (kuna) Refuse a function entry at a direct CALL target the Listing walk's
     /// own out-of-bounds gate forbids it to decode (`unmappedentry`); default
     /// **on**. The recursive-descent walk gates every instruction address on the
@@ -3265,6 +3268,7 @@ impl Architecture {
             analysis_entry_disc: false,
             analysis_eh_frame_full: false,
             analysis_unwindstarts: false,
+            analysis_machoehframe: false,
             analysis_fdeinterior: false,
             analysis_coldentry: false,
             analysis_pdatainterior: false,
@@ -3725,6 +3729,8 @@ impl Architecture {
         // (kuna) Mach-O `__unwind_info` function-start discovery — default-OFF
         // (opt-in, output-changing: adds the unwind-recorded function starts).
         self.analysis_unwindstarts = false;
+        // (kuna) Mach-O `__eh_frame` FDE starts — default-ON, as `.eh_frame` is on ELF.
+        self.analysis_machoehframe = true;
         // (kuna) DIV-61 `.eh_frame` FDE-interior entry suppression — default-ON.
         self.analysis_fdeinterior = true;
         self.analysis_coldentry = true;

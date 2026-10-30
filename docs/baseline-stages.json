@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3367,
-    3367
+    3372,
+    3372
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -986,7 +986,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 354 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 355 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -2736,6 +2736,11 @@
     "data:logical shift retains unsigned destination",
     "data:loop initial and backedge definitions share a family",
     "data:low address outside pointer inference range still folds",
+    "data:machoehframe: a recovered start decompiles as a function",
+    "data:machoehframe: both passes discover the LC_MAIN entry",
+    "data:machoehframe: the first FDE start joins the inventory (off: absent)",
+    "data:machoehframe: the second FDE start joins the inventory (off: absent)",
+    "data:machoehframe: the third FDE start joins the inventory (off: absent)",
     "data:marker has no executable trap",
     "data:mirror receives the local without a device read",
     "data:mixed argument reads: byte uses fifth argument",

@@ -881,6 +881,22 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   peel costs about 0.15 s per read and `kuna functions` on the kernel takes
   3.7 s and 429 MB.
 
+(kuna) **Mach-O load tolerance**
+(`decompiler/crates/kuna-analysis/src/loader/kuna_machotolerance.rs`). A segment,
+section, symbol table or string table whose file range runs past the end of a
+truncated or hand-edited Mach-O used to fail the whole load: `object` checks the
+symbol table eagerly in `File::parse`, and the loader reads each segment's file
+range when it maps it. `clamp_out_of_file_ranges` clamps each such range to the
+bytes the file holds (segment `filesize`, section `size`, `nsyms`, `strsize`) in
+a copy of the image, applied at the same two points as the ELF and PE header
+repairs, and says so once on stderr. Virtual sizes are untouched, so the rest of
+each data segment still reads as zero-filled memory and nothing is invented. A
+Mach-O with `LC_ENCRYPTION_INFO[_64]` `cryptid != 0` still loads, but its
+encrypted range is App Store ciphertext that decompiles to noise, so the engine
+load names it once (`encryption_note`): `Mach-O is encrypted (LC_ENCRYPTION_INFO
+cryptid 1): file bytes 0x4000..0x... are ciphertext and decompile to noise;
+decrypt the app first`.
+
 (kuna) **dyld shared cache.** A cache file is not an object file: it is a main
 file starting `dyld_v1`, sub-caches beside it (`.01`, `.27.dylddata`,
 `.44.dyldlinkedit`, ...) and a `.symbols` file, each a header plus a mapping
@@ -4357,6 +4373,8 @@ a wrong entry is a garbage `sub_<addr>`; a missed one is invisible until a calle
 overruns into it (§1.7).
 
 (kuna) **`__unwind_info` is a stripping-proof function-start source for Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_unwindinfo.rs (UnwindInfoStartsPass)`, option `unwindstarts`, default-off). The linker folds each object's `__compact_unwind` records into one `__TEXT,__unwind_info` section whose second-level pages — regular `(functionOffset, encoding)` pairs, or compressed `u32`s whose low 24 bits are the offset from the page's first function — list, in ascending order, the start of every function the unwinder can describe (one per `.cfi_startproc`). Because the section lives in the mapped `__TEXT` segment it survives the `strip` that removes `LC_FUNCTION_STARTS` from `__LINKEDIT`, which is the whole of its value: on an App-Store app whose function starts were stripped, `LC_MAIN`, the exports, `__mod_init_func` and the thin symbol stream seed only a handful of entries, and arm64 has no always-on prologue sweep (oracle 5 is x86-64-only), so the gap between the few seeds is the entire text and nothing starts a function inside it. Measured on a decrypted 249 MB arm64 `Instagram.app` with no `LC_FUNCTION_STARTS`, the default inventory is 59,222 — of which only 23 are real `__text` functions, the rest `__got` slots and `__stubs` — while `__unwind_info` records 204,800 real starts; with the option on all 204,800 are recovered and each decodes to a normal function body. On an image that still carries `LC_FUNCTION_STARTS` the oracle is a strict no-op: every unwind start is already a function-starts entry — the linker folds runs of adjacent same-encoding functions into one page entry, so the set is in fact a *subset* (on the 84 MB Toyota app, 185,937 unwind entries against 296,775 function starts, discovery unchanged at 314,038). Only the function **starts** are read; the compact encodings (frame size, saved-register set, frameless stack size) are deliberately ignored, because kuna's S5/S7 frame analysis recovers the stack frame from the code — the same reason the `.eh_frame` oracle inherits CFI rather than rebuilding it. Output-changing (it adds entries), so default-off: a default run is byte-identical to before.
+
+(kuna) **`__eh_frame` FDE starts on Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_machoehframe.rs (MachoEhFrameStartsPass)`, option `machoehframe`, default-on). A Mach-O describes most functions' unwinding in `__unwind_info` and falls back to a DWARF FDE in `__TEXT,__eh_frame` for a function the compact encoding cannot describe (a variable stack adjustment, an unusual register save). Each FDE's `pcBegin` is a function start, exactly as on ELF, where the always-on discovery already reads `.eh_frame` (oracle 3); the pass runs that same walk (`scan_eh_frame_starts`, now accepting a Mach-O's `__eh_frame`) and keeps the starts that lie in an executable section and carry no symbol. Like `__unwind_info` the section lives in `__TEXT` and survives the strip of `LC_FUNCTION_STARTS`; unlike it, every FDE is a real function start with no folding, and the pass is cheap, so it is on by default, as IDA's Mach-O loader runs its `eh_frame` parse on every load. On an image that keeps `LC_FUNCTION_STARTS` it adds nothing.
 
 (kuna) **The x86-64 half of oracle 4 reads two encodings, because "PC-relative" is
 a link model and not part of the idiom.** `main` reaches `rdi` as a `lea
