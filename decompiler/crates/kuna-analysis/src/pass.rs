@@ -652,6 +652,9 @@ pub struct AnalysisOutput {
     /// (kuna `libctypes`) Data symbols the analysis tier types outright — the
     /// stdio stream slots. See [`TypedDataFact`].
     pub typed_data: Vec<TypedDataFact>,
+    /// (kuna `gortti`) Go runtime type descriptors and itabs under their linker
+    /// names; folded into [`Self::typed_data`] at commit when the option is on.
+    pub go_rtti: Vec<TypedDataFact>,
     /// (kuna `swifttypes`) The Swift type-layout facts. See [`SwiftTypeFacts`].
     pub swift_types: SwiftTypeFacts,
     /// (kuna `formatstring static`) Per-call-site prototype overrides the
@@ -841,6 +844,7 @@ impl AnalysisOutput {
         self.dwarf_typed_globals.extend(other.dwarf_typed_globals);
         self.tls_layout = self.tls_layout.take().or(other.tls_layout);
         self.typed_data.extend(other.typed_data);
+        self.go_rtti.extend(other.go_rtti);
         self.swift_types.typed_data.extend(other.swift_types.typed_data);
         self.swift_types.prototypes.extend(other.swift_types.prototypes);
         self.swift_types.param_locks.extend(other.swift_types.param_locks);

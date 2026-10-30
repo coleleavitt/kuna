@@ -2298,6 +2298,8 @@ pub struct Architecture {
     pub analysis_panicloc: bool,
     /// (kuna `strcodelen`) Bound `&str` literals by the length the code loads beside them.
     pub analysis_strcodelen: bool,
+    /// (kuna `gortti`) Name Go type descriptors and itabs.
+    pub analysis_gortti: bool,
     /// (kuna) Gate the DWARF `.debug_line` source-line comment pass (`dwarf_lines`);
     /// default **off** — it changes the decompiled output (adds `/* file:line */`
     /// comments). The kuna analog of Ghidra's `DWARFLineInfoCommentScript`.
@@ -3546,6 +3548,7 @@ impl Architecture {
             analysis_datasyms: false,
             analysis_panicloc: false,
             analysis_strcodelen: false,
+            analysis_gortti: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
             analysis_dwarfnocall: false,
@@ -4076,6 +4079,7 @@ impl Architecture {
         self.analysis_dwarf = true;
         self.analysis_panicloc = true; // (kuna) Rust-only; inert on the datatest corpus, which loads no ELF
         self.analysis_strcodelen = true;
+        self.analysis_gortti = true;
         self.analysis_datasyms = true; // (kuna) DIV-76 ELF data-symbol naming default-ON (the DIV-26 arm, now gated)
         self.analysis_dwarf_lines = false; // (kuna) source-line comments default-OFF (output-changing, opt-in)
         self.analysis_typedepth = true; // (kuna) DIV: full-depth DWARF type resolution default-ON (the depth budget truncated ordinary C declarations to void; real-ELF DWARF path only, so every parity gate is byte-identical)

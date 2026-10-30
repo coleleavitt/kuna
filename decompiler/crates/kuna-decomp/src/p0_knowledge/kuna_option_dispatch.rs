@@ -894,6 +894,7 @@ kuna_options! { self, p1;
     },
     "panicloc" => on_off!(analysis_panicloc, "Rust panic Location records"),
     "strcodelen" => on_off!(analysis_strcodelen, "code-side Rust &str lengths"),
+    "gortti" => on_off!(analysis_gortti, "Go type descriptor and itab names"),
     "mba" => on_off!(mba, "Linear MBA simplification"),
     "avxintrinsics" => on_off!(avx_intrinsics, "Intel intrinsic names for AVX user-ops"),
     "x87depth" => on_off!(x87_depth, "x87 stack depth at returns"),

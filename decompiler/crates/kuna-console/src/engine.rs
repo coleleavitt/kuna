@@ -4725,6 +4725,11 @@ fn commit_analysis_output(
         out.data_objects.retain(|d| !typed.contains(&d.addr));
         out.typed_data.splice(0..0, dwarf_globals);
     }
+    // 0c. (kuna `gortti`) Go type descriptors and itabs under their linker names.
+    let go_rtti = std::mem::take(&mut out.go_rtti);
+    if prog.arch().analysis_gortti {
+        out.typed_data.extend(go_rtti);
+    }
     // 0b. (kuna `swifttypes`) The Swift type-layout arm's facts, the same
     //     deferred shape: on, the typed metadata records and the accessor
     //     prototypes fold into their streams (the register-pinned parameters
@@ -5272,9 +5277,23 @@ fn commit_analysis_output(
     //    terminated fact's len includes its NUL slot, a bounded fact's len IS
     //    the element count (char_size 1, no terminator byte to add).
     let typed_spans: Vec<(u64, u64)> = if prog.arch().analysis_datasyms {
-        out.typed_data.iter().map(|d| (d.addr, d.addr + d.type_.get_size().max(1) as u64)).collect()
+        let mut spans: Vec<(u64, u64)> =
+            out.typed_data.iter().map(|d| (d.addr, d.addr + d.type_.get_size().max(1) as u64)).collect();
+        spans.sort_unstable();
+        let mut merged: Vec<(u64, u64)> = Vec::with_capacity(spans.len());
+        for (lo, hi) in spans {
+            match merged.last_mut() {
+                Some(last) if lo <= last.1 => last.1 = last.1.max(hi),
+                _ => merged.push((lo, hi)),
+            }
+        }
+        merged
     } else {
         Vec::new()
+    };
+    let in_typed_span = |addr: u64| {
+        let i = typed_spans.partition_point(|&(lo, _)| lo <= addr);
+        i > 0 && addr < typed_spans[i - 1].1
     };
     //    A bounded literal that starts inside a NUL-scan row ends the row there:
     //    rustc packs literals back to back, so the row glues the literal before
@@ -5324,7 +5343,7 @@ fn commit_analysis_output(
                 None => false,
             }
         };
-        if occupied || typed_spans.iter().any(|&(lo, hi)| fact.addr >= lo && fact.addr < hi) {
+        if occupied || in_typed_span(fact.addr) {
             continue;
         }
 

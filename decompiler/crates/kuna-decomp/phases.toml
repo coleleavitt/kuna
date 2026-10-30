@@ -6791,6 +6791,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "gortti"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "ida95-47"
+summary = "Name and type a Go image's runtime type descriptors and itabs, as its own linker does: `type:main.Point`, `type:*main.Point`, `go:itab.*main.Point,main.Shape` (`type.` and `go.itab.` before go1.20). `runtime.moduledata` is read through a layout table per release (go1.16 to go1.26, word indices from `runtime/symtab.go` at each tag) to find the type blob and the `typelinks` and `itablinks` slices; the descriptors are found by walking the type graph from them (element, key, field, parameter, method and `ptrToThis` edges). Each becomes a data symbol typed `runtime._type` (48 bytes) or `runtime.itab` (32), so `runtime.newobject(0x49b840)` reads `runtime.newobject(&type:main.Point)`. Registered for Go-detected images; a real symbol at the address wins."
+use_when = "On by default for Go binaries: allocations, interface conversions and type switches name the type they use. Turn it off to see the raw descriptor addresses."
+example = "--option gortti off"
+source_decompiler = "kuna"
+inspiration = "IDA 9.5 golang plugin (moduledata layouts per version, RTYPE/itab naming)"
+change_kind = "type-inference"
+tier = "analysis"
+symptoms = "a go runtime.newobject call passes a bare address|go interface conversion stores an unnamed itab address|stripped go binary shows hex constants where type descriptors are used"
+live_field = "analysis_gortti"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "mba"
 values = "on|off"
 default = "off"

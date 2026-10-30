@@ -616,6 +616,9 @@ Three tiers:
 | a rust string literal prints glued to the next literal | [`strcodelen`](#strcodelen) |
 | a &str pointer alone shows several literals run together | [`strcodelen`](#strcodelen) |
 | rust string symbol names concatenate two messages | [`strcodelen`](#strcodelen) |
+| a go runtime.newobject call passes a bare address | [`gortti`](#gortti) |
+| go interface conversion stores an unnamed itab address | [`gortti`](#gortti) |
+| stripped go binary shows hex constants where type descriptors are used | [`gortti`](#gortti) |
 | a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
 | an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
 | LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
@@ -2929,6 +2932,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On by default for Rust binaries: a literal pointer that appears without its length still prints only its own text. Turn it off to see the NUL-scan strings.
 - **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-48
 - **Example:** `--option strcodelen off`
+
+### `gortti` -- on | off, default `on`
+
+- **Symptoms:** a go runtime.newobject call passes a bare address; go interface conversion stores an unnamed itab address; stripped go binary shows hex constants where type descriptors are used.
+- **What it does:** Name and type a Go image's runtime type descriptors and itabs, as its own linker does: `type:main.Point`, `type:*main.Point`, `go:itab.*main.Point,main.Shape` (`type.` and `go.itab.` before go1.20). `runtime.moduledata` is read through a layout table per release (go1.16 to go1.26, word indices from `runtime/symtab.go` at each tag) to find the type blob and the `typelinks` and `itablinks` slices; the descriptors are found by walking the type graph from them (element, key, field, parameter, method and `ptrToThis` edges). Each becomes a data symbol typed `runtime._type` (48 bytes) or `runtime.itab` (32), so `runtime.newobject(0x49b840)` reads `runtime.newobject(&type:main.Point)`. Registered for Go-detected images; a real symbol at the address wins.
+- **When to flip:** On by default for Go binaries: allocations, interface conversions and type switches name the type they use. Turn it off to see the raw descriptor addresses.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · ida95-47
+- **Example:** `--option gortti off`
 
 ### `unwindstarts` -- on | off, default `off`
 

@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_415() {
-    assert_eq!(kuna_num_settables(), 415);
-    assert_eq!(SETTABLE_TABLE.len(), 415);
+fn settable_count_is_416() {
+    assert_eq!(kuna_num_settables(), 416);
+    assert_eq!(SETTABLE_TABLE.len(), 416);
 }
 
 #[test]
-fn tier_counts_are_133_core_153_transform_129_analysis() {
+fn tier_counts_are_133_core_153_transform_130_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_133_core_153_transform_129_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (133, 153, 129));
+    assert_eq!((core, transform, analysis), (133, 153, 130));
 }
 
 #[test]
@@ -996,8 +996,8 @@ fn option_values_live_value_present_for_187() {
     // 157 -> 158: +1 for `calleeretpurge` (live_field).
     // 158 -> 159: +1 for `switchtrim` (live_field).
     // 159 -> 160: +1 for `tailcontract` (live_field).
-    // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`.
-    assert_eq!(with_live, 191);
+    // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`, +1 for `gortti`.
+    assert_eq!(with_live, 192);
 }
 
 #[test]
@@ -1248,7 +1248,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `ehcold`.
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
-    assert_eq!(json.matches("},\n").count(), 414);
+    assert_eq!(json.matches("},\n").count(), 415);
 }
 
 #[test]
