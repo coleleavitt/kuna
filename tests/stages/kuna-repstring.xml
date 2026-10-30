@@ -1,0 +1,87 @@
+<decompilertest>
+<binaryimage arch="x86:LE:64:default:gcc">
+<!--
+    x86 `rep movs`/`rep stos` as memcpy/memset (`option repstring on|off`,
+    default on; stage P3, the late fullloop pass beside `strlenscan`).
+
+    The fixtures (repstring.c beside them, gcc -Os, x86-64 and i386) copy and
+    fill with the repeat-prefixed string instructions gcc inlines at -Os.
+    SLEIGH lifts each as a loop inside the one instruction.
+
+    The first pass of each image (`option repstring off`) shows those loops:
+    `while (v3) { ... *a0 = *a1; v3 -= 1; ... }`. The second (the shipped
+    default) prints one builtin call per instruction, with the byte count the
+    element count times the element width, and a pointer read after the loop
+    reads its final value (`copy_end` returns the destination plus the count).
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c3
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/repstring_x86_64</com>
+  <com>option repstring off</com>
+  <com>read symbols</com>
+  <com>load function copy_struct</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function copy_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function fill_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function zero_rec</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function copy_end</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/repstring_x86_64</com>
+  <com>read symbols</com>
+  <com>load function copy_struct</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function copy_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function fill_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function zero_rec</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function copy_end</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/repstring_i386</com>
+  <com>option repstring off</com>
+  <com>read symbols</com>
+  <com>load function copy_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function fill_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/repstring_i386</com>
+  <com>read symbols</com>
+  <com>load function copy_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function fill_n</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="REPSTRING #1: off, every repeat instruction is a loop" min="7" max="7">while \(</stringmatch>
+<stringmatch name="REPSTRING #2: on, the 64-byte struct copy is one memcpy of rep movsd's 16 words" min="1" max="1">builtin_memcpy\(a0,a1,0x40\);</stringmatch>
+<stringmatch name="REPSTRING #3: on, a run-time byte count copies with rep movsb" min="3" max="3">builtin_memcpy\(a0,a1,a2\);</stringmatch>
+<stringmatch name="REPSTRING #4: on, rep stosb fills with the byte argument" min="2" max="2">builtin_memset\(a0,a1,a2\);</stringmatch>
+<stringmatch name="REPSTRING #5: on, rep stosd of zero is a 44-byte memset" min="1" max="1">builtin_memset\(a0,0,0x2c\);</stringmatch>
+<stringmatch name="REPSTRING #6: on, the destination after the copy is its end" min="1" max="1">return \(int8\)a0 \+ a2;</stringmatch>
+</decompilertest>

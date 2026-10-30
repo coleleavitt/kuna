@@ -30,6 +30,9 @@ Three tiers:
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
 | repnz scasb in the disassembly where IDA prints strlen | [`strlenscan`](#strlenscan) |
+| a while loop that copies one element per iteration and steps two pointers and a count | [`repstring`](#repstring) |
+| rep movsq / rep stosd from -Os code printed as a loop instead of memcpy/memset | [`repstring`](#repstring) |
+| a struct copy prints as a 16-iteration word loop | [`repstring`](#repstring) |
 | stack string initialisation renders as an array-typed cast such as (char[8])s_addr._0_8_ | [`rodatastring`](#rodatastring) |
 | partial-symbol slice assignments like buf._0_9_ = s_addr._16_9_ instead of the string | [`rodatastring`](#rodatastring) |
 | a recognized rodata literal never appears in the function that copies it onto the stack | [`rodatastring`](#rodatastring) |
@@ -1369,6 +1372,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: a string length gcc 9 or older MSVC computed with `repnz scasb` reads `strlen(s)`, taken where the scan was (`v1 = strlen(s);` when it is read twice or before a store). Set it off to see the scan loop SLEIGH lifts the instruction to, as upstream prints it.
 - **Where / provenance:** P3/simplification-quiescence · ida · presentation-default · kuna-strlenscan
 - **Example:** `option strlenscan off`
+
+### `repstring` -- on | off, default `on`
+
+- **Symptoms:** a while loop that copies one element per iteration and steps two pointers and a count; rep movsq / rep stosd from -Os code printed as a loop instead of memcpy/memset; a struct copy prints as a 16-iteration word loop.
+- **What it does:** Print an x86 `rep movs` as `builtin_memcpy(dst, src, n * w)` and a `rep stos` as `builtin_memset(dst, c, n * w)`. SLEIGH lifts the repeat prefix as a loop inside the one instruction, so a copy or fill gcc and clang inline at `-Os` (or MSVC with `/Oi`) printed as `while (v3) { v2 = &a0[1]; v1 = &a1[1]; *a0 = *a1; v3 -= 1; ... }`. `kuna_repstring` runs in the fullloop tail beside `strlenscan` and matches the two blocks the instruction lifts to on SSA: a head entered from outside and from the body, holding only the phis of the count, the destination and (for a copy) the source, that leaves exactly when the count is zero (`n == 0` or `n != 0` either way round); and a body entered and left only through the head, at the same instruction address, that steps the count down by one and each pointer up by the element width w (1, 2, 4 or 8; a set direction flag, which steps them down, is declined), stores one element through the destination and either loads it through the source or stores a value defined before the loop, and computes nothing else; nothing outside the loop may read a value the body computes. A destination in the function's own frame (the stack pointer plus a constant) is declined: the builtin is placed after heritage, so the frame locations it writes would have no definition at it, and the merge could fold a value stored into the buffer after the copy into one held before it (a `buf[0] = v` after the fill printed before it). A frame location heritage already guards the element store with -- an INDIRECT on the store and a phi in the head -- gets an INDIRECT on the builtin instead. A fill becomes `memset` only when every byte of the stored value is the same (`stosb` always; a constant such as 0 or 0x2020202020202020), so a `stosd` of an arbitrary word keeps its loop. The builtin is placed in the head before its branch with the values entering the loop, every read after the loop of the count becomes 0 and of a pointer the pointer plus `n * w`, and the edge into the body is removed so the next mainloop pass deletes it. The builtin keeps the call flag, so it stays ordered against loads, stores and calls. The memcpy and memset builtins suggest `void *` for their pointer operands to type inference (`DatatypeUserOp::getInputLocal`), so a destination parameter prints `void *a0`. 0/675 datatest assertions and the stage corpus do not move. Over 8 stripped x86-64 /usr/bin binaries (make, xz, gzip, diff, patch, tar, zstd, lsof; 59 repeat instructions) 41 become builtins in 28 functions, each change a loop replaced by one call; the 18 left are fills of frame buffers.
+- **When to flip:** On by default. Flip off when a `rep movsb` copies forward over its own output on purpose -- an LZ77 decoder's overlapping match copy is defined for the instruction and not for memcpy -- or to see the instruction's loop.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-repstring
+- **Example:** `option repstring off`
 
 ### `rodatastring` -- on | off, default `on`
 

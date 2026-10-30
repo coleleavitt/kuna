@@ -163,6 +163,25 @@ fn input_type_local_with(data: &Funcdata, op: OpId, slot: int4, recovered: bool)
         }
     }
 
+    // (kuna repstring) `DatatypeUserOp::getInputLocal` for the copy and fill
+    // builtins: the destination, and a copy's source, are `void *`.
+    if opcode == OpCode::CPUI_CALLOTHER && data.get_arch().rep_string {
+        let id = o.get_in(0).and_then(|v| data.vbank().get(v)).map(|v| v.get_offset());
+        let pointer = match id {
+            Some(k) if k == crate::userop::BUILTIN_MEMCPY as u64 => slot == 1 || slot == 2,
+            Some(k) if k == crate::userop::BUILTIN_MEMSET as u64 => slot == 1,
+            _ => false,
+        };
+        if pointer {
+            if let Some(tlst) = arch.types() {
+                let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
+                if let Ok(ptr) = tlst.get_type_void().and_then(|v| tlst.get_type_pointer(in_size, v, ws)) {
+                    return ptr;
+                }
+            }
+        }
+    }
+
     // C++ `TypeOpCallind::getInputLocal(op, 0)` (typeop.cc:763-768): the first input
     // of a CALLIND is the *function pointer*, so its suggested type is `code *` —
     // `getTypePointer(in0Size, getTypeCode(), spc->getWordSize())`.  This is what
