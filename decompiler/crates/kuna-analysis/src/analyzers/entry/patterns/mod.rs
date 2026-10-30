@@ -573,6 +573,30 @@ pub fn for_arch(
     }
 }
 
+/// [`for_arch`] keyed by a SLEIGH language id (`x86:LE:64:default`,
+/// `ARM:LE:32:v7`, ...), for an image with no object header to name its
+/// architecture.
+pub fn for_language(language_id: &str) -> Option<&'static FuncStartPatterns> {
+    use object::Architecture as A;
+    let mut parts = language_id.split(':');
+    let processor = parts.next()?;
+    let little = parts.next()? == "LE";
+    let size = parts.next().unwrap_or("");
+    let arch = match (processor, size) {
+        ("x86", "64") => A::X86_64,
+        ("x86", "32") => A::I386,
+        ("AARCH64", _) => A::Aarch64,
+        ("ARM", _) => A::Arm,
+        ("RISCV", _) => A::Riscv64,
+        ("MIPS", "64") => A::Mips64,
+        ("MIPS", _) => A::Mips,
+        ("PowerPC", "64") => A::PowerPc64,
+        ("PowerPC", _) => A::PowerPc,
+        _ => return None,
+    };
+    for_arch(arch, little)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

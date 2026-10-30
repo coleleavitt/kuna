@@ -4637,7 +4637,12 @@ A32 is the image default. An explicit `--isa` names the mode itself, so the pass
 paints nothing then. Before any
 pattern is tried at an offset, its byte must be one some post pattern (or a bare
 pattern's marked byte) accepts; the skip is exact and makes the scan about 4x
-faster (52 ms vs 216 ms over git's 3.1 MB `.text`, identical hits).
+faster (52 ms vs 216 ms over git's 3.1 MB `.text`, identical hits). On a
+headerless image (`--raw-image`), where the object-file passes cannot run, the
+same option sweeps the image's executable bytes with the pattern set of the
+target's language id (`patterns/mod.rs (for_language)`) and seeds `rawdiscover`'s
+call-target walk with the starts it finds, so a function reached only through a
+pointer table is in the inventory too.
 
 **LSDA landing pads** (`eh_frame_full`, default-off): the deeper
 `GccExceptionAnalyzer` markup — follow each FDE's CIE `L` augmentation to its

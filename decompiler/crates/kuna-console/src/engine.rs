@@ -2552,9 +2552,24 @@ impl ConsoleProgram {
             .filter(|(_, _, flags)| flags & section_flags::CODE != 0)
             .map(|(addr, size, _)| (addr, addr.saturating_add(size)))
             .collect();
-        let seeds: Vec<u64> =
+        let mut seeds: Vec<u64> =
             self.pending_synthetic_entries.iter().map(|addr| addr.get_offset()).collect();
-        let known: BTreeSet<u64> = seeds.iter().copied().collect();
+        // (kuna `funcstart_patterns`) The prologue patterns of the target's
+        // language, swept over the same executable bytes, seed the walk too.
+        if self.arch().analysis_funcstart_patterns {
+            if let Some(set) = kuna_analysis::entry::patterns::for_language(self.arch().get_description()) {
+                for &(lo, hi) in &exec {
+                    let Ok(size) = usize::try_from(hi - lo) else { continue };
+                    if let Some(bytes) = self.read_bytes(lo, size) {
+                        seeds.extend(set.scan(lo, &bytes));
+                    }
+                }
+                seeds.sort_unstable();
+                seeds.dedup();
+            }
+        }
+        let mut known: BTreeSet<u64> =
+            self.pending_synthetic_entries.iter().map(|addr| addr.get_offset()).collect();
         let found = {
             let arch = self.arch();
             kuna_analysis::listing::kuna_rawdiscover::discover(
@@ -2565,11 +2580,10 @@ impl ConsoleProgram {
                 &seeds,
             )
         };
-        for vma in found {
-            if known.contains(&vma) {
-                continue;
+        for vma in found.into_iter().chain(seeds) {
+            if known.insert(vma) {
+                self.pending_synthetic_entries.push(Address::new(Rc::clone(&code_space), vma));
             }
-            self.pending_synthetic_entries.push(Address::new(Rc::clone(&code_space), vma));
         }
     }
 
