@@ -682,6 +682,9 @@ pub struct FlowInfo<'a, E: FlowEnvironment> {
     /// the SAME entry must `cancel_inject_id` so the injection does not recurse.
     /// `None` outside a call-fixup injection (the user-op path passes NULL `fc`).
     injecting_entry: Option<Address>,
+    /// (kuna `itaniumeh`) Instructions of a landing-pad stub: the pad and its
+    /// fall-through successors, up to the stub's first branch.
+    eh_pad_stub: std::collections::BTreeSet<Address>,
 }
 
 /// Apply explicit-flow and declared-extent precedence before consulting either
@@ -753,6 +756,7 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
             overlap_watch: None,
             overlap_cbranch_target: None,
             injecting_entry: None,
+            eh_pad_stub: std::collections::BTreeSet::new(),
         }
     }
 
@@ -1678,6 +1682,11 @@ following this call as a branch"
             .get(op)
             .expect("tail_call_kind: stale op")
             .get_addr();
+        // (kuna itaniumeh) A jump out of a landing-pad stub enters the pad's
+        // `.cold` code, which belongs to this function.
+        if self.eh_pad_stub.contains(site) {
+            return None;
+        }
         select_inferred_tail_call(
             self.applied_branch_overrides.contains(site),
             self.is_inside_declared_extent(dest),
@@ -1773,6 +1782,7 @@ following this call as a branch"
         if let Some(table) = eh_table.as_deref() {
             if table.is_pad(curaddr.get_offset()) && !self.is_flow_for_inline() {
                 crate::kuna_itaniumeh::define_pad_registers(&mut self.data, table, curaddr)?;
+                self.eh_pad_stub.insert(curaddr.clone());
             }
         }
 
@@ -2017,6 +2027,9 @@ truncating the fall-through here"
                 self.outofbounds.insert(next);
                 isfallthru = false;
             } else {
+                if self.eh_pad_stub.contains(curaddr) {
+                    self.eh_pad_stub.insert(next.clone());
+                }
                 self.addrlist.push(next);
             }
         }

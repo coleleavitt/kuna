@@ -2840,9 +2840,15 @@ if (eh_selector() == 1) {
   v3 = __cxa_begin_catch(eh_exception());
 ```
 
+- GCC's default hot/cold partitioning puts the handler code in a separate
+  `.cold` FDE, and the pad is a stub that jumps there. That FDE is also a
+  function entry, so the jump would read as a tail call. Flow records the pad
+  and its fall-through successors (`FlowInfo::eh_pad_stub`), and
+  `tail_call_kind` does not classify a branch from those instructions, so the
+  cold code is decoded as part of the function.
+
 A `try` region kind in `p8_structure` would be the next step. The edges and
-helpers are what it would read. **Limits.** Pads in a GCC `.cold` partition are
-reached through a jump into another FDE, which flow may treat as a tail call.
-SjLj and ARM EHABI tables are not read. Pinned by
+helpers are what it would read. **Limits.** SjLj and ARM EHABI tables are not
+read. Pinned by
 `tests/stages/kuna-itaniumeh.xml` (two passes over the `itaniumeh/eh_x86_64.elf`
-fixture).
+fixture) and `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build).
