@@ -2511,6 +2511,8 @@ pub struct Architecture {
     /// no-op without the Listing AND without a configured DB. Default-off, real-ELF
     /// path only ⇒ every parity gate is byte-identical.
     pub analysis_fid: bool,
+    /// (kuna) Check FID matches against callee names, several rounds, tiny-stub guard (`fidcallees`). Default on.
+    pub analysis_fidcallees: bool,
     /// (kuna) Gate the MSVC RTTI / vftable recovery pass (`rtti`); default **off**.
     /// The kuna analog of Ghidra's `RttiAnalyzer` (a Microsoft-PE analyzer): on a
     /// Windows PE it parses the `CompleteObjectLocator` → RTTI3/2/1 → RTTI0 graph in
@@ -2637,6 +2639,8 @@ pub struct Architecture {
     pub analysis_nameladder: bool,
     /// (kuna) Name library functions from IDA FLIRT `.sig` files listed in `KUNA_FLIRT_SIGS` (`flirt`). Default off.
     pub analysis_flirt: bool,
+    /// (kuna) FLIRT reference-site checks and arbitration (`flirtsites`). Default on.
+    pub analysis_flirtsites: bool,
     /// (kuna) Apply libc prototype / no-return to functions a FID or FLIRT rename names (`fidproto`). Default on.
     pub analysis_fidproto: bool,
     /// (kuna) IDA's string rule inside code sections (`codestrings`). Default on.
@@ -3536,6 +3540,7 @@ impl Architecture {
             analysis_noreturn_reach: false,
             error_noreturn_callsites: Vec::new(),
             analysis_fid: false,
+            analysis_fidcallees: true,
             analysis_rtti: false,
             analysis_itaniumrtti: false,
             analysis_aif: false,
@@ -3550,6 +3555,7 @@ impl Architecture {
             analysis_compacttable: true,
             analysis_nameladder: true,
             analysis_flirt: false,
+            analysis_flirtsites: true,
             analysis_fidproto: true,
             analysis_codestrings: true,
             analysis_protomerge: false,
@@ -4053,6 +4059,7 @@ impl Architecture {
         self.analysis_noreturn_error = true; // (kuna) DIV-16 default-on: REMOVES CODE (conclude error(nonzero,...) wrappers no-return, dropping the dead fall-through at every caller). Sub-rule of noreturn_propagate, gated on the Listing (default-off), so every parity gate is byte-identical (real-ELF Listing path only); restore with `option noreturn_error off`
         self.analysis_noreturn_reach = true; // (kuna) DIV-19 default-on: REMOVES CODE (CFG-reachability no-return, Ghidra's FindNoReturnFunctionsAnalyzer.targetOnlyCallsNoReturn — mid-body no-return calls, dead returns, switch-of-no-return). Sub-rule of noreturn_propagate, gated on the Listing (default-off), so every parity gate is byte-identical (real-ELF Listing path only); restore with `option noreturn_reach off`
         self.analysis_fid = false; // FID fingerprint matcher consumer default-off
+        self.analysis_fidcallees = true;
         self.analysis_rtti = false; // MSVC RTTI / vftable recovery default-off (PE-only, output-changing)
         self.analysis_itaniumrtti = false; // (kuna, NOVEL) Itanium RTTI / vtable recovery default-off (ELF-only, output-changing)
         self.analysis_aif = false; // Aggressive Instruction Finder gap-walk default-off
@@ -4074,6 +4081,7 @@ impl Architecture {
         self.analysis_compacttable = true;
         self.analysis_nameladder = true;
         self.analysis_flirt = false;
+        self.analysis_flirtsites = true;
         self.analysis_fidproto = true;
         self.analysis_codestrings = true;
         self.analysis_protomerge = false;

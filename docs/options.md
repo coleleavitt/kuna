@@ -818,9 +818,15 @@ Three tiers:
 | a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
 | kuna cannot use ida flirt signatures | [`flirt`](#flirt) |
 | memcpy and printf in a static binary have no names | [`flirt`](#flirt) |
+| flirt leaves printf-style wrappers unnamed because several modules match | [`flirtsites`](#flirtsites) |
+| flirt names a short i386 wrapper after the wrong library function | [`flirtsites`](#flirtsites) |
+| flirt misses an ifunc resolver whose reference is a lea of a function address | [`flirtsites`](#flirtsites) |
 | a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto) |
 | a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto) |
 | code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto) |
+| fid leaves a function unnamed because two library functions share its hash | [`fidcallees`](#fidcallees) |
+| fid renames a small stub to the wrong library function | [`fidcallees`](#fidcallees) |
+| fid names a function whose calls go to differently named functions | [`fidcallees`](#fidcallees) |
 | msvc c++ class names missing and vftables left as unnamed data | [`rtti`](#rtti) |
 | no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes | [`rtti`](#rtti) |
 | gcc/clang c++ class names missing and vtables left as unnamed DAT_ data | [`itaniumrtti`](#itaniumrtti) |
@@ -3274,6 +3280,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-flirt
 - **Example:** `KUNA_FLIRT_SIGS=$IDADIR/sig/pc/glibc_amd64.sig kuna functions ./static-stripped --option listing on --option flirt on`
 
+### `flirtsites` -- on | off, default `on`
+
+- **Symptoms:** flirt leaves printf-style wrappers unnamed because several modules match; flirt names a short i386 wrapper after the wrong library function; flirt misses an ifunc resolver whose reference is a lea of a function address.
+- **What it does:** Check FLIRT matches against the names a module's reference sites expect, as IDA 9.5 does. A site's target is the branch or call target of the instruction covering it, or on x86 the address its 32-bit field encodes (a lea or mov of a function address). A module that lies wholly inside the trie prefix (no CRC) and names sites is dropped when a site's target carries another name, and waits for the last round unless one site agrees; such a module with no named site is accepted as IDA accepts it, and the collision rule guards it. An entry that is a bare return is never named. When the modules matching at an entry disagree on the name, each name is scored by its sites like IDA's ambiguity arbitration (libida.so 0x70c280): +4 for a site whose target has the expected name, -4 for one whose target has another name, 0 when it is unnamed. The strictly best name wins and a tie waits for a later round; a round that names nothing new makes the next one the last, and in the last round a module whose CRC covers bytes past the trie prefix may keep its classic reference unnamed (never one whose target has another name); a name found at several entries in one round goes only to the strictly best scored one. Only acts when flirt is on.
+- **When to flip:** On (default); it only acts when flirt is on. Flip off to restore the rule that renames an entry only when every matching module agrees on the name and skips every module no longer than the trie prefix that has no reference.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-flirtsites
+- **Example:** `--option flirtsites off`
+
 ### `fidproto` -- on | off, default `on`
 
 - **Symptoms:** a function fid or flirt named memcpy keeps its recovered parameters; a flirt-named exit or abort is not treated as no-return; code after a call to a renamed library abort is decompiled as reachable.
@@ -3281,6 +3295,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default). It only acts on a function a FID/FLIRT/PDB/Objective-C/Swift rename just named, and only when the name is a libc/libm name or on the no-return list. Flip off to keep the renamed function's recovered prototype.
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-fidproto
 - **Example:** `--option fidproto off`
+
+### `fidcallees` -- on | off, default `on`
+
+- **Symptoms:** fid leaves a function unnamed because two library functions share its hash; fid renames a small stub to the wrong library function; fid names a function whose calls go to differently named functions.
+- **What it does:** Check FID matches against callee names. `kuna fid build` records, for each function, the offset of every call or jump that leaves the function and the callee's name (from the relocation in a .o, or the named function at the target; a callee recorded under an alias takes the name the database keeps). When the fid pass is on, each candidate name of a matched function is scored by its callees: +4 for a callee whose target already has the recorded name, -4 for one whose target has another name, 0 when the target is unnamed. The best score wins; a tie, a negative score, or a stub of 16 bytes or less (padding excluded) with no confirming callee names nothing. A name the binary already has is not given again, and a name found at several addresses in one round goes only to the strictly best scored one. A decision an unnamed callee could still change waits, and matching runs up to three rounds so names found in one round confirm callers in the next. A database built before callees were recorded (format version 1) scores every candidate 0.
+- **When to flip:** On (default); it only acts when fid is on. Flip off to restore the single-pass rule that renames a function whenever its full-hash bucket has exactly one name, with no callee check and no tiny-stub guard.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-fidcallees
+- **Example:** `--option fidcallees off`
 
 ### `rtti` -- on | off, default `off`
 

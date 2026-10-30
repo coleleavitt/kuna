@@ -621,7 +621,11 @@ mod tests {
               // is inert, so the preset has nothing to turn on.
               "flirt",
               // `protomerge` measured worse on Lua 5.4.8 with DWARF (see its row).
-              "protomerge"];
+              "protomerge",
+              // `flirt` needs signature files the user supplies (`KUNA_FLIRT_SIGS`,
+              // IDA's own `.sig` files); kuna ships none, so the preset has nothing
+              // to run it with.
+              "flirt"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open

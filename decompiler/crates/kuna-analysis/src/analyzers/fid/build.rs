@@ -57,7 +57,9 @@ struct ExtentInsn {
     addr: u64,
     len: u32,
     is_call: bool,
+    is_jump: bool,
     is_terminal: bool,
+    flows: Vec<u64>,
 }
 
 /// Build the FID records for every named, hashable function in `bytes` (a parsed
@@ -93,8 +95,7 @@ pub fn build_records(
     // so each function's exclusive upper bound is the next entry. This is the
     // load-bearing seed/name source (see the module doc): for an `ET_REL` `.o`
     // the raw `object::File` symbol address is section-relative.
-    let mut funcs = image.func_symbols();
-    funcs.sort_by_key(|(a, _)| *a);
+    let mut funcs = functions_by_address(image);
     funcs.dedup_by_key(|(a, _)| *a);
 
     // The relocation oracle for the 4-way scalar rule: a relocation overlapping
@@ -154,6 +155,11 @@ pub fn build_records(
             }
             continue;
         }
+        let mut extent = extent;
+        while is_x86 && fps.len() > 1 && fps.last().is_some_and(|fp| is_x86_padding(&fp.bytes)) {
+            fps.pop();
+            extent.pop();
+        }
 
         let skippers: Vec<Box<dyn InstructionSkipper>> = if is_x86 {
             vec![Box::new(X86InstructionSkipper)]
@@ -188,6 +194,7 @@ pub fn build_records(
             );
         }
 
+        let callees = callee_names(&extent, *entry, &relocs, &funcs);
         records.push(FidRecord {
             full_hash: quad.full_hash,
             specific_hash: quad.specific_hash,
@@ -195,10 +202,78 @@ pub fn build_records(
             specific_addl: quad.specific_addl_size,
             flags,
             name: name.clone(),
+            callees,
         });
     }
 
     records
+}
+
+/// The named callees of a function: each call or jump in `extent` that carries a
+/// relocation against a named symbol (an external callee in a `.o`), or whose
+/// target leaves the function and is a named function entry, as `(offset from
+/// entry, name)`.
+fn callee_names(
+    extent: &[ExtentInsn],
+    entry: u64,
+    relocs: &ObjectRelocations,
+    funcs: &[(u64, String)],
+) -> Vec<(u32, String)> {
+    let end = extent.last().map_or(entry, |i| i.addr + u64::from(i.len));
+    let mut out = Vec::new();
+    for ins in extent.iter().filter(|i| i.is_call || i.is_jump) {
+        let off = (ins.addr - entry) as u32;
+        let last = ins.addr + u64::from(ins.len).max(1) - 1;
+        if let Some(name) = relocs.symbol_in(ins.addr, last) {
+            out.push((off, name.to_string()));
+            continue;
+        }
+        let Some(&t) = ins.flows.first() else { continue };
+        if t > entry && t < end {
+            continue;
+        }
+        if let Ok(i) = funcs.binary_search_by_key(&t, |(a, _)| *a) {
+            out.push((off, funcs[i].1.clone()));
+        }
+    }
+    out
+}
+
+/// The function symbols of `image` by address; at one address the public
+/// spelling comes first (no `.` suffix, fewest leading underscores, shortest),
+/// so `fflush` is kept over its alias `_IO_fflush` and `malloc` over
+/// `__libc_malloc`.
+fn functions_by_address(image: &ObjectLoadImage) -> Vec<(u64, String)> {
+    let mut funcs = image.func_symbols();
+    funcs.extend(image.func_symbol_aliases());
+    funcs.sort_by_key(|(a, n)| (*a, n.contains('.'), n.len() - n.trim_start_matches('_').len(), n.len()));
+    funcs
+}
+
+/// Every function name in `image` paired with the name [`build_records`] keeps
+/// for its address (the first symbol there), so a callee recorded under an
+/// alias (`__libc_malloc` for `malloc`) can be rewritten to the kept name.
+pub fn alias_names(image: &ObjectLoadImage) -> Vec<(String, String)> {
+    let funcs = functions_by_address(image);
+    let mut out = Vec::new();
+    let mut kept: Option<(u64, String)> = None;
+    for (addr, name) in funcs {
+        match &kept {
+            Some((a, k)) if *a == addr => out.push((name, k.clone())),
+            _ => kept = Some((addr, name)),
+        }
+    }
+    out
+}
+
+/// Alignment padding after a function's last instruction: `int3`, or a NOP
+/// (`90` or the `0F 1F` family) under any number of `66`/`2E` prefixes, the
+/// `data16 cs nopw` runs gcc pads with. The Listing never decodes unreachable
+/// padding, so the generator drops it from the end of the `[entry, next)`
+/// clip; inside a function only the Ghidra skipper patterns apply.
+fn is_x86_padding(bytes: &[u8]) -> bool {
+    let body = &bytes[bytes.iter().take_while(|&&b| b == 0x66 || b == 0x2e).count()..];
+    body == [0x90] || body == [0xcc] || body.starts_with(&[0x0f, 0x1f])
 }
 
 /// Linear-decode a function's extent: the contiguous instructions in
@@ -234,7 +309,14 @@ fn decode_extent(
         let len = dec.len.max(1); // never advance by 0 (avoid an infinite loop)
         let cls = classify(&dec.ops, vma, dec.len);
         let is_terminal = cls.flow.is_terminal;
-        out.push(ExtentInsn { addr: vma, len, is_call: cls.flow.is_call, is_terminal });
+        out.push(ExtentInsn {
+            addr: vma,
+            len,
+            is_call: cls.flow.is_call,
+            is_jump: cls.flow.is_jump,
+            is_terminal,
+            flows: cls.flows,
+        });
 
         // When there is no `next` bound, a terminal (return / unconditional
         // branch out) ends the contiguous body.
@@ -305,11 +387,14 @@ fn map_op_object(o: SleighOpObject) -> OpObject {
 struct ObjectRelocations {
     /// `(start_vma, end_vma_inclusive)` per relocation, sorted by `start_vma`.
     ranges: Vec<(u64, u64)>,
+    /// `(start_vma, symbol name)` for each relocation against a named symbol,
+    /// sorted by `start_vma`.
+    symbols: Vec<(u64, String)>,
 }
 
 impl ObjectRelocations {
     fn from_object(file: &object::File) -> Self {
-        use object::read::{Object, ObjectSection};
+        use object::read::{Object, ObjectSection, ObjectSymbol};
         use object::SectionIndex;
         use std::collections::HashMap;
 
@@ -335,6 +420,7 @@ impl ObjectRelocations {
         }
 
         let mut ranges: Vec<(u64, u64)> = Vec::new();
+        let mut symbols: Vec<(u64, String)> = Vec::new();
         for sec in file.sections() {
             let Some(&sec_vma) = vma_of.get(&sec.index()) else {
                 continue; // a non-loaded section's relocs do not land in any body
@@ -345,10 +431,28 @@ impl ObjectRelocations {
                 let nbytes = (reloc.size() as u64 / 8).max(1);
                 let end = start.wrapping_add(nbytes - 1);
                 ranges.push((start, end));
+                if let object::RelocationTarget::Symbol(idx) = reloc.target() {
+                    let named = file
+                        .symbol_by_index(idx)
+                        .ok()
+                        .filter(|sym| sym.kind() != object::SymbolKind::Section)
+                        .and_then(|sym| sym.name().ok().map(str::to_string))
+                        .filter(|n| !n.is_empty());
+                    if let Some(name) = named {
+                        symbols.push((start, name));
+                    }
+                }
             }
         }
         ranges.sort_unstable_by_key(|r| r.0);
-        Self { ranges }
+        symbols.sort_unstable_by_key(|r| r.0);
+        Self { ranges, symbols }
+    }
+
+    /// The symbol a relocation inside `[min_addr, max_addr]` names.
+    fn symbol_in(&self, min_addr: u64, max_addr: u64) -> Option<&str> {
+        let i = self.symbols.partition_point(|(s, _)| *s < min_addr);
+        self.symbols.get(i).filter(|(s, _)| *s <= max_addr).map(|(_, n)| n.as_str())
     }
 }
 
@@ -365,4 +469,19 @@ fn align_up(x: u64, align: u64) -> u64 {
         return x;
     }
     x.wrapping_add(align - 1) & !(align - 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_x86_padding;
+
+    #[test]
+    fn trailing_padding_forms() {
+        assert!(is_x86_padding(&[0x90]));
+        assert!(is_x86_padding(&[0xcc]));
+        assert!(is_x86_padding(&[0x66, 0x66, 0x2e, 0x0f, 0x1f, 0x84, 0, 0, 0, 0, 0]));
+        assert!(is_x86_padding(&[0x0f, 0x1f, 0x44, 0, 0]));
+        assert!(!is_x86_padding(&[0xc3]));
+        assert!(!is_x86_padding(&[0x66, 0x0f, 0xef, 0xc0]));
+    }
 }

@@ -1308,6 +1308,7 @@ kuna_options! { self, p1;
         on_off!(analysis_noreturn_reach, "CFG-reachability no-return rule (Ghidra targetOnlyCallsNoReturn)")
     },
     "fid" => on_off!(analysis_fid, "FID fingerprint matcher Listing consumer"),
+    "fidcallees" => on_off!(analysis_fidcallees, "FID callee-name check and arbitration"),
     "rtti" => on_off!(analysis_rtti, "MSVC RTTI / vftable class-name recovery pass"),
     "itaniumrtti" => {
         on_off!(analysis_itaniumrtti, "Itanium (GCC/Clang) RTTI / vtable recovery pass")
@@ -1342,6 +1343,8 @@ kuna_options! { self, p1;
         on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
     },    "flirt" => {
         on_off!(analysis_flirt, "FLIRT signature matching")
+    },    "flirtsites" => {
+        on_off!(analysis_flirtsites, "FLIRT reference-site checks and arbitration")
     },    "fidproto" => {
         on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
     },    "codestrings" => {

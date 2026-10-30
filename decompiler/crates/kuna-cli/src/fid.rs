@@ -22,7 +22,7 @@ mod archive;
 use archive::records_for_archive;
 
 use kuna_analysis::loadimage_object::ObjectLoadImage;
-use kuna_analysis::fid::build::build_records;
+use kuna_analysis::fid::build::{alias_names, build_records};
 use kuna_analysis::fid::db::{FidDb, FidRecord};
 use kuna_console::engine::bootstrap_from_object;
 
@@ -106,11 +106,13 @@ fn cmd_build(argv: &[String]) -> i32 {
     let spec_roots = spec_roots();
 
     let mut all: Vec<FidRecord> = Vec::new();
+    let mut aliases: Vec<(String, String)> = Vec::new();
     for input in &args.inputs {
         match records_for_input(input, &spec_roots) {
-            Ok(mut recs) => {
+            Ok((mut recs, mut al)) => {
                 eprintln!("kuna fid build: {input}: {} record(s)", recs.len());
                 all.append(&mut recs);
+                aliases.append(&mut al);
             }
             Err(e) => {
                 eprintln!("kuna fid build: {input}: {e}");
@@ -119,6 +121,7 @@ fn cmd_build(argv: &[String]) -> i32 {
         }
     }
 
+    canonicalize_callees(&mut all, aliases);
     dedup_records(&mut all);
 
     let db = FidDb::from_records(lang, cspec, all);
@@ -134,6 +137,21 @@ fn cmd_build(argv: &[String]) -> i32 {
     );
     0
 }
+
+/// Rewrite each callee recorded under an alias to the name the database keeps
+/// for that function, so a match compares one spelling.
+fn canonicalize_callees(all: &mut [FidRecord], aliases: Vec<(String, String)>) {
+    #[expect(clippy::disallowed_types, reason = "lookup only")]
+    let kept: std::collections::HashMap<String, String> = aliases.into_iter().collect();
+    for (_, name) in all.iter_mut().flat_map(|r| r.callees.iter_mut()) {
+        if let Some(k) = kept.get(name.as_str()) {
+            name.clone_from(k);
+        }
+    }
+}
+
+/// A build's records and its `(alias, kept name)` pairs.
+type Built = (Vec<FidRecord>, Vec<(String, String)>);
 
 /// Keep the first record for each (full hash, specific hash, name), in input order.
 fn dedup_records(all: &mut Vec<FidRecord>) {
@@ -153,7 +171,7 @@ fn dedup_records(all: &mut Vec<FidRecord>) {
 
 /// Build the FID records for one input path: a `.a` archive (each member
 /// bootstrapped separately) or a single object/linked image.
-fn records_for_input(input: &str, spec_roots: &[String]) -> Result<Vec<FidRecord>, String> {
+fn records_for_input(input: &str, spec_roots: &[String]) -> Result<Built, String> {
     let bytes = std::fs::read(input).map_err(|e| format!("cannot read: {e}"))?;
     if is_archive(&bytes) {
         records_for_archive(input, &bytes, spec_roots)
@@ -163,7 +181,7 @@ fn records_for_input(input: &str, spec_roots: &[String]) -> Result<Vec<FidRecord
 }
 
 /// Bootstrap a single object file (at a real path) and build its records.
-fn records_for_object_path(path: &str, spec_roots: &[String]) -> Result<Vec<FidRecord>, String> {
+fn records_for_object_path(path: &str, spec_roots: &[String]) -> Result<Built, String> {
     // Bootstrap the architecture from the object (resolves the SLEIGH language,
     // builds the engine, attaches the loadimage). `target = ""` ⇒ derive the
     // language from the object's machine.
@@ -179,12 +197,13 @@ fn records_for_object_path(path: &str, spec_roots: &[String]) -> Result<Vec<FidR
     let image = ObjectLoadImage::from_bytes(path, &bytes)
         .map_err(|e| format!("loadimage failed: {e}"))?;
 
-    Ok(build_records(
+    let records = build_records(
         &bytes,
         &image,
         arch,
         arch.translate().as_sleigh().expect("fid build: standalone Sleigh engine"),
-    ))
+    );
+    Ok((records, alias_names(&image)))
 }
 
 /// Is `bytes` a Unix `ar` archive (the `.a` magic `!<arch>\n`)?
@@ -240,7 +259,17 @@ mod tests {
             specific_addl: 2,
             flags: 0,
             name: name.to_string(),
+            callees: Vec::new(),
         }
+    }
+
+    #[test]
+    fn callees_recorded_under_an_alias_take_the_kept_name() {
+        let mut caller = record(1, 1, "caller");
+        caller.callees = vec![(4, "__libc_malloc".into()), (9, "free".into())];
+        let mut all = vec![caller];
+        canonicalize_callees(&mut all, vec![("__libc_malloc".into(), "malloc".into())]);
+        assert_eq!(all[0].callees, [(4, "malloc".into()), (9, "free".into())]);
     }
 
     #[test]

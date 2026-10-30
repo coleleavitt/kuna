@@ -4688,10 +4688,51 @@ every other binary's pass list is byte-identical to before the pass existed):
   byte-exact port of Ghidra's FunctionID hashing — the operand-masked FNV-1a64
   full hash over a function's instruction stream (mask via the SLEIGH
   `instruction_mask`, x86 NOP padding skipped) — looked up in a kuna `.fid`
-  database built by `kuna fid build`. Only a bucket that collapses to exactly one
-  name renames (never guess on a tie), and only through the placeholder label
-  gate: the stripped-static-library recovery (`sub_4017c0` → `kuna_crc32`) with no
-  way to clobber a real name.
+  database built by `kuna fid build`. Renames go only through the placeholder
+  label gate: the stripped-static-library recovery (`sub_4017c0` → `kuna_crc32`)
+  with no way to clobber a real name.
+
+  The generator (`decompiler/crates/kuna-analysis/src/analyzers/fid/build.rs (build_records)`)
+  hashes each function over the linear `[entry, next symbol)` clip, but the
+  Listing never decodes the unreachable alignment padding after a function's last
+  instruction. Ghidra's skipper table lacks the `data16 cs nopw` runs gcc pads
+  with, so a function followed by one hashed differently on the two sides and
+  could never match. The generator therefore drops trailing padding (`int3`, or
+  `90` / the `0F 1F` NOP family under any `66`/`2E` prefixes) from the clip; the
+  Ghidra skipper still decides everything inside the body. On a stripped
+  `-static` x86-64 program built against Gentoo glibc 2.43, a `libc.a` database
+  renames 324 functions correctly instead of 258. Where several symbols share an
+  address the generator keeps the public spelling (no `.` suffix, fewest leading
+  underscores, shortest), so the database says `fflush` and `malloc` rather than
+  `_IO_fflush` and `__libc_malloc`, the names the prototype tables know.
+
+  **Callee checks** (`fidcallees`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/fid/mod.rs (arbitrate)`) give
+  the matcher what IDA's FLIRT has: a check against the names of what a function
+  calls. The generator records, per function, the offset of every call or jump
+  that leaves it with the callee's name: the relocation's symbol in a `.o`, or
+  the named function at the target. A callee recorded under an alias is
+  rewritten to the name the database keeps for it, so both sides use one
+  spelling. The callee table is format version 2 of the `.fid` file; a database
+  without callees is still written and read as version 1. At match time each
+  candidate name of a function is scored the way IDA 9.x arbitrates ambiguous
+  FLIRT matches: +4 for each recorded callee whose target already has that name,
+  -4 for each whose target has another name, 0 when the target is unnamed or
+  inside the function. The best score wins; a tie or a negative score names
+  nothing. A function of at most 16 bytes, padding excluded, needs at least one
+  confirming callee: like IDA's tiny-module guard, a few instructions match too
+  many stubs. A decision an unnamed callee could still change waits, and the pass
+  runs up to three rounds, so the names one round finds confirm their callers in
+  the next (IDA's `AU_LIBF`/`AU_LBF2`/`AU_LBF3` queues). A name already in the
+  binary is not given again, and a name found at several addresses in one round
+  goes only to the address with the strictly best score. On the program above
+  (324 right and 6 wrong names with the option off) it settles one two-name
+  bucket by its callees (`_IO_str_pbackfail` over `_IO_wstr_pbackfail`),
+  withholds three wrong names that two addresses each received, and loses three
+  right ones: two stubs of 16 bytes or less with no named callee, and one
+  collision the old rule happened to resolve right. The result is 322 right and
+  3 wrong. Off restores the single-pass rule: rename whenever
+  the bucket has exactly one name.
 - **Format strings** (`formatstring off|static|full`, default `static`;
   `decompiler/crates/kuna-analysis/src/analyzers/formatstring/mod.rs`): what a
   `printf`/`scanf`-family call does with its variadic arguments is stated by its
@@ -7059,7 +7100,53 @@ prototype of its name (or a `nameladder` spelling) and the no-return flag when
 the no-return lists name it, as IDA applies the type and `noret.cfg` on a
 FLIRT rename. All 212 signature files IDA 9.5 ships parse to the last byte; on
 the stripped static-pie `/sbin/ldconfig` with `glibc_amd64.sig`, 207 of 1,611
-functions are named in 1.9 s.
+functions are named in 1.9 s. `KUNA_FLIRT_SIGS` may name directories, whose
+`*.sig` files are all taken. A startup signature is never loaded (its module
+names are IDA scripts that choose runtime signatures, not function names), nor
+is one whose header file-type mask excludes the binary's format, so pointing
+the variable at all of IDA's `sig/` directories loads only the ELF-capable
+libraries for an ELF: on a stripped static x86-64 program that is 4.7 s and
+1.2 GB instead of 11 s and 3.8 GB for every `sig/pc` file, with the same names.
+A reference names a function when the instruction covering its offset points
+there, by a branch or call target or, on x86, by the address its 32-bit field
+encodes (RIP-relative on x86-64, else absolute): an `ifunc` resolver
+references its implementations with `lea`, which the Listing records as no
+flow.
+
+**FLIRT site checks** (`flirtsites`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/mod.rs (match_all)`) use
+the version-11 reference sites the way IDA 9.5 does. Each named site of a
+module (and its classic reference) is compared with the name already at the
+site's target: it agrees, differs, or the target is unnamed. A module that
+lies wholly inside the trie prefix has no CRC to tell it apart, so when it
+names sites it is dropped if one differs, and waits for the last round unless
+one agrees; one without any named site is accepted, as IDA accepts it, and the
+collision rule guards it. An entry whose first instruction is a return is
+never named, IDA's rule against matching `ret` padding. When the modules
+matching at one entry disagree on the name, each name is scored like IDA's
+ambiguity arbitration (`libida.so` 0x70c280): +4 for a site whose target has
+the expected name, -4 for one whose target has another name, 0 when it is
+unnamed. The strictly best name wins and a tie waits for a later round, when
+more targets are named; a round that names nothing new makes the next one the
+last. In the last round a module whose CRC covers bytes past the trie prefix
+may keep its classic reference unnamed, so a long module whose callee no
+signature names (`rand` calling an unmatched `__random`) is still taken; a
+reference whose target carries another name still rejects it. A name found at
+several entries in one round goes only to the strictly best scored one. Measured on stripped static programs built here (names compared with the
+unstripped twin; right/wrong for the base matcher, then with the option off
+and on): x86-64 against Gentoo glibc 2.43 (gcc `-O2`, clang `-O2`, gcc `-O0`
+alike) 160/2, 171/2, 176/2; x86-64 against Debian 12 `libc.a` 320/0, 333/0,
+338/0, and Debian 13 318/1, 330/1, 337/1; i386 (`glibc_i386.sig`) 220/5,
+220/5, 227/4; AArch64 against Debian 13 `libc.a` (`glibc_arm64.sig`, clang
+`-O2`) 151/1, 151/1, 156/1; a stripped Go 1.26 program with `gopclntab off`
+and the Go standard-library signatures 123/0, 123/0, 127/1. On the AArch64
+program 848 of 1,030 functions match no module of the signature at all, and
+kuna names 156 of the 162 whose candidates include the right name, so the
+signature's coverage of that build is the limit. The remaining wrong names are functions whose code is
+identical to the library function named (`buffer_free` for
+`__libio_freemem`). Off restores the rule that renames an entry only when
+every matching module agrees and skips every prefix-only module without a
+reference.
 
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)

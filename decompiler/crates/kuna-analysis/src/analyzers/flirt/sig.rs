@@ -55,6 +55,11 @@ pub struct Node {
 pub struct Sig {
     pub version: u8,
     pub library: String,
+    /// The IDA file types (`FT_*` bits) the library applies to; 0 when unset.
+    pub file_formats: u32,
+    /// A startup signature (`LS_STARTUP`): its module names are IDA scripts
+    /// that pick runtime signatures, not function names.
+    pub startup: bool,
     pub pattern_len: usize,
     pub root: Node,
 }
@@ -72,8 +77,21 @@ impl Sig {
     }
 }
 
+const LS_STARTUP: u16 = 0x01;
 const LS_ZIP: u16 = 0x10;
 const LS_ZSTD: u16 = 0x40;
+
+/// Whether a `.sig` file's header admits a binary of IDA file type `ft`
+/// (`FT_*` bit index): not a startup signature, and the file-type mask is unset
+/// or names `ft`.
+pub fn applies_to(data: &[u8], ft: Option<u32>) -> bool {
+    if data.len() < 18 || &data[..6] != b"IDASGN" {
+        return false;
+    }
+    let formats = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
+    let flags = u16::from_le_bytes([data[16], data[17]]);
+    flags & LS_STARTUP == 0 && (formats == 0 || ft.is_none_or(|b| formats >> b & 1 == 1))
+}
 
 /// Parse a `.sig` file.
 pub fn parse(data: &[u8]) -> Result<Sig, String> {
@@ -86,6 +104,7 @@ pub fn parse(data: &[u8]) -> Result<Sig, String> {
     }
     let le16 = |p: usize| u16::from_le_bytes([data[p], data[p + 1]]);
     let flags = le16(16);
+    let file_formats = u32::from_le_bytes([data[8], data[9], data[10], data[11]]);
     let name_len = data[34] as usize;
     let mut p = 37;
     if version >= 6 {
@@ -127,7 +146,7 @@ pub fn parse(data: &[u8]) -> Result<Sig, String> {
     if r.p != body.len() {
         return Err(format!("trailing bytes at {} of {}", r.p, body.len()));
     }
-    Ok(Sig { version, library, pattern_len, root })
+    Ok(Sig { version, library, file_formats, startup: flags & LS_STARTUP != 0, pattern_len, root })
 }
 
 struct Reader<'a> {
