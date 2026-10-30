@@ -27,10 +27,11 @@
 //!   `DYLD_CHAINED_PTR_64` (2), `DYLD_CHAINED_PTR_64_OFFSET` (6),
 //!   `DYLD_CHAINED_PTR_ARM64E` (1) non-auth + `DYLD_CHAINED_PTR_ARM64E_USERLAND`
 //!   (9) / `_USERLAND24` (12).
-//! - **arm64e auth-rebase** — handled: the PAC/diversity/key/auth bits are
-//!   *stripped* and the 32-bit image-base-relative target is rebased to a real
-//!   VMA. (Pointer authentication is a runtime concept; statically the resolved
-//!   pointer is just `imagebase + target`.)
+//! - **arm64e auth-rebase** — handled: the 32-bit image-base-relative target is
+//!   rebased to a real VMA (statically the resolved pointer is just
+//!   `imagebase + target`), and the signing context dyld signs the slot with —
+//!   key, 16-bit diversity, address diversity — is kept beside it
+//!   ([`ChainedFixups::pac_auth`]).
 //! - **Bind / import-ordinal chains** — a bind entry names an *external* symbol
 //!   whose runtime address is unknown statically, so it is never entered into
 //!   the pointer overlay (a consumer reading that slot misses and falls back,
@@ -140,6 +141,22 @@ pub struct ChainedFixups {
     /// resolved into `rebases` once every chain has been read
     /// ([`resolve_kernel_cache_levels`]).
     kernel_cache: Vec<(u64, u8, u64)>,
+    /// `slot_vma → signing context` for every arm64e auth rebase in `rebases`.
+    auth: HashMap<u64, PacAuth>,
+}
+
+/// The pointer-authentication context of an arm64e auth rebase
+/// (`dyld_chained_ptr_arm64e_auth_rebase`): dyld signs the rebased pointer with
+/// `key` and a discriminator built from `diversity`, blended with the slot's own
+/// address when `address_diversity` is set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PacAuth {
+    /// `ptrauth_key`: 0 = IA, 1 = IB, 2 = DA, 3 = DB.
+    pub key: u8,
+    /// The 16-bit constant discriminator.
+    pub diversity: u16,
+    /// Whether the slot address is blended into the discriminator.
+    pub address_diversity: bool,
 }
 
 impl ChainedFixups {
@@ -166,6 +183,12 @@ impl ChainedFixups {
     /// (out of scope).
     pub fn resolved_ptr(&self, va: u64) -> Option<u64> {
         self.rebases.get(&va).copied()
+    }
+
+    /// The signing context of the auth rebase at slot `va`; `None` for a plain
+    /// rebase, a bind, or a non-fixup slot.
+    pub fn pac_auth(&self, va: u64) -> Option<PacAuth> {
+        self.auth.get(&va).copied()
     }
 
     /// Every resolved rebase target, in no particular order.
@@ -488,6 +511,9 @@ fn walk_chain(
             let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
             if let Some(target) = decoded {
                 out.rebases.insert(va, target);
+                if let Some(auth) = auth_context(raw, pointer_format) {
+                    out.auth.insert(va, auth);
+                }
             } else if let Some((ordinal, addend)) = bind_entry(raw, pointer_format) {
                 if let Some((name, import_addend)) = imports.get(ordinal).filter(|(n, _)| !n.is_empty()) {
                     out.binds.insert(va, (Rc::clone(name), import_addend.wrapping_add(addend)));
@@ -546,8 +572,8 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
             }
             if auth == 1 {
                 // dyld_chained_ptr_arm64e_auth_rebase: target is the low 32 bits, an
-                // offset from the image base (diversity/addrDiv/key in 32..50 are
-                // the PAC signing context — stripped statically).
+                // offset from the image base; diversity/addrDiv/key in 32..50 are
+                // the signing context [`auth_context`] reads.
                 let target = raw & 0xFFFF_FFFF;
                 (next, Some(imagebase.wrapping_add(target)))
             } else {
@@ -598,6 +624,20 @@ fn bind_entry(raw: u64, pointer_format: u16) -> Option<(usize, i64)> {
 fn kernel_cache_rebase(raw: u64, pointer_format: u16) -> Option<(u64, u8, u64)> {
     matches!(pointer_format, ptr_format::PTR_64_KERNEL_CACHE | ptr_format::X86_64_KERNEL_CACHE)
         .then(|| ((raw >> 51) & 0xFFF, ((raw >> 30) & 3) as u8, raw & 0x3FFF_FFFF))
+}
+
+/// The signing context of an arm64e auth rebase word (`auth == 1`, `bind == 0`):
+/// `diversity` in bits 32..47, `addrDiv` in bit 48, `key` in bits 49..50.
+fn auth_context(raw: u64, pointer_format: u16) -> Option<PacAuth> {
+    let arm64e = matches!(
+        pointer_format,
+        ptr_format::ARM64E | ptr_format::ARM64E_USERLAND | ptr_format::ARM64E_USERLAND24
+    );
+    (arm64e && (raw >> 62) == 0b10).then(|| PacAuth {
+        key: ((raw >> 49) & 0b11) as u8,
+        diversity: ((raw >> 32) & 0xFFFF) as u16,
+        address_diversity: (raw >> 48) & 1 == 1,
+    })
 }
 
 /// Map a VMA to its file offset via the segment table (the inverse of the load
@@ -664,8 +704,8 @@ mod tests {
         assert_eq!(target, Some(0x1_0000_8028), "OFFSET form rebases imagebase + target");
     }
 
-    /// arm64e **auth-rebase**: the PAC/diversity/key bits (32..62) are stripped and
-    /// the low-32-bit target is rebased `imagebase + target`. `auth` is bit 63.
+    /// arm64e **auth-rebase**: the target ignores the signing bits (32..50) and is
+    /// the low-32-bit offset rebased `imagebase + target`. `auth` is bit 63.
     #[test]
     fn decode_arm64e_auth_rebase_strips_pac() {
         let imagebase = 0x1_0000_0000;
@@ -679,6 +719,27 @@ mod tests {
             Some(0x1_0000_8028),
             "auth-rebase strips PAC and rebases imagebase + 32-bit target"
         );
+    }
+
+    /// The chain walk keeps each auth rebase's signing context beside its target
+    /// and records none for a plain rebase.
+    #[test]
+    fn auth_rebase_keeps_key_and_diversity() {
+        let imagebase = 0x1_0000_0000;
+        let segs = [SegInfo { vmaddr: imagebase, fileoff: 0, filesize: 16 }];
+        let auth = (1u64 << 63) | (2u64 << 49) | (1u64 << 48) | (1u64 << 51) | (0x1234u64 << 32) | 0x8028;
+        let plain = 0x1_0000_8050u64;
+        let mut file = auth.to_le_bytes().to_vec();
+        file.extend(plain.to_le_bytes());
+        let mut out = ChainedFixups::default();
+        walk_chain(&file, &segs, imagebase, 8, ptr_format::ARM64E, imagebase, &[], &mut out);
+        assert_eq!(out.resolved_ptr(imagebase), Some(0x1_0000_8028));
+        assert_eq!(
+            out.pac_auth(imagebase),
+            Some(PacAuth { key: 2, diversity: 0x1234, address_diversity: true })
+        );
+        assert_eq!(out.resolved_ptr(imagebase + 8), Some(0x1_0000_8050));
+        assert_eq!(out.pac_auth(imagebase + 8), None);
     }
 
     /// arm64e **non-auth** rebase (plain ARM64E): the 43-bit target is a full
