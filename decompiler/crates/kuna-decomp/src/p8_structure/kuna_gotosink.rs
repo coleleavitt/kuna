@@ -16,6 +16,10 @@
 //!   `continue;`.  A region with a `break;` or `continue;` not enclosed by its
 //!   own loop or switch is left alone, because the new loop would capture it.
 //!
+//! An `if` on an exceptional edge (`itaniumeh`, `javatry`) is left where it is,
+//! and a function holding one keeps its nested lists: the try printers match
+//! that shape.
+//!
 //! Both rewrites only move list members under a new node; a label no carrier
 //! reaches any more is released (`kuna_gotolabel::release_converted_labels`).
 
@@ -37,6 +41,37 @@ fn if_goto(graph: &BlockGraph, id: BlockId) -> Option<BlockId> {
 fn plain_goto(graph: &BlockGraph, id: BlockId) -> Option<BlockId> {
     let b = graph.block(id);
     (b.get_type() == BlockType::Goto && b.get_goto_type() == block_flags::f_goto_goto).then(|| b.get_goto_target()).flatten()
+}
+
+/// Is the `if` `id` an exceptional edge (`eh_unwinding()`, `java_try()`,
+/// `java_throws()`)? The try printers read those as they are, so they never move.
+fn exceptional_if(data: &Funcdata, id: BlockId) -> bool {
+    use crate::userop::{BUILTIN_EH_UNWINDING, BUILTIN_JAVA_THROWS, BUILTIN_JAVA_TRY};
+    use kuna_num::opcodes::OpCode;
+    let graph = data.sblocks_ref();
+    let cond = graph.block(id).get_block(0);
+    let Some(bb) = graph.get_exit_leaf(cond).and_then(|l| graph.block(l).get_copy()) else { return false };
+    let Some(op) = data.bb_op_tail(bb).and_then(|o| data.obank().get(o)) else { return false };
+    if op.code() != OpCode::CPUI_CBRANCH {
+        return false;
+    }
+    let mut vn = op.get_in(1);
+    for _ in 0..4 {
+        let Some(def) = vn.and_then(|v| data.vbank().get(v)).and_then(|v| v.get_def()).and_then(|d| data.obank().get(d)) else {
+            return false;
+        };
+        match def.code() {
+            OpCode::CPUI_BOOL_NEGATE | OpCode::CPUI_COPY => vn = def.get_in(0),
+            OpCode::CPUI_CALLOTHER => {
+                return def.get_in(0).and_then(|v| data.vbank().get(v)).is_some_and(|v| {
+                    v.is_constant()
+                        && [BUILTIN_EH_UNWINDING, BUILTIN_JAVA_TRY, BUILTIN_JAVA_THROWS].iter().any(|&b| v.get_offset() == b as u64)
+                })
+            }
+            _ => return false,
+        }
+    }
+    false
 }
 
 /// Is there a `break;` or `continue;` under `nodes` that no loop or switch
@@ -116,6 +151,7 @@ fn loop_once(data: &mut Funcdata, list: BlockId) -> Option<BlockId> {
     let comps: Vec<BlockId> = graph.block(list).get_list().to_vec();
     for j in 0..comps.len() {
         let (target, conditional) = match (if_goto(graph, comps[j]), plain_goto(graph, comps[j])) {
+            (Some(_), _) if exceptional_if(data, comps[j]) => continue,
             (Some(t), _) => (t, true),
             (None, Some(t)) => (t, false),
             _ => continue,
@@ -152,6 +188,9 @@ fn sink_once(data: &mut Funcdata, list: BlockId) -> Option<BlockId> {
     let comps: Vec<BlockId> = graph.block(list).get_list().to_vec();
     for i in 0..comps.len() {
         let Some(target) = if_goto(graph, comps[i]) else { continue };
+        if exceptional_if(data, comps[i]) {
+            continue;
+        }
         let head = graph.get_front_leaf(target)?;
         let Some(j) = comps.iter().skip(i + 2).position(|&c| graph.get_front_leaf(c) == Some(head)).map(|p| p + i + 2) else { continue };
         if j - i - 1 > MAX_SUNK {
@@ -179,10 +218,29 @@ fn sink_once(data: &mut Funcdata, list: BlockId) -> Option<BlockId> {
     None
 }
 
+/// Does any `if` under `root` sit on an exceptional edge? The try printers
+/// read the nesting structuring left around one, so its lists stay unflattened.
+fn has_exceptional_if(data: &Funcdata, root: BlockId) -> bool {
+    let graph = data.sblocks_ref();
+    let mut stack = vec![root];
+    while let Some(id) = stack.pop() {
+        let b = graph.block(id);
+        if b.get_type() == BlockType::If && exceptional_if(data, id) {
+            return true;
+        }
+        for i in 0..b.get_size() {
+            stack.push(b.get_block(i));
+        }
+    }
+    false
+}
+
 /// Apply both rewrites to a fixpoint; returns how many fired.
 pub(crate) fn gotosink_apply(data: &mut Funcdata) -> i32 {
     let root = data.sblocks_root();
-    data.sblocks_mut().kuna_flatten_lists(root);
+    if !has_exceptional_if(data, root) {
+        data.sblocks_mut().kuna_flatten_lists(root);
+    }
     let mut count = 0;
     let mut released = Vec::new();
     for _ in 0..64 {

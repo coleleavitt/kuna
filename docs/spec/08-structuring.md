@@ -194,6 +194,11 @@ Labels no carrier reaches any more are released
 (`kuna_gotolabel::release_converted_labels`), and `mark_label_bump_up` runs
 again so a new loop prints its head's label above itself.
 
+An `if` whose condition is an exceptional edge (`eh_unwinding()` from
+`itaniumeh`, `java_try()`/`java_throws()` from `javatry`) is never moved or
+looped, and a function that holds one keeps its nested lists unflattened:
+the try printers recognise the shape structuring left around the edge.
+
 **`whilecontinue` — the continue point of a conditional loop.** With
 `whilecontinue on` (the default, and only while `loopcontinue` is on),
 `kuna_loopcontinue.rs (continue_points)` gives a conditional loop the leaf its
