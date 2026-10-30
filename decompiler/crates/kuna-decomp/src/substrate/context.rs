@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
+    pub type_vote: bool,
     /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
     pub switch_guard_merge: bool,
     /// Keep mapped global array bases separate from negative element offsets.
@@ -1951,6 +1953,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            type_vote: false,
             switch_guard_merge: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)

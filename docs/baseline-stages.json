@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3701,
-    3701
+    3703,
+    3703
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1170,6 +1170,8 @@
     "data:KUNA-THUNKENTRY #3: leaf is a function only with the option on, in fast and aggressive mode",
     "data:KUNA-THUNKENTRY #4: leaf decompiles to its own body",
     "data:KUNA-THUNKENTRY #5: the catalog documents it as a default-on P1 code/data-partition option",
+    "data:KUNA-TYPEVOTE #1: the voted shifts need no cast (default)",
+    "data:KUNA-TYPEVOTE #2: typevote off casts the undefined instances",
     "data:KUNA-UNMAPPEDENTRY #1: the option parses and round-trips in both directions, and is inert on the XML path -- the source form x <= 8 renders identically in all three passes",
     "data:KUNA-UNMAPPEDENTRY #2: the catalog documents it as a default-on P1 code/data-partition correctness fix, live-toggled back on",
     "data:KUNA-UNMAPPEDENTRY #3: the catalog row carries the correctness-fix change_kind an agent reads to judge the flip",

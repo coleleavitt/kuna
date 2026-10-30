@@ -50,6 +50,7 @@
 <symbol space="ram" offset="0x7011ab" name="report_clang_o2"/>
 </binaryimage>
 <script>
+  <com>option typevote off</com>
   <com>lo fu header_gcc_o0</com>
   <com>decompile</com>
   <com>print C</com>

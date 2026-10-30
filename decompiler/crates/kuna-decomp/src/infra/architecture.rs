@@ -672,6 +672,8 @@ pub struct Architecture {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
     pub dyn_alloca: bool,
+    /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
+    pub type_vote: bool,
     /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
     pub switch_guard_merge: bool,
     /// Keep mapped global array bases separate from negative element offsets
@@ -3231,6 +3233,7 @@ impl Architecture {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            type_vote: false,
             switch_guard_merge: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
@@ -3731,6 +3734,7 @@ impl Architecture {
         self.bit_idioms = true;
         self.helper_roles = true;
         self.dyn_alloca = true;
+        self.type_vote = true;
         self.switch_guard_merge = true;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
@@ -4728,6 +4732,7 @@ impl Architecture {
         ctx.bit_idioms = self.bit_idioms;
         ctx.helper_roles = self.helper_roles;
         ctx.dyn_alloca = self.dyn_alloca;
+        ctx.type_vote = self.type_vote;
         ctx.switch_guard_merge = self.switch_guard_merge;
         ctx.global_array_anchor = self.global_array_anchor;
         ctx.cancel_byte_arithmetic = self.cancel_byte_arithmetic; // cancelbytearithmetic

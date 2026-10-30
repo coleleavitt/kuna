@@ -179,6 +179,8 @@ Three tiers:
 | computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound) |
 | a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ... | [`switchguardmerge`](#switchguardmerge) |
 | a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
+| a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote) |
+| a cast back to a variable's own declared type at each read | [`typevote`](#typevote) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
 | pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
 | 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
@@ -1954,6 +1956,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see the guard and the separate equality tests the compiler emitted.
 - **Where / provenance:** P2/switch-model · kuna · presentation-default · kuna-switchguardmerge
 - **Example:** `--option switchguardmerge off`
+
+### `typevote` -- on | off, default `on`
+
+- **Symptoms:** a variable declared undefined4/undefined8 although it is shifted, masked or compared; a cast back to a variable's own declared type at each read.
+- **What it does:** Type a variable the type passes leave undefinedN by a vote over the ops that write and read it, once every variable is final. Logical shifts and zero extension vote unsigned; arithmetic shifts, sign extension and signed compares vote signed; a copy from or to an integer-typed value votes its signedness; other integer ops vote numeric (int on a tie, the C default); float ops vote float. A returned value is not voted and a parameter takes only an unsigned vote, so no signature changes; a piece of a union keeps its type. Merge copies added after type inference start untyped, so an unsigned int parameter printed (unsigned int)a1 at each read.
+- **When to flip:** On (default). Flip off to see which values type inference left undefined.
+- **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-typevote
+- **Example:** `--option typevote off`
 
 ### `switchsharedcase` -- on | off, default `on` (destructive opt-in)
 
