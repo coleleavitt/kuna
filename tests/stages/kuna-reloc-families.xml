@@ -1,0 +1,52 @@
+<decompilertest>
+<binaryimage arch="x86:LE:64:default">
+<!--
+    Kuna #63 (personal): P1 relocatable-object layout, instruction relocation
+    families (option relocobjects, default on). Objects built from
+    fixtures/relocs/t.c and a64.s as their headers say. Before this change
+    each family below was "unsupported" and its field kept the assembler's
+    placeholder: RISC-V HI20/LO12 data read as address 0 and the tail call a
+    switch, MIPS HI16/LO16 data read as dat_0 and the jal as sub_0, PPC32
+    ADDR16_HA/LO data read as dat_0.
+    #1-#2 AArch64 ADR_PREL_LO21, LD_PREL_LO19, MOVW_UABS_G1/G0_NC,
+    CONDBR19, TSTBR14. #3 RISC-V HI20/LO12_I/LO12_S. #4-#5 MIPS REL HI16/LO16
+    pairing and R_MIPS_26. #6-#7 PPC32 ADDR16_HA/LO and REL24.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">c3</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file tests/stages/fixtures/relocs/a64.o</com>
+  <com>read symbols</com>
+  <com>load function probe</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file tests/stages/fixtures/relocs/riscv64.o</com>
+  <com>read symbols</com>
+  <com>load function pick</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file tests/stages/fixtures/relocs/mips.o</com>
+  <com>read symbols</com>
+  <com>load function pick</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file tests/stages/fixtures/relocs/ppc32.o</com>
+  <com>read symbols</com>
+  <com>load function pick</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="relocs #1: AArch64 ADR, literal load and MOVW reach the extern data" min="1" max="1">return \(uint4\)\(dat_402004 \+ dat_402010 \+ dat_402008\);</stringmatch>
+<stringmatch name="relocs #2: AArch64 CBZ/TBNZ/B.cond reach their global labels" min="1" max="1">if \(a0 &gt;&gt; 3 &amp; 1\) \{</stringmatch>
+<stringmatch name="relocs #3: RISC-V HI20/LO12 resolve the global" min="1" max="1">dat_400078 \+= \(int4\)a0;</stringmatch>
+<stringmatch name="relocs #4: MIPS HI16/LO16 pairs resolve the global" min="1" max="1">dat_4000b0 \+= a0;</stringmatch>
+<stringmatch name="relocs #5: MIPS R_MIPS_26 calls the extern" min="1" max="1">return ext_fn\(-a0\);</stringmatch>
+<stringmatch name="relocs #6: PPC32 ADDR16_HA/LO resolve the global" min="1" max="1">dat_400090 \+= a0;</stringmatch>
+<stringmatch name="relocs #7: PPC32 REL24 calls the extern" min="1" max="1">v2 = ext_fn\(-a0\);</stringmatch>
+</decompilertest>

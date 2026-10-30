@@ -19,6 +19,9 @@
 
 use object::{elf, Architecture, Relocation, RelocationEncoding, RelocationFlags, RelocationKind};
 
+/// GNU's `R_MIPS_PC32`, which the `object` crate does not name.
+const R_MIPS_PC32: u32 = 248;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum RelocationFailure {
     Unsupported,
@@ -62,6 +65,28 @@ enum Specific {
     SparcWdisp30,
     SparcHi22 { pc: bool },
     SparcLo10 { pc: bool },
+    Aarch64AdrLo21,
+    Aarch64Imm19 { load: bool },
+    Aarch64Imm14,
+    Aarch64Movw { shift: u8, checked: bool },
+    RiscvHi20,
+    RiscvLo12 { store: bool },
+    RiscvPcrelHi20,
+    RiscvPcrelLo12 { store: bool },
+    RiscvCall,
+    RiscvBranch,
+    RiscvJal,
+    RiscvRvcBranch,
+    RiscvRvcJump,
+    RiscvAddSub { sub: bool },
+    RiscvSet,
+    Riscv6 { sub: bool },
+    MipsHi16,
+    MipsLo16,
+    Mips26,
+    MipsPc16,
+    PpcAddr16 { form: PpcHalf },
+    PpcRel14,
     Generic { bits: u8 },
 }
 
@@ -150,6 +175,16 @@ impl RelocationSpec {
                     | Specific::Aarch64Branch26
                     | Specific::Ppc64Rel24
                     | Specific::SparcWdisp30
+                    | Specific::Aarch64Imm19 { load: false }
+                    | Specific::Aarch64Imm14
+                    | Specific::RiscvCall
+                    | Specific::RiscvJal
+                    | Specific::RiscvBranch
+                    | Specific::RiscvRvcJump
+                    | Specific::RiscvRvcBranch
+                    | Specific::Mips26
+                    | Specific::MipsPc16
+                    | Specific::PpcRel14
             )
     }
 }
@@ -265,13 +300,103 @@ fn classify_info(
         (Architecture::Sparc | Architecture::Sparc32Plus, Some(elf::R_SPARC_PC10)) => {
             Some((Specific::SparcLo10 { pc: true }, false))
         }
+
+        (Architecture::Aarch64, Some(elf::R_AARCH64_ADR_PREL_LO21)) => {
+            Some((Specific::Aarch64AdrLo21, false))
+        }
+        (Architecture::Aarch64, Some(elf::R_AARCH64_CONDBR19)) => {
+            Some((Specific::Aarch64Imm19 { load: false }, false))
+        }
+        (Architecture::Aarch64, Some(elf::R_AARCH64_LD_PREL_LO19)) => {
+            Some((Specific::Aarch64Imm19 { load: true }, false))
+        }
+        (Architecture::Aarch64, Some(elf::R_AARCH64_TSTBR14)) => Some((Specific::Aarch64Imm14, false)),
+        (Architecture::Aarch64, Some(t @ elf::R_AARCH64_MOVW_UABS_G0..=elf::R_AARCH64_MOVW_UABS_G3)) => {
+            let group = ((t - elf::R_AARCH64_MOVW_UABS_G0) / 2) as u8;
+            let checked = (t - elf::R_AARCH64_MOVW_UABS_G0) % 2 == 0;
+            Some((Specific::Aarch64Movw { shift: group * 16, checked }, false))
+        }
+
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_RELAX | elf::R_RISCV_ALIGN)) => {
+            return Ok(None)
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_HI20)) => {
+            Some((Specific::RiscvHi20, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_LO12_I)) => {
+            Some((Specific::RiscvLo12 { store: false }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_LO12_S)) => {
+            Some((Specific::RiscvLo12 { store: true }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_PCREL_HI20)) => {
+            Some((Specific::RiscvPcrelHi20, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_PCREL_LO12_I)) => {
+            Some((Specific::RiscvPcrelLo12 { store: false }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_PCREL_LO12_S)) => {
+            Some((Specific::RiscvPcrelLo12 { store: true }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_CALL | elf::R_RISCV_CALL_PLT)) => {
+            Some((Specific::RiscvCall, true))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_BRANCH)) => {
+            Some((Specific::RiscvBranch, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_JAL)) => Some((Specific::RiscvJal, false)),
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_RVC_BRANCH)) => {
+            Some((Specific::RiscvRvcBranch, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_RVC_JUMP)) => {
+            Some((Specific::RiscvRvcJump, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(t @ elf::R_RISCV_ADD8..=elf::R_RISCV_SUB64)) => {
+            Some((Specific::RiscvAddSub { sub: t >= elf::R_RISCV_SUB8 }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_SET8 | elf::R_RISCV_SET16 | elf::R_RISCV_SET32)) => {
+            Some((Specific::RiscvSet, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_SET6)) => {
+            Some((Specific::Riscv6 { sub: false }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_SUB6)) => {
+            Some((Specific::Riscv6 { sub: true }, false))
+        }
+        (Architecture::Riscv32 | Architecture::Riscv64, Some(elf::R_RISCV_32_PCREL)) => {
+            Some((Specific::PcRelativeData, false))
+        }
+
+        (Architecture::Mips | Architecture::Mips64, Some(elf::R_MIPS_JALR)) => return Ok(None),
+        (Architecture::Mips | Architecture::Mips64, Some(elf::R_MIPS_HI16)) => Some((Specific::MipsHi16, false)),
+        (Architecture::Mips | Architecture::Mips64, Some(elf::R_MIPS_LO16)) => Some((Specific::MipsLo16, false)),
+        (Architecture::Mips | Architecture::Mips64, Some(elf::R_MIPS_26)) => Some((Specific::Mips26, true)),
+        (Architecture::Mips | Architecture::Mips64, Some(elf::R_MIPS_PC16)) => Some((Specific::MipsPc16, false)),
+        (Architecture::Mips | Architecture::Mips64, Some(R_MIPS_PC32)) => Some((Specific::PcRelativeData, false)),
+
+        (Architecture::PowerPc, Some(elf::R_PPC_NONE)) => return Ok(None),
+        (Architecture::PowerPc, Some(elf::R_PPC_ADDR16)) => Some((Specific::PpcAddr16 { form: PpcHalf::Plain }, false)),
+        (Architecture::PowerPc, Some(elf::R_PPC_ADDR16_LO)) => Some((Specific::PpcAddr16 { form: PpcHalf::Lo }, false)),
+        (Architecture::PowerPc, Some(elf::R_PPC_ADDR16_HI)) => Some((Specific::PpcAddr16 { form: PpcHalf::Hi }, false)),
+        (Architecture::PowerPc, Some(elf::R_PPC_ADDR16_HA)) => Some((Specific::PpcAddr16 { form: PpcHalf::Ha }, false)),
+        (Architecture::PowerPc, Some(elf::R_PPC_REL24 | elf::R_PPC_PLTREL24 | elf::R_PPC_LOCAL24PC)) => {
+            Some((Specific::Ppc64Rel24, true))
+        }
+        (Architecture::PowerPc, Some(elf::R_PPC_REL14 | elf::R_PPC_REL14_BRTAKEN | elf::R_PPC_REL14_BRNTAKEN)) => {
+            Some((Specific::PpcRel14, false))
+        }
+        (Architecture::PowerPc, Some(elf::R_PPC_REL32)) => Some((Specific::PcRelativeData, false)),
         _ => None,
     };
 
     if let Some((specific, call)) = specific {
         let width = match specific {
-            Specific::Ppc64Toc16 { .. } => 2,
-            Specific::Ppc64Toc64 => 8,
+            Specific::Ppc64Toc16 { .. } | Specific::PpcAddr16 { .. } => 2,
+            Specific::RiscvRvcBranch | Specific::RiscvRvcJump => 2,
+            Specific::Ppc64Toc64 | Specific::RiscvCall => 8,
+            Specific::RiscvAddSub { .. } | Specific::RiscvSet | Specific::Riscv6 { .. } => {
+                riscv_data_width(r_type.unwrap_or(0))
+            }
             _ => 4,
         };
         return Ok(Some(RelocationSpec {
@@ -379,8 +504,391 @@ fn apply_info(
         Specific::SparcLo10 { pc } => {
             sparc_lo10(field, little_endian, reloc, symbol, pc.then_some(place))
         }
+        Specific::Aarch64AdrLo21 => aarch64_adr_lo21(field, little_endian, reloc, symbol, place),
+        Specific::Aarch64Imm19 { .. } => aarch64_pcrel_imm(field, little_endian, reloc, symbol, place, 19),
+        Specific::Aarch64Imm14 => aarch64_pcrel_imm(field, little_endian, reloc, symbol, place, 14),
+        Specific::Aarch64Movw { shift, checked } => {
+            aarch64_movw(field, little_endian, reloc, symbol, shift, checked)
+        }
+        Specific::RiscvHi20 => riscv_u_type(field, reloc, symbol as i128 + reloc.addend as i128),
+        Specific::RiscvLo12 { store } => {
+            riscv_lo12(field, reloc, symbol as i128 + reloc.addend as i128, store)
+        }
+        Specific::RiscvPcrelHi20 => {
+            riscv_u_type(field, reloc, riscv_pcrel_value(reloc, symbol, place))
+        }
+        // `symbol` is the paired PCREL_HI20's own `S + A - P`.
+        Specific::RiscvPcrelLo12 { store } => {
+            riscv_lo12(field, reloc, symbol as i64 as i128 + reloc.addend as i128, store)
+        }
+        Specific::RiscvCall => riscv_call(field, reloc, symbol, place),
+        Specific::RiscvBranch => riscv_branch(field, reloc, symbol, place),
+        Specific::RiscvJal => riscv_jal(field, reloc, symbol, place),
+        Specific::RiscvRvcBranch => riscv_rvc_branch(field, reloc, symbol, place),
+        Specific::RiscvRvcJump => riscv_rvc_jump(field, reloc, symbol, place),
+        Specific::RiscvAddSub { sub } => {
+            let old = read_integer(field, true) as i128;
+            let delta = symbol as i128 + reloc.addend as i128;
+            write_integer(field, true, (if sub { old - delta } else { old + delta }) as u64);
+            Ok(())
+        }
+        Specific::RiscvSet => {
+            write_integer(field, true, (symbol as i128 + reloc.addend as i128) as u64);
+            Ok(())
+        }
+        Specific::Riscv6 { sub } => {
+            let old = (field[0] & 0x3f) as i128;
+            let delta = symbol as i128 + reloc.addend as i128;
+            let value = if sub { old - delta } else { delta };
+            field[0] = (field[0] & 0xc0) | ((value as u8) & 0x3f);
+            Ok(())
+        }
+        Specific::MipsHi16 => mips_hi16(field, little_endian, reloc, symbol, None),
+        Specific::MipsLo16 => mips_lo16(field, little_endian, reloc, symbol),
+        Specific::Mips26 => mips_26(field, little_endian, reloc, symbol, place),
+        Specific::MipsPc16 => mips_pc16(field, little_endian, reloc, symbol, place),
+        Specific::PpcAddr16 { form } => ppc_addr16(field, little_endian, reloc, symbol, form),
+        Specific::PpcRel14 => ppc_rel14(field, little_endian, reloc, symbol, place),
         Specific::Generic { bits } => generic(field, little_endian, reloc, symbol, place, bits),
     }
+}
+
+/// Byte width of a RISC-V `ADD*`/`SUB*`/`SET*` data relocation.
+fn riscv_data_width(r_type: u32) -> usize {
+    match r_type {
+        elf::R_RISCV_ADD8 | elf::R_RISCV_SUB8 | elf::R_RISCV_SET8 | elf::R_RISCV_SET6 | elf::R_RISCV_SUB6 => 1,
+        elf::R_RISCV_ADD16 | elf::R_RISCV_SUB16 | elf::R_RISCV_SET16 => 2,
+        elf::R_RISCV_ADD64 | elf::R_RISCV_SUB64 => 8,
+        _ => 4,
+    }
+}
+
+fn riscv_pcrel_value(reloc: RelocationInfo, symbol: u64, place: u64) -> i128 {
+    symbol as i128 + reloc.addend as i128 - place as i128
+}
+
+/// `S + A - P` of a RISC-V `PCREL_HI20`, which the `PCREL_LO12_*` naming its
+/// label takes the low twelve bits of.
+pub fn riscv_pcrel_hi_value(reloc: &Relocation, symbol: u64, place: u64) -> i128 {
+    riscv_pcrel_value(RelocationInfo::from(reloc), symbol, place)
+}
+
+impl RelocationSpec {
+    /// A RISC-V `PCREL_HI20`, whose value the paired low part needs.
+    pub fn is_riscv_pcrel_hi(self) -> bool {
+        matches!(self.specific, Specific::RiscvPcrelHi20)
+    }
+
+    /// A RISC-V `PCREL_LO12_*`, whose symbol is the label of its `PCREL_HI20`.
+    pub fn is_riscv_pcrel_lo(self) -> bool {
+        matches!(self.specific, Specific::RiscvPcrelLo12 { .. })
+    }
+
+    /// A MIPS `HI16`, whose REL addend is completed by the next `LO16`.
+    pub fn is_mips_hi16(self) -> bool {
+        matches!(self.specific, Specific::MipsHi16)
+    }
+
+    /// A MIPS `LO16`.
+    pub fn is_mips_lo16(self) -> bool {
+        matches!(self.specific, Specific::MipsLo16)
+    }
+}
+
+/// Patch a REL MIPS `HI16` once its `LO16` is known: `AHL = (AHI << 16) +
+/// sext(ALO)`, and the field takes the carry-adjusted high half of `S + AHL`.
+pub fn mips_hi16_with_lo(
+    reloc: &Relocation,
+    hi_field: &mut [u8],
+    lo_field: &[u8],
+    little_endian: bool,
+    symbol: u64,
+) -> Result<(), RelocationFailure> {
+    let lo = read_u32(lo_field, little_endian) & 0xffff;
+    mips_hi16(hi_field, little_endian, RelocationInfo::from(reloc), symbol, Some(lo as i16 as i128))
+}
+
+fn aarch64_adr_lo21(
+    field: &mut [u8],
+    le: bool,
+    reloc: RelocationInfo,
+    symbol: u64,
+    place: u64,
+) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    if insn & 0x9f00_0000 != 0x1000_0000 {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let encoded = ((((insn >> 5) & 0x7ffff) as i128) << 2) | (((insn >> 29) & 3) as i128);
+    let value = symbol as i128 + explicit_plus_implicit(reloc, sign_extend(encoded, 21)) - place as i128;
+    require_signed(value, 21)?;
+    let raw = value as u32;
+    insn = (insn & !0x60ff_ffe0) | ((raw & 3) << 29) | (((raw >> 2) & 0x7ffff) << 5);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// `CONDBR19`/`LD_PREL_LO19` (19-bit word offset at bit 5) and `TSTBR14`
+/// (14-bit word offset at bit 5): `(S + A - P) >> 2`.
+fn aarch64_pcrel_imm(
+    field: &mut [u8],
+    le: bool,
+    reloc: RelocationInfo,
+    symbol: u64,
+    place: u64,
+    bits: u8,
+) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    let matches = if bits == 14 {
+        insn & 0x7e00_0000 == 0x3600_0000
+    } else {
+        insn & 0xff00_0010 == 0x5400_0000 || insn & 0x7e00_0000 == 0x3400_0000 || insn & 0x3b00_0000 == 0x1800_0000
+    };
+    if !matches {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let mask = (1u32 << bits) - 1;
+    let implicit = sign_extend((((insn >> 5) & mask) as i128) << 2, bits + 2);
+    let value = symbol as i128 + explicit_plus_implicit(reloc, implicit) - place as i128;
+    require_aligned(value, 4)?;
+    require_signed(value, bits + 2)?;
+    insn = (insn & !(mask << 5)) | ((((value >> 2) as u32) & mask) << 5);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// `MOVW_UABS_G<n>[_NC]`: bits `shift..shift+15` of `S + A` into MOVZ/MOVK's
+/// imm16; the checked forms require the value to fit below the group's top.
+fn aarch64_movw(
+    field: &mut [u8],
+    le: bool,
+    reloc: RelocationInfo,
+    symbol: u64,
+    shift: u8,
+    checked: bool,
+) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    if insn & 0x1f80_0000 != 0x1280_0000 {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let implicit = ((((insn >> 5) & 0xffff) as i128) << shift) as i128;
+    let value = symbol as i128 + explicit_plus_implicit(reloc, implicit);
+    if checked && (value < 0 || (shift < 48 && value >= 1i128 << (shift + 16))) {
+        return Err(RelocationFailure::OutOfRange);
+    }
+    insn = (insn & !(0xffff << 5)) | ((((value >> shift) as u32) & 0xffff) << 5);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// The high part of a U-type instruction (`lui`/`auipc`): `(value + 0x800) >> 12`.
+fn riscv_u_type(field: &mut [u8], reloc: RelocationInfo, value: i128) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, true);
+    if reloc.implicit_addend || !matches!(insn & 0x7f, 0x37 | 0x17) {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    require_signed(value + 0x800, 32)?;
+    insn = (insn & 0xfff) | (((value + 0x800) as u32) & 0xffff_f000);
+    write_u32(field, true, insn);
+    Ok(())
+}
+
+/// The low twelve bits into an I-type (`addi`, loads, `jalr`) or S-type (stores)
+/// immediate.
+fn riscv_lo12(field: &mut [u8], reloc: RelocationInfo, value: i128, store: bool) -> Result<(), RelocationFailure> {
+    if reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let mut insn = read_u32(field, true);
+    let lo = (value as u32) & 0xfff;
+    insn = if store {
+        (insn & 0x01ff_f07f) | ((lo >> 5) << 25) | ((lo & 0x1f) << 7)
+    } else {
+        (insn & 0x000f_ffff) | (lo << 20)
+    };
+    write_u32(field, true, insn);
+    Ok(())
+}
+
+/// `auipc ra, %hi; jalr ra, %lo(ra)`: the 8-byte `CALL`/`CALL_PLT` pair.
+fn riscv_call(field: &mut [u8], reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let value = riscv_pcrel_value(reloc, symbol, place);
+    let jalr = read_u32(&field[4..], true);
+    if jalr & 0x707f != 0x0067 {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    riscv_u_type(&mut field[..4], reloc, value)?;
+    riscv_lo12(&mut field[4..], reloc, value, false)
+}
+
+fn riscv_branch(field: &mut [u8], reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, true);
+    if insn & 0x7f != 0x63 || reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = riscv_pcrel_value(reloc, symbol, place);
+    require_aligned(value, 2)?;
+    require_signed(value, 13)?;
+    let v = value as u32;
+    insn = (insn & 0x01ff_f07f)
+        | (((v >> 12) & 1) << 31)
+        | (((v >> 5) & 0x3f) << 25)
+        | (((v >> 1) & 0xf) << 8)
+        | (((v >> 11) & 1) << 7);
+    write_u32(field, true, insn);
+    Ok(())
+}
+
+fn riscv_jal(field: &mut [u8], reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, true);
+    if insn & 0x7f != 0x6f || reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = riscv_pcrel_value(reloc, symbol, place);
+    require_aligned(value, 2)?;
+    require_signed(value, 21)?;
+    let v = value as u32;
+    insn = (insn & 0xfff)
+        | (((v >> 20) & 1) << 31)
+        | (((v >> 1) & 0x3ff) << 21)
+        | (((v >> 11) & 1) << 20)
+        | (((v >> 12) & 0xff) << 12);
+    write_u32(field, true, insn);
+    Ok(())
+}
+
+fn riscv_rvc_branch(field: &mut [u8], reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u16(field, true);
+    if insn & 0xc003 != 0xc001 || reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = riscv_pcrel_value(reloc, symbol, place);
+    require_aligned(value, 2)?;
+    require_signed(value, 9)?;
+    let v = value as u16;
+    insn = (insn & 0xe383)
+        | (((v >> 8) & 1) << 12)
+        | (((v >> 3) & 3) << 10)
+        | (((v >> 6) & 3) << 5)
+        | (((v >> 1) & 3) << 3)
+        | (((v >> 5) & 1) << 2);
+    write_u16(field, true, insn);
+    Ok(())
+}
+
+fn riscv_rvc_jump(field: &mut [u8], reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u16(field, true);
+    if insn & 0x6003 != 0x2001 || reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = riscv_pcrel_value(reloc, symbol, place);
+    require_aligned(value, 2)?;
+    require_signed(value, 12)?;
+    let v = value as u16;
+    insn = (insn & 0xe003)
+        | (((v >> 11) & 1) << 12)
+        | (((v >> 4) & 1) << 11)
+        | (((v >> 8) & 3) << 9)
+        | (((v >> 10) & 1) << 8)
+        | (((v >> 6) & 1) << 7)
+        | (((v >> 7) & 1) << 6)
+        | (((v >> 1) & 7) << 3)
+        | (((v >> 5) & 1) << 2);
+    write_u16(field, true, insn);
+    Ok(())
+}
+
+/// `HI16`: the carry-adjusted high half of `S + A`. A REL object's addend is
+/// split across the HI16/LO16 pair, so the caller passes the LO16's half
+/// (`lo`); a RELA addend is complete.
+fn mips_hi16(
+    field: &mut [u8],
+    le: bool,
+    reloc: RelocationInfo,
+    symbol: u64,
+    lo: Option<i128>,
+) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    let addend = if reloc.implicit_addend {
+        (((insn & 0xffff) as i128) << 16) + lo.ok_or(RelocationFailure::InvalidEncoding)?
+    } else {
+        reloc.addend as i128
+    };
+    let value = symbol as i128 + addend;
+    insn = (insn & 0xffff_0000) | ((((value + 0x8000) >> 16) as u32) & 0xffff);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+fn mips_lo16(field: &mut [u8], le: bool, reloc: RelocationInfo, symbol: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    let value = symbol as i128 + explicit_plus_implicit(reloc, (insn & 0xffff) as i16 as i128);
+    insn = (insn & 0xffff_0000) | ((value as u32) & 0xffff);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// `R_MIPS_26` (`j`/`jal`): the word index of `S + A` within the 256 MiB
+/// region of the delay slot.
+fn mips_26(field: &mut [u8], le: bool, reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    if !matches!(insn >> 26, 2 | 3) {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = symbol as i128 + explicit_plus_implicit(reloc, ((insn & 0x03ff_ffff) as i128) << 2);
+    require_aligned(value, 4)?;
+    if (value as u64) & 0xf000_0000 != place.wrapping_add(4) & 0xf000_0000 {
+        return Err(RelocationFailure::OutOfRange);
+    }
+    insn = (insn & 0xfc00_0000) | (((value >> 2) as u32) & 0x03ff_ffff);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// `R_MIPS_PC16`: `(S + A - P) >> 2` into a branch's 16-bit offset.
+fn mips_pc16(field: &mut [u8], le: bool, reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    let implicit = ((insn & 0xffff) as i16 as i128) << 2;
+    let value = symbol as i128 + explicit_plus_implicit(reloc, implicit) - place as i128;
+    require_aligned(value, 4)?;
+    require_signed(value, 18)?;
+    insn = (insn & 0xffff_0000) | (((value >> 2) as u32) & 0xffff);
+    write_u32(field, le, insn);
+    Ok(())
+}
+
+/// `R_PPC_ADDR16{,_LO,_HI,_HA}`: a half of `S + A` into a 16-bit field.
+fn ppc_addr16(field: &mut [u8], le: bool, reloc: RelocationInfo, symbol: u64, form: PpcHalf) -> Result<(), RelocationFailure> {
+    if reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = symbol as i128 + reloc.addend as i128;
+    let encoded = match form {
+        PpcHalf::Plain => {
+            require_signed(value, 16)?;
+            value as u16
+        }
+        PpcHalf::Lo => value as u16,
+        PpcHalf::Hi => (value >> 16) as u16,
+        PpcHalf::Ha => ((value + 0x8000) >> 16) as u16,
+        PpcHalf::Ds | PpcHalf::LoDs => return Err(RelocationFailure::Unsupported),
+    };
+    write_u16(field, le, encoded);
+    Ok(())
+}
+
+/// `R_PPC_REL14*`: a conditional branch's 14-bit word displacement.
+fn ppc_rel14(field: &mut [u8], le: bool, reloc: RelocationInfo, symbol: u64, place: u64) -> Result<(), RelocationFailure> {
+    let mut insn = read_u32(field, le);
+    if insn >> 26 != 16 || reloc.implicit_addend {
+        return Err(RelocationFailure::InvalidEncoding);
+    }
+    let value = symbol as i128 + reloc.addend as i128 - place as i128;
+    require_aligned(value, 4)?;
+    require_signed(value, 16)?;
+    insn = (insn & !0xfffc) | ((value as u32) & 0xfffc);
+    write_u32(field, le, insn);
+    Ok(())
 }
 
 fn explicit_plus_implicit(reloc: RelocationInfo, implicit: i128) -> i128 {
@@ -1894,5 +2402,87 @@ mod sparc_tests {
             classify_info(Architecture::Sparc64, rela(elf::R_SPARC_WDISP30, 0)).err(),
             Some(RelocationFailure::Unsupported)
         );
+    }
+}
+
+#[cfg(test)]
+mod family_tests {
+    use super::*;
+    use object::{RelocationEncoding, RelocationKind};
+
+    fn reloc(r_type: u32, implicit: bool) -> RelocationInfo {
+        RelocationInfo {
+            kind: RelocationKind::Unknown,
+            encoding: RelocationEncoding::Unknown,
+            size: 0,
+            addend: 0,
+            implicit_addend: implicit,
+            r_type: Some(r_type),
+        }
+    }
+
+    #[test]
+    fn riscv_split_immediates_encode_branch_jal_and_call_pairs() {
+        let branch = reloc(elf::R_RISCV_BRANCH, false);
+        let spec = classify_info(Architecture::Riscv64, branch).unwrap().unwrap();
+        let mut bytes = 0x0000_0063u32.to_le_bytes(); // beq x0, x0, 0
+        apply_info(spec, branch, &mut bytes, true, 0x1000 - 0x10, 0x1000, None, None).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), 0xfe00_08e3); // beq x0, x0, -16
+        let jal = reloc(elf::R_RISCV_JAL, false);
+        let spec = classify_info(Architecture::Riscv64, jal).unwrap().unwrap();
+        let mut bytes = 0x0000_00efu32.to_le_bytes(); // jal ra, 0
+        apply_info(spec, jal, &mut bytes, true, 0x1800, 0x1000, None, None).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), 0x0010_00ef); // +0x800: imm[11] is bit 20
+        let call = reloc(elf::R_RISCV_CALL_PLT, false);
+        let spec = classify_info(Architecture::Riscv64, call).unwrap().unwrap();
+        assert_eq!(spec.width(), 8);
+        let mut bytes = [0x97, 0x00, 0x00, 0x00, 0xe7, 0x80, 0x00, 0x00]; // auipc ra,0; jalr ra
+        apply_info(spec, call, &mut bytes, true, 0x2000 + 0x1ff8, 0x2000, None, None).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes[..4].try_into().unwrap()), 0x0000_2097); // %hi = 2
+        assert_eq!(u32::from_le_bytes(bytes[4..].try_into().unwrap()) >> 20, 0xff8); // %lo = -8
+    }
+
+    #[test]
+    fn mips_rel_hi16_takes_the_carry_from_its_lo16() {
+        let hi = reloc(elf::R_MIPS_HI16, true);
+        let lo = reloc(elf::R_MIPS_LO16, true);
+        let lo_spec = classify_info(Architecture::Mips, lo).unwrap().unwrap();
+        let mut hi_bytes = 0x3c02_0000u32.to_be_bytes(); // lui v0, 0
+        let mut lo_bytes = 0x8c42_0004u32.to_be_bytes(); // lw v0, 4(v0)
+        let lo_before = lo_bytes;
+        // S = 0x1234_fffc: S + 4 carries into the high half.
+        mips_hi16(&mut hi_bytes, false, hi, 0x1234_fffc, Some(4)).unwrap();
+        apply_info(lo_spec, lo, &mut lo_bytes, false, 0x1234_fffc, 0, None, None).unwrap();
+        assert_ne!(lo_bytes, lo_before);
+        assert_eq!(u32::from_be_bytes(hi_bytes), 0x3c02_1235);
+        assert_eq!(u32::from_be_bytes(lo_bytes), 0x8c42_0000);
+    }
+
+    #[test]
+    fn aarch64_movw_groups_and_short_branches() {
+        let g1 = reloc(elf::R_AARCH64_MOVW_UABS_G1, false);
+        let spec = classify_info(Architecture::Aarch64, g1).unwrap().unwrap();
+        let mut bytes = 0xd2a0_000au32.to_le_bytes(); // movz x10, #0, lsl 16
+        apply_info(spec, g1, &mut bytes, true, 0x0012_3456, 0, None, None).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), 0xd2a0_024a); // #0x12, lsl 16
+        assert_eq!(
+            apply_info(spec, g1, &mut 0xd2a0_000au32.to_le_bytes(), true, 0x1_0000_0000, 0, None, None),
+            Err(RelocationFailure::OutOfRange)
+        );
+        let tbz = reloc(elf::R_AARCH64_TSTBR14, false);
+        let spec = classify_info(Architecture::Aarch64, tbz).unwrap().unwrap();
+        let mut bytes = 0x3718_0000u32.to_le_bytes(); // tbnz w0, #3, .
+        apply_info(spec, tbz, &mut bytes, true, 0x1020, 0x1000, None, None).unwrap();
+        assert_eq!(u32::from_le_bytes(bytes), 0x3718_0100);
+    }
+
+    #[test]
+    fn ppc32_half_relocations_split_the_address() {
+        let ha = reloc(elf::R_PPC_ADDR16_HA, false);
+        let spec = classify_info(Architecture::PowerPc, ha).unwrap().unwrap();
+        assert_eq!(spec.width(), 2);
+        let mut bytes = [0, 0];
+        apply_info(spec, ha, &mut bytes, false, 0x1234_8000, 0, None, None).unwrap();
+        assert_eq!(bytes, [0x12, 0x35]);
     }
 }

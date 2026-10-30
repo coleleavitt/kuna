@@ -45,6 +45,10 @@ decompiler/target/release/kuna test --datatests --datatests-dir tests/stages \
     --save-baseline docs/baseline-stages.json
 ```
 
+`kuna-reloc-families.xml` loads relocatable objects (`fixtures/relocs/`, built by
+`zig cc` as their sources say) for the AArch64, RISC-V, MIPS and PPC32
+instruction relocation families.
+
 ## Testcase conventions
 
 Each `.xml` is a standard `<decompilertest>` (bytechunks + console script +

@@ -624,7 +624,23 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   the object's byte order, plus the instruction fields and ABI formulas for ARM
   `CALL`/`JUMP24`/Thumb branches/`REL32`/`PREL31`, AArch64 branch/page/low-12
   forms, PowerPC64 `REL24`/TOC forms, and 32-bit SPARC `WDISP30`/`WPLT30`/
-  `HI22`/`LO10`/`PC22`/`PC10`/`DISP32` forms. An entry that cannot be encoded is left
+  `HI22`/`LO10`/`PC22`/`PC10`/`DISP32` forms. AArch64 also covers `ADR_PREL_LO21`,
+  `LD_PREL_LO19`, `CONDBR19`, `TSTBR14` and `MOVW_UABS_G0..G3` (the checked
+  groups range-checked). RISC-V covers `HI20`/`LO12_I`/`LO12_S`,
+  `PCREL_HI20`/`PCREL_LO12_I`/`PCREL_LO12_S`, the 8-byte `CALL`/`CALL_PLT`
+  `auipc`+`jalr` pair, `BRANCH`, `JAL`, the two compressed branches, the
+  `ADD`/`SUB`/`SET` data families and `32_PCREL`; `RELAX` and `ALIGN` are no-ops,
+  since the layout keeps the assembler's bytes. A `PCREL_LO12` names the label of
+  its `auipc` rather than the target, so each section's `PCREL_HI20` values are
+  kept by place and the low half takes the low twelve bits of that value. MIPS
+  covers `HI16`/`LO16`, `R_MIPS_26`, `PC16` and `PC32` (`JALR` is a hint). A REL
+  object splits a `HI16`'s addend across the pair, so each `HI16` waits for the
+  next `LO16` against the same symbol and takes the carry-adjusted high half of
+  `S + (AHI << 16) + sext(ALO)`; a `HI16` that never meets one is reported as
+  unresolved. GOT-relative MIPS forms (`GOT16`, `CALL16`, `GPREL16`) still need a
+  synthesized GOT and `_gp`. 32-bit PowerPC covers `ADDR16`/`_LO`/`_HI`/`_HA`,
+  `REL24`/`PLTREL24`/`LOCAL24PC`, `REL14` and its branch-hint forms, and
+  `REL32`. An entry that cannot be encoded is left
   untouched and classified by reason (unsupported, unresolved target, missing
   TOC, section bounds, required veneer, alignment, range, or invalid encoding).
   The loader reports exact failure totals in at most eight groups with three

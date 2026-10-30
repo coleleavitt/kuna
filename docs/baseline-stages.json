@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3367,
-    3367
+    3374,
+    3374
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2941,6 +2941,13 @@
     "data:regsigned #4: by default (option off) each load carries a widening cast",
     "data:regsigned #5: a web with an input that is no sign extension keeps the register width in both passes",
     "data:regsigned #6: a value stored to a 4-byte frame slot keeps the register width in both passes",
+    "data:relocs #1: AArch64 ADR, literal load and MOVW reach the extern data",
+    "data:relocs #2: AArch64 CBZ/TBNZ/B.cond reach their global labels",
+    "data:relocs #3: RISC-V HI20/LO12 resolve the global",
+    "data:relocs #4: MIPS HI16/LO16 pairs resolve the global",
+    "data:relocs #5: MIPS R_MIPS_26 calls the extern",
+    "data:relocs #6: PPC32 ADDR16_HA/LO resolve the global",
+    "data:relocs #7: PPC32 REL24 calls the extern",
     "data:rename after rebuilding updates initializer fields",
     "data:rename after rebuilding updates the call view",
     "data:retsplitglobal #1: the shared epilogue is cloned into all three predecessors with the option off and emitted once with it on",

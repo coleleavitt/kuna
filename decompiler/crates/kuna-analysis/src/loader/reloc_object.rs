@@ -380,6 +380,11 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 little_endian,
             ));
         }
+        // RISC-V `PCREL_HI20` values by place, for the `PCREL_LO12_*` that name
+        // their label; MIPS REL `HI16`s waiting for the `LO16` that completes
+        // their addend.
+        let mut riscv_hi: HashMap<u64, i128> = HashMap::new();
+        let mut mips_hi: Vec<(usize, object::Relocation, u64)> = Vec::new();
         for (offset, reloc) in relocs {
             let r_type = match reloc.flags() {
                 RelocationFlags::Elf { r_type } => Some(r_type),
@@ -460,18 +465,68 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 continue;
             };
             let place = sec_vma.wrapping_add(offset);
+            if spec.is_mips_hi16() && reloc.has_implicit_addend() {
+                mips_hi.push((off, reloc, target.address));
+                continue;
+            }
+            if spec.is_mips_lo16() && reloc.has_implicit_addend() {
+                let (paired, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut mips_hi)
+                    .into_iter()
+                    .partition(|(_, hi, address)| hi.target() == reloc.target() && *address == target.address);
+                mips_hi = rest;
+                let lo_field = laid[li].data[off..end].to_vec();
+                for (hi_off, hi, address) in paired {
+                    if let Err(reason) = reloc_apply::mips_hi16_with_lo(
+                        &hi,
+                        &mut laid[li].data[hi_off..hi_off + 4],
+                        &lo_field,
+                        little_endian,
+                        address,
+                    ) {
+                        diagnostics.record(architecture, r_type, reason, sec_vma, hi_off as u64);
+                    }
+                }
+            }
+            let symbol = if spec.is_riscv_pcrel_lo() {
+                match riscv_hi.get(&target.address) {
+                    Some(value) => *value as u64,
+                    None => {
+                        diagnostics.record(
+                            architecture,
+                            r_type,
+                            RelocationFailure::UnresolvedTarget,
+                            sec_vma,
+                            offset,
+                        );
+                        continue;
+                    }
+                }
+            } else {
+                target.address
+            };
             if let Err(reason) = reloc_apply::apply(
                 spec,
                 &reloc,
                 &mut laid[li].data[off..end],
                 little_endian,
-                target.address,
+                symbol,
                 place,
                 target.thumb,
                 toc,
             ) {
                 diagnostics.record(architecture, r_type, reason, sec_vma, offset);
+            } else if spec.is_riscv_pcrel_hi() {
+                riscv_hi.insert(place, reloc_apply::riscv_pcrel_hi_value(&reloc, target.address, place));
             }
+        }
+        for (hi_off, _, _) in mips_hi {
+            diagnostics.record(
+                architecture,
+                None,
+                RelocationFailure::UnresolvedTarget,
+                sec_vma,
+                hi_off as u64,
+            );
         }
     }
 
