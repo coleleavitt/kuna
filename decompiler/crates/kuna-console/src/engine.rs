@@ -3241,6 +3241,9 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (kuna) Swift runtime-metadata recovery — default-OFF (output-changing:
         // names stripped functions and descriptor records).
         "swiftmetadata" => arch.analysis_swiftmetadata,
+        // (kuna) The Swift runtime prototypes — default-ON (a Swift image's
+        // runtime calls are the same functions everywhere).
+        "swiftruntime" => arch.analysis_swiftruntime,
         // (kuna) Mach-O `__cfstring` constant-string recovery — default-off,
         // output-changing (renders CFString constants as literals + adds `char[N]`
         // symbols). Registered here so the fail-open `_ => true` never silently
@@ -4711,6 +4714,7 @@ fn commit_analysis_output(
             out.swift_types.models = swift.models;
             out.swift_types.input_hints = swift.input_hints;
             out.swift_types.regs = swift.regs;
+            out.swift_types.declared = swift.declared;
         }
     } else {
         out.swift_types = Default::default();
@@ -5740,6 +5744,35 @@ fn commit_analysis_output(
             locks.retain(|(i, _, _)| *i != fact.index);
             locks.push((fact.index, fact.name.clone(), piece));
         }
+        // (kuna `swiftcall`) Declared prototypes from mangled names: the
+        // pieces parked by address under their model, `self` pinned to the
+        // `swiftself` register as explicit input storage.
+        for fact in &out.swift_types.declared {
+            let Some(model) = prog.arch().get_model(fact.model).cloned() else { continue };
+            let mut pieces = fact.pieces.clone();
+            if let Some(slot) = fact.self_slot {
+                let Ok(loc) = prog.arch().get_register_varnode(fact.self_reg.as_bytes()) else {
+                    continue;
+                };
+                let Some(space) = loc.space.clone() else { continue };
+                let Some(ty) = pieces.intypes.get(slot as usize).cloned() else { continue };
+                pieces.input_storage.push((
+                    slot,
+                    kuna_decomp::fspec::ParameterPieces {
+                        addr: Address::new(space, loc.offset),
+                        type_: Some(ty),
+                        flags: kuna_decomp::fspec::parameter_pieces_flags::TYPELOCK
+                            | kuna_decomp::fspec::parameter_pieces_flags::NAMELOCK,
+                    },
+                ));
+            }
+            let a = Address::new(Rc::clone(code_space), fact.func_addr);
+            if let Some((sid, _)) = prog.arch().symboltab.find_function_across_scopes(&a) {
+                pieces.name = prog.arch().symboltab.symbol(sid).get_name().to_string();
+            }
+            prog.arch_mut().set_function_prototype_model_at(&a, model);
+            prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        }
         // (kuna `swiftcall`) Model-only bindings and the unlocked `self`
         // hints, the register again resolved through the language.
         let mut models = (*prog.arch().loader_proto_models).clone();
@@ -5766,13 +5799,17 @@ fn commit_analysis_output(
         for (entry, list) in hints {
             prog.arch_mut().loader_input_hints.insert(entry, Rc::new(list));
         }
-        let throws = prog.arch().get_model(kuna_decomp::kuna_swiftcall::SWIFTCALL_THROWS).cloned();
+        use kuna_decomp::kuna_swiftcall::{SWIFTASYNCCALL, SWIFTASYNCCALL_THROWS, SWIFTCALL, SWIFTCALL_THROWS};
+        let model = |name: &str| prog.arch().get_model(name).cloned();
         let reg = |name: &str| {
             let loc = prog.arch().get_register_varnode(name.as_bytes()).ok()?;
             Some((Address::new(loc.space.clone()?, loc.offset), loc.size as i32))
         };
-        if let (Some((self_reg, error_reg)), Some(throws)) = (out.swift_types.regs, throws) {
-            if let (Some(self_reg), Some(error_reg)) = (reg(self_reg), reg(error_reg)) {
+        let models = (model(SWIFTCALL), model(SWIFTCALL_THROWS), model(SWIFTASYNCCALL), model(SWIFTASYNCCALL_THROWS));
+        if let (Some((self_reg, error_reg, async_reg)), (Some(plain), Some(throws), Some(asynccall), Some(asynccall_throws))) =
+            (out.swift_types.regs, models)
+        {
+            if let (Some(self_reg), Some(error_reg), Some(async_reg)) = (reg(self_reg), reg(error_reg), reg(async_reg)) {
                 let maybe_self = out
                     .swift_types
                     .models
@@ -5783,7 +5820,11 @@ fn commit_analysis_output(
                 prog.arch_mut().loader_swift_abi = Some(Rc::new(kuna_decomp::kuna_swiftcall::SwiftAbi {
                     self_reg,
                     error_reg,
+                    async_reg,
                     throws,
+                    plain,
+                    asynccall,
+                    asynccall_throws,
                     maybe_self,
                 }));
             }

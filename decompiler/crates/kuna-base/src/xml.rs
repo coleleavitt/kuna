@@ -2154,7 +2154,7 @@ mod tests {
         // and kuna-arithhelpers / 32-bit arithmetic runtime helpers print as C operators
         // and kuna-contextnames / loop counters and returned locals are named
         // and kuna-formatcallees / undeclared format functions are typed from their formats
-        assert_eq!(count, 659, "corpus file count drifted");
+        assert_eq!(count, 664, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

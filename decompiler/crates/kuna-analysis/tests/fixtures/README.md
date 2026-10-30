@@ -2124,3 +2124,24 @@ it `a1`, while `peek` gains no `self`. With `swiftcall off` the methods read
 `self` from an unnamed r13 and `run` returns the throwing call's result
 unchecked.
 
+### `swift_sigs_syms_elf` / `swift_sigs_elf` — declared Swift signatures, four-word returns, async (`swiftcall`)
+
+`swift_sigs_syms_elf` (x86-64 ELF, 26 KB, symbols kept) is the declared-prototype
+fixture (`tests/stages/kuna-swiftsigs.xml`); `swift_sigs_elf` is the same binary
+after `llvm-strip --strip-all` (`tests/stages/kuna-swiftasync.xml`: the async
+context from what the body calls, with no name to say so). Its source
+`swift_sigs_syms_elf.swift` declares a class `Box` whose methods return a
+three-word struct (`triple`, back in `rcx:rdx:rax`), a five-word struct (`wide`,
+through the indirect result register, rax on x86-64 Swift), a payload-less enum
+(`tint`, `Color`), an `async` method (`slow`, its context in r14) and a plain
+`scaled(_:by:)`, plus a struct method whose by-value `self` stays recovered.
+Built with `swiftc -O -module-name sigfix -parse-as-library swift_sigs_syms_elf.swift
+-o swift_sigs_syms_elf` (not stripped: the signatures are the symbols').
+
+**Pinned VMAs** (`nm`): `Box.triple(_:)`@`0x3be0`, `Box.wide(_:)`@`0x3c10`,
+`Box.scaled(_:by:)`@`0x3c60`, `Box.slow(_:)`@`0x3c80`, `Box.tint(_:)`@`0x3cc0`,
+`Box.color.getter`@`0x3b10`. With `swiftmetadata on` they decompile as
+`sigfix.Triple sigfix.Box.triple(_:)(long a0, sigfix.Box *self)`,
+`sigfix.Wide *sigfix.Box.wide(_:)(sigfix.Wide *rethidden, long a0, sigfix.Box *self)`,
+`void sigfix.Box.slow(_:)(swift.AsyncContext *async_context, sigfix.Box *self, …)`
+and `sigfix.Color sigfix.Box.tint(_:)(…) { … return red; }`.

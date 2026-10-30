@@ -3373,7 +3373,19 @@ only `x20` does not grow `x0`; no declared type is ever assigned to it. Ghidra's
 `__thiscall`, so any argument in x0 forces a `self` before it. `__swiftcall`
 keeps x20 and x21 among the preserved registers, as a non-throwing callee
 keeps them; `__swiftcall_throws` moves the error register to the killed ones,
-so the value a caller tests after the call is the callee's.
+so the value a caller tests after the call is the callee's. Two more,
+`__swiftasynccall` and `__swiftasynccall_throws`, put the `swiftasync`
+register (x22 / r14) ahead of `swiftself` with `storage="class2"` — its own
+section again — for an `async` function's task context. All four take
+Swift's return rule: Swift returns up to four words in registers (x0–x3;
+rax, rdx, rcx, r8), so the derivation appends two output entries after the
+default model's second general one and moves the C model's indirect-result
+rule (`minsize="17"` → the hidden return through x8 / rax) to 33 bytes. A
+struct of 17 to 32 bytes a Swift function returns therefore comes back as a
+register join where the C model would have read it through x8; from 33
+bytes the indirect result register stands, as in C. On x86-64 the default
+model's output is an explicit `join_dual_class` rule rather than a register
+list, so only the threshold changes there.
 
 A convention can be bound to a function without a signature: the analysis
 tier's `(addr, model)` facts land in `Architecture::loader_proto_models` and
@@ -3397,6 +3409,16 @@ runtime arguments theirs, and propagation and record synthesis leave it in
 place; the recovered parameter takes the hinted name. A hint with no type
 names the parameter only. A body that never reads the register declares
 nothing.
+
+A function with no signature and no name to say so still states its
+convention by what it calls (`kuna_swiftcall::callee_evidence`, read in the
+decompile drive before the model is set): a body that calls `swift_willThrow`
+throws, one that calls the task runtime's suspension entry points
+(`swift_task_alloc` / `swift_task_dealloc` / `swift_task_switch`,
+`swift_continuation_*`, `swift_asyncLet_*`, the task-group and future waits)
+is `async`, and the metadata's binding is upgraded to the matching model —
+`__swiftasynccall` with a nameless `async_context` hint on the `swiftasync`
+register — so a stripped image's resume partials take their context.
 
 Two call-site rules read the image's Swift registers
 (`decompiler/crates/kuna-decomp/src/p4_calls/kuna_swiftcall.rs`,

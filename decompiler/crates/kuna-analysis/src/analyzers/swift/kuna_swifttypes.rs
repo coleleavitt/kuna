@@ -56,6 +56,8 @@ use crate::pass::{AnalysisOutput, ParamLockFact, TypedDataFact};
 pub struct Registers {
     pub self_reg: &'static str,
     pub error_reg: &'static str,
+    /// The `swiftasync` register: an `async` function's task context.
+    pub async_reg: &'static str,
     pub args: [&'static str; 2],
 }
 
@@ -65,11 +67,13 @@ impl Registers {
             object::Architecture::Aarch64 => Registers {
                 self_reg: "x20",
                 error_reg: "x21",
+                async_reg: "x22",
                 args: ["x0", "x1"],
             },
             object::Architecture::X86_64 => Registers {
                 self_reg: "R13",
                 error_reg: "R12",
+                async_reg: "R14",
                 args: ["RDI", "RSI"],
             },
             _ => return None,
@@ -89,8 +93,15 @@ pub fn locate_metadata(img: &MachoImage, arch: object::Architecture, accessor: u
 }
 
 fn locate_arm64(img: &MachoImage, accessor: u64) -> Option<u64> {
-    let bytes = img.read(accessor, 20)?;
-    let word = |i: usize| u32::from_le_bytes(bytes[i * 4..i * 4 + 4].try_into().ok()?).into();
+    let bytes = [20usize, 16, 12]
+        .iter()
+        .find_map(|&n| img.read(accessor, n))?;
+    let word = |i: usize| {
+        bytes
+            .get(i * 4..i * 4 + 4)
+            .and_then(|b| b.try_into().ok())
+            .map(u32::from_le_bytes)
+    };
     let words: Vec<Option<u32>> = (0..5).map(word).collect();
     let mut i = 0;
     // `stp x29, x30, [sp, #-16]!; mov x29, sp` opens the accessor that
@@ -102,7 +113,11 @@ fn locate_arm64(img: &MachoImage, accessor: u64) -> Option<u64> {
     if adrp & 0x9f00_0000 == 0x1000_0000 && adrp & 31 == 0 && words[i + 1] == Some(0xd503_201f) {
         // `adr x0, …; nop`: the linker's relaxation of the `adrp`/`add` pair.
         let imm = ((((adrp >> 5) & 0x7_ffff) << 2) | ((adrp >> 29) & 3)) as i64;
-        let imm = if imm & (1 << 20) != 0 { imm - (1 << 21) } else { imm };
+        let imm = if imm & (1 << 20) != 0 {
+            imm - (1 << 21)
+        } else {
+            imm
+        };
         let next = words[i + 2]?;
         let plain = next == 0x5280_0001 || next == 0xd280_0001 || next == 0xd65f_03c0;
         let call = next & 0xfc00_0000 == 0x9400_0000 || next & 0xfc00_0000 == 0x1400_0000;
@@ -135,7 +150,10 @@ fn locate_arm64(img: &MachoImage, accessor: u64) -> Option<u64> {
 }
 
 fn locate_x86_64(img: &MachoImage, accessor: u64) -> Option<u64> {
-    let bytes = img.read(accessor, 16)?;
+    // The accessor may be the last bytes of its section.
+    let bytes = [16usize, 12, 10]
+        .iter()
+        .find_map(|&n| img.read(accessor, n))?;
     let mut i = 0;
     if bytes.starts_with(&[0x55, 0x48, 0x89, 0xe5]) {
         i = 4;
@@ -207,6 +225,7 @@ pub struct Stats {
     pub located: usize,
     pub structs: usize,
     pub classes: usize,
+    pub enums: usize,
     pub fields: usize,
     pub typed_fields: usize,
     pub vtable_getters: usize,
@@ -272,6 +291,10 @@ impl<'a> Types<'a> {
     /// Find every statically laid-out type's metadata and check it points
     /// back at the descriptor.
     pub fn locate_all(&mut self) {
+        let debug = std::env::var("KUNA_SWIFTTYPES_DUMP")
+            .ok()
+            .map(|p| format!("{p}.locate"));
+        let mut log = String::new();
         for ctx in self.md.contexts.values() {
             if !ctx.kind.is_nominal() || ctx.flags & 0x80 != 0 || (ctx.flags >> 16) & 3 != 0 {
                 continue;
@@ -280,8 +303,20 @@ impl<'a> Types<'a> {
                 continue;
             };
             let Some(meta) = locate_metadata(self.img(), self.arch, accessor) else {
+                if debug.is_some() {
+                    log.push_str(&format!(
+                        "{:x} {:?} accessor {accessor:x}: no static metadata\n",
+                        ctx.addr, ctx.name
+                    ));
+                }
                 continue;
             };
+            if debug.is_some() {
+                log.push_str(&format!(
+                    "{:x} {:?} metadata {meta:x} flags {:x}\n",
+                    ctx.addr, ctx.name, ctx.flags
+                ));
+            }
 
             let descriptor_slot = match ctx.kind {
                 ContextKind::Class => meta + self.class_flags_offset() + 24,
@@ -294,7 +329,16 @@ impl<'a> Types<'a> {
             if kind_ok && self.img().read_ptr(descriptor_slot) == Some(ctx.addr) {
                 self.metadata.insert(ctx.addr, meta);
                 self.by_metadata.insert(meta, ctx.addr);
+            } else if debug.is_some() {
+                log.push_str(&format!(
+                    "  refused: kind {:x?} descriptor {:x?}\n",
+                    self.img().read_ptr(meta),
+                    self.img().read_ptr(descriptor_slot)
+                ));
             }
+        }
+        if let Some(p) = debug {
+            let _ = std::fs::write(p, log);
         }
     }
 
@@ -332,7 +376,7 @@ impl<'a> Types<'a> {
 
     fn records(&self, ctx: &Context) -> Option<Vec<(String, Vec<u8>, u64)>> {
         let fd = self.fields_by_addr.get(&ctx.fields?)?;
-        if fd.records.len() != ctx.num_fields as usize {
+        if ctx.kind != ContextKind::Enum && fd.records.len() != ctx.num_fields as usize {
             return None;
         }
         let mut out = Vec::new();
@@ -366,6 +410,9 @@ impl<'a> Types<'a> {
         let ctx = self.md.contexts.get(&addr)?;
         let meta = *self.metadata.get(&addr)?;
         let path = self.unique_path(addr)?;
+        if ctx.kind == ContextKind::Enum {
+            return self.build_enum(ctx, meta, &path);
+        }
         let existing = self.tf.find_by_name(&path).ok().flatten();
         let shell = match existing {
             Some(t) if t.get_metatype() == type_metatype::TYPE_STRUCT && t.get_size() == 0 => t,
@@ -377,6 +424,36 @@ impl<'a> Types<'a> {
             ContextKind::Class => self.build_class(ctx, meta, &shell),
             _ => None,
         }
+    }
+
+    /// A payload-less enum as a C enum: its cases, in declaration order, at
+    /// the values the runtime gives them (0, 1, …), at the width its value
+    /// witness table states (one byte up to 256 cases).
+    fn build_enum(&self, ctx: &Context, meta: u64, path: &str) -> Option<Rc<Datatype>> {
+        if ctx.num_payload_cases != 0 || ctx.num_empty_cases == 0 {
+            return None;
+        }
+        let (size, _) = self.struct_extent(meta)?;
+        if !matches!(size, 1 | 2 | 4) {
+            return None;
+        }
+        let records = self.records(ctx)?;
+        if records.len() != ctx.num_empty_cases as usize {
+            return None;
+        }
+        if self.tf.find_by_name(path).ok().flatten().is_some() {
+            return None;
+        }
+        let en = self
+            .tf
+            .get_type_enum_sized(path, size as i32, type_metatype::TYPE_ENUM_UINT)
+            .ok()?;
+        let values: std::collections::BTreeMap<u64, String> = records
+            .iter()
+            .enumerate()
+            .map(|(i, (name, _, _))| (i as u64, name.clone()))
+            .collect();
+        self.tf.set_enum_values(&en, values).ok()
     }
 
     fn build_struct(&self, ctx: &Context, meta: u64, shell: &Rc<Datatype>) -> Option<Rc<Datatype>> {
@@ -590,7 +667,7 @@ impl<'a> Types<'a> {
 
     /// The kuna type of a demangled Swift type, sized `hint` bytes in its
     /// container, or `None` for one outside the mapping.
-    fn kuna_type(&self, node: &NodeRef, hint: u32) -> Option<Rc<Datatype>> {
+    pub(super) fn kuna_type(&self, node: &NodeRef, hint: u32) -> Option<Rc<Datatype>> {
         let inner = if node.kind == Kind::Type {
             node.first()?
         } else {
@@ -603,6 +680,24 @@ impl<'a> Types<'a> {
                 if let Some(t) = self.known_type(&full, hint) {
                     return Some(t);
                 }
+                // A Clang-imported type (`__C.CGSize`, `__C.NSString`) is the
+                // C type of that name when the image has one (DWARF, the
+                // Objective-C pass), inline for a struct, through a pointer
+                // for a class.
+                if let Some(c_name) = full.strip_prefix("__C.") {
+                    if let Some(t) = tf
+                        .find_by_name(c_name)
+                        .ok()
+                        .flatten()
+                        .filter(|t| t.get_size() > 0)
+                    {
+                        return if inner.kind == Kind::Class {
+                            tf.get_type_pointer(self.ptr_size, t, 1).ok()
+                        } else {
+                            (t.get_size() as u32 <= hint).then_some(t)
+                        };
+                    }
+                }
                 if inner.kind == Kind::Class {
                     let st = match self.by_path.get(&full) {
                         Some(&addr) => self
@@ -613,12 +708,8 @@ impl<'a> Types<'a> {
                     return tf.get_type_pointer(self.ptr_size, st, 1).ok();
                 }
                 let addr = *self.by_path.get(&full)?;
-                if inner.kind == Kind::Structure {
-                    let t = self.struct_type(addr)?;
-                    (t.get_size() as u32 <= hint).then_some(t)
-                } else {
-                    None
-                }
+                let t = self.struct_type(addr)?;
+                (t.get_size() as u32 <= hint).then_some(t)
             }
             Kind::BoundGenericEnum => {
                 let base = print_full(inner.first()?)?;
@@ -632,7 +723,33 @@ impl<'a> Types<'a> {
                     || t.get_name().starts_with("Swift.Array<")
                     || t.get_name().starts_with("Swift.Dictionary<")
                     || t.get_name().starts_with("Swift.Set<");
-                (nil_is_zero && t.get_size() as u32 <= hint).then_some(t)
+                if nil_is_zero {
+                    return (t.get_size() as u32 <= hint).then_some(t);
+                }
+                // A payload with no spare bit (an integer, a double, a
+                // struct of them) carries a tag byte after it: `nil` is tag 1.
+                let payload = t.get_size() as u32;
+                if !matches!(
+                    t.get_metatype(),
+                    type_metatype::TYPE_INT
+                        | type_metatype::TYPE_UINT
+                        | type_metatype::TYPE_FLOAT
+                        | type_metatype::TYPE_STRUCT
+                ) || payload == 0
+                    || payload + 1 > hint
+                {
+                    return None;
+                }
+                let full = print_full(node)?.replace(' ', "");
+                let tag = self
+                    .tf
+                    .get_base_named(1, type_metatype::TYPE_UINT, "uint1")
+                    .ok()?;
+                self.interned_struct(
+                    &full,
+                    &[(0, "value", t), (payload as i32, "is_nil", tag)],
+                    (payload + 1) as i32,
+                )
             }
             Kind::BoundGenericStructure => {
                 let base = print_full(inner.first()?)?;
@@ -848,6 +965,7 @@ impl<'a> Types<'a> {
                 match ctx.kind {
                     ContextKind::Struct => stats.structs += 1,
                     ContextKind::Class => stats.classes += 1,
+                    ContextKind::Enum => stats.enums += 1,
                     _ => {}
                 }
                 let mut i = 0;
@@ -1047,6 +1165,22 @@ impl<'a> Types<'a> {
     /// A pointer to `t`.
     pub(super) fn pointer_to(&self, t: Rc<Datatype>) -> Option<Rc<Datatype>> {
         self.tf.get_type_pointer(self.ptr_size, t, 1).ok()
+    }
+
+    /// The dotted path and type of the global variable a `$s…vp` storage
+    /// symbol names (`Module.name`), when its type maps.
+    pub fn global_variable(&self, symbol: &str) -> Option<(String, Rc<Datatype>)> {
+        let tree = demangle_swift_tree(symbol)?;
+        let [entity] = tree.children.as_slice() else {
+            return None;
+        };
+        if entity.kind != Kind::Variable {
+            return None;
+        }
+        let ty = entity.child_of_kind(Kind::Type)?;
+        let t = self.kuna_type(ty, u32::MAX)?;
+        let name = crate::demangle::kuna_swift::name::print_name(&tree)?;
+        Some((name, t))
     }
 
     /// `Type *`: the pointer a class or struct `self` is passed as.

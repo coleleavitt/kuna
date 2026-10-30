@@ -36,6 +36,12 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use kuna_decomp::dtype::Datatype;
+use kuna_decomp::kuna_swiftcall::{
+    SWIFTASYNCCALL,
+    SWIFTASYNCCALL_THROWS,
+    SWIFTCALL,
+    SWIFTCALL_THROWS,
+};
 
 use super::descriptors::{ContextKind, Target, TypeRef};
 use super::kuna_swifttypes::{Registers, Types};
@@ -44,13 +50,13 @@ use crate::demangle::kuna_swift::node::{Kind, Node, NodeRef};
 use crate::demangle::kuna_swift::print::print_full;
 use crate::pass::{AnalysisOutput, InputHintFact, ModelFact};
 
-use kuna_decomp::kuna_swiftcall::{SWIFTCALL, SWIFTCALL_THROWS};
-
 #[derive(Default, Debug)]
 pub struct Stats {
     pub bound: usize,
     pub typed_self: usize,
     pub throws: usize,
+    pub asyncs: usize,
+    pub declared: usize,
 }
 
 /// What a function's `self` is.
@@ -69,9 +75,20 @@ struct Binding {
     conflicted: bool,
 }
 
+/// A symbol-named member's declared signature, for the prototype: the
+/// regular parameters, the trailing ones a witness takes (the `Self`
+/// metadata and the witness table), the return type, and the `self` that
+/// rides in `swiftself` when the member takes one there.
+pub struct Declared {
+    pub params: Vec<(String, Rc<Datatype>)>,
+    pub ret: Rc<Datatype>,
+    pub swiftself: Option<Rc<Datatype>>,
+}
+
 struct Binder<'t, 'a> {
     types: &'t Types<'a>,
     bound: BTreeMap<u64, Binding>,
+    declared: BTreeMap<u64, (Declared, &'static str)>,
 }
 
 impl Binder<'_, '_> {
@@ -79,7 +96,13 @@ impl Binder<'_, '_> {
         self.put_with(f, model, self_t, false);
     }
 
-    fn put_with(&mut self, f: u64, model: &'static str, self_t: Option<Rc<Datatype>>, maybe_self: bool) {
+    fn put_with(
+        &mut self,
+        f: u64,
+        model: &'static str,
+        self_t: Option<Rc<Datatype>>,
+        maybe_self: bool,
+    ) {
         if !self.types.namer.is_code(f) {
             return;
         }
@@ -128,12 +151,20 @@ impl Binder<'_, '_> {
 
     fn classes(&mut self) {
         let md = self.types.md;
-        let mut contexts: Vec<_> = md.contexts.values().filter(|c| c.kind == ContextKind::Class).collect();
+        let mut contexts: Vec<_> = md
+            .contexts
+            .values()
+            .filter(|c| c.kind == ContextKind::Class)
+            .collect();
         contexts.sort_by_key(|c| c.addr);
         for ctx in contexts {
             for e in &ctx.vtable {
                 let Some(f) = e.impl_addr else { continue };
-                let is = if e.instance { SelfIs::Instance } else { SelfIs::Metatype };
+                let is = if e.instance {
+                    SelfIs::Instance
+                } else {
+                    SelfIs::Metatype
+                };
                 let t = self.self_type(ctx.addr, is);
                 self.put(f, SWIFTCALL, t);
             }
@@ -141,16 +172,25 @@ impl Binder<'_, '_> {
                 let Some(f) = o.impl_addr else { continue };
                 let is = match (o.base_class, o.method) {
                     (Target::Direct(b), Target::Direct(m)) => {
-                        let Some(e) = md.contexts.get(&b).and_then(|base| base.vtable.iter().find(|e| e.addr == m))
+                        let Some(e) = md
+                            .contexts
+                            .get(&b)
+                            .and_then(|base| base.vtable.iter().find(|e| e.addr == m))
                         else {
                             continue;
                         };
-                        if e.instance { SelfIs::Instance } else { SelfIs::Metatype }
+                        if e.instance {
+                            SelfIs::Instance
+                        } else {
+                            SelfIs::Metatype
+                        }
                     }
-                    (_, Target::Slot(slot)) => match self.types.imports.get(&slot).and_then(|n| imported_is(n)) {
-                        Some(is) => is,
-                        None => continue,
-                    },
+                    (_, Target::Slot(slot)) => {
+                        match self.types.imports.get(&slot).and_then(|n| imported_is(n)) {
+                            Some(is) => is,
+                            None => continue,
+                        }
+                    }
                     _ => continue,
                 };
                 let t = self.self_type(ctx.addr, is);
@@ -167,14 +207,20 @@ impl Binder<'_, '_> {
             };
             let local_rows = c.witnesses.is_empty() && c.flags & (1 << 17) == 0;
             if let (true, Some(w), Target::Direct(p)) = (local_rows, c.witness_table, c.protocol) {
-                let Some(proto) = md.contexts.get(&p) else { continue };
+                let Some(proto) = md.contexts.get(&p) else {
+                    continue;
+                };
                 for (k, (req, _)) in proto.requirements.iter().enumerate() {
                     let Some(is) = requirement_is(md.requirement_flags.get(req).copied()) else {
                         continue;
                     };
                     let slot = w + md.ptr_size * (1 + k as u64);
                     if let Some(&f) = md.words.get(&slot) {
-                        let is = if is == SelfIs::Instance { SelfIs::Witness } else { is };
+                        let is = if is == SelfIs::Instance {
+                            SelfIs::Witness
+                        } else {
+                            is
+                        };
                         let ty = self.self_type(t, is);
                         self.put(f, SWIFTCALL, ty);
                     }
@@ -184,19 +230,32 @@ impl Binder<'_, '_> {
                 let Some(f) = *impl_addr else { continue };
                 let is = match *req {
                     Target::Direct(r) => requirement_is(md.requirement_flags.get(&r).copied()),
-                    Target::Slot(slot) => self.types.imports.get(&slot).and_then(|n| imported_is(n)),
+                    Target::Slot(slot) => {
+                        self.types.imports.get(&slot).and_then(|n| imported_is(n))
+                    }
                 };
                 let Some(is) = is else { continue };
-                let is = if is == SelfIs::Instance { SelfIs::Witness } else { is };
+                let is = if is == SelfIs::Instance {
+                    SelfIs::Witness
+                } else {
+                    is
+                };
                 let ty = self.self_type(t, is);
                 self.put(f, SWIFTCALL, ty);
             }
         }
-        let mut protocols: Vec<_> = md.contexts.values().filter(|c| c.kind == ContextKind::Protocol).collect();
+        let mut protocols: Vec<_> = md
+            .contexts
+            .values()
+            .filter(|c| c.kind == ContextKind::Protocol)
+            .collect();
         protocols.sort_by_key(|c| c.addr);
         for proto in protocols {
             for (req, default_impl) in &proto.requirements {
-                if let (Some(f), Some(_)) = (*default_impl, requirement_is(md.requirement_flags.get(req).copied())) {
+                if let (Some(f), Some(_)) = (
+                    *default_impl,
+                    requirement_is(md.requirement_flags.get(req).copied()),
+                ) {
                     self.put(f, SWIFTCALL, None);
                 }
             }
@@ -205,21 +264,175 @@ impl Binder<'_, '_> {
 
     fn symbols(&mut self, symbols: &[(u64, String)]) {
         for (addr, name) in symbols {
-            let Some(tree) = demangle_swift_tree(name) else { continue };
-            let [entity] = tree.children.as_slice() else { continue };
-            let Some((owner, is, throws)) = member(entity) else { continue };
-            let model = if throws { SWIFTCALL_THROWS } else { SWIFTCALL };
+            let Some(tree) = demangle_swift_tree(name) else {
+                continue;
+            };
+            let [entity] = tree.children.as_slice() else {
+                continue;
+            };
+            // An async function's resume partials are the same function
+            // split at its suspension points: each takes the context.
+            let (entity, partial) = match entity.kind {
+                Kind::AsyncAwaitResumePartialFunction | Kind::AsyncSuspendResumePartialFunction => {
+                    match entity.first() {
+                        Some(inner) => (inner, true),
+                        None => continue,
+                    }
+                }
+                _ => (entity, false),
+            };
+            let Some((owner, is, throws)) = member(entity) else {
+                continue;
+            };
+            let model = match (partial || is_async(entity), throws) {
+                (true, true) => SWIFTASYNCCALL_THROWS,
+                (true, false) => SWIFTASYNCCALL,
+                (false, true) => SWIFTCALL_THROWS,
+                (false, false) => SWIFTCALL,
+            };
             let value_type = matches!(owner_kind(&owner), Some(Kind::Structure | Kind::Enum));
             if value_type && is == SelfIs::Metatype {
                 continue;
             }
             let ty = match nominal(&owner) {
-                Some(path) => self.types.nominal_at(&path).and_then(|a| self.self_type(a, is)),
+                Some(path) => self
+                    .types
+                    .nominal_at(&path)
+                    .and_then(|a| self.self_type(a, is)),
                 None => None,
             };
-            self.put_with(*addr, model, ty, value_type && is == SelfIs::Instance);
+            self.put_with(
+                *addr,
+                model,
+                ty.clone(),
+                value_type && is == SelfIs::Instance,
+            );
+            if !partial && !is_async(entity) {
+                if let Some(d) = self.declared(entity, is, value_type, ty) {
+                    self.declared.insert(*addr, (d, model));
+                }
+            }
         }
     }
+
+    /// The declared signature of `entity`, when every type in it is known
+    /// and the convention places every part: a class member's `self` in
+    /// `swiftself`; a witness's at the value's address, followed by the
+    /// `Self` metadata and the witness table; a struct's or enum's instance
+    /// member not at all (a non-mutating member of a loadable struct takes
+    /// `self` exploded into the argument registers, a mutating one its
+    /// address in `swiftself`, and the name does not say which).
+    fn declared(
+        &self,
+        entity: &NodeRef,
+        is: SelfIs,
+        value_type: bool,
+        self_t: Option<Rc<Datatype>>,
+    ) -> Option<Declared> {
+        if value_type && is == SelfIs::Instance {
+            return None;
+        }
+        let types = self.types;
+        let any = |node: &NodeRef| types.kuna_type(node, u32::MAX);
+        let (mut params, ret) = match entity.kind {
+            Kind::Function | Kind::Allocator | Kind::Constructor => {
+                let (params, ret) = function_signature(entity)?;
+                let labels = entity.child_of_kind(Kind::LabelList);
+                let mut out = Vec::with_capacity(params.len());
+                for (i, p) in params.iter().enumerate() {
+                    let label = labels
+                        .and_then(|l| l.child(i))
+                        .filter(|l| l.kind == Kind::Identifier)
+                        .map(|l| l.get_text().to_string())
+                        .unwrap_or_else(|| format!("a{i}"));
+                    out.push((label, any(p)?));
+                }
+                let ret = if is_void(&ret) {
+                    types.tf.get_type_void().ok()?
+                } else {
+                    any(&ret)?
+                };
+                (out, ret)
+            }
+            Kind::Getter | Kind::Setter => {
+                let storage = entity.first()?;
+                if storage.kind != Kind::Variable {
+                    return None;
+                }
+                let var_t = storage.child_of_kind(Kind::Type)?;
+                if entity.kind == Kind::Getter {
+                    (Vec::new(), any(var_t)?)
+                } else {
+                    (
+                        vec![("value".to_string(), any(var_t)?)],
+                        types.tf.get_type_void().ok()?,
+                    )
+                }
+            }
+            Kind::Destructor | Kind::Deallocator => (Vec::new(), types.tf.get_type_void().ok()?),
+            _ => return None,
+        };
+        // A by-value aggregate wider than two words takes registers Swift
+        // explodes it into and the C model passes it through memory.
+        if params.iter().any(|(_, t)| {
+            t.get_metatype() == kuna_decomp::dtype::type_metatype::TYPE_STRUCT && t.get_size() > 16
+        }) {
+            return None;
+        }
+        let swiftself = match is {
+            SelfIs::Instance | SelfIs::Witness | SelfIs::Metatype => self_t?,
+        };
+        if is == SelfIs::Witness {
+            let meta = types.metadata_struct().and_then(|t| {
+                types
+                    .tf
+                    .get_type_pointer(types.md.ptr_size as i32, t, 1)
+                    .ok()
+            })?;
+            let void = types.tf.get_type_void().ok()?;
+            let void_ptr = types
+                .tf
+                .get_type_pointer(types.md.ptr_size as i32, void, 1)
+                .ok()?;
+            params.push(("Self".to_string(), meta));
+            params.push(("witness_table".to_string(), void_ptr));
+        }
+        Some(Declared {
+            params,
+            ret,
+            swiftself: Some(swiftself),
+        })
+    }
+}
+
+/// The parameter types and the return type of a function entity's type.
+fn function_signature(entity: &NodeRef) -> Option<(Vec<NodeRef>, NodeRef)> {
+    let mut t = entity.child_of_kind(Kind::Type)?;
+    let func = loop {
+        let inner = t.first()?;
+        match inner.kind {
+            Kind::Type => t = inner,
+            Kind::FunctionType | Kind::NoEscapeFunctionType => break inner,
+            _ => return None,
+        }
+    };
+    let args = func.child_of_kind(Kind::ArgumentTuple)?.first()?;
+    let ret = func.child_of_kind(Kind::ReturnType)?.first()?;
+    let params = match args.first() {
+        Some(tuple) if tuple.kind == Kind::Tuple => tuple
+            .children
+            .iter()
+            .map(|e| e.children.iter().find(|c| c.kind == Kind::Type).cloned())
+            .collect::<Option<Vec<_>>>()?,
+        _ => vec![Rc::clone(args)],
+    };
+    Some((params, Rc::clone(ret)))
+}
+
+/// `()`, the empty tuple.
+fn is_void(ty: &NodeRef) -> bool {
+    ty.first()
+        .is_some_and(|t| t.kind == Kind::Tuple && t.children.is_empty())
 }
 
 /// `self` of a requirement with these `ProtocolRequirementFlags`: kinds 1-6
@@ -230,12 +443,17 @@ fn requirement_is(flags: Option<u32>) -> Option<SelfIs> {
     if !matches!(flags & 0xf, 1..=6) {
         return None;
     }
-    Some(if flags & 0x10 != 0 { SelfIs::Instance } else { SelfIs::Metatype })
+    Some(if flags & 0x10 != 0 {
+        SelfIs::Instance
+    } else {
+        SelfIs::Metatype
+    })
 }
 
 /// `self` of the member an imported method descriptor (`…Tq`) names.
 fn imported_is(import: &str) -> Option<SelfIs> {
-    let tree = demangle_swift_tree(import).or_else(|| demangle_swift_tree(&format!("_{import}")))?;
+    let tree =
+        demangle_swift_tree(import).or_else(|| demangle_swift_tree(&format!("_{import}")))?;
     let top = tree.first()?;
     if top.kind != Kind::MethodDescriptor {
         return None;
@@ -256,7 +474,11 @@ fn member(entity: &NodeRef) -> Option<(NodeRef, SelfIs, bool)> {
             let ty = conformance.first()?;
             let inner = entity.child(1)?;
             let (_, is, throws) = member(inner)?;
-            let is = if is == SelfIs::Instance { SelfIs::Witness } else { is };
+            let is = if is == SelfIs::Instance {
+                SelfIs::Witness
+            } else {
+                is
+            };
             Some((Rc::clone(ty), is, throws))
         }
         Kind::Static => {
@@ -293,7 +515,11 @@ fn owner_kind(owner: &NodeRef) -> Option<Kind> {
         _ => owner,
     };
     let n = if n.kind == Kind::Type { n.first()? } else { n };
-    matches!(n.kind, Kind::Class | Kind::Structure | Kind::Enum | Kind::Protocol).then_some(n.kind)
+    matches!(
+        n.kind,
+        Kind::Class | Kind::Structure | Kind::Enum | Kind::Protocol
+    )
+    .then_some(n.kind)
 }
 
 /// The dotted path of a member's owner, when it is a class or struct.
@@ -302,16 +528,22 @@ fn nominal(owner: &NodeRef) -> Option<String> {
         Kind::Extension => owner.child(1)?,
         _ => owner,
     };
-    let n = if n.kind == Kind::Type { Rc::clone(n.first()?) } else { Rc::clone(n) };
+    let n = if n.kind == Kind::Type {
+        Rc::clone(n.first()?)
+    } else {
+        Rc::clone(n)
+    };
     if !matches!(n.kind, Kind::Class | Kind::Structure) {
         return None;
     }
     print_full(&Node::with(Kind::Type, vec![n]))
 }
 
-/// Whether the function type of an entity throws.
-fn throws(entity: &NodeRef) -> bool {
-    let Some(mut t) = entity.child_of_kind(Kind::Type) else { return false };
+/// Whether the function type of an entity is `async`.
+fn is_async(entity: &NodeRef) -> bool {
+    let Some(mut t) = entity.child_of_kind(Kind::Type) else {
+        return false;
+    };
     loop {
         let Some(inner) = t.first() else { return false };
         match inner.kind {
@@ -324,7 +556,30 @@ fn throws(entity: &NodeRef) -> bool {
                 return inner
                     .children
                     .iter()
-                    .any(|c| matches!(c.kind, Kind::ThrowsAnnotation | Kind::TypedThrowsAnnotation));
+                    .any(|c| c.kind == Kind::AsyncAnnotation);
+            }
+            _ => return false,
+        }
+    }
+}
+
+/// Whether the function type of an entity throws.
+fn throws(entity: &NodeRef) -> bool {
+    let Some(mut t) = entity.child_of_kind(Kind::Type) else {
+        return false;
+    };
+    loop {
+        let Some(inner) = t.first() else { return false };
+        match inner.kind {
+            Kind::Type => t = inner,
+            Kind::DependentGenericType => match inner.child_of_kind(Kind::Type) {
+                Some(next) => t = next,
+                None => return false,
+            },
+            Kind::FunctionType | Kind::NoEscapeFunctionType => {
+                return inner.children.iter().any(|c| {
+                    matches!(c.kind, Kind::ThrowsAnnotation | Kind::TypedThrowsAnnotation)
+                });
             }
             _ => return false,
         }
@@ -332,25 +587,86 @@ fn throws(entity: &NodeRef) -> bool {
 }
 
 /// Bind the convention to every member the image names, and hint `self`.
-pub fn bind(types: &Types, regs: &Registers, symbols: &[(u64, String)], out: &mut AnalysisOutput) -> Stats {
+pub fn bind(
+    types: &Types,
+    regs: &Registers,
+    symbols: &[(u64, String)],
+    out: &mut AnalysisOutput,
+) -> Stats {
     let mut b = Binder {
         types,
         bound: BTreeMap::new(),
+        declared: BTreeMap::new(),
     };
     b.symbols(symbols);
     b.classes();
     b.conformances();
     let mut stats = Stats::default();
     if !b.bound.is_empty() {
-        out.swift_types.regs = Some((regs.self_reg, regs.error_reg));
+        out.swift_types.regs = Some((regs.self_reg, regs.error_reg, regs.async_reg));
     }
-    for (f, binding) in b.bound {
+    let context_t = types
+        .tf
+        .find_by_name("swift.AsyncContext")
+        .ok()
+        .flatten()
+        .or_else(|| types.tf.get_type_struct("swift.AsyncContext").ok())
+        .and_then(|t| {
+            types
+                .tf
+                .get_type_pointer(types.md.ptr_size as i32, t, 1)
+                .ok()
+        });
+    let declared_addrs: std::collections::BTreeSet<u64> = b.declared.keys().copied().collect();
+    for (f, (d, model)) in b.declared {
         if types.namer.owners_disagree(f) {
             continue;
         }
+        stats.declared += 1;
+        let self_slot = d.swiftself.is_some().then_some(d.params.len() as i32);
+        let mut intypes: Vec<Rc<Datatype>> = d.params.iter().map(|(_, t)| Rc::clone(t)).collect();
+        let mut innames: Vec<String> = d.params.iter().map(|(n, _)| n.clone()).collect();
+        if let Some(t) = d.swiftself {
+            intypes.push(t);
+            innames.push("self".to_string());
+        }
+        out.swift_types
+            .declared
+            .push(crate::pass::SwiftDeclaredFact {
+                func_addr: f,
+                model,
+                self_slot,
+                self_reg: regs.self_reg,
+                pieces: kuna_decomp::fspec::PrototypePieces {
+                    name: String::new(),
+                    outtype: Some(d.ret),
+                    intypes,
+                    innames,
+                    first_var_arg_slot: -1,
+                    output_storage: None,
+                    input_storage: Vec::new(),
+                    kuna_library_names: None,
+                },
+            });
+    }
+    for (f, binding) in b.bound {
+        // A declared prototype carries its model and its `self`; a bound
+        // model beside it would displace the declaration's.
+        if types.namer.owners_disagree(f) || declared_addrs.contains(&f) {
+            continue;
+        }
         stats.bound += 1;
-        if binding.model == SWIFTCALL_THROWS {
+        if matches!(binding.model, SWIFTCALL_THROWS | SWIFTASYNCCALL_THROWS) {
             stats.throws += 1;
+        }
+        if matches!(binding.model, SWIFTASYNCCALL | SWIFTASYNCCALL_THROWS) {
+            stats.asyncs += 1;
+            out.swift_types.input_hints.push(InputHintFact {
+                func_addr: f,
+                reg: regs.async_reg,
+                name: "async_context".to_string(),
+                type_: context_t.clone(),
+            });
         }
         out.swift_types.models.push(ModelFact {
             func_addr: f,

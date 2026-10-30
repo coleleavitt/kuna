@@ -38,9 +38,9 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_396() {
-    assert_eq!(kuna_num_settables(), 396);
-    assert_eq!(SETTABLE_TABLE.len(), 396);
+fn settable_count_is_398() {
+    assert_eq!(kuna_num_settables(), 398);
+    assert_eq!(SETTABLE_TABLE.len(), 398);
 }
 
 #[test]
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_148_transform_123_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 148, 123));
+    assert_eq!((core, transform, analysis), (125, 149, 124));
 }
 
 #[test]
@@ -310,6 +310,8 @@ fn option_values_live_value_present_for_168() {
         // console-side via `kuna_live_value` (its token), no codegen live
         // reader.
         "fatstr",
+        // (kuna) The Swift string-literal rule, the same three-valued shape.
+        "swiftstr",
         // (kuna) The named libc/POSIX aggregate types — a load-time analysis gate
         // read through the `KUNA_LIBCTYPES` env bridge (the named shells are
         // interned while the prototype pass builds its signatures, upstream of
@@ -554,6 +556,8 @@ fn option_values_live_value_present_for_168() {
         "osclassinfo",
         // (kuna) The Swift calling-convention arm's gate, read inside that pass.
         "swiftcall",
+        // (kuna) The Swift runtime prototype pass gate.
+        "swiftruntime",
         // (kuna) PE PDB metadata recovery — an analysis-pass gate with no codegen
         // live reader (read console-side via kuna_live_value), like the gates around
         // it. Default-on (DIV-129), PE-only, `.pdb`-sidecar-gated.
@@ -1226,7 +1230,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
     // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `codestrings`; +1 `protomerge`; +1 `bitidioms`; +1 `canaryglobal`.
-    assert_eq!(json.matches("},\n").count(), 395);
+    assert_eq!(json.matches("},\n").count(), 397);
 }
 
 #[test]
