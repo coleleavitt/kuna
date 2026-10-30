@@ -554,6 +554,10 @@ pub struct ConsoleProgram {
     /// datatest path (no Listing tier), so the gated build is a structural no-op
     /// there. Empty/`None` when the listing flag is off ⇒ zero cost.
     analysis_image: Option<(String, Vec<u8>)>,
+    /// (kuna `objectview`) The PE view of a TE image or the ELF view of a raw
+    /// one, kept for the CLI's object-file consumers once the commit has taken
+    /// [`Self::analysis_image`].
+    object_view: Option<Rc<[u8]>>,
     /// (kuna `armframes`) The whole-image frame recovery: set before the commit,
     /// it is replayed instead of searched; after it, the record that commit made.
     arm_frames: Option<kuna_analysis::aif::kuna_framereplay::ArmFrameReplay>,
@@ -2640,6 +2644,39 @@ impl ConsoleProgram {
         }
     }
 
+    /// (kuna `objectview`) Run the object-file pass list over the PE / ELF view a
+    /// TE or raw bootstrap stashed in [`Self::analysis_image`], so its facts join
+    /// the gated commit like an object image's. With the gate off the view is
+    /// dropped, and the deferred Listing tier below declines as before.
+    fn set_object_view(&mut self, path: &str, view: Option<Vec<u8>>) {
+        self.object_view = view.as_deref().map(Rc::from);
+        self.analysis_image = view.map(|view| (path.to_string(), view));
+    }
+
+    /// (kuna `objectview`) The PE view of a TE image or the ELF view of a
+    /// byte-addressed raw one; `None` for an object image, which is its own.
+    pub fn object_view(&self) -> Option<&[u8]> {
+        self.object_view.as_deref()
+    }
+
+    fn run_object_view_passes(&mut self) {
+        if !matches!(self.container, ProgramContainer::Raw | ProgramContainer::Te) {
+            return;
+        }
+        if !self.arch().analysis_objectview {
+            self.analysis_image = None;
+            return;
+        }
+        let Some((path, bytes)) = self.analysis_image.as_ref() else { return };
+        let target = self.arch.arch_id().to_string();
+        let Ok(image) = ObjectLoadImage::from_bytes_silent_with_target(path, bytes, &target) else {
+            return;
+        };
+        let arch = self.arch();
+        let split = kuna_analysis::passes::run_default_analyses_per_pass(bytes, &image, arch, arch.translate());
+        self.pending_analysis.extend(split);
+    }
+
     /// (kuna) Commit the stashed per-pass analysis facts, gated by the per-pass
     /// `--option <id> on|off` enable flags — the deferred half of the analysis
     /// boundary (conflict #4). Called from `IfcReadSymbols` (`read symbols`), which
@@ -2664,6 +2701,7 @@ impl ConsoleProgram {
     /// defensively re-gated facts merge into the same `merged` output committed
     /// below. With Listing off, this whole block is skipped.
     pub fn commit_pending_analysis(&mut self) -> KunaResult<()> {
+        self.run_object_view_passes();
         // (kuna `entrythumbflow`) The entry-reachable Thumb walk, taken out of
         // the pending slot BEFORE it runs so a failure cannot leave it armed for
         // the next commit. Its paints join the gated stash under their own id.
@@ -2822,12 +2860,14 @@ impl ConsoleProgram {
         // the gate was off (the default). See `passes::run_deferred_entry_passes`.
         let want_funcstart_patterns = self.arch().analysis_funcstart_patterns;
         let want_coldentry = self.arch().analysis_coldentry || self.arch().analysis_ehcold;
+        let want_addrtable = self.arch().analysis_addrtable;
         if (want_listing
             || want_fast_funcdisc
             || want_operand_refs
             || want_wide32_alone
             || want_funcstart_patterns
-            || want_coldentry)
+            || want_coldentry
+            || want_addrtable)
             && self.analysis_image.is_some()
         {
             let analysis_target = self.arch.arch_id().to_string();
@@ -2917,6 +2957,9 @@ impl ConsoleProgram {
                         merged.merge(out);
                     } else if want_wide32_alone {
                         merged.merge(kuna_analysis::passes::run_wide_strings32(&bytes, &image, self.arch()));
+                    }
+                    if want_addrtable {
+                        merged.merge(kuna_analysis::passes::run_addrtable(&bytes, &image, self.arch()));
                     }
                 }
             }
@@ -3876,6 +3919,7 @@ fn empty_program(
         libctypes_glibc: false,
         libctypes_refused: false,
         analysis_image: None,
+        object_view: None,
         arm_frames: None,
         loader_data_objects: Vec::new(),
         loader_data_exports: Vec::new(),
@@ -4032,6 +4076,14 @@ pub fn bootstrap_from_raw(
     prog.pending_analysis = input_isa_stash(input_context_paints);
     prog.analysis_code_space = Some(code_space);
     prog.raw_address_units = Some((word_size, arm32));
+    if word_size == 1 {
+        let entry = prog.pending_synthetic_entries.first().map_or(image_base, Address::get_offset);
+        let language = prog.arch.arch_id().to_string();
+        let view = std::fs::read(path).ok().and_then(|bytes| {
+            kuna_analysis::loader::kuna_objectview::raw_as_elf(&bytes, image_base, entry, &language)
+        });
+        prog.set_object_view(path, view);
+    }
     Ok(prog)
 }
 
@@ -4252,6 +4304,7 @@ pub fn bootstrap_from_te_bytes(
         entry,
     });
     program.analysis_code_space = Some(code_space);
+    program.set_object_view(path, kuna_analysis::loader::kuna_objectview::te_as_pe(bytes));
     apply_readonly_ranges(&mut program, &readonly_ranges);
     program.arch_mut().litpool_const = Rc::new(litpool_const);
     Ok(program)

@@ -1722,6 +1722,10 @@ pub struct ArchContext {
     /// [`Funcdata::fillin_read_only`](crate::funcdata::Funcdata::fillin_read_only).
     /// `false` by default (C++ `Architecture::resetDefaults`).
     pub readonlypropagate: bool,
+    /// (kuna `mapglobalsyms`) Whether `ActionMapGlobals` records a data Symbol
+    /// for each group of global storage no Symbol holds, for the driver to add
+    /// to the global scope once the function is done.
+    pub mapglobalsyms: bool,
     /// (kuna `dynrelocs`) `[start, stop]` (inclusive) offsets whose read-only
     /// contents are foldable even with [`Self::readonlypropagate`] off: the
     /// dynamic-relocation slots the loader filled in that `PT_GNU_RELRO` freezes.
@@ -2179,6 +2183,7 @@ impl ArchContext {
             // C++ Architecture default: readonlypropagate = false (resetDefaults);
             // `option readonly` flips it before the per-function build_arch_handle.
             readonlypropagate: false,
+            mapglobalsyms: false,
             // (kuna) No dynamic-relocation const slots until a real ELF load
             // installs them (see `Architecture::dynreloc_const`).
             dynreloc_const: Rc::new(Vec::new()),

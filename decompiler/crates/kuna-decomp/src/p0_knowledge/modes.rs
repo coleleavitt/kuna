@@ -625,7 +625,11 @@ mod tests {
               // `flirt` needs signature files the user supplies (`KUNA_FLIRT_SIGS`,
               // IDA's own `.sig` files); kuna ships none, so the preset has nothing
               // to run it with.
-              "flirt"];
+              "flirt",
+              // `mapglobalsyms` makes a function's output depend on which functions
+              // were decompiled before it in the same run; in the preset that would
+              // make every `decompile-all` under 500 KiB order-dependent.
+              "mapglobalsyms"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open

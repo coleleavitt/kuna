@@ -12502,7 +12502,7 @@ fn kuna_global_naming(spc: &std::rc::Rc<kuna_base::space::AddrSpace>) -> bool {
 /// (kuna) `kunaGlobalDataName(Address)` — `dat_<hex offset>`; ghidra-mode
 /// (`name_style_ghidra`) prints the Ghidra GUI convention `DAT_%08x` instead
 /// (what Java's `isDynamicSymbolName` recognizes as dynamic).
-fn kuna_global_data_name(style: crate::database::KunaNameStyle, off: u64) -> String {
+pub(crate) fn kuna_global_data_name(style: crate::database::KunaNameStyle, off: u64) -> String {
     if style == crate::database::KunaNameStyle::Ghidra {
         return format!("DAT_{off:08x}");
     }

@@ -1272,16 +1272,28 @@ The parsed entry and named sections are retained as format-neutral program
 metadata (`decompiler/crates/kuna-console/src/engine.rs (ProgramImageMetadata)`),
 populated by the object loader as well, so the project README no longer
 re-parses the input and reports the entry through the inventory on every path.
-A TE image has no `object::File`, so the Listing discovery tier cannot run over
-it and the deferred consumers are skipped. Its inventory comes from the same
+A TE image has no `object::File` of its own. The loader maps it directly (above),
+and the analyzer tier reads it through a rebuilt PE view (`objectview`,
+default-on; `decompiler/crates/kuna-analysis/src/loader/kuna_objectview.rs (te_as_pe)`).
+The TE header replaced `StrippedSize` bytes of DOS, PE and optional headers, and
+every section's `PointerToRawData` still counts from the original file, so the
+view is a freshly written header of exactly `StrippedSize` bytes — machine,
+subsystem, entry, `BaseOfCode`, `ImageBase` and the two data directories a TE
+keeps — in front of the TE file from its section table on. Every raw pointer
+then stays valid as it is. If `StrippedSize` is too short for a PE header, the
+header is padded and every raw pointer is moved by the padding. At the commit
+(`engine.rs (run_object_view_passes)`) the view goes through the same per-pass
+list and gates an object image's bytes go through, and it becomes the deferred
+Listing tier's image. A TE therefore gets strings, the `pemain` UEFI entry
+prototype, prologue starts and the Listing consumers. On top of that comes the
 headerless-image discovery a `--raw-image` load uses (`rawdiscover`, §below),
-seeded with the container entry over the TE's `CODE` sections; it runs after
-the entry Thumb walk so a mixed-mode ARM image's Thumb code is decoded in the
-mode that walk painted. With `--option rawdiscover off` the inventory is the
-entry plus any declared boundaries and the load says so once on stderr. The
-object-view consumers (`strings`, `crypto`, `xrefs`, `decompile-graph`,
-and the graph-backed `functions`/`decompile-all` filters) report one capability
-error from the shared image read rather than the object crate's parse failure.
+seeded with the container entry over the TE's `CODE` sections. It runs after the
+entry Thumb walk, so a mixed-mode ARM image's Thumb code is decoded in the mode
+that walk painted. With `--option rawdiscover off` that walk is skipped and the
+load says so once on stderr. With `--option objectview off` the view is dropped
+and the passes do not run. The object-view consumers (`strings`, `crypto`,
+`xrefs`, `decompile-graph`, and the graph-backed `functions`/`decompile-all`
+filters) read the same PE view through the shared image read.
 
 (kuna) **Static unpacking.** A packed image is the one input on which the whole
 tier is honestly useless: it maps a loader stub and a compressed blob, so every
@@ -6019,25 +6031,43 @@ instead of parsing the file again: `kuna functions --summary`'s
 `entry`/`reachable_from_entry`, `kuna decompile-graph`'s `isEntryPoint`, and the
 `kuna decompile-project` README's entry row.
 
-**Address tables** (`addrtable`,
+**Address tables** (`addrtable`, default-off, on in `--mode aggressive`;
 `decompiler/crates/kuna-analysis/src/analyzers/addrtable/mod.rs (AddrTablePass)`)
-scan `.rodata`/`.data` for runs of pointer-width values all landing in executable
-sections — vtables and absolute function-pointer arrays — emitting data symbols
-plus a read-only range (never entries, never switch ranges; in-function switch
-recovery is the inherited S2 engine machinery, a different thing entirely). Ghidra
-ships this analyzer disabled, and kuna goes one further: the pass is implemented
-and tested but **left out of the registered pass list** (`passes.rs` keeps its
-registration commented out), because a pointer-run scanner over-accepts and the
-relocation guard that defends it is weak on non-PIE executables.
+scan initialized data for runs of pointer-width values that all land in executable
+sections: vtables, absolute function-pointer arrays and hook tables. The import
+slot sections (`.got`, `.got.plt`, `.idata`, the Mach-O `__got` /
+`__auth_got` / `__la_symbol_ptr` / `__nl_symbol_ptr`) are skipped. Those slots
+are the loader's, and a lazily bound one points back into its own PLT stub. The
+pass never emits entries or switch ranges; in-function switch recovery is the
+inherited S2 engine machinery, a different thing entirely. Ghidra ships this
+analyzer disabled, and so does kuna, because a pointer-run scanner over-accepts
+and the relocation guard that defends it is weak on non-PIE executables. The
+gate is known only after `load file`, so the pass is not in the load-time list.
+`commit_pending_analysis` runs it at the deferred commit
+(`passes.rs (run_addrtable)`), and a default run scans nothing.
 
-The scanner's one live consumer is the reference walk behind `kuna xrefs`
-(`decompiler/crates/kuna-analysis/src/listing/xrefs.rs (XrefIndex)`). Under
-`--option addrtable on` (and so `--mode aggressive`) each table slot is filed as a
-`data` reference from the slot to the code it holds — the reference Ghidra's
-`AddressTable.makeTable` creates — so `kuna xrefs --to` a function reached only
-through a pointer table names the slot instead of answering zero references. A
-slot is data, so the reference is attributed to no function. Emitted C is
-unaffected: no fact is committed.
+What it commits depends on where the table lies:
+- **Writable data.** No compiler puts a switch table there, so the table is a
+  run-time hook or callback table. It is typed `code *[N]` under the image's name
+  for its head, or `AddrTable<addr>` (the label Ghidra's `AddressTable.makeTable`
+  writes). A call through a slot then reads `(*AddrTable002022b0[a0 % 3])(x)`
+  instead of a cast byte offset.
+- **Read-only data.** The table may be a switch's offset table that the code masks
+  and adds to. A name-locked object with no element type would print every access
+  as `*(unsigned int *)&AddrTable[i * 4]`, so this table gets only a read-only range
+  over its body: a load from a fixed slot folds to the function it holds, and a
+  variable access keeps its inferred `dat_<addr>[i]` spelling.
+
+Over 400 small x86-64, ARM, MIPS and PE fixtures decompiled under `auto`
+(aggressive below 500 KiB), two binaries change, one function each, both to a
+typed table index.
+
+The reference walk behind `kuna xrefs`
+(`decompiler/crates/kuna-analysis/src/listing/xrefs.rs (XrefIndex)`) reads the same
+tables. Under `addrtable on` each slot is filed as a `data` reference from the
+slot to the code it holds, which is the reference `makeTable` creates. So
+`kuna xrefs --to` a function reached only through a pointer table names the slot.
+A slot is data, so the reference is attributed to no function.
 
 ## 1.6 The Listing tier
 
@@ -6744,6 +6774,20 @@ the way to assert it. Raw and TE containers only (a TE seeds the walk with its
 container entry and bounds it by its `CODE` sections), so every object-format
 result is byte-identical; `--option rawdiscover off` restores the seeds-only
 inventory.
+
+A byte-addressed raw image also runs the object-file pass list
+(`objectview`, default-on), through an ELF view
+(`decompiler/crates/kuna-analysis/src/loader/kuna_objectview.rs (raw_as_elf)`).
+The view has one `PT_LOAD` and one `SHF_ALLOC | SHF_WRITE | SHF_EXECINSTR`
+`.text` section covering the file at `--base`, which is the read-write-execute
+block Ghidra's raw importer makes. Its machine, class and byte order come from
+the selected SLEIGH language, and its `e_entry` is the first seed. A processor
+ELF assigns no number gets `EM_NONE`: the sections still scan, and only
+`object`'s architecture is unknown. The view runs at the commit like a TE's,
+so the strings, the prologue and entry oracles and the Listing tier join the
+seeds and `rawdiscover`'s call closure. A word-addressed target (code-space
+word size above one) keeps the old behavior, because its addresses are not
+byte offsets.
 
 Table-derived roots are committed but are deliberately not fed through a
 second recursive walk. Thus the bounded path obtains direct-call closure and

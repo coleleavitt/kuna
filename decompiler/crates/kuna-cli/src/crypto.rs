@@ -34,6 +34,7 @@ pub(crate) struct CryptoArgs {
     target: Option<String>,
     sleighpath: Option<String>,
     isa: Option<kuna_console::engine::ArmIsa>,
+    raw: crate::image::RawFlags,
 }
 
 struct Row {
@@ -133,9 +134,10 @@ fn section_matches(name: Option<&str>, want: &str) -> bool {
 }
 
 pub(crate) fn query(args: &CryptoArgs) -> Result<String, String> {
-    let bytes = crate::image::image_bytes(
+    let bytes = args.raw.image(
         &args.binary,
         kuna_analysis::loader::macho_fat::slice_pref(args.slice.as_deref(), args.target.as_deref()),
+        args.target.as_deref(),
     )?;
     let file = kuna_analysis::loadimage_object::parse_object(&bytes)
         .map_err(|e| format!("could not parse {}: {e}", args.binary))?;
@@ -189,6 +191,8 @@ fn attribute(args: &CryptoArgs, file: &object::File, hits: Vec<Hit>) -> Result<V
         base: None,
         ..Args::serial()
     };
+    let mut load = load;
+    args.raw.apply(&mut load);
     let prog = load_program(&load, DriverDefaults::Inventory)?;
     let inventory: BTreeMap<u64, String> = prog
         .function_entries_canonical()
@@ -326,8 +330,13 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<CryptoArgs, String> {
     let mut sleighpath = None;
     let mut isa = None;
     let mut i = 0;
+    let mut raw = crate::image::RawFlags::default();
     while i < argv.len() {
         let a = argv[i].as_str();
+        if raw.take(argv, &mut i)? {
+            i += 1;
+            continue;
+        }
         match a {
             "--json" => json = true,
             "--algorithm" => algorithm = Some(take(argv, &mut i, "--algorithm")?),
@@ -353,14 +362,19 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<CryptoArgs, String> {
     if no_xrefs && isa.is_some() {
         return Err("--isa has no effect with --no-xrefs (no code is decoded)".into());
     }
-    Ok(CryptoArgs { binary, json, algorithm, section, no_xrefs, options, mode, slice, target, sleighpath, isa })
+    raw.check(target.as_deref())?;
+    if raw.on && slice.is_some() {
+        return Err("--slice does not apply to --raw-image input".into());
+    }
+    Ok(CryptoArgs { binary, json, algorithm, section, no_xrefs, options, mode, slice, target, sleighpath, isa, raw })
 }
 
 fn usage() {
     eprintln!(
         "usage: kuna crypto <binary> [--json] [--algorithm SUBSTR] [--section NAME] [--no-xrefs] \\\n\
          \x20                   [--mode auto|reliable|aggressive|fast] [--option N V].. \\\n\
-         \x20                   [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]\n\
+         \x20                   [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D] \\\n\
+         \x20                   [--raw-image --target T --base VMA --entry VMA]\n\
          \n\
          Lists well-known crypto constants in the image's mapped sections, each with\n\
          the functions that use it:\n\
@@ -386,3 +400,4 @@ fn usage() {
          functions}}]}}; without it, one tab-separated row each."
     );
 }
+

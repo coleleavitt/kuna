@@ -81,6 +81,7 @@ pub(crate) struct StringsArgs {
     target: Option<String>,
     sleighpath: Option<String>,
     isa: Option<kuna_console::engine::ArmIsa>,
+    raw: crate::image::RawFlags,
 }
 
 /// A row, ready to render: the recovered literal plus who reaches it.
@@ -112,9 +113,10 @@ pub fn run(argv: &[String]) -> i32 {
 
 /// Scan, attribute, filter, render — the whole command in one pass.
 pub(crate) fn query(args: &StringsArgs) -> Result<String, String> {
-    let bytes = crate::image::image_bytes(
+    let bytes = args.raw.image(
         &args.binary,
         kuna_analysis::loader::macho_fat::slice_pref(args.slice.as_deref(), args.target.as_deref()),
+        args.target.as_deref(),
     )?;
     let options =
         mode_options_for_binary(args.mode.as_deref(), &args.binary, args.options.clone())?;
@@ -215,6 +217,8 @@ fn attribute(
         base: None,
         ..Args::serial()
     };
+    let mut load = load;
+    args.raw.apply(&mut load);
     let prog = load_program(&load, DriverDefaults::Inventory)?;
     // The inventory, read ONCE. `ConsoleProgram::find_entry_at` rebuilds and
     // linearly scans this whole vector per call, which is a rounding error while
@@ -403,8 +407,13 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<StringsArgs, String> {
     let mut isa = None;
 
     let mut i = 0;
+    let mut raw = crate::image::RawFlags::default();
     while i < argv.len() {
         let a = argv[i].as_str();
+        if raw.take(argv, &mut i)? {
+            i += 1;
+            continue;
+        }
         match a {
             "--json" => json = true,
             "--min-length" => {
@@ -473,6 +482,10 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<StringsArgs, String> {
             return Err(format!("unknown --encoding {other:?} (ascii, utf8, utf16, all)"))
         }
     };
+    raw.check(target.as_deref())?;
+    if raw.on && slice.is_some() {
+        return Err("--slice does not apply to --raw-image input".into());
+    }
     Ok(StringsArgs {
         binary,
         json,
@@ -493,6 +506,7 @@ pub(crate) fn parse_args(argv: &[String]) -> Result<StringsArgs, String> {
         target,
         sleighpath,
         isa,
+        raw,
     })
 }
 
@@ -502,7 +516,8 @@ fn usage() {
          \x20                    [--encoding ascii|utf8|utf16|all] [--termination nul|any] \\\n\
          \x20                    [--section NAME] [--no-xrefs] \\\n\
          \x20                    [--mode auto|reliable|aggressive|fast] [--option N V].. \\\n\
-         \x20                    [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]\n\
+         \x20                    [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D] \\\n\
+         \x20                   [--raw-image --target T --base VMA --entry VMA]\n\
          \n\
          Lists the text the analyzer tier's own matcher finds, each with the\n\
          functions that reference it.  Defaults: ascii, minimum length 5,\n\
