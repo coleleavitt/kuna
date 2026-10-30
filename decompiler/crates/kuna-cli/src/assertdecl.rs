@@ -158,6 +158,10 @@ pub(crate) fn console_form(
         }
         Body::Readonly { addr, size } => (Slot::Image, format!("readonly {addr:#x} {size}")),
         Body::Volatile { addr, size } => (Slot::Image, format!("volatile {addr:#x} {size}")),
+        Body::Register { name, value, range: None } => (Slot::Program, format!("set track {name} {value:#x}")),
+        Body::Register { name, value, range: Some((addr, size)) } => {
+            (Slot::Program, format!("set track {name} {value:#x} {addr:#x} {:#x}", addr + *size as u64))
+        }
         Body::Name { func, symbol, newname } => match names_another(func, target) {
             Some(f) => return Err(unbindable(&f)),
             None => (Slot::Symbol, format!("rename {symbol} {newname}")),

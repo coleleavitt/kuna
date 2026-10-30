@@ -502,6 +502,7 @@ One directive per `--assert`, keyed by intent rather than by phase:
 | `readonly <addr>+<size>` | the bytes in this range never change at run time |
 | `volatile <addr>+<size>` | device memory: every access is a real access |
 | `bytes <addr> <hex\|@FILE>` | the bytes mapped here are these, whatever the file holds |
+| `register <name> <hex value> [<addr>+<size>]` | the register holds this value on entry to code in the range (everywhere without one), a tracked register as a processor spec's `tracked_set` states it: `register CS 0xf000 0xf0000+0x10000` |
 
 Storage is a register name (`RDI`), the console's `%RDI`, or its address grammar
 (`[stack,-0x18,8]`). Addresses are hexadecimal with or without `0x`. A size is
@@ -1285,6 +1286,8 @@ arguments its header states:
 | ESP32 / ESP8266 app image | `E9`, segment table | chip id: Xtensa (ESP32, S2, S3, ESP8266) or RISC-V (C2, C3, C6, H2, P4) | lowest segment; header entry |
 | uClinux bFLT v4 | `bFLT` | ColdFire unless `--target` | 0; header entry; GOT and relocations rebased past the 64-byte header |
 | Qualcomm MBN / SBL / GPT image | SBL codeword, MBN header, `EFI PART` | the wrapped ELF's | the ELF is loaded as is |
+| MediaTek `md1img` | chained `0x58881688` section headers | MIPS32 LE (a nanoMIPS `md1rom` is reported: no SLEIGH spec decodes it) | `md1rom` at 0x90000000; `md1_dbginfo` (LZMA) symbols name functions |
+| PC BIOS / flash image | the last 16 bytes are a far jump to segment F000+, a near jump or a backward short jump (after `nop`/`wbinvd`) | `x86:LE:16:Real Mode` | the last 128 KiB below 1 MiB, entry F000:FFF0, `CS` tracked per 64 KiB segment; with `--target x86:LE:32:...` the whole flash ending at 4 GiB |
 
 A flat image whose processor the container does not state is probed for a
 Cortex-M vector table like a raw dump.
@@ -3047,8 +3050,10 @@ FV -> FFS file -> section, into nested volumes and decompressing EDK2's LZMA
 or TE section is written as `<UI name>.efi` / `.te` (the file GUID when there is
 no UI section) into `<binary>.modules/` or `-o DIR`; `--list` only lists them,
 and `--json` reports volumes, modules (file, GUID, name, FFS type, size) and the
-sections it could not decode (Tiano/EFI standard compression is reported, not
-decoded). Each module is then an ordinary EFI image for the other subcommands.
+sections it could not decode. EFI 1.1 standard compression sections and
+EDK2 Tiano GUID-defined sections are decoded (`firmware/tiano.rs`, a port of
+EDK2's `Decompress.c`; a standard section that fails as EFI 1.1 is retried as
+Tiano, which some vendors store there). Each module is then an ordinary EFI image for the other subcommands.
 
 ```sh
 $ kuna unpack OVMF.fd --list | tail -2

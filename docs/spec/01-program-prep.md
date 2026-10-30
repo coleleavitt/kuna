@@ -8735,12 +8735,21 @@ alignment, erase polarity from the volume attributes), sections (4-byte
 alignment, extended sizes), nested volumes in `FIRMWARE_VOLUME_IMAGE` sections
 and RAW files, compression sections stored uncompressed, and GUID-defined
 sections for EDK2 LZMA (`lzma-rs`, the 13-byte LZMA-alone header), LZMA with
-the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Brotli
-(`brotli-decompressor`, after EDK2's 16-byte size header) and CRC32. Every
+the x86 BCJ filter (decoded as the LZMA SDK `x86_Convert`), Tiano
+(`tiano.rs (decompress)`, a port of EDK2 `BaseTools/Source/C/Common/Decompress.c`
+with the 5-bit position set), Brotli (`brotli-decompressor`, after EDK2's
+16-byte size header) and CRC32; a standard compression section of type 1 is
+decoded as EFI 1.1 (4-bit position set) and retried as Tiano. Every
 PE32/TE section is a module named by the file's UI section. `containers.rs (detect)` reads U-Boot
 legacy images, Intel HEX, Motorola S-records, ESP32/ESP8266 application images,
 uClinux bFLT v4 (rebasing GOT entries and relocations past the 64-byte header,
-as `binfmt_flat` does) and Qualcomm MBN/SBL wrappers, and returns either one
+as `binfmt_flat` does), Qualcomm MBN/SBL wrappers, MediaTek `md1img` (the
+`md1rom` section at 0x90000000 as MIPS32 LE, the LZMA `md1_dbginfo` symbol
+records as function names, a nanoMIPS ROM reported because no SLEIGH spec
+decodes it) and PC BIOS images (the reset-vector test of IDA's
+`bios_image.py`; the last 128 KiB mapped below 1 MiB with `register CS`
+assertions for segments E000 and F000, or with a 32-bit target the whole flash
+ending at 4 GiB), and returns either one
 flat image (lowest to highest loaded address, gaps filled, at most 256 MiB;
 an ESP image whose segments span more keeps the segments in the entry's
 16 MiB window) with the processor, base and entries its header states, or the

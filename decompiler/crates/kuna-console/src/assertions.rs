@@ -132,6 +132,10 @@ pub enum Body {
     /// `bytes <addr> <hex|@file>` — the bytes mapped at this address are these,
     /// whatever the file holds.  The plaintext a packer writes over itself.
     Bytes { addr: u64, data: Vec<u8> },
+    /// `register <name> <value> [<addr>+<size>]` -- the register holds this
+    /// value on entry to any function in the range (everywhere without one):
+    /// a tracked register, as a processor spec's `tracked_set` states.
+    Register { name: String, value: u64, range: Option<(u64, int4)> },
 }
 
 /// What became of one directive.  `status` is `applied` or `rejected`; a
@@ -173,6 +177,7 @@ impl Body {
             Body::Readonly { .. } => ("readonly", "P1", "code-data-partition"),
             Body::Volatile { .. } => ("volatile", "P1", "code-data-partition"),
             Body::Bytes { .. } => ("bytes", "P1", "code-data-partition"),
+            Body::Register { .. } => ("register", "P0", "external-refinement"),
         }
     }
 
@@ -456,9 +461,35 @@ fn apply_one_program_scoped(prog: &mut ConsoleProgram, body: &Body) -> Result<()
         Body::Volatile { addr, size } => {
             paint_property(prog, *addr, *size, kuna_decomp::varnode::varnode_flags::volatil)
         }
+        Body::Register { name, value, range } => apply_register(prog, name, *value, *range),
         // Handled by the decompile loop.
         _ => Err("internal: not a program-scoped directive".into()),
     }
+}
+
+/// `register` -- the in-process twin of the console's `set track`.
+fn apply_register(prog: &mut ConsoleProgram, name: &str, value: u64, range: Option<(u64, int4)>) -> Result<(), String> {
+    let loc = prog.arch().get_register_varnode(name.as_bytes()).map_err(|e| e.explain().to_string())?;
+    let tracked = kuna_sleigh::globalcontext::TrackedContext { loc, val: value };
+    match range {
+        None => prog.arch().with_context_db_mut(|db| db.get_tracked_default().push(tracked)),
+        Some((addr, size)) => {
+            if size <= 0 {
+                return Err("a range needs a size of at least one byte".into());
+            }
+            let first = code_addr(prog, addr)?;
+            let space = first.get_space().cloned().ok_or("the loaded program has no default code space")?;
+            let last = Address::new(space, first.get_offset() + size as u64);
+            prog.arch().with_context_db_mut(|db| {
+                let def = db.get_tracked_default().clone();
+                let track = db.create_set(&first, &last);
+                *track = def;
+                track.push(tracked);
+            });
+        }
+    }
+    prog.callwide_unavailable("tracked register assertions require a new complete image proof");
+    Ok(())
 }
 
 /// `readonly` / `volatile` — the in-process twin of the console's `readonly` and
