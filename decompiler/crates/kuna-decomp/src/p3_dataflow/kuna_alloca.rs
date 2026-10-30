@@ -48,12 +48,13 @@ fn signed(data: &Funcdata, vn: VarnodeId) -> Option<i64> {
     Some(((v.get_offset() << bits) as i64) >> bits)
 }
 
-/// Is `vn` the stack pointer, the entry value plus or minus constants?
+/// Is `vn` the stack pointer: its entry value, or an earlier `alloca` result,
+/// plus or minus constants?
 fn stack_pointer(data: &Funcdata, vn: VarnodeId) -> bool {
     let mut vn = vn;
     for _ in 0..16 {
         let Some(v) = data.vbank().get(vn) else { return false };
-        if v.is_spacebase() && v.is_input() {
+        if (v.is_spacebase() && v.is_input()) || is_alloca(data, vn) {
             return true;
         }
         match def(data, vn) {

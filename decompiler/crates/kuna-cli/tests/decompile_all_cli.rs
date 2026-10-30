@@ -7665,7 +7665,12 @@ fn a_calls_own_return_address_push_is_part_of_the_call() {
         let bin = fx.join(format!("callpush_{build}_x86_64"));
         let mut arms: Vec<String> = Vec::new();
         for arm in ["off", "on"] {
-            let args = ["decompile-all", bin.to_str().unwrap(), "--sleighpath", sp.as_str(), "--option", "callpush", arm];
+            // `alloca off`: the pushes below a dynamic allocation stay stores
+            // through stack arithmetic, which is what the strings below match.
+            let args = [
+                "decompile-all", bin.to_str().unwrap(), "--sleighpath", sp.as_str(), "--option", "callpush", arm, "--option",
+                "alloca", "off",
+            ];
             let (stdout, stderr, ok) = run_kuna(&args);
             assert!(ok, "kuna decompile-all failed: {stderr}");
             let mut body = String::new();
