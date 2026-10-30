@@ -8306,3 +8306,45 @@ Legacy-SSE integer and two-lane double code (`paddd`, `mulpd` without VEX)
 keeps its lanes at the default `lanefuse on` (chapter 02), so such a
 function's 16-byte arguments read as 8-byte lane pieces; `lanefuse all` gives
 it `__m128i`/`__m128d` arguments and returns.
+
+
+**Helper-call roles** (`helperroles`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p4_calls/kuna_helperrole.rs (role_of)`,
+`(RuleStrcpyChain)`): a `CALL` is tagged with a role (memcpy, memmove, memset,
+memcmp, strlen, strcpy, strncpy, strcmp) from its callee's name with decorations
+stripped (`_memcpy`, `j_strlen`, `__imp_memcpy`, `memcpy@GLIBC`, a `builtin_`
+prefix), and a `CALLOTHER` from its builtin id (the copy/fill/strlen builtins and
+the `bitidioms` byte-swap, rotate, abs and ctz ones), Hex-Rays' `funcrole_t`.
+`RuleStrcpyChain` reads the roles: `memcpy(d, s, strlen(s) + 1)` becomes the
+typed builtin `strcpy(d, s)` (`char *` in and out) when the length's source and
+the copy's source are one value through copies, extensions and the `INDIRECT`s
+a call leaves on a preserved register; the call spec of a rewritten `CALL` is
+deleted, along with its own return-address push under `callpush` (which only
+recognises a push ahead of a `CALL`), and a `strlen` whose length nobody reads
+is removed (it has no other effect). On `-O2 -fno-builtin` `dup_into` the two calls print as `strcpy(a0,a1)`.
+
+**va_start** (`vastart`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p4_calls/kuna_vastart.rs (ActionVaStart)`,
+run in the full loop after the stack-guard strip): an x86-64 SysV variadic
+function that materializes a `va_list` spills the unnamed argument registers
+to a 176-byte register save area (the XMM half under `if (al)`) and sets the
+four `__va_list_tag` fields. The action finds the two offset constants (two
+4-byte COPYs or one 8-byte COPY at a stack slot `X`: `gp_offset` a multiple of
+8 up to 48, `fp_offset` 48 plus a multiple of 16 up to 176) and, in the same
+block, the writes of `X+8` and `X+16`, where the `X+16` value is a stack
+address (`PTRSUB` or `INT_ADD` off the stack pointer) giving the save area. A
+write is a COPY, or an INDIRECT whose input is other storage (a store folded
+into a later call's effect on the slot). It inserts `va_start(&X, last)`
+before the offset COPYs, turns those COPYs into indirect creations of it, and
+feeds the pointer writes from new indirect creations of it, so the `va_list`
+keeps every later reader. `last` is the prototype's parameter
+`gp_offset/8 + (fp_offset-48)/16 - 1`, or, before a prototype exists and with
+no named float argument, the integer argument register `gp_offset/8 - 1`. The
+save area's slots lose their address-forced liveness and local mapping (as the
+stack-guard strip does for the canary slot), so dead-code removes the spills
+and the `al` test, and an unlocked prototype is marked variadic. Lua 5.4
+x86-64 (DWARF): 6 functions, 489 lines to 230; ld.so: 8 functions (2 callers
+of `_dl_debug_printf` now return `void`, as the source does); stripped Lua:
+4 functions whose 14-parameter signatures become `(a0, a1, ...)`, e.g.
+`void sub_1019210(struct_33 *a0,unsigned long a1,...)`. The reading side
+(`va_arg`'s `gp_offset < 48` diamond) is not recovered.

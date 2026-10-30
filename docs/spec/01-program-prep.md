@@ -3516,23 +3516,20 @@ moves.
   `dwarfstructs off` stays exactly the pre-DIV-86 name-only mapping its own row
   promises.
 
-- **Prototype merge** (`protomerge`, default-off; kuna;
+- **Prototype merge** (`protomerge`, default-on; kuna;
   `decompiler/crates/kuna-decomp/src/p4_calls/kuna_protomerge.rs (merge)`): the
   load-time sources park whole prototypes on a function at the analysis commit
   (the by-name and by-address libc tables, the demangled C++ signature, DWARF),
-  and the last used to replace the earlier wholesale. With the option on, two
-  prototypes of the same shape (arity, variadic slot, the same size in every
-  slot) merge slot by slot: each slot keeps the type that says more (a named
-  aggregate or enum, or a pointer to one, over a pointer to a scalar, over a
-  pointer to void, over a float or bool, over an integer, over an undefined),
-  ties going to the later source; names fill in from the earlier one; a return
-  type survives a later source that leaves the return open. Different shapes
-  replace as before, and directive, console and decompile-time prototypes are
-  never merged. This is IDA's per-argument `score_tinfo` merge. It is off
-  because on Lua 5.4.8 with DWARF it changes 4 of 893 signatures and not all for
-  the better: `luaL_checkstack` gains its `char *` message, `luaF_closeupval`
-  loses its `StackValue *` to `unsigned long`, and `bcmp`/`memcmp` take
-  `unsigned char *` where DWARF declares `void *`.
+  and the last used to replace the earlier wholesale. Two prototypes of the same
+  shape (arity, variadic slot, the same size in every slot) now merge slot by
+  slot: a typed slot (pointer, float, bool, aggregate, enum) beats a plain
+  integer, which beats an undefined; two typed slots, two pointers included, are
+  a tie that the later source wins, so DWARF's `void *` stays even where a table
+  spelled `unsigned char *`. Names fill in from the earlier source; a return type
+  survives a later source that leaves it open. Different shapes replace as
+  before; directive, console and decompile-time prototypes never merge. IDA's
+  per-argument `score_tinfo` merge. On Lua 5.4.8 with DWARF, llvm-objdump, bzip2
+  and an i386 C++ fixture it changes no signature.
 
 - **Name ladder** (`nameladder`, default-on; kuna;
   `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
@@ -3886,7 +3883,12 @@ moves.
   `libproto` also parks `void *(size_t[, ...])` / `void(void *[, size_t])` on the
   imported Itanium allocation functions (`_Znwm`, `_Znam`, `_ZdlPv`, `_ZdlPvm`,
   their `nothrow_t` and `align_val_t` forms and the 32-bit `j` spellings), so a
-  `T *p = operator new(n)` no longer needs a cast.
+  `T *p = operator new(n)` no longer needs a cast. On an i386 System V ELF a
+  defined function whose last instruction is `ret $4` pops a hidden struct-return
+  pointer the mangled parameter list never spells, so a `void *rethidden`
+  parameter is put in front (IDA's `func_has_stkframe_hole` test, read off the
+  function's own epilogue): `_Z2mkii` reads `mk(void *rethidden,int a1,int a2)`
+  instead of the shifted `mk(int a0,int a1)`.
 - **MSVC declarations** (`msvcsig`, `on|off`, default `on`, applied only while
   `cppsig` is not `off`;
   `decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_msvcsig.rs`, the
@@ -7506,6 +7508,47 @@ identical to the library function named (`buffer_free` for
 every matching module agrees and skips every prefix-only module without a
 reference.
 
+**Data-object width** (`globalwidth`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_accesswidth.rs (access_widths)`):
+a symbol-table data object (`STT_OBJECT` with a size) has no type, so it was
+mapped as `undefined<size>` and an element access rendered as
+`*(short *)&g3[(i & 7) * 2UL]`. Over the decoded Listing every `LOAD`/`STORE`
+whose address is a constant or a constant plus something, and every direct
+data-space operand (branch and call targets excluded), that lands in an object
+is read at the width of the value moved. An object all of whose accesses use
+one width `w` that divides its size, with some access indexed or past the first
+element, is mapped as `undefined<w>[size / w]` (or `undefined<w>` when `w` is
+the size); a lone narrowing read (`(int)g1` of a `long`) changes nothing. IDA
+sizes items from the referencing operand (`insn_create_op_data`). The same scan
+gives **the AIF data veto** (`aifdataveto`, default-on;
+`decompiler/crates/kuna-analysis/src/listing/kuna_accesswidth.rs (data_targets)`):
+a discovered entry (not a symbol, and not the target of a decoded call or
+branch) whose first instruction the code reads or writes as data is dropped from
+the entry stream, and an AIF gap entry likewise, IDA's roll-back of a
+speculative run with a `dr_R`/`dr_W` xref. On a Thumb literal-pool image an
+AIF-only entry whose first word a literal load reads is dropped too (the
+`poolentry` fixture's `F`, the split shape its corpus measurement disclosed). On the stripped
+Lua (x86-64, AArch64), ld.so, llvm-nm and llvm-objdump images it removes
+nothing; on the fixture it removes the function-shaped table the code reads.
+**Incremental walk** (`incrementalwalk`, default-on): the x86 callback rounds
+resume the Listing from the accepted roots instead of rebuilding it, the
+`addrtakenentry` way; on a 300-callback i386 fixture the function set is
+identical either way.
+
+**Call tables** (`calltable`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_calltable.rs (scan)`): the
+tables computed transfers index are read with the `switchtable` register-chain
+fold (`register_targets` now also answers for `CALLIND`, and reads an unchecked
+pointer table up to 256 entries, flagged `unbounded`) and voted as IDA's
+`check_flat_jump_table` does: an indexed call, a jump whose distinct targets are
+40% or more other functions' entries, or on x86 an unchecked table whose targets
+all sit on 16-byte boundaries, is a call table. Its targets become entries (and
+call references in the `kuna xrefs` walk, instead of switch cases); a
+discovered, non-symbol entry on a case of a real switch that no call reaches is
+demoted. On the fixture the two table functions are found and the
+prologue-shaped case is no longer a function; on stripped Lua (x86-64, AArch64),
+ld.so, llvm-nm and llvm-objdump the function lists are unchanged.
+
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
 gives a discovered function a body. The Listing keys a function by its entry,
@@ -7523,7 +7566,10 @@ from several entries is shared, and the model keeps the list of every function
 that reaches it, as IDA's tail keeps its referers. With the option on, the FID
 matcher hashes this body (all chunks, ascending, Ghidra's `func.getBody()`
 order) instead of the clip. Analysis-tier and Listing-only; it changes FID's
-input and nothing else, so it is inert on the XML datatest path.
+input and nothing else, so it is inert on the XML datatest path. The inventory `size` the console reports (`kuna functions`) is the
+chunk body under the option (the sum of the chunks, shared tails included)
+instead of the clip's upper bound; on the fixture a function placed before a
+shared tail reports its own 6 bytes instead of 12.
 
 **Literal-pool inference** (`poolentry`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/analyzers/aif/kuna_poolentry.rs`) is aimed at

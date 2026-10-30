@@ -846,6 +846,22 @@ pub struct ArchContext {
     pub mba: bool,
     /// (kuna `bitidioms`) Read by [`RuleBitIdioms`](crate::kuna_bitidioms::RuleBitIdioms).
     pub bit_idioms: bool,
+    /// (kuna `helperroles`) Read by [`RuleStrcpyChain`](crate::kuna_helperrole::RuleStrcpyChain).
+    pub helper_roles: bool,
+    /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
+    pub dyn_alloca: bool,
+    /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
+    pub index_rescale: bool,
+    /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
+    pub loop_rotate: bool,
+    /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
+    pub post_increment: bool,
+    /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
+    pub va_start: bool,
+    /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
+    pub type_vote: bool,
+    /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
+    pub switch_guard_merge: bool,
     /// Keep mapped global array bases separate from negative element offsets.
     pub global_array_anchor: bool,
     /// (kuna) Fold an exact one-byte modular cancellation around a bounded
@@ -2001,6 +2017,14 @@ impl ArchContext {
             fold_boolean_mask: false,    // GH-1282 booleanmask
             mba: false,
             bit_idioms: false,
+            helper_roles: false,
+            dyn_alloca: false,
+            index_rescale: false,
+            loop_rotate: false,
+            post_increment: false,
+            va_start: false,
+            type_vote: false,
+            switch_guard_merge: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)
             ret_split_global: false,     // retsplitglobal (the ArchSeam carries the real default)

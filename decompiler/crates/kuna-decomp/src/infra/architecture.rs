@@ -708,6 +708,23 @@ pub struct Architecture {
     /// (kuna `bitidioms`) Fold shift/OR byte swaps and rotates into `bswap` /
     /// `rotl` (see [`crate::kuna_bitidioms`]).
     pub bit_idioms: bool,
+    /// (kuna `helperroles`) Role-tagged helper-call rewrites
+    /// ([`crate::kuna_helperrole`]).
+    pub helper_roles: bool,
+    /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
+    pub dyn_alloca: bool,
+    /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
+    pub index_rescale: bool,
+    /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
+    pub loop_rotate: bool,
+    /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
+    pub post_increment: bool,
+    /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
+    pub va_start: bool,
+    /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
+    pub type_vote: bool,
+    /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
+    pub switch_guard_merge: bool,
     /// Keep mapped global array bases separate from negative element offsets
     /// (option `globalarrayanchor`).
     pub global_array_anchor: bool,
@@ -2730,6 +2747,14 @@ pub struct Architecture {
     pub analysis_tailcallentry: bool,
     /// (kuna) Function bodies as chunks with shared tails (`funcchunks`); the FID matcher hashes the chunk body. Default off.
     pub analysis_funcchunks: bool,
+    /// (kuna) Type symbol-table data objects from their access width (`globalwidth`). Default on.
+    pub analysis_globalwidth: bool,
+    /// (kuna) Drop an AIF gap entry whose first instruction the code reads or writes as data (`aifdataveto`). Default on.
+    pub analysis_aifdataveto: bool,
+    /// (kuna) Resume the Listing walk from new callback roots instead of rebuilding it (`incrementalwalk`). Default on.
+    pub analysis_incrementalwalk: bool,
+    /// (kuna) Call tables, the call-table vs switch vote and switch-case entry demotion (`calltable`). Default on.
+    pub analysis_calltable: bool,
     /// (kuna) Run `tailcallentry` on AArch64, x86 and RISC-V as well as ARM (`tailcallentryall`). Default off.
     pub analysis_tailcallentryall: bool,
     /// (kuna) Read AArch64 compact (shifted-offset) jump tables in the reference walk (`compacttable`). Default on.
@@ -3320,6 +3345,14 @@ impl Architecture {
             mba: false,
             avx_intrinsics: false,
             bit_idioms: false,
+            helper_roles: false,
+            dyn_alloca: false,
+            index_rescale: false,
+            loop_rotate: false,
+            post_increment: false,
+            va_start: false,
+            type_vote: false,
+            switch_guard_merge: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false,
             simd_lane_fold: false,
@@ -3688,6 +3721,10 @@ impl Architecture {
             analysis_aifpoolslide: true,
             analysis_tailcallentry: false,
             analysis_funcchunks: false,
+            analysis_globalwidth: true,
+            analysis_aifdataveto: true,
+            analysis_incrementalwalk: true,
+            analysis_calltable: true,
             analysis_tailcallentryall: false,
             analysis_compacttable: true,
             analysis_nameladder: true,
@@ -3833,7 +3870,15 @@ impl Architecture {
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
         self.mba = false;
         self.avx_intrinsics = true; // (kuna) presentation only; 0/675 datatest assertions move
-        self.bit_idioms = false;
+        self.bit_idioms = true;
+        self.helper_roles = true;
+        self.dyn_alloca = true;
+        self.index_rescale = true;
+        self.loop_rotate = true;
+        self.post_increment = true;
+        self.va_start = true;
+        self.type_vote = true;
+        self.switch_guard_merge = true;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`
@@ -4242,6 +4287,10 @@ impl Architecture {
         self.analysis_aifpoolslide = true;
         self.analysis_tailcallentry = false; // tail-call function-entry recovery default-off
         self.analysis_funcchunks = false;
+        self.analysis_globalwidth = true;
+        self.analysis_aifdataveto = true;
+        self.analysis_incrementalwalk = true;
+        self.analysis_calltable = true;
         self.analysis_tailcallentryall = false;
         self.analysis_compacttable = true;
         self.analysis_nameladder = true;
@@ -4249,7 +4298,7 @@ impl Architecture {
         self.analysis_flirtsites = true;
         self.analysis_fidproto = true;
         self.analysis_codestrings = true;
-        self.analysis_protomerge = false;
+        self.analysis_protomerge = true;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)
@@ -4855,6 +4904,14 @@ impl Architecture {
         ctx.fold_boolean_mask = self.fold_boolean_mask; // GH-1282 booleanmask
         ctx.mba = self.mba;
         ctx.bit_idioms = self.bit_idioms;
+        ctx.helper_roles = self.helper_roles;
+        ctx.dyn_alloca = self.dyn_alloca;
+        ctx.index_rescale = self.index_rescale;
+        ctx.loop_rotate = self.loop_rotate;
+        ctx.post_increment = self.post_increment && self.print.out_lang() == crate::kuna_lang::OutLang::C;
+        ctx.va_start = self.va_start;
+        ctx.type_vote = self.type_vote;
+        ctx.switch_guard_merge = self.switch_guard_merge;
         ctx.global_array_anchor = self.global_array_anchor;
         ctx.cancel_byte_arithmetic = self.cancel_byte_arithmetic; // cancelbytearithmetic
         ctx.simd_lane_fold = self.simd_lane_fold; // simdlane
@@ -6043,7 +6100,8 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ALLOCA, BUILTIN_VA_START,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ALLOCA, BUILTIN_VA_START, BUILTIN_ABS,
+            BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ, BUILTIN_STRCPY,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -6076,7 +6134,6 @@ impl Architecture {
             userops.register_builtin(BUILTIN_SYSCALL_ERROR, &adapter)?;
             // (kuna strlenscan) the length an inline `repnz scasb` computes.
             userops.register_builtin(BUILTIN_STRLEN, &adapter)?;
-            // (kuna itaniumeh) the exceptional-edge test and the two pad values.
             for (id, name) in crate::kuna_lanefuse::builtins() {
                 userops.register_named_builtin(id, &name);
             }
@@ -6085,6 +6142,8 @@ impl Architecture {
             for (id, name) in crate::kuna_lanefuse::mask_builtins(named.iter().map(|(i, nm)| (*i, nm.as_slice()))) {
                 userops.register_named_builtin(id, &name);
             }
+            // (kuna itaniumeh, swiftcall) the exceptional-edge test, the pad values
+            // and the Swift error register.
             for id in [
                 crate::userop::BUILTIN_EH_UNWINDING,
                 crate::userop::BUILTIN_EH_EXCEPTION,
@@ -6104,6 +6163,12 @@ impl Architecture {
             // (kuna alloca, varargsave) the dynamic allocation and va_list set-up.
             userops.register_builtin(BUILTIN_ALLOCA, &adapter)?;
             userops.register_builtin(BUILTIN_VA_START, &adapter)?;
+            // (kuna bitidioms, helperroles) abs, bit reverse, count trailing zeros, strcpy.
+            userops.register_builtin(BUILTIN_ABS, &adapter)?;
+            userops.register_builtin(BUILTIN_LABS, &adapter)?;
+            userops.register_builtin(BUILTIN_BITREV, &adapter)?;
+            userops.register_builtin(BUILTIN_CTZ, &adapter)?;
+            userops.register_builtin(BUILTIN_STRCPY, &adapter)?;
             Ok(())
         })();
         self.userops = userops;

@@ -525,7 +525,7 @@ fn static_thumb_functions_after_an_arm_export_keep_their_mode() {
                 first.contains("a0 = (0xb <= a0) ? a0 + -10 : a0 << 1;"),
                 "{name} {extra:?}: {first}"
             );
-            let second = run(&["decompile", lib, popcount.0, "--addr"], extra);
+            let second = run(&["decompile", lib, popcount.0, "--addr", "--option", "looprotate", "off"], extra);
             assert!(second.contains(popcount.1), "{name} {extra:?}: {second}");
             let all = run(&["decompile-all", lib], extra);
             for entry in [ternary, popcount.0] {
@@ -558,7 +558,8 @@ fn a_pointer_only_thumb_function_keeps_the_mode_a_blx_before_it_gives() {
 /// function, in the other mode, is reached only through a `blx`: the Thumb
 /// `thumb_last` before the A32 `arm_hidden` at 0x4bc, and the A32 `arm_last`
 /// before the Thumb `thumb_hidden` at 0x4a4. Both loops decompile, alone and
-/// in the whole-binary run.
+/// in the whole-binary run (`looprotate` off: the loop bodies pinned are
+/// the do-while ones).
 #[test]
 fn a_call_that_never_returns_leaves_the_next_function_in_its_own_mode() {
     for (name, addr) in [
@@ -568,9 +569,9 @@ fn a_call_that_never_returns_leaves_the_next_function_in_its_own_mode() {
         let path = fixture(name);
         let lib = path.to_str().unwrap();
         for extra in VALUES {
-            let alone = run(&["decompile", lib, addr, "--addr"], extra);
+            let alone = run(&["decompile", lib, addr, "--addr", "--option", "looprotate", "off"], extra);
             assert!(alone.contains("v1 += v2 ^ 5;"), "{name} {extra:?}: {alone}");
-            let all = run(&["decompile-all", lib], extra);
+            let all = run(&["decompile-all", lib, "--option", "looprotate", "off"], extra);
             let named = format!("sub_{}", &addr[2..]);
             assert!(
                 body(&all, &named).contains("v1 += v2 ^ 5;"),
@@ -588,7 +589,7 @@ fn a_call_that_never_returns_leaves_the_next_function_in_its_own_mode() {
 fn static_thumb_functions_after_an_unsized_arm_export_keep_their_mode() {
     let path = fixture("arm_unsized_export_le32");
     for extra in VALUES {
-        let all = run(&["decompile-all", path.to_str().unwrap()], extra);
+        let all = run(&["decompile-all", path.to_str().unwrap(), "--option", "looprotate", "off"], extra);
         assert!(body(&all, "sub_410").contains("v1 += v2 ^ 5;"), "{extra:?}: {all}");
         assert!(body(&all, "sub_430").contains("a0 >>= 1"), "{extra:?}: {all}");
         assert!(!body(&all, "sub_430").contains("halt_"), "{extra:?}: {all}");

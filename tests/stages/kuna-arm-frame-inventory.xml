@@ -49,6 +49,7 @@
   <com>option funcstart_patterns on</com>
   <com>option aif on</com>
   <com>option aifpoolslide off</com>
+  <com>option aifdataveto off</com>
   <com>read symbols</com>
   <com>functions</com>
   <com>load function sub_80003fc</com>

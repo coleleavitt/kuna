@@ -1,0 +1,41 @@
+<decompilertest>
+<binaryimage arch="x86:LE:64:default:gcc">
+<!--
+    kuna-postinc: a pointer step after the statement that dereferences the
+    pointer prints as a post-increment (option postinc).
+
+    Source (gcc -O1, x86-64):
+      int sumb(const unsigned char *p, int n) {
+        int s = 0;
+        while (n) { n = n - 1; s += *p; p++; }
+        return s;
+      }
+
+    Stage: P9, ActionPostIncrement: the step p = p + 1 reads the same value
+    only the LOAD of one byte before it reads, p points to one-byte elements,
+    and the statement with the LOAD is printed right before the step, so the
+    step prints nothing and the LOAD prints *p++.
+
+    Pass 1 (default) prints v2 += (uint4)*a0++; pass 2 (postinc off) the
+    LOAD and the step.
+-->
+<bytechunk space="ram" offset="0x401000" readonly="true">
+f30f1efa85f6742789f0488d0c07b800000000669066662e0f1f8400000000000fb61701d04883c7014839cf75f2c389f0c3f30f1efab8000000000f1f4400000fb614068814074883c00184d275f1c3f30f1efa4839f77414b80000000066904883c7040347fc4839fe75f4c3b800000000c3f30f1efa55534883ec10488d6c2408be002040004889efe8a3ffffffbe020000004889efe864ffffff89c3488d74240c4889efe8a5ffffff01c3895c24048b44240490ebfe
+</bytechunk>
+<symbol space="ram" offset="0x401032" name="cpy"/>
+<symbol space="ram" offset="0x401073" name="_start"/>
+<symbol space="ram" offset="0x401000" name="sumb"/>
+<symbol space="ram" offset="0x401050" name="sumi"/>
+</binaryimage>
+<script>
+  <com>lo fu sumb</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option postinc off</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="KUNA-POSTINC #1: the step folds into the dereference (default)" min="1" max="1">\*a0\+\+;</stringmatch>
+<stringmatch name="KUNA-POSTINC #2: postinc off keeps the step as its own statement" min="1" max="1">a0 = &amp;a0\[1\];</stringmatch>
+</decompilertest>

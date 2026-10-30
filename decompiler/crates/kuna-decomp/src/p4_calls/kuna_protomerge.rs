@@ -16,22 +16,17 @@ use std::rc::Rc;
 use crate::dtype::{type_metatype, Datatype};
 use crate::fspec::PrototypePieces;
 
-/// How much a type says about a value, higher is more. An undefined or plain
-/// integer says least; a pointer says more, more again when it says to what; a
-/// named aggregate or enum says most.
+/// How much a type says about a value, higher is more: an undefined says
+/// nothing, a plain integer little, anything else (a pointer, a float, a bool,
+/// an aggregate or enum) enough that a later source keeps its own reading.
+/// Pointers are not ranked against each other: a later `void *` from DWARF is
+/// what the source declared even when a table spelled `unsigned char *`.
 pub fn type_score(dt: &Datatype) -> i32 {
     use type_metatype::*;
     match dt.get_metatype() {
-        TYPE_STRUCT | TYPE_UNION | TYPE_ARRAY => 6,
-        TYPE_ENUM_INT | TYPE_ENUM_UINT => 5,
-        TYPE_PTR | TYPE_PTRREL => match dt.get_ptr_to().map(|t| t.get_metatype()) {
-            Some(TYPE_STRUCT | TYPE_UNION | TYPE_ENUM_INT | TYPE_ENUM_UINT | TYPE_ARRAY) => 7,
-            Some(TYPE_VOID | TYPE_UNKNOWN) | None => 4,
-            Some(_) => 6,
-        },
-        TYPE_FLOAT | TYPE_BOOL | TYPE_CODE => 3,
-        TYPE_INT | TYPE_UINT => 2,
-        _ => 0,
+        TYPE_UNKNOWN | TYPE_VOID => 0,
+        TYPE_INT | TYPE_UINT => 1,
+        _ => 2,
     }
 }
 
@@ -94,6 +89,10 @@ mod tests {
     fn keeps_the_more_specific_slot_and_fills_names() {
         let old = pieces(vec![dt(8, type_metatype::TYPE_FLOAT), dt(4, type_metatype::TYPE_INT)], &["x", "n"]);
         let new = pieces(vec![dt(8, type_metatype::TYPE_UINT), dt(4, type_metatype::TYPE_UNKNOWN)], &["", "count"]);
+        // a later pointer is kept over an earlier one of another kind
+        let p_old = pieces(vec![dt(8, type_metatype::TYPE_STRUCT)], &[""]);
+        let p_new = pieces(vec![dt(8, type_metatype::TYPE_PTR)], &[""]);
+        assert_eq!(merge(&p_old, p_new).intypes[0].get_metatype(), type_metatype::TYPE_PTR);
         let m = merge(&old, new);
         assert_eq!(m.intypes[0].get_metatype(), type_metatype::TYPE_FLOAT);
         assert_eq!(m.intypes[1].get_metatype(), type_metatype::TYPE_INT);

@@ -376,6 +376,9 @@ pub fn universal_sched(
         rrow!("bitidioms", "analysis", crate::kuna_bitidioms::RuleBitIdioms::new("analysis")),
         rrow!("alloca", "analysis", crate::kuna_alloca::RuleAlloca::new("analysis")),
         rrow!("allocaprobe", "analysis", crate::kuna_alloca::RuleAllocaProbe::new("analysis")),
+        rrow!("intabs", "analysis", crate::kuna_bitidioms::RuleIntAbs::new("analysis")),
+        rrow!("strcpychain", "analysis", crate::kuna_helperrole::RuleStrcpyChain::new("analysis")),
+        rrow!("dynalloca", "analysis", crate::kuna_dynalloca::RuleDynAlloca::new("analysis")),
         rrow!("gobool", "analysis", crate::kuna_gobool::RuleGoBoolReturn::with_group(false, "analysis")),
         rrow!("boolsignless", "analysis", crate::kuna_flagcompare::RuleBoolSignLess::with_group(false, "analysis")),
         rrow!("sborrowge", "analysis", crate::kuna_flagcompare::RuleSborrowGe::with_group(false, "analysis")),
@@ -614,6 +617,7 @@ pub fn universal_sched(
             act!(ActionSpacebase::boxed("base")),
             act!(ActionNonzeroMask::boxed("analysis")),
             act!(ActionInferTypes::boxed("typerecovery")),
+            act!(crate::kuna_indexrescale::ActionIndexRescale::boxed("typerecovery")),
             // (kuna) structsynth: once propagation has settled, complete a
             // `struct_N` over a pointer parameter dereferenced at two or more
             // constant offsets and type-lock the parameter to it.  It sits here
@@ -625,6 +629,7 @@ pub fn universal_sched(
             stackstall,
             act!(crate::p6_variables::kuna_savedregisterspills::ActionRestrictLocalSavedLanes::boxed()),
             act!(ActionRedundBranch::boxed("deadcontrolflow")),
+            act!(crate::kuna_looprotate::ActionLoopRotate::boxed("blockrecovery")),
             act!(ActionBlockStructure::boxed("blockrecovery")),
             act!(ActionConstantPtr::boxed("typerecovery")),
             SchedNode::Pool { flags: REPEAT, name: "oppool2", rules: oppool2_rules },
@@ -651,6 +656,7 @@ pub fn universal_sched(
             act!(ActionDeadCode::boxed_narrowing("deadcode")),
             act!(ActionDoNothing::boxed("deadcontrolflow")),
             act!(ActionSwitchNorm::boxed("switchnorm")),
+            act!(crate::kuna_switchguardmerge::ActionSwitchGuardMerge::boxed("switchnorm")),
             SchedNode::Action(Box::new(move || {
                 Box::new(crate::kuna_loweredswitch::ActionLowerSwitchDetect::with_store(
                     false,
@@ -659,6 +665,7 @@ pub fn universal_sched(
                 ))
             })),
             act!(Box::new(crate::kuna_stackguard::ActionStripStackGuard::new(false, "returnsplit"))),
+            act!(crate::kuna_vastart::ActionVaStart::boxed("returnsplit")),
             // (kuna) msvcstackguard (option `msvcstackguard`, default-OFF): the
             // Windows sibling of ActionStripStackGuard.  MSVC `/GS` puts the
             // compare inside `__security_check_cookie`, so the guarded function
@@ -698,6 +705,9 @@ pub fn universal_sched(
             // passes above: mainloop has settled the count and the searched byte
             // to constants, and the repeating fullloop folds what it leaves.
             act!(Box::new(crate::kuna_strlenscan::ActionStrlenScan::new(false, "returnsplit"))),
+            // (kuna) bitidioms: the one-instruction bsf/tzcnt/bsr loop becomes
+            // ctz / LZCOUNT, removed the same way.
+            act!(Box::new(crate::kuna_bitidioms::ActionBitScanLoop::new("returnsplit"))),
             // (kuna) repstring (option `repstring`): the same loop shape for
             // `rep movs`/`rep stos`, collapsed into memcpy/memset by removing
             // the edge into the copy; mainloop then deletes the orphaned body.
@@ -816,6 +826,7 @@ pub fn universal_sched(
             act!(ActionMergeType::boxed("merge")),
             act!(ActionHideShadow::boxed("merge")),
             act!(ActionCopyMarker::boxed("merge")),
+            act!(crate::kuna_typevote::ActionTypeVote::boxed("typerecovery")),
             act!(ActionLateDoNothing::boxed("blockrecovery")),
             act!(ActionBlockStructure::boxed("blockrecovery")),
             act!(ActionPreferComplement::boxed("blockrecovery", false)),
@@ -838,6 +849,7 @@ pub fn universal_sched(
             act!(crate::kuna_calltargettype::ActionCallTargetType::boxed("typerecovery")),
             act!(ActionSetCasts::boxed("casts")),
             act!(ActionFinalStructure::boxed("blockrecovery")),
+            act!(crate::kuna_postinc::ActionPostIncrement::boxed("blockrecovery")),
             // (kuna) angr SAILR return-tail goto-reduction (option `gotoreduce`,
             // default-OFF).  Runs after the tree is final + goto targets labelled.
             act!(crate::p8_structure::kuna_gotoreduce::ActionGotoReduce::boxed("blockrecovery")),

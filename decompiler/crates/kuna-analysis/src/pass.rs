@@ -669,6 +669,15 @@ pub struct AnalysisOutput {
     /// path only, and only when a `.fid` database is configured); empty otherwise.
     /// See [`FidMatch`].
     pub fid_names: Vec<FidMatch>,
+    /// (kuna `funcchunks`) Each function's flow body size in bytes (the sum of
+    /// its chunks, shared tails included), by `(entry, bytes)`.
+    pub function_bodies: Vec<(u64, u64)>,
+    /// (kuna `globalwidth`) The one width each sized data object is read and
+    /// written with, by `(addr, width)`.
+    pub global_widths: Vec<(u64, u32)>,
+    /// (kuna `aifdataveto`) Discovered (not symbol) entries the code reads or
+    /// writes as data; the commit drops them from the entry stream.
+    pub data_vetoed: Vec<u64>,
     /// (kuna `cppproto`) The DWARF recoveries that only the C++ arm of the DWARF
     /// pass produces, held APART from the streams above so the commit boundary can
     /// drop them wholesale under `--option cppproto off`. The producing pass runs
@@ -927,6 +936,9 @@ impl AnalysisOutput {
         self.comments.extend(other.comments);
         self.header_comments.extend(other.header_comments);
         self.fid_names.extend(other.fid_names);
+        self.function_bodies.extend(other.function_bodies);
+        self.global_widths.extend(other.global_widths);
+        self.data_vetoed.extend(other.data_vetoed);
         self.cpp_dwarf.symbols.extend(other.cpp_dwarf.symbols);
         self.cpp_dwarf.locals.extend(other.cpp_dwarf.locals);
         self.cpp_dwarf.prototypes.extend(other.cpp_dwarf.prototypes);

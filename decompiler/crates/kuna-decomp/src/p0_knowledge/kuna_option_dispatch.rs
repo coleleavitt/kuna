@@ -107,6 +107,14 @@ kuna_options! { self, p1;
     "ovlesssimplify" => on_off!(ov_less_simplify, "OV-flag signed-compare simplification"),
     "booleanmask" => on_off!(fold_boolean_mask, "Boolean sign-mask folding"),
     "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
+    "helperroles" => on_off!(helper_roles, "Role-tagged helper-call rewrites"),
+    "dynalloca" => on_off!(dyn_alloca, "Run-time stack moves as alloca"),
+    "indexrescale" => on_off!(index_rescale, "Byte offsets rescaled to element indexes"),
+    "looprotate" => on_off!(loop_rotate, "Guarded do-while loops rotated to while loops"),
+    "postinc" => on_off!(post_increment, "Pointer steps folded into *p++"),
+    "vastart" => on_off!(va_start, "va_start prologue as one call"),
+    "typevote" => on_off!(type_vote, "Type vote for leftover undefined varnodes"),
+    "switchguardmerge" => on_off!(switch_guard_merge, "Equality guards merged into their switch"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),
     "cancelbytearithmetic" => {
         let (val, msg) =
@@ -1405,7 +1413,19 @@ kuna_options! { self, p1;
     },
     "funcchunks" => {
         on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
+    },    "globalwidth" => {
+        on_off!(analysis_globalwidth, "Data-object typing from access width")
+    },    "aifdataveto" => {
+        on_off!(analysis_aifdataveto, "AIF data read/write veto")
+    },    "incrementalwalk" => {
+        on_off!(analysis_incrementalwalk, "Incremental Listing walk for callback roots")
+    },    "calltable" => {
+        on_off!(analysis_calltable, "Call-table recovery, vote and case demotion")
     },
+
+
+
+
     "tailcallentryall" => {
         on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
     },

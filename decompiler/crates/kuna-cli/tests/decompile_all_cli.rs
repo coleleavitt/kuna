@@ -2688,7 +2688,8 @@ fn printed_functions(stdout: &str, names: &[&str]) -> String {
 /// where the machine moves bits -- so it is refused.  The round trip compiles the
 /// seven printed callers (`-no-pie`, so the array's address survives the printed
 /// 32-bit `(int)a1 + 0xc`) against a bit-preserving `h` and compares them with the
-/// source.
+/// source. `typevote` is off: its unsigned vote for the shifted word changes
+/// the casts this test pins.
 #[test]
 fn a_float_in_a_general_register_keeps_its_integer_uses_round_trip() {
     let bin = repo_root()
@@ -2698,7 +2699,7 @@ fn a_float_in_a_general_register_keeps_its_integer_uses_round_trip() {
         .to_string();
     let sp = specs();
     let (stdout, stderr, ok) =
-        run_kuna(&["decompile-all", &bin, "--option", "structdefs", "on", "--sleighpath", &sp]);
+        run_kuna(&["decompile-all", &bin, "--option", "structdefs", "on", "--option", "typevote", "off", "--sleighpath", &sp]);
     assert!(ok, "kuna decompile-all failed: {stderr}");
     for want in [
         "return (int)h(a0,v1) + v1 + 3;",

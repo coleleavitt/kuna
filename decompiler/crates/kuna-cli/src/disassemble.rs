@@ -855,11 +855,44 @@ fn render_text(region: &Region, rows: &[Row], truncated: bool) -> String {
             ""
         }
     );
-    for r in rows {
+    let mut i = 0;
+    while i < rows.len() {
+        let r = &rows[i];
+        if let Some((n, align)) = alignment_run(rows, i) {
+            let line = format!("{:<14}{:<22}align {align}", format!("0x{:x}", r.addr), r.hex());
+            let _ = writeln!(out, "{}", line.trim_end());
+            i += n;
+            continue;
+        }
         let line = format!("{:<14}{:<22}{}", format!("0x{:x}", r.addr), r.hex(), r.text());
         let _ = writeln!(out, "{}", line.trim_end());
+        i += 1;
     }
     out
+}
+
+/// IDA's `align` item: after an instruction that does not fall through, a run
+/// of padding instructions (NOPs, `int3`, all-zero bytes) that ends exactly on a
+/// `2^k` boundary it is shorter than (`k` at most 4, the default code alignment
+/// IDA reports), followed by another instruction. Returns the run's row count
+/// and `2^k`.
+fn alignment_run(rows: &[Row], at: usize) -> Option<(usize, u64)> {
+    let prev = rows.get(at.checked_sub(1)?)?;
+    let m = prev.mnemonic.to_ascii_lowercase();
+    let terminal = ["ret", "jmp", "hlt", "ud2", "b", "br", "bx", "eret"].iter().any(|t| m == *t || m.starts_with(&format!("{t}.")))
+        || m.starts_with("ret");
+    if !terminal {
+        return None;
+    }
+    let padding = |r: &Row| {
+        let m = r.mnemonic.to_ascii_lowercase();
+        m.starts_with("nop") || m == "int3" || m == "xchg" && r.bytes == [0x66, 0x90] || r.bytes.iter().all(|&b| b == 0)
+    };
+    let n = rows[at..].iter().take_while(|r| padding(r)).count();
+    let next = rows.get(at + n)?;
+    let len = next.addr - rows[at].addr;
+    let align = (2..=4).rev().map(|k| 1u64 << k).find(|a| next.addr % a == 0 && len < *a && len > 0)?;
+    (n > 0).then_some((n, align))
 }
 
 /// The human byte surface: `xxd -g1` with kuna's own address column — a `#`

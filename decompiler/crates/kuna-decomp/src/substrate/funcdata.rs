@@ -4807,7 +4807,7 @@ impl Funcdata {
                 if !wv.get_addr().is_constant() {
                     return false;
                 }
-                let off = (wv.get_offset() >> (least_byte * 8))
+                let off = wv.get_offset().checked_shr(least_byte as u32 * 8).unwrap_or(0)
                     & kuna_base::address::calc_mask(v.get_size());
                 return off == v.get_offset();
             }

@@ -626,8 +626,6 @@ mod tests {
               // `flirt` needs signature files named by KUNA_FLIRT_SIGS; without them it
               // is inert, so the preset has nothing to turn on.
               "flirt",
-              // `protomerge` measured worse on Lua 5.4.8 with DWARF (see its row).
-              "protomerge",
               // `flirt` needs signature files the user supplies (`KUNA_FLIRT_SIGS`,
               // IDA's own `.sig` files); kuna ships none, so the preset has nothing
               // to run it with.
@@ -653,10 +651,8 @@ mod tests {
         const UNEVALUATED: &[&str] = &[
             // Landed with fixture measurements only: `funcchunks` changes only FID's
             // input, `tailcallentryall` was measured on Lua and the LLVM tools, and
-            // `bitidioms` rewrites one datatest and two PowerPC stage cases.
             "funcchunks",
             "tailcallentryall",
-            "bitidioms",
             // `dwarfglobaltypes` was turned off by default in its own branch after
             // landing; it has no preset sweep yet.
             "dwarfglobaltypes",

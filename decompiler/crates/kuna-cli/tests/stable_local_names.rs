@@ -344,7 +344,8 @@ fn a_structure_pointer_retype_keeps_the_variable_whole() {
 /// The retyped variable keeps the name a directive pins on it while the type
 /// reshapes the code around it: `walk`'s pointer is found by its lock once the
 /// first decompile's keys miss it (it printed as `v3`), and `squeeze`'s stays
-/// declared where the reshaped loop could inline it (it vanished).
+/// declared where the reshaped loop could inline it (it vanished). With
+/// `looprotate` the do-while and its `v2` go, so the test turns it off.
 #[test]
 fn a_structure_pointer_retype_keeps_its_name() {
     let fixture = "retypeptr_x86_64";
@@ -352,9 +353,10 @@ fn a_structure_pointer_retype_keeps_its_name() {
     for (function, directive, decl) in
         [("walk", "type v2 S *v2", "  S *v2;"), ("walk", "type v2 S *", "  S *v2;"), ("squeeze", "type v1 S *v1", "  S *v1;")]
     {
-        let code = decompile_in(fixture, function, &[], &[typedef, directive]);
+        let rotate_off = ["--option", "looprotate", "off"];
+        let code = decompile_in(fixture, function, &rotate_off, &[typedef, directive]);
         assert!(code.contains(decl), "{function} {directive}:\n{code}");
-        assert_eq!(declared(&code), declared(&decompile_in(fixture, function, &[], &[])), "{code}");
+        assert_eq!(declared(&code), declared(&decompile_in(fixture, function, &rotate_off, &[])), "{code}");
     }
 }
 

@@ -222,6 +222,9 @@ pub mod pcodeop_addlflags {
     /// writes a narrowed call result back into its register.  Set and read by
     /// [`crate::p4_calls::kuna_narrowret`].
     pub const kuna_narrowret: uint4 = 0x400000;
+    /// (kuna) This LOAD or STORE prints its pointer as `p++` and the increment
+    /// after it prints nothing. Set by [`crate::p9_emit::kuna_postinc`].
+    pub const kuna_postinc: uint4 = 0x800000;
 }
 
 // ---------------------------------------------------------------------------

@@ -881,8 +881,7 @@ impl CircleRange {
             return true;
         }
         let shift = leastsigbit_set(nzmask);
-        self.step = 1;
-        self.step <<= shift; // step <<= shift (int4 shift)
+        self.step = 1i32.wrapping_shl(shift as u32); // C++ `step <<= shift` on an int4
         self.mask = calc_mask(size);
         self.left = 0;
         self.right = (nzmask.wadd(self.step as uintb)) & self.mask;

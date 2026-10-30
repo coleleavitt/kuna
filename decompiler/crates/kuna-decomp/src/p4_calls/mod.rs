@@ -9,6 +9,7 @@ pub mod modelrules;
 pub mod coreaction_protos;
 pub mod kuna_calleedeadarg;
 pub mod kuna_protomerge;
+pub mod kuna_helperrole;
 pub mod kuna_hiddenretarg; // (kuna) a value left in the hidden-return register is no argument a callee cannot take
 pub mod kuna_calleereadarg; // (kuna) keep a refused argument the callee's own body reads
 pub mod kuna_zerofillreturn; // (kuna) the zero a narrow write leaves in a returned q register's upper half is no part of the value
@@ -62,6 +63,7 @@ pub mod kuna_callbacktype; // (kuna) a callback takes the prototype of the slot 
 pub mod kuna_calleevote; // (kuna) a callee parameter takes the type every caller passes
 pub mod kuna_callerptr; // (kuna) a parameter every caller passes a pointer is a pointer
 pub mod kuna_callpush; // (kuna) a call's own return-address push is part of the call
+pub mod kuna_vastart; // (kuna) the x86-64 va_start prologue as va_start(ap, last)
 pub mod kuna_callrettype; // (kuna) a call returns the type its callee's recovery gave it
 pub mod kuna_condexeret; // (kuna) a return trial failed only on a path ActionConditionalExe removes gets one more pass
 pub mod kuna_condexeretuse; // (kuna) a use of a returned value on the branch a re-tested condition rules out does not compete

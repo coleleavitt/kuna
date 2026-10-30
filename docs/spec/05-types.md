@@ -3744,3 +3744,48 @@ drives them (`decompiler/crates/kuna-decomp/src/p3_dataflow/heritage.rs
 (Heritage::heritage)`) is a documented stub — inert for every architecture
 without split records, which is the entire current test surface, so no live
 output depends on it yet.
+
+**Type vote** (`typevote`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p5_types/kuna_typevote.rs (ActionTypeVote)`,
+run after the merge passes, before names and casts): a variable whose type is
+still `undefinedN` (1, 2, 4 or 8 bytes, no instance type-locked or constant)
+takes the type the ops on its instances vote for, the weighted vote Hex-Rays'
+ctree type solver runs. Logical shifts and zero extension vote unsigned;
+arithmetic shifts, sign extension, signed compares, divides and overflow tests
+vote signed; a COPY from or to an `int`/`uint` value votes its signedness with
+weight 3; other integer arithmetic, bitwise ops and equality tests vote
+numeric; float ops vote float. Integer votes give `int`/`uint` of the size
+(signed unless unsigned outvotes it), float votes at 4 or 8 bytes give
+`float`/`double`, and no vote leaves the variable undefined. The prototype
+stays the prototype's: a value that reaches a RETURN (through copies, register
+pair joins, extensions and truncations) is not voted, and a parameter takes
+only an unsigned vote, since an undefined parameter already prints as unsigned
+in the signature. A piece of a union (`TYPE_PARTIALUNION`, which also prints
+as `undefinedN`) keeps its type, because its union field reads hang on it.
+Merge copies added after type inference start untyped, so a parameter printed
+`unsigned int a1` read as `(unsigned int)a1 >> 0x18`; voted, it reads
+`a1 >> 0x18`. On Lua 5.4 x86-64 the `undefinedN` declarations drop from 73 to
+66 and 25 functions lose casts, with no signature changed and no measurable
+time added; the ones left are union pieces, odd-sized (3, 5, 6, 7 byte) values
+and returned values.
+
+**Index rescaling** (`indexrescale`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p5_types/kuna_indexrescale.rs (ActionIndexRescale)`,
+right after `ActionInferTypes` in the main loop): an `INT_ADD(p, w)` whose `p`
+points to `k`-byte elements (`k > 1`) starts a web from `w` through
+MULTIEQUAL, INDIRECT, COPY and constant steps. The web is rescaled when every
+member is written by a COPY of a constant, a step by a constant, or a join of
+members, every constant is an exact signed multiple of `k`, and every reader is
+one of those writes, an `INT_ADD` with a base pointing to `k`-byte elements, or
+an equality or ordering compare with a multiple of `k`; no member is an input,
+free, address-tied or persistent. A base that is the address of a structure
+field other than an array is refused (`scalar_field`: the offset picks a field,
+as in Lua's `reallymarkobject`, not an element). The constants are divided by
+`k`, each add becomes `PTRADD(p, w, k)`, which prints as `p[w]`, and compares
+take the divided constant; this relies on the byte offset not wrapping.
+gcc -O2 `rule[two ? 3 : 1] = v` prints `a0[v1] = a1;` with `v1 = 1;` and
+`v1 = 3;`. Lua 5.4 x86-64: 4 functions (`luaS_clearcache` loops over
+`g->strcache[v1]` stepping by 2 up to `0x6a`), AArch64 13, ld.so 3; time
+within noise. A pointer that steps by the element size (gcc's loops) is the
+pointer case `ActionPostIncrement` and the `for` recovery print; a byte offset
+also used in other arithmetic is left.

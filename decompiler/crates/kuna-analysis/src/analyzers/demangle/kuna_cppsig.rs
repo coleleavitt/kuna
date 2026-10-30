@@ -91,7 +91,7 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use object::read::{Object, ObjectSymbol};
+use object::read::{Object, ObjectSection, ObjectSymbol};
 use object::SymbolKind;
 
 use kuna_base::types::{int4, uint4};
@@ -170,6 +170,7 @@ impl AnalysisPass for CppSigPass {
         let types = ctx.arch.types();
         let (_addr_size, word_size) = ctx.arch.data_org();
         let ptr = types.get_size_of_pointer();
+        let hidden = hidden_return_entries(ctx);
         for (addr, decl, msvc) in &decls {
             let (has_this, proven) = match decl.this_kind {
                 ThisKind::Proven => (true, true),
@@ -182,9 +183,18 @@ impl AnalysisPass for CppSigPass {
             if has_this && decl.class.is_empty() {
                 continue;
             }
-            let Some(pieces) = build_pieces(decl, has_this, types, ptr, word_size) else {
+            let Some(mut pieces) = build_pieces(decl, has_this, types, ptr, word_size) else {
                 continue;
             };
+            if hidden.contains(addr) {
+                let Ok(void) = types.get_type_void() else { continue };
+                let Ok(retptr) = types.get_type_pointer(ptr, void, word_size) else { continue };
+                pieces.intypes.insert(0, retptr);
+                pieces.innames.insert(0, "rethidden".to_string());
+                if pieces.first_var_arg_slot >= 0 {
+                    pieces.first_var_arg_slot += 1;
+                }
+            }
             if *msvc {
                 out.cpp_sig.msvc_legacy.push((*addr, pieces));
             } else if proven {
@@ -196,6 +206,35 @@ impl AnalysisPass for CppSigPass {
         super::kuna_msvcsig::collect(ctx, &mangled, &imports, &mut out.cpp_sig);
         out
     }
+}
+
+/// The entries of an i386 System V image whose function ends in `ret $4`: the
+/// callee pops the hidden struct-return pointer, so the demangled parameter
+/// list (which never spells it) is one stack slot short. IDA's
+/// `func_has_stkframe_hole` test, read off the function's own last instruction.
+fn hidden_return_entries(ctx: &AnalysisCtx) -> HashSet<u64> {
+    let mut out = HashSet::new();
+    if !ctx.arch.archid.starts_with("x86:LE:32") || ctx.file.format() != object::BinaryFormat::Elf {
+        return out;
+    }
+    for sym in ctx.file.symbols() {
+        if sym.kind() != SymbolKind::Text || sym.address() == 0 || sym.size() < 3 {
+            continue;
+        }
+        let end = sym.address() + sym.size();
+        let tail = ctx.file.sections().find_map(|s| {
+            let (lo, hi) = (s.address(), s.address() + s.size());
+            if end <= lo || end > hi || end < lo + 3 {
+                return None;
+            }
+            let data = s.data().ok()?;
+            data.get((end - 3 - lo) as usize..(end - lo) as usize).map(|b| b.to_vec())
+        });
+        if tail.as_deref() == Some(&[0xc2, 0x04, 0x00]) {
+            out.insert(sym.address());
+        }
+    }
+    out
 }
 
 /// Every defined FUNC symbol whose name is C++-mangled, as `(entry vma, raw name)`.

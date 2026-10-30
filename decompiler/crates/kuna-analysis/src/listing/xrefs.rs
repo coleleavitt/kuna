@@ -1197,6 +1197,7 @@ fn descend(
                 if let Some(p) = pool.as_ref() {
                     let mut cases: Vec<u64> = Vec::new();
                     let mut stated: Option<usize> = None;
+                    let mut unbounded = false;
                     for &(base, kind) in &drefs {
                         if kind == XrefKind::Data {
                             cases.extend(kuna_switchtable::targets(
@@ -1236,6 +1237,7 @@ fn descend(
                             }
                         }
                         (cases, stated) = (read.cases, read.stated);
+                        unbounded = read.unbounded;
                     }
                     // A dispatch that names no address rendered nothing above,
                     // and a row whose instruction column is blank does not say
@@ -1243,9 +1245,46 @@ fn descend(
                     if !cases.is_empty() && text.is_empty() {
                         text = assembly(translate, vma, &code_space);
                     }
-                    st.take_switch(vma, entry, &cases, stated, max_entries, &text);
-                    picpool.cases(vma, &cases);
-                    insn_queue.extend(cases.iter().map(|&target| (target, mode)));
+                    // (kuna `calltable`) IDA's call-table vote: a table whose
+                    // distinct targets are 40% or more other functions' entries
+                    // dispatches tail calls, not cases of this function.
+                    let distinct: BTreeSet<u64> = cases.iter().copied().collect();
+                    let foreign = distinct.iter().filter(|t| st.funcs.contains(t) && **t != entry).count();
+                    let aligned = arch.archid.starts_with("x86") && distinct.len() >= 2 && distinct.iter().all(|t| t % 16 == 0);
+                    if arch.analysis_calltable && !distinct.is_empty() && ((unbounded && aligned) || foreign * 5 >= distinct.len() * 2) {
+                        for &t in &distinct {
+                            st.file(vma, t, XrefKind::Call, &text);
+                            if st.funcs.insert(t) {
+                                func_queue.push_back(t);
+                            }
+                        }
+                    } else if !unbounded {
+                        st.take_switch(vma, entry, &cases, stated, max_entries, &text);
+                        picpool.cases(vma, &cases);
+                        insn_queue.extend(cases.iter().map(|&target| (target, mode)));
+                    }
+                }
+            }
+            // (kuna `calltable`) An indexed call through a table of function
+            // pointers calls every entry of the table.
+            if arch.analysis_calltable && c.flows.is_empty() && c.flow.is_computed && c.flow.is_call {
+                if let Some(p) = pool.as_ref() {
+                    let callind = cap.ops().iter().find(|o| o.opcode == OpCode::CPUI_CALLIND).and_then(|o| o.ins.first()).cloned();
+                    if let Some(callind) = callind {
+                        let read = kuna_switchtable::register_targets(
+                            translate, &code_space, data_space.as_ref(), &st.decoded, vma, &callind, p, &exec, &reach,
+                        );
+                        if !read.cases.is_empty() && text.is_empty() {
+                            text = assembly(translate, vma, &code_space);
+                        }
+                        let distinct: BTreeSet<u64> = read.cases.iter().copied().collect();
+                        for t in distinct {
+                            st.file(vma, t, XrefKind::Call, &text);
+                            if st.funcs.insert(t) {
+                                func_queue.push_back(t);
+                            }
+                        }
+                    }
                 }
             }
 

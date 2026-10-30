@@ -111,6 +111,9 @@ fn bootstrap(on: bool) -> kuna_console::engine::ConsoleProgram {
     // place; it is pinned off here for the same reason. `verify_aifpoolslide.rs`
     // gates it on this fixture.
     prog.arch_mut().set_kuna_option("aifpoolslide", "off").expect("aifpoolslide flips off");
+    // `aifdataveto` drops `F`, an AIF-only entry whose first word `G` reads as
+    // data; it is pinned off so the disclosed split below stays observable.
+    prog.arch_mut().set_kuna_option("aifdataveto", "off").expect("aifdataveto flips off");
     if on {
         prog.arch_mut().set_kuna_option("poolentry", "on").expect("poolentry flips on");
     }

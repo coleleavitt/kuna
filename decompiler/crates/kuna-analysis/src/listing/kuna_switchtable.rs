@@ -293,11 +293,13 @@ pub(super) fn register_targets(
 
     let mut vals: Vec<(Key, Val)> = Vec::new();
     let mut dispatch = None;
+    let mut call = false;
     let mut index: Option<(u64, usize, Key)> = None;
     'slice: for (vma, ops) in &slice {
         for (i, op) in ops.iter().enumerate() {
-            if op.opcode == OpCode::CPUI_BRANCHIND && *vma == from {
+            if matches!(op.opcode, OpCode::CPUI_BRANCHIND | OpCode::CPUI_CALLIND) && *vma == from {
                 dispatch = op.ins.first().and_then(|vn| value_of(vn, &vals, data_space));
+                call = op.opcode == OpCode::CPUI_CALLIND;
                 break 'slice;
             }
             if leaves_registers_unknown(op.opcode) {
@@ -347,10 +349,18 @@ pub(super) fn register_targets(
     match (guard_limit(translate, code_space, data_space, decoded, from, reach), masked) {
         (Ok(limit), masked) => {
             let limit = masked.map_or(limit, |n| n.min(limit));
-            TableRead { cases: read(limit), stated: Some(limit), gap: None }
+            TableRead { cases: read(limit), stated: Some(limit), gap: None, unbounded: false }
         }
+        // (kuna `calltable`) An indexed call states no count: its table runs to
+        // the first word that is not code of the caller's section.
+        (Err(_), None) if table.1.is_none() => TableRead {
+            cases: targets(table.0, from, pool, exec, None, max_entries.min(CALL_TABLE_MAX)),
+            stated: None,
+            gap: None,
+            unbounded: !call,
+        },
         (Err(gap), masked) => match masked.map(|n| (n, read(n))) {
-            Some((n, cases)) if cases.len() == n => TableRead { cases, stated: Some(n), gap: None },
+            Some((n, cases)) if cases.len() == n => TableRead { cases, stated: Some(n), gap: None, unbounded: false },
             _ => TableRead { gap: gap.filter(|_| reach.far), ..TableRead::default() },
         },
     }
@@ -435,6 +445,9 @@ fn mask_limit(
     None
 }
 
+/// The most entries a call table with no range check is read to.
+pub(super) const CALL_TABLE_MAX: usize = 256;
+
 /// What [`register_targets`] read at one computed jump.
 #[derive(Debug, Default)]
 pub(super) struct TableRead {
@@ -445,6 +458,10 @@ pub(super) struct TableRead {
     /// Where the read stopped for want of a decoded instruction ending at this
     /// address: the walk reached the dispatch before the code falling into it.
     pub gap: Option<u64>,
+    /// (kuna `calltable`) A jump through a pointer table with no range check:
+    /// the entries run to the first non-code word, which is only a call table's
+    /// shape (IDA's vote); a switch read this way is not a switch.
+    pub unbounded: bool,
 }
 
 /// How many cases the range check ahead of the dispatch admits, or `None` when

@@ -22,6 +22,10 @@ Three tiers:
 | a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms) |
 | bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms) |
 | hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
+| memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s) | [`helperroles`](#helperroles) |
+| an inlined strcpy shows as a strlen call followed by a memcpy | [`helperroles`](#helperroles) |
+| a variable-length array prints as &(&Stack[-8])[-n] | [`dynalloca`](#dynalloca) |
+| sub rsp, rax decompiles to stack pointer arithmetic instead of alloca | [`dynalloca`](#dynalloca) |
 | a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
 | `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
 | a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
@@ -182,6 +186,17 @@ Three tiers:
 | 'jump-as-call' on a switchAssist or lookupswitch user-op | [`jumpassist`](#jumpassist) |
 | 'Too many branches' jumptable failure where a cbranch range guard bounds the index | [`switchguardbound`](#switchguardbound) |
 | computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound) |
+| a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ... | [`switchguardmerge`](#switchguardmerge) |
+| a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
+| a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote) |
+| a cast back to a variable's own declared type at each read | [`typevote`](#typevote) |
+| *(int *)((long)p + v1) where v1 only takes multiples of 4 | [`indexrescale`](#indexrescale) |
+| a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale) |
+| a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
+| a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
+| a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
+| if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate) |
+| a while loop prints as an if around a do-while | [`looprotate`](#looprotate) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
 | pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
 | 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
@@ -958,6 +973,18 @@ Three tiers:
 | a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks) |
 | a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks) |
 | a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks) |
+| a symbol-table array prints as *(short *)&g[i * 2] | [`globalwidth`](#globalwidth) |
+| a global array with a symbol but no debug info decompiles as byte offsets | [`globalwidth`](#globalwidth) |
+| element accesses to a named global table need casts | [`globalwidth`](#globalwidth) |
+| a sub_ entry starts on a table the code loads from | [`aifdataveto`](#aifdataveto) |
+| aif adds a function at an address the program writes to | [`aifdataveto`](#aifdataveto) |
+| a stripped function list contains data the code reads | [`aifdataveto`](#aifdataveto) |
+| function discovery on an i386 binary full of push imm callbacks is slow | [`incrementalwalk`](#incrementalwalk) |
+| each callback round re-decodes the whole program | [`incrementalwalk`](#incrementalwalk) |
+| a function reached only through a table of function pointers is missing | [`calltable`](#calltable) |
+| kuna xrefs shows no caller for a function called through ops[i](x) | [`calltable`](#calltable) |
+| a switch case that opens with push rbp is listed as a function | [`calltable`](#calltable) |
+| a dispatcher's table of tail calls is printed as a switch | [`calltable`](#calltable) |
 | a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
 | a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
 | tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
@@ -1657,13 +1684,29 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P9/type-definition-preamble · angr · presentation-default · kuna-structdefs
 - **Example:** `option structdefs on`
 
-### `bitidioms` -- on | off, default `off`
+### `bitidioms` -- on | off, default `on`
 
 - **Symptoms:** a byte swap prints as four masked shifts ORed together; a rotate prints as a pair of opposite shifts ORed together; bswap or rev instructions decompile to shift and mask soup; hash or crc code full of paired shifts.
-- **What it does:** Fold a byte swap or a constant rotate written out as shifts, masks and ORs into a call: bswap(x) when every leaf of an INT_OR tree moves whole bytes of the same x so that byte i lands in byte N-1-i (2, 4 or 8 bytes, each destination byte exactly once; masks, shifts and zero-extended byte pieces accepted), and rotl(x, n) for (x << n) | (x >> (W - n)) with a constant n. SLEIGH lifts bswap/rev and rol/ror into exactly that shift form, and compilers emit it for the portable C, so the decompiled C showed four masked shifts where the source said __builtin_bswap32. This is Hex-Rays' slot-filling bswap matcher and its rotate rule (it prints _byteswap_ulong and __ROL4__).
-- **When to flip:** Off by default: the datatest corpus has a leading-zero-count case and two PowerPC rotate-and-mask cases whose expected C it rewrites. Flip on for crypto, hashing, checksum and network-order code, where bswap/rev/rol/ror and their portable C spellings otherwise print as masked shift soup.
+- **What it does:** Fold a byte swap or a constant rotate written out as shifts, masks and ORs into a call: bswap(x) when every leaf of an INT_OR tree moves whole bytes of the same x so that byte i lands in byte N-1-i (2, 4 or 8 bytes, each destination byte exactly once; masks, shifts and zero-extended byte pieces accepted), and rotl(x, n) for (x << n) | (x >> (W - n)) with a constant n. SLEIGH lifts bswap/rev and rol/ror into exactly that shift form, and compilers emit it for the portable C, so the decompiled C showed four masked shifts where the source said __builtin_bswap32. This is Hex-Rays' slot-filling bswap matcher and its rotate rule (it prints _byteswap_ulong and __ROL4__). It also folds the cmov/cneg lowering of x < 0 ? -x : x (a MULTIEQUAL of x and -x chosen by a sign test, checked at x = -5 and x = 5) into abs(x) / labs(x), an AArch64 rbit + clz (LZCOUNT of a full bit reversal) into ctz(x), a full bit reversal into bitreverse(x), and the loop SLEIGH lifts x86 bsf/tzcnt/bsr to into ctz(x) / LZCOUNT(x) ^ (W-1), proved by running the loop on every single-bit and several mixed sources. A rotate whose reader masks away one of its two halves is left to the shift rules (PowerPC rlwinm/rldic write shifts as rotate-and-mask).
+- **When to flip:** On (default). Flip off to see the raw shift-and-mask expressions, the cmov/cneg abs diamond and the one-instruction bsf/bsr loops, for example to check which bits a hand-written partial swap moves.
 - **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-bitidioms
-- **Example:** `--option bitidioms on`
+- **Example:** `--option bitidioms off`
+
+### `helperroles` -- on | off, default `on`
+
+- **Symptoms:** memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s); an inlined strcpy shows as a strlen call followed by a memcpy.
+- **What it does:** Tag helper calls with a role (memcpy, memmove, memset, memcmp, strlen, strcpy, strncpy, strcmp, byte swap, rotate, abs, count-trailing-zeros) from the callee's name with its decorations stripped (_memcpy, j_strlen, __imp_memcpy, memcpy@GLIBC, builtin_ prefix) or a CALLOTHER builtin's id, and rewrite on the roles: memcpy(d, s, strlen(s) + 1) becomes strcpy(d, s) (either half a library call or a builtin; the arguments compared through copies, extensions and the INDIRECTs a call leaves on a preserved register), and a strlen whose length nobody reads is dropped. Hex-Rays' funcrole_t tags and the chain in minsn_t::optimize_subtree.
+- **When to flip:** On (default). Flip off to keep the memcpy/strlen pair as the binary spells it.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-helperroles
+- **Example:** `--option helperroles off`
+
+### `dynalloca` -- on | off, default `on`
+
+- **Symptoms:** a variable-length array prints as &(&Stack[-8])[-n]; sub rsp, rax decompiles to stack pointer arithmetic instead of alloca.
+- **What it does:** Print a stack pointer moved down by a run-time amount as alloca(n). A variable-length array or an alloca call compiles to sub rsp, n (sub sp, sp, xN) with n computed at run time; once types are in, the new stack pointer value is PTRADD(stack pointer, -n, 1), which printed as &(&Stack[-8])[-n]. With this on, that PTRADD with a non-constant n becomes the typed builtin alloca(n), returning void *.
+- **When to flip:** On (default). Flip off to see the stack-pointer arithmetic a dynamic allocation lowers to.
+- **Where / provenance:** P7/edge-virtualization · kuna · presentation-default · kuna-dynalloca
+- **Example:** `--option dynalloca off`
 
 ### `mulblob` -- on | off, default `on`
 
@@ -2016,6 +2059,54 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Set on PER PROGRAM when a switch reports 'Could not recover jumptable ... Too many branches' and renders as a computed (code *)() call AND the dispatch is range-guarded (vs the modulo form switchmodbound handles); DESTRUCTIVE as a global default (the guard-to-index correspondence is asserted across a stack spill it cannot prove in dataflow, so it may over-bound an unrelated indirect jump).
 - **Where / provenance:** P2/switch-model · angr · opt-in-tool · angr-missing-function-call
 - **Example:** `option switchguardbound on`
+
+### `switchguardmerge` -- on | off, default `on`
+
+- **Symptoms:** a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ...; a case value outside the jump table is tested after the switch.
+- **What it does:** Merge an equality test that a switch's range guard (or its default) leads to into the switch as more cases. gcc and clang lower a switch with a far outlier (case 100 beside case 0..6) to a jump table behind a range guard plus `x == 100` tests on the guard's other side, which printed as `if (a0 <= 6) { switch(a0) {...} } if (a0 != 100) return -1; ...`. With this on, the guard is evaluated on the outliers and on every case label (each must keep its path), the blocks on the way must only compute, and the default must read the same values either way; then each outlier becomes a case and the guard goes. The same holds for a chain of tests that is the switch's own default (clang).
+- **When to flip:** On (default). Flip off to see the guard and the separate equality tests the compiler emitted.
+- **Where / provenance:** P2/switch-model · kuna · presentation-default · kuna-switchguardmerge
+- **Example:** `--option switchguardmerge off`
+
+### `typevote` -- on | off, default `on`
+
+- **Symptoms:** a variable declared undefined4/undefined8 although it is shifted, masked or compared; a cast back to a variable's own declared type at each read.
+- **What it does:** Type a variable the type passes leave undefinedN by a vote over the ops that write and read it, once every variable is final. Logical shifts and zero extension vote unsigned; arithmetic shifts, sign extension and signed compares vote signed; a copy from or to an integer-typed value votes its signedness; other integer ops vote numeric (int on a tie, the C default); float ops vote float. A returned value is not voted and a parameter takes only an unsigned vote, so no signature changes; a piece of a union keeps its type. Merge copies added after type inference start untyped, so an unsigned int parameter printed (unsigned int)a1 at each read.
+- **When to flip:** On (default). Flip off to see which values type inference left undefined.
+- **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-typevote
+- **Example:** `--option typevote off`
+
+### `indexrescale` -- on | off, default `on`
+
+- **Symptoms:** *(int *)((long)p + v1) where v1 only takes multiples of 4; a loop steps an offset by the element size and adds it to the base.
+- **What it does:** Rescale a byte offset into an array to an element index. When a variable's web (joined through MULTIEQUAL, INDIRECT, COPY and constant steps) is written only by constants and steps that are multiples of k and read only as an offset added to a pointer to k-byte elements (not the address of a non-array structure field), by its own steps, or by compares with multiples of k, its constants are divided by k and each add becomes PTRADD(p, i, k): *(int *)((long)rule + v2) with v2 = 4 / v2 = 0xc prints rule[v2] with v2 = 1 / v2 = 3. Assumes the byte offset does not wrap, as an array offset does.
+- **When to flip:** On (default). Flip off to see the byte offsets the compiler kept.
+- **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-indexrescale
+- **Example:** `--option indexrescale off`
+
+### `vastart` -- on | off, default `on`
+
+- **Symptoms:** a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores; a stripped printf-like function recovers 14 parameters.
+- **What it does:** Print the x86-64 SysV va_start prologue as va_start(ap, last). A variadic function that materializes a va_list spills the unnamed argument registers (and, under test al, the eight XMM registers) to a 176-byte register save area and sets gp_offset, fp_offset, overflow_arg_area and reg_save_area; kuna printed each spill and field store. With this on, the two offset constants (gp_offset 8 per named integer argument, fp_offset 48 plus 16 per named float argument) beside the two pointer writes in one block become effects of a va_start(&ap, last) CALLOTHER, the register save area loses its forced liveness so the spills go, and an unlocked prototype is marked variadic: a stripped image's 14-parameter signature becomes (a0, a1, ...).
+- **When to flip:** On (default). Flip off to see the register save area spills and the four va_list field stores.
+- **Where / provenance:** P4/prototype-source · kuna · presentation-default · kuna-vastart
+- **Example:** `--option vastart off`
+
+### `postinc` -- on | off, default `on`
+
+- **Symptoms:** a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++;.
+- **What it does:** Fold a pointer step that follows the statement dereferencing the pointer into a post-increment: `v = *p; p = &p[1];` prints `v = *p++;` and `*d = c; d = &d[1];` prints `*d++ = c;`. The step (INT_ADD or PTRADD of a constant c, output and input the same variable) folds only when the stepped value is read by exactly one other op, a LOAD or STORE of c bytes through it, the pointer's element is c bytes, and the statement holding that LOAD or STORE is printed right before the step in the same block. C output only.
+- **When to flip:** On (default). Flip off to see each pointer step as its own statement.
+- **Where / provenance:** P9/readability-rewrites · kuna · presentation-default · kuna-postinc
+- **Example:** `--option postinc off`
+
+### `looprotate` -- on | off, default `on`
+
+- **Symptoms:** if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop; a while loop prints as an if around a do-while.
+- **What it does:** Rotate a guarded do-while loop into a while loop (loop un-inversion). Compilers turn while (c) body into if (c) { do body while (c); }; with this on, when the guard is the tail's condition evaluated on the values entering the loop (operands compared op by op), or the loop counts by one from x0 to an exit at i + 1 == n behind a guard x0 < n (then i + 1 != n is i + 1 < n on every iteration), and the code between guard and loop has no side effect and each exit value is available at the top, the header's MULTIEQUALs move to a new header block that tests the condition and the guard's and tail's branches go. The for recovery then prints for (i = 0; i < n; i = i + 1). Two return blocks that return the same thing on the entry values (the guard's return 0, the loop's return c) count as one exit.
+- **When to flip:** On (default). Flip off to see the guard and the do-while the compiler emitted.
+- **Where / provenance:** P8/loop-refinement · kuna · presentation-default · kuna-looprotate
+- **Example:** `--option looprotate off`
 
 ### `switchsharedcase` -- on | off, default `on` (destructive opt-in)
 
@@ -3685,11 +3776,11 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-codestrings
 - **Example:** `--option codestrings off`
 
-### `protomerge` -- on | off, default `off`
+### `protomerge` -- on | off, default `on`
 
 - **Symptoms:** a libc function's FILE * parameter becomes void * because a later source declared it; a demangled C++ class pointer parameter is replaced by unsigned long; a dwarf prototype erases a parameter name the library table gave.
-- **What it does:** Merge the prototypes the load-time sources park on one function slot by slot instead of letting the later source replace the earlier wholesale. The libc tables (by name and by address), the named-aggregate libctypes tables, the demangled C++ signature and DWARF each park a whole prototype at the analysis commit, in that order; before this the last one won even where an earlier one knew more about a parameter. With this on, when both have the same shape (arity, variadic slot, and the same size in every slot), each slot keeps the type that says more (a named struct, union, enum or array, or a pointer to one, over a pointer to a scalar, over a pointer to void, over a float or bool, over an integer, over an undefined), ties going to the later source; names fill in from the earlier one when the later has none; a return type survives when the later source leaves the return open. Prototypes of a different shape replace each other as before. Directive, console and decompile-time prototypes are not merged.
-- **When to flip:** Off by default: on Lua 5.4.8 with DWARF (static musl) it changes 4 of 893 signatures: luaL_checkstack gains its char * message, but luaF_closeupval loses its StackValue * level to unsigned long and bcmp/memcmp take unsigned char * instead of the void * DWARF declares, so the source order or the shape test needs work before it can be on. Flip on to experiment with slot-by-slot merging of library, demangled and DWARF prototypes.
+- **What it does:** Merge the prototypes the load-time sources park on one function slot by slot instead of letting the later source replace the earlier wholesale. The libc tables (by name and by address), the named-aggregate libctypes tables, the demangled C++ signature and DWARF each park a whole prototype at the analysis commit, in that order; before this the last one won even where an earlier one knew more about a parameter. With this on, when both have the same shape (arity, variadic slot, and the same size in every slot), each slot keeps the type that says more (anything typed over a plain integer, a plain integer over an undefined; two typed slots, two pointers included, are a tie), ties going to the later source, so a DWARF void * is kept over a table's unsigned char *; names fill in from the earlier one when the later has none; a return type survives when the later source leaves the return open. Prototypes of a different shape replace each other as before. Directive, console and decompile-time prototypes are not merged.
+- **When to flip:** On (default). Measured on Lua 5.4.8 (static musl + DWARF, 892 functions), llvm-objdump (1,124 functions), bzip2 (84) and an i386 C++ fixture: no signature changes, so it costs nothing where the sources agree; it keeps an earlier source's typed slot where a later one only states an integer or nothing, and fills parameter names. Flip off to restore last-source-wins.
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-protomerge
 - **Example:** `--option protomerge off`
 
@@ -3712,10 +3803,42 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `funcchunks` -- on | off, default `off`
 
 - **Symptoms:** fid misses a library function whose body is split by the compiler; a function's body in the inventory absorbs the function after it; a shared epilogue is counted in only one function; a .cold part after the next function is not part of its parent's fingerprint.
-- **What it does:** Give every discovered function a body made of chunks instead of the address clip [entry, next entry). After the Listing walk, a function's body is the flow closure of its entry: fall-through and branch targets, never a call target, and never another function's entry (a jump there is a tail call). The body is cut into address runs (undecoded alignment padding of up to 16 bytes joins two runs). The run that holds the entry is the main chunk; every other run is a tail. An instruction reached from several entries is a shared tail and lists every function that reaches it as an owner, the way IDA's func_t keeps tails with a referer list. The FID matcher hashes this body (main chunk plus tails, ascending, Ghidra's func.getBody() order) instead of the clip, so a function whose error path or epilogue sits after the next function, or that shares a tail with another function, hashes the instructions it really runs. Requires the Listing (option listing on) and only changes FID's input; inert without both.
+- **What it does:** Give every discovered function a body made of chunks instead of the address clip [entry, next entry). After the Listing walk, a function's body is the flow closure of its entry: fall-through and branch targets, never a call target, and never another function's entry (a jump there is a tail call). The body is cut into address runs (undecoded alignment padding of up to 16 bytes joins two runs). The run that holds the entry is the main chunk; every other run is a tail. An instruction reached from several entries is a shared tail and lists every function that reaches it as an owner, the way IDA's func_t keeps tails with a referer list. The FID matcher hashes this body (main chunk plus tails, ascending, Ghidra's func.getBody() order) instead of the clip, so a function whose error path or epilogue sits after the next function, or that shares a tail with another function, hashes the instructions it really runs. The inventory size kuna functions reports is the chunk body (the sum of the chunks, shared tails included) instead of the [entry, next) upper bound. Requires the Listing (option listing on); inert without it.
 - **When to flip:** Flip on with listing on and fid on when FID misses a library function whose body is not one contiguous run (a gcc .cold split, a shared epilogue, an outlined error path after the next function), or when the clip makes a function absorb a neighbour that the walk never reaches from its entry. Off keeps the [entry, next) clip.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-funcchunks
 - **Example:** `--option listing on --option fid on --option funcchunks on`
+
+### `globalwidth` -- on | off, default `on`
+
+- **Symptoms:** a symbol-table array prints as *(short *)&g[i * 2]; a global array with a symbol but no debug info decompiles as byte offsets; element accesses to a named global table need casts.
+- **What it does:** Type each symbol-table data object (STT_OBJECT with a size, no DWARF type) from the width the code reads and writes it with. A data object is otherwise mapped as undefined<size>, so a short g[8] is an opaque 16-byte blob and every element access renders as *(short *)&g[i * 2]. With the Listing built, every LOAD or STORE whose address is a constant or a constant plus something, and every direct data-space operand, that lands inside the object is read at the width of the value moved; an object all of whose accesses use one width w that divides its size is mapped as an array of size / w undefined<w> elements (or undefined<w> when w is the size). Mixed widths leave it as it was. IDA sizes data items from the operand of the instructions that use them (insn_create_op_data).
+- **When to flip:** On (default); inert without the Listing (option listing on, which the aggressive preset and auto under 500 KiB carry). Flip off to restore undefined<size> blobs for symbol-table data objects.
+- **Where / provenance:** P1/external-refinement · kuna · type-inference · kuna-globalwidth
+- **Example:** `--option globalwidth off`
+
+### `aifdataveto` -- on | off, default `on`
+
+- **Symptoms:** a sub_ entry starts on a table the code loads from; aif adds a function at an address the program writes to; a stripped function list contains data the code reads.
+- **What it does:** Drop an Aggressive Instruction Finder gap entry whose first instruction the decoded code reads or writes as data. IDA rolls a speculative code run back as a unit when any address in it carries a data read or write reference (dr_R/dr_W); a gap the program loads from or stores to is a table, a literal or a variable, not a function. The data targets are every LOAD/STORE address that is a constant or a constant plus something, and every direct data-space operand, over the decoded Listing. Inert without aif and the Listing.
+- **When to flip:** On (default). Flip off to keep an AIF entry the program also reads as data (self-modifying or code-as-data tricks).
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-aifdataveto
+- **Example:** `--option aifdataveto off`
+
+### `incrementalwalk` -- on | off, default `on`
+
+- **Symptoms:** function discovery on an i386 binary full of push imm callbacks is slow; each callback round re-decodes the whole program.
+- **What it does:** Continue the Listing walk from the callback roots a round accepts (x86 PUSH imm callbacks) instead of decoding the whole program again for each round. A resumed walk keeps the instructions, functions and references already found and decodes only what the new roots reach; a decode at an address does not depend on who reached it first, so the result is the Listing a fresh build makes. IDA queues only the addresses a new fact affects; this is that for the callback rounds.
+- **When to flip:** On (default). Flip off to rebuild the Listing from scratch for every callback round, the old behaviour, if a resumed walk ever disagrees with a fresh one.
+- **Where / provenance:** P1/code-data-partition · kuna · performance · kuna-incrementalwalk
+- **Example:** `--option incrementalwalk off`
+
+### `calltable` -- on | off, default `on`
+
+- **Symptoms:** a function reached only through a table of function pointers is missing; kuna xrefs shows no caller for a function called through ops[i](x); a switch case that opens with push rbp is listed as a function; a dispatcher's table of tail calls is printed as a switch.
+- **What it does:** Read the tables computed transfers index and vote the way IDA does (check_flat_jump_table): an indexed CALL through a pointer table calls every entry; a computed JUMP whose distinct targets are 40% or more other functions' entries, or (on x86) an unchecked pointer table whose targets all sit on 16-byte function boundaries, is a call table of tail calls, not a switch. Call-table targets become function entries and, in the reference walk behind kuna xrefs, call references of the dispatcher instead of its switch cases. The other way round, a discovered entry (not a symbol) that is a case of a real switch and that no call reaches is demoted, IDA's AFL_NOTPROC on switch targets. The tables are read with the switchtable register-chain fold; an indexed call with no range check reads up to 256 entries, stopping at the first word that is not code of the caller's section.
+- **When to flip:** On (default). Flip off if a hand-written dispatcher's table is misread as functions, or to see a prologue-shaped switch case listed as a function again.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-calltable
+- **Example:** `--option calltable off`
 
 ### `tailcallentryall` -- on | off, default `off`
 

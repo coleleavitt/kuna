@@ -39,6 +39,8 @@ pub mod kuna_callerreads;
 pub mod kuna_entrythumbflow;
 pub mod kuna_floatglobals;
 pub mod kuna_funcchunks;
+pub mod kuna_accesswidth;
+pub mod kuna_calltable;
 pub mod kuna_pdecode;
 pub mod kuna_rawdiscover;
 pub mod kuna_tailcallentry;

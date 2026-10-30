@@ -133,6 +133,21 @@ pub(crate) fn output_type_local(data: &Funcdata, op: OpId) -> Rc<Datatype> {
                 return t;
             }
         }
+        // (kuna `bitidioms`, `helperroles`) `abs`/`labs` return a signed
+        // integer, `strcpy` its `char *` destination.
+        if in0_off == crate::userop::BUILTIN_ABS as u64 || in0_off == crate::userop::BUILTIN_LABS as u64 {
+            if let Some(Ok(t)) = arch.types().map(|t| t.get_base(out_size, type_metatype::TYPE_INT)) {
+                return t;
+            }
+        }
+        if in0_off == crate::userop::BUILTIN_STRCPY as u64 {
+            if let Some(tlst) = arch.types() {
+                let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
+                if let Ok(ptr) = tlst.get_type_char(1).and_then(|c| tlst.get_type_pointer(out_size, c, ws)) {
+                    return ptr;
+                }
+            }
+        }
         // (kuna itaniumeh) the exceptional-edge test is a `bool`.
         if in0_off == crate::userop::BUILTIN_EH_UNWINDING as u64 {
             if let Some(Ok(t)) = arch.types().map(|t| t.get_base(out_size, type_metatype::TYPE_BOOL)) {
@@ -268,6 +283,25 @@ fn input_type_local_with(data: &Funcdata, op: OpId, slot: int4, recovered: bool)
         if let Some(tlst) = arch.types() {
             if let Ok(ptr) = tlst.get_type_struct("__va_list_tag").and_then(|t| tlst.get_type_pointer(8, t, 1)) {
                 if ptr.get_ptr_to().is_some_and(|t| t.get_size() == 24) {
+                    return ptr;
+                }
+            }
+        }
+    }
+
+    // (kuna `bitidioms`, `helperroles`) `abs`/`labs` take a signed integer,
+    // `strcpy` two `char *`.
+    if opcode == OpCode::CPUI_CALLOTHER && slot >= 1 {
+        let id = o.get_in(0).and_then(|v| data.vbank().get(v)).map(|v| v.get_offset());
+        if let Some(tlst) = arch.types() {
+            if (id == Some(crate::userop::BUILTIN_ABS as u64) || id == Some(crate::userop::BUILTIN_LABS as u64)) && slot == 1 {
+                if let Ok(t) = tlst.get_base(in_size, type_metatype::TYPE_INT) {
+                    return t;
+                }
+            }
+            if id == Some(crate::userop::BUILTIN_STRCPY as u64) && slot <= 2 {
+                let ws = data.get_arch().manage().get_default_data_space().map(|s| s.get_word_size()).unwrap_or(1);
+                if let Ok(ptr) = tlst.get_type_char(1).and_then(|c| tlst.get_type_pointer(in_size, c, ws)) {
                     return ptr;
                 }
             }

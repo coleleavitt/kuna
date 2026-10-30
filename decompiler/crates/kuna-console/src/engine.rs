@@ -595,6 +595,8 @@ pub struct ConsoleProgram {
     /// Non-zero sizes only: a bare declaration with no extent leaves the entry
     /// unbounded, which is the engine-wide `UNBOUNDED_SIZE` default.
     declared_extents: BTreeMap<u64, int4>,
+    /// (kuna `funcchunks`) Flow body sizes from the chunk model, by entry.
+    function_bodies: BTreeMap<u64, u64>,
     /// (kuna) **Caller-declared function entries**, entry VMA — every address a
     /// caller asserted a function at through `function bounds` /
     /// `--define-function`, extent or no extent.
@@ -974,6 +976,13 @@ impl ConsoleProgram {
             &mut entries,
             &crate::funcextent::spans(&self.sections(), &self.segments()),
         );
+        // (kuna `funcchunks`) The chunk model's flow body, where one was built,
+        // replaces the clip's upper bound.
+        for entry in &mut entries {
+            if let Some(&body) = self.function_bodies.get(&entry.addr.get_offset()) {
+                entry.size = body;
+            }
+        }
         // A caller-declared extent is an assertion, not a guess: it outranks the
         // clip everywhere the clip is reported (`declared_extents`).
         if self.has_declared_extents() {
@@ -3304,6 +3313,10 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // functions, so it changes emitted C by construction). Listing consumer;
         // the live gate is the pre-invocation check in `run_listing_consumers`.
         "tailcallentry" => arch.analysis_tailcallentry,
+        "funcchunks" => arch.analysis_funcchunks,
+        "globalwidth" => arch.analysis_globalwidth,
+        "aifdataveto" => arch.analysis_aifdataveto,
+        "calltable" => arch.analysis_calltable,
         "gopclntab" => arch.analysis_gopclntab,
         "gotypes" => arch.analysis_gotypes,
         "gonoreturn" => arch.analysis_gonoreturn,
@@ -3935,6 +3948,7 @@ fn empty_program(
         loader_data_exports: Vec::new(),
         data_name_aliases: HashMap::new(),
         declared_extents: BTreeMap::new(),
+        function_bodies: BTreeMap::new(),
         declared_entries: BTreeSet::new(),
         declared_names: BTreeMap::new(),
         declared_revision: 0,
@@ -4758,11 +4772,15 @@ pub fn bootstrap_from_object_with_isa(
 fn commit_analysis_output(
     prog: &mut ConsoleProgram,
     code_space: &Rc<AddrSpace>,
-    out: kuna_analysis::pass::AnalysisOutput,
+    mut out: kuna_analysis::pass::AnalysisOutput,
 ) -> KunaResult<()> {
     use kuna_analysis::pass::SymKind;
 
     let num_spaces = prog.arch().manage().num_spaces();
+    if !out.data_vetoed.is_empty() {
+        let vetoed: std::collections::BTreeSet<u64> = out.data_vetoed.iter().copied().collect();
+        out.entries.retain(|e| !vetoed.contains(e));
+    }
 
     // 0. (kuna `cppproto`) The DWARF C++ arm's facts. The producing pass runs at
     //    `load file`, upstream of the `option` commands, so it stashes them apart
@@ -5282,6 +5300,11 @@ fn commit_analysis_output(
     //     binary every function is a placeholder ⇒ FID fires; on a named binary it
     //     defers (the real name wins). A fact with no function at `addr`, or whose
     //     function already carries a real name, is the faithful no-op.
+    for &(entry, body) in &out.function_bodies {
+        if body > 0 {
+            prog.function_bodies.insert(entry, body);
+        }
+    }
     let mut fids = out.fid_names.clone();
     fids.sort_by(|a, b| (a.addr, &a.name).cmp(&(b.addr, &b.name)));
     fids.dedup();
@@ -5586,6 +5609,7 @@ fn commit_analysis_output(
     //     option lines are applied, so the flag needs no env bridge on either CLI
     //     path. The stash is drained either way (a second `read symbols` must not
     //     re-commit); off simply drops it and the rendering is exactly pre-DIV-26.
+    let global_widths: std::collections::BTreeMap<u64, u32> = out.global_widths.iter().copied().collect();
     let mut loader_data_objects = std::mem::take(&mut prog.loader_data_objects);
     if !prog.arch().analysis_datasyms {
         loader_data_objects.clear();
@@ -5618,13 +5642,15 @@ fn commit_analysis_output(
         // NEGATIVE size that indexed the type factory's cache out of bounds and
         // took the process down. A declared extent is never trusted to be
         // representable. GH-339.
-        let ct = prog
-            .arch()
-            .types()
-            .get_base(
-                (*size).clamp(1, int4::MAX as u64) as int4,
-                kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN,
-            )?;
+        let clamped = (*size).clamp(1, int4::MAX as u64) as int4;
+        let width = global_widths.get(sym_addr).copied().unwrap_or(0) as int4;
+        let ct = if width > 0 && width < clamped && clamped % width == 0 {
+            let types = prog.arch().types();
+            let elem = types.get_base(width, kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN)?;
+            types.get_type_array(clamped / width, elem)?
+        } else {
+            prog.arch().types().get_base(clamped, kuna_decomp::dtype::type_metatype::TYPE_UNKNOWN)?
+        };
         let name = data_names.name(name, *sym_addr);
         let arch = prog.arch_mut();
         let (scope, base) =
