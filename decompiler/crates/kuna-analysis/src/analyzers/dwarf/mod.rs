@@ -279,6 +279,12 @@ struct DieSnap {
     fbreg_location: Option<i64>,
     /// `DW_AT_frame_base` on a subprogram.
     frame_base: Option<FrameBase>,
+    /// (kuna `dwarfscopes`) A variable held in a register: the DWARF register
+    /// and, for a location-list entry, the PC its range starts at.
+    reg_location: Option<(u16, Option<u64>)>,
+    /// (kuna `dwarfscopes`) A parameter whose location at the function's entry
+    /// is a single register.
+    entry_register: Option<u16>,
     indirect_parameter: bool,
     register_indirect_parameter: Option<kuna_dwarfbyref::HiddenValues>,
     /// Depth in the DIE tree (root unit DIE = 0).
@@ -329,6 +335,8 @@ impl DieSnap {
             addr_location: None,
             fbreg_location: None,
             frame_base: None,
+            reg_location: None,
+            entry_register: None,
             indirect_parameter: false,
             register_indirect_parameter: None,
             depth,
@@ -500,6 +508,16 @@ fn snapshot_unit_for_abi(
                     .then(|| kuna_dwarfscopes::loclist_frame_offset(dwarf, unit, &loc))
                     .flatten()
             });
+            if kuna_dwarfscopes::enabled() {
+                if snap.fbreg_location.is_none() {
+                    snap.reg_location = kuna_dwarfscopes::register_location(dwarf, unit, &loc);
+                }
+                if snap.tag == gimli::DW_TAG_formal_parameter {
+                    let entry = parent_off.and_then(|parent| map.get(&parent)).and_then(|parent| parent.low_pc);
+                    snap.entry_register = kuna_dwarfbyref::location_at_entry(dwarf, unit, &loc, entry)
+                        .and_then(|e| kuna_dwarfscopes::single_register(e.0.slice()));
+                }
+            }
             if snap.tag == gimli::DW_TAG_formal_parameter && kuna_dwarfbyref::is_fortran(language) {
                 let entry = parent_off
                     .and_then(|parent| map.get(&parent))
@@ -573,6 +591,7 @@ fn simple_fbreg_location(loc: &gimli::AttributeValue<Reader<'_>>) -> Option<i64>
         _ => return None,
     };
     kuna_dwarflocation::frame_offset(bytes)
+        .or_else(|| kuna_dwarfscopes::enabled().then(|| kuna_dwarfscopes::piece_frame_offset(bytes)).flatten())
 }
 
 /// Decode a little-endian SLEB128 (DWARF signed LEB128) from `buf`, returning the
@@ -1108,10 +1127,10 @@ fn note_nocall(
 /// fbreg location, no `DW_AT_type`, an unbuildable type, an empty name) is SKIPPED
 /// — never a failure (the names+types of subtasks 1+2 are unaffected).
 ///
-/// We restrict to **direct** children of the subprogram DIE: a lexical-block- or
-/// inlined-subroutine-nested local is a documented loss (the same listing-cosmetic
-/// scope as the skipped `DW_TAG_label`/`DW_TAG_call_site`), and a plain `-O0`/`-g`
-/// function carries its locals as direct children.
+/// (kuna `dwarfscopes`) Locals nested in lexical blocks and inlined
+/// subroutines are collected too (an inlined one named by its abstract origin,
+/// a repeated name suffixed), and a variable held in a register becomes a
+/// [`RegLocalFact`](crate::pass::RegLocalFact).
 fn collect_fbreg_locals(
     func_addr: u64,
     sub: &DieSnap,
@@ -1120,35 +1139,43 @@ fn collect_fbreg_locals(
     word_size: uint4,
     cfa: i64,
     out: &mut Vec<crate::pass::LocalFact>,
+    regs: &mut Vec<crate::pass::RegLocalFact>,
 ) {
-    let Some(base) = kuna_dwarfscopes::frame_base_offset(sub.frame_base, cfa) else { return };
+    let base = kuna_dwarfscopes::frame_base_offset(sub.frame_base, cfa);
     let mut walk = TypeWalk::new();
-    let scopes = kuna_dwarfscopes::enabled();
-    let mut pending: Vec<usize> = sub.children.iter().rev().copied().collect();
-    while let Some(coff) = pending.pop() {
-        let Some(child) = dies.get(&coff) else { continue };
-        if child.tag == gimli::DW_TAG_lexical_block && scopes {
-            pending.extend(child.children.iter().rev().copied());
-            continue;
-        }
+    let mut names = kuna_dwarfscopes::LocalNames::default();
+    for child in kuna_dwarfscopes::scope_vars(sub, dies) {
         if !matches!(child.tag, gimli::DW_TAG_variable | gimli::DW_TAG_formal_parameter) {
             continue;
         }
-        if child.name.is_empty() {
+        let origin = child.origin_ref.and_then(|o| dies.get(&o));
+        let name = if child.name.is_empty() { origin.map(|o| o.name.clone()).unwrap_or_default() } else { child.name.clone() };
+        if name.is_empty() {
             continue;
         }
-        let Some(fbreg) = child.fbreg_location else { continue };
-        let Some(ty) =
-            build_datatype(child.type_ref, dies, types, word_size, &mut walk, false)
-        else {
+        let type_ref = child.type_ref.or_else(|| origin.and_then(|o| o.type_ref));
+        let Some(ty) = build_datatype(type_ref, dies, types, word_size, &mut walk, false) else {
             continue;
         };
-        out.push(crate::pass::LocalFact {
-            func_addr,
-            name: child.name.clone(),
-            type_: ty,
-            stack_offset: base.wrapping_add(fbreg),
-        });
+        match (child.fbreg_location, base, child.reg_location) {
+            (Some(fbreg), Some(base), _) => out.push(crate::pass::LocalFact {
+                func_addr,
+                name: names.unique(&name),
+                type_: ty,
+                stack_offset: base.wrapping_add(fbreg),
+            }),
+            (None, _, Some((reg, lo))) if child.tag == gimli::DW_TAG_variable && ty.get_size() > 0 => {
+                regs.push(crate::pass::RegLocalFact {
+                    func_addr,
+                    name: names.unique(&name),
+                    type_: ty,
+                    dwarf_reg: reg,
+                    reg: String::new(),
+                    start: lo.unwrap_or(func_addr),
+                })
+            }
+            _ => {}
+        }
     }
 }
 
@@ -1259,6 +1286,7 @@ impl AnalysisPass for DwarfPass {
                             if let Some(pieces) =
                                 build_pieces(&snap.name, snap, &dies, types, word_size)
                             {
+                                kuna_dwarfscopes::entry_storage(snap, low_pc, &dies, &pieces, &mut out.dwarf_param_regs);
                                 kuna_dwarflinkage::append(snap, &dies, &pieces, &linkage_imports, &linkage_definitions, &mut out.prototypes_at);
                                 out.prototypes.push(pieces);
                                 let params = snap.children.iter().copied().filter(|c| {
@@ -1275,7 +1303,7 @@ impl AnalysisPass for DwarfPass {
                             // `DWARFVariable.readLocalVariableStorage` -> stack varnode.
                             // Only when the arch's CFA constant is known.
                             if let Some(cfa) = cfa {
-                                collect_fbreg_locals(low_pc, snap, &dies, types, word_size, cfa, &mut out.locals);
+                                collect_fbreg_locals(low_pc, snap, &dies, types, word_size, cfa, &mut out.locals, &mut out.dwarf_reg_locals);
                             }
                         }
                         // (kuna `cppproto`) The C++ arm: fuse the definition with the
@@ -1358,6 +1386,16 @@ impl AnalysisPass for DwarfPass {
                     _ => {}
                 }
             }
+        }
+        let arch = ctx.file.architecture();
+        for list in [&mut out.dwarf_reg_locals, &mut out.dwarf_param_regs] {
+            list.retain_mut(|r| match kuna_dwarfscopes::register_name(arch, r.dwarf_reg) {
+                Some(name) => {
+                    r.reg = name;
+                    true
+                }
+                None => false,
+            });
         }
         out
     }

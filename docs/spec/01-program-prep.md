@@ -3113,9 +3113,32 @@ moves.
   `DW_TAG_lexical_block` scopes at any depth are collected in document order
   like direct children, and a variable whose location is a location list takes
   the stack slot when every frame-relative entry of the list names the same one;
-  register entries stay with inference. Inlined-subroutine locals and composite
-  (`DW_OP_piece`) locations remain a documented loss, and parameter storage
-  is still the calling convention's. (ida) The
+  a composite whose `DW_OP_piece` parts are consecutive frame slots is the
+  first slot (`kuna_dwarfscopes.rs (piece_frame_offset)`). Inlined subroutines
+  are walked like lexical blocks, their variables named through
+  `DW_AT_abstract_origin`, a repeated name in one function suffixed `_2`, `_3`
+  (`scope_vars`, `LocalNames`). A variable held in one register (a whole-function
+  `DW_OP_reg<n>`/`DW_OP_regx`, or the longest single-register entry of its
+  location list, `register_location`) becomes a `pass.rs (RegLocalFact)`; the
+  DWARF register number is turned into the SLEIGH name by the psABI tables in
+  `register_name` (x86-64, i386, AArch64, ARM, RISC-V, MIPS, PowerPC). The
+  commit parks them on the architecture by function entry, and the decompile
+  (`decompiler/crates/kuna-decomp/src/substrate/funcdata.rs (seed_dwarf_register_locals)`)
+  maps each as a namelocked, typelocked local at the use point its value will
+  have after heritage: the range's start when it begins a basic block (a
+  loop-carried value's phi), otherwise the last raw write covering the storage
+  strictly before the start and at most 16 bytes earlier (the defining
+  instruction); the matching raw varnodes have their properties refreshed, as
+  for a console `type varnode`. A parameter whose location at the entry PC is a
+  single register (`entry_storage`) is locked to that register when the
+  default model would put some parameter of the function elsewhere and gives it
+  no hidden return pointer (the commit asks the model with
+  `assign_parameter_storage`): locked twice, as a `map param` lock for the
+  function's own decompile and as explicit input storage on the prototype its
+  callers read, so a `regparm(3)` callee and its call sites agree. A function the
+  model already describes keeps its model-derived storage. A composite held in several registers (a struct split
+  across RDI:RSI) is not mapped; it would need a local symbol at a join-space
+  address. (ida) The
   data-global fix (DIV-24): a global used to be mapped with a size-1 type, so any
   multi-byte access queried `queryContainer(addr, 4)` past it and rendered
   `dat_<addr>`; the pass now resolves `DW_AT_type` to a byte size

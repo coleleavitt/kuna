@@ -502,6 +502,9 @@ pub struct Architecture {
     pub peb_names: crate::kuna_pebnames::PebNamesMode,
     /// (kuna) `tlsnames`: the static TLS block the loader committed.
     pub tls_layout: Option<std::rc::Rc<crate::p5_types::kuna_tlsnames::TlsLayout>>,
+    /// (kuna `dwarfscopes`) Register-held DWARF locals by function entry:
+    /// name, type, register storage, and the PC the register holds it from.
+    pub dwarf_reg_locals: std::collections::BTreeMap<u64, Vec<(String, Rc<crate::dtype::Datatype>, Address, u64)>>,
     /// (kuna `structsynth`) Over which bases a structure may be synthesized from
     /// constant-offset dereferences: `off` (the default) or `param` (function
     /// parameters).  See [`kuna_structsynth`](crate::kuna_structsynth).
@@ -3180,6 +3183,7 @@ impl Architecture {
             syscall_regs: crate::kuna_syscallregs::SyscallRegsMode::Off, // (kuna) option syscallregs; reset_defaults sets the shipped default
             image_os_userland: false, // (kuna) a load-time fact; set by the console's `load file`
             tls_layout: None,
+            dwarf_reg_locals: std::collections::BTreeMap::new(),
             peb_names: crate::kuna_pebnames::PebNamesMode::Off, // (kuna) option pebnames; reset_defaults sets the shipped default
             struct_synth: crate::kuna_structsynth::StructSynthMode::Off, // (kuna) option structsynth; reset_defaults sets the shipped default
             struct_synth_shard: None,
