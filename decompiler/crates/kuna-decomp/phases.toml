@@ -6635,6 +6635,25 @@ tier = "analysis"
 symptoms = "kuna functions on a .o or .obj lists phantom sub_<addr> entries below 0x400000 beside the real ones|functions and decompile-all disagree on how many functions a relocatable object has|a -g .o names one function at address 0 and leaves the rest sub_<addr>|string literals and dwarf-named globals in a .o never attach to the loaded image"
 
 [[settable]]
+option = "debuglink"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "environment-binding"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-elf-debuglink"
+summary = "Name a stripped ELF's functions from its separate debug file: the companion its GNU build-id note names (<dir>/.build-id/xx/rest.debug, build-id checked) or its .gnu_debuglink names (next to the image, its .debug/ directory, or <dir>/<image directory>/, CRC32 checked), with <dir> each entry of KUNA_DEBUG_DIRS then /usr/lib/debug; failing that, the XZ-compressed function symbol table a Fedora/RHEL image keeps in .gnu_debugdata (MiniDebugInfo). Only an image without its own .symtab is affected, and an address that already has a name keeps it. Loader-tier: read via the KUNA_DEBUGLINK env var (symbols are read at load file)."
+use_when = "On by default: a stripped system binary whose debug package or debuginfod cache is installed decompiles with its real function names instead of sub_<addr>. Turn OFF to see only what the image itself carries, or when a mismatched debug directory is in KUNA_DEBUG_DIRS."
+example = "option debuglink off"
+source_decompiler = "kuna"
+inspiration = "gdb's separate debug file search (build-id and debuglink) and IDA's ELF companion file lookup and .gnu_debugdata reader"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "a stripped distribution binary prints sub_<addr> for every function although its debug package is installed|a Fedora/RHEL binary keeps function names in .gnu_debugdata but kuna shows none"
+
+[[settable]]
 option = "dynrelocs"
 values = "on|off"
 default = "on"

@@ -36,6 +36,8 @@ pub mod arm_markers;
 // therefore invisible.
 pub mod elf_dynseg;
 pub mod elf_plt;
+// (kuna `debuglink`) separate debug files and MiniDebugInfo for stripped ELFs.
+pub mod elf_debuglink;
 // (kuna `globalref`) The sections a program's own data objects live in.
 pub mod kuna_globalref;
 pub mod elfv1;

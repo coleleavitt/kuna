@@ -994,6 +994,35 @@ impl ObjectLoadImage {
         }
         let dynreloc_const: Vec<(u64, u64)> =
             dynrelocs.const_ranges.into_iter().filter(|(lo, _)| applied.contains(lo)).collect();
+        // (kuna `debuglink`) A stripped ELF's function names from its debug
+        // companion (build-id / `.gnu_debuglink`) or its `.gnu_debugdata`.
+        if kuna_decomp::kuna_debuglink::debuglink_enabled() {
+            let (symbols, source) = crate::loader::elf_debuglink::companion_symbols(
+                &file,
+                Some(std::path::Path::new(filename)).filter(|p| p.is_file()),
+            );
+            let mut added = 0usize;
+            for (addr, name) in symbols {
+                if seen.insert(addr) {
+                    funcsyms.push(FuncSym { addr, name });
+                    added += 1;
+                }
+            }
+            if let (Some(source), true) = (source, added != 0) {
+                kuna_base::notes::say_once(
+                    filename,
+                    &format!("[kuna debuglink] {filename}: {added} function names from {source}"),
+                );
+            }
+        }
+        for (first, second) in crate::loader::elf_debuglink::overlapping_loads(bytes) {
+            kuna_base::notes::say_once(
+                filename,
+                &format!(
+                    "[kuna] {filename}: PT_LOAD at 0x{second:x} overwrites the segment at 0x{first:x} with different file bytes"
+                ),
+            );
+        }
         // (kuna `dynrelocs`) An `IRELATIVE` resolver is code only the dynamic
         // loader calls; name the unnamed ones, as IDA's `ifunc_<addr>` does.
         for &resolver in &dynrelocs.ifunc_resolvers {

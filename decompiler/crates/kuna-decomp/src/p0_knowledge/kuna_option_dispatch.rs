@@ -1082,6 +1082,12 @@ kuna_options! { self, p1;
             if val { "on" } else { "off" }
         ))
     },
+    "debuglink" => {
+        let val = on_or_off(p1)?;
+        self.analysis_debuglink = val;
+        crate::kuna_debuglink::set_debuglink_env(val);
+        Ok(format!("separate debug file lookup turned {}", if val { "on" } else { "off" }))
+    },
     "pdatachained" => {
         let val = on_or_off(p1)?;
         self.analysis_pdatachained = val;

@@ -667,6 +667,8 @@ Three tiers:
 | functions and decompile-all disagree on how many functions a relocatable object has | [`relocrebase`](#relocrebase) |
 | a -g .o names one function at address 0 and leaves the rest sub_<addr> | [`relocrebase`](#relocrebase) |
 | string literals and dwarf-named globals in a .o never attach to the loaded image | [`relocrebase`](#relocrebase) |
+| a stripped distribution binary prints sub_<addr> for every function although its debug package is installed | [`debuglink`](#debuglink) |
+| a Fedora/RHEL binary keeps function names in .gnu_debugdata but kuna shows none | [`debuglink`](#debuglink) |
 | a call in a pie binary renders as (*dat_<addr>)(...) with no name although the callee is a named function in the same image | [`dynrelocs`](#dynrelocs) |
 | a got slot reads back as 0 in the decompiled output | [`dynrelocs`](#dynrelocs) |
 | reading a relocated function-pointer table in a pie binary yields all zeroes | [`dynrelocs`](#dynrelocs) |
@@ -2767,6 +2769,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** On (default) makes kuna functions and kuna decompile-all agree on a .o/.obj, and attaches that object's DWARF names, string literals and named globals to the loaded image. Flip off to restore the pre-fix behavior -- phantom sub_<section-offset> entries beside every real function, one DWARF function at address 0, and no string/data attachment.
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · GH-289
 - **Example:** `option relocrebase off`
+
+### `debuglink` -- on | off, default `on`
+
+- **Symptoms:** a stripped distribution binary prints sub_<addr> for every function although its debug package is installed; a Fedora/RHEL binary keeps function names in .gnu_debugdata but kuna shows none.
+- **What it does:** Name a stripped ELF's functions from its separate debug file: the companion its GNU build-id note names (<dir>/.build-id/xx/rest.debug, build-id checked) or its .gnu_debuglink names (next to the image, its .debug/ directory, or <dir>/<image directory>/, CRC32 checked), with <dir> each entry of KUNA_DEBUG_DIRS then /usr/lib/debug; failing that, the XZ-compressed function symbol table a Fedora/RHEL image keeps in .gnu_debugdata (MiniDebugInfo). Only an image without its own .symtab is affected, and an address that already has a name keeps it. Loader-tier: read via the KUNA_DEBUGLINK env var (symbols are read at load file).
+- **When to flip:** On by default: a stripped system binary whose debug package or debuginfod cache is installed decompiles with its real function names instead of sub_<addr>. Turn OFF to see only what the image itself carries, or when a mismatched debug directory is in KUNA_DEBUG_DIRS.
+- **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-elf-debuglink
+- **Example:** `option debuglink off`
 
 ### `dynrelocs` -- on | off, default `on`
 

@@ -300,6 +300,7 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         "ifuncfpret" => on_off(conf.analysis_ifuncfpret),
         "relocrebase" => on_off(conf.analysis_relocrebase),
         "dynrelocs" => on_off(conf.analysis_dynrelocs),
+        "debuglink" => on_off(conf.analysis_debuglink),
         "pdatachained" => on_off(conf.analysis_pdatachained),
         "rexthunk" => on_off(conf.analysis_rexthunk),
         // (kuna `goabi`) Two-valued but spelled auto|off, so it reports its token.

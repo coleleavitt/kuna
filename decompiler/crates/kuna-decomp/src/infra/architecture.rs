@@ -2063,6 +2063,10 @@ pub struct Architecture {
     /// exists only for catalog visibility and the `phase catalog` live `current`
     /// field.
     pub analysis_dynrelocs: bool,
+    /// (kuna) Name a stripped ELF's functions from its debug companion or
+    /// `.gnu_debugdata` (`debuglink`); read through [`crate::kuna_debuglink`]'s
+    /// env var at `load file`, kept here for the catalog's live value.
+    pub analysis_debuglink: bool,
     /// (kuna) Gate the PE chained-`UNWIND_INFO` `.pdata` entry skip
     /// (`pdatachained`); default **on** (DIV-117, GH-403). MSVC splits a
     /// shrink-wrapped or separated function across several `RUNTIME_FUNCTION`
@@ -3285,6 +3289,7 @@ impl Architecture {
             analysis_relocrebase: false,
             analysis_kernelcache: Default::default(),
             analysis_dynrelocs: false,
+            analysis_debuglink: true,
             analysis_pdatachained: false,
             analysis_rexthunk: false,
             analysis_goabi: false, // (kuna) option goabi; reset_defaults sets the shipped default (auto)
@@ -3746,6 +3751,7 @@ impl Architecture {
         self.analysis_i386_pie_plt = true; // (kuna) i386-PIE PLT decode default-on (angr)
         self.analysis_kernelcache = Default::default();
         self.analysis_relocrebase = true; // (kuna) DIV-79 relocatable-object analysis rebase default-ON (GH-289)
+        self.analysis_debuglink = true; // (kuna) separate debug files, default-ON: only a stripped ELF with a findable companion changes
         self.analysis_dynrelocs = true; // (kuna) DIV-84 linked-image dynamic relocations default-ON
         self.analysis_pdatachained = true; // (kuna) DIV-117 GH-403: a chained-UNWIND_INFO .pdata record is an interior chunk, not a function
         self.analysis_peordinal = true; // (kuna) an OLEAUT32/WS2_32/WSOCK32/MSVBVM60 import-by-ordinal is named from the built-in export table

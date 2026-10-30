@@ -987,6 +987,25 @@ sections, and symbols, and is also used when analysis or a CLI inspection
 command reopens the image. It retains the typed reader's header and section
 validation; it does not rewrite the machine bytes to another architecture.
 
+(kuna) **A stripped ELF's separate debug information** (`debuglink`,
+default on, a load-time gate read through `KUNA_DEBUGLINK`). Distributions
+strip their binaries and ship the symbol table and DWARF in a separate file.
+When the image has no `.symtab`,
+`decompiler/crates/kuna-analysis/src/loader/elf_debuglink.rs (companion_symbols)`
+looks for that file the way gdb does: the GNU build-id note names
+`<dir>/.build-id/<xx>/<rest>.debug`, accepted only if its own build-id matches,
+and `.gnu_debuglink` names a file next to the image, in its `.debug/`
+directory, or under `<dir>/<image's directory>/`, accepted only if its CRC32
+matches. `<dir>` is each entry of `KUNA_DEBUG_DIRS`, then `/usr/lib/debug`.
+Failing a companion, the XZ-compressed ELF in `.gnu_debugdata` (Fedora's
+MiniDebugInfo, decompressed with `lzma-rs`) supplies a function-only symbol
+table. The companion's defined function symbols join the loader's function
+symbols; an address that already has a name keeps it. Only the names are read:
+the companion's DWARF is not yet applied. The loader also reports a `PT_LOAD`
+that maps an address another `PT_LOAD` already mapped from different file bytes
+(`elf_debuglink.rs (overlapping_loads)`), a shape only a hand-made or hostile
+image has; which bytes win is unchanged.
+
 (kuna) **UEFI TE images take a bounded container path of their own.**
 `decompiler/crates/kuna-analysis/src/loadimage_te.rs (TeLoadImage)` parses a
 file the format probe claims. That probe reads more than the `VZ` signature —
