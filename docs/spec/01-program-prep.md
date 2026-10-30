@@ -1147,8 +1147,17 @@ after the previous one, one DEX model per file. Index spaces are per file, so
 each function's snapshot carries the model whose mapping holds its entry
 (`architecture.rs (Architecture::build_arch_handle_for_entry)`): a constant-pool
 index resolves in the method's own file. A call into a class defined in another
-file of the APK prints by name through that pool, but the call is not linked to
-the other file's function.
+file of the APK prints by name through that pool. Its target is linked across
+the files by `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_dex/links.rs
+(MethodIndex)`: a method reference is the declaring class's descriptor, the
+name and the prototype descriptor, which name the same method in every file, so
+an index of every defined method by that key, plus each class's superclass for
+a method a subclass inherits, resolves an `invoke` in any file to the code
+address of the method it runs. `links.rs (calls)` lists every `invoke` of the
+loaded files that way, and `kuna xrefs` answers from it for DEX and APK input
+(`--to` a method: its call sites in every file; `--from` a method: what it
+calls, a framework method that no loaded file defines appearing by name with
+no address).
 
 (kuna) **A stripped ELF's separate debug information** (`debuglink`,
 default on, a load-time gate read through `KUNA_DEBUGLINK`). Distributions

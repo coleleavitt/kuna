@@ -2392,6 +2392,22 @@ back are indistinguishable from one long one. Without a range check to read, not
 is followed. This is what puts the callees inside a `switch` on
 `kuna decompile-graph`'s callee list.
 
+A DEX file or an APK has no object-file view, so `kuna xrefs` answers for it from
+the `invoke` call graph instead (`kuna_dex/links.rs`): every method reference is
+resolved across the APK's DEX files to the method it runs, through the
+superclass chain for an inherited method. `--to <method>` lists the call sites in
+every file; `--from <method>` lists what the method calls, a framework method no
+loaded file defines appearing by name with `-` for its address. `call` is the
+only kind.
+
+```console
+$ kuna xrefs two.apk --to demo::Hello::add
+# 4 references to demo::Hello::add @ 0x368
+0x458	call	demo::Hello::many	invoke-static demo.Hello.add(II)I
+...
+0x1016c	call	demo::Other::twice	invoke-static demo.Hello.add(II)I
+```
+
 A target nothing references is exit `0` with `count: 0` — an answer, not a
 failure. A name that resolves to nothing is exit `1` with the reason on stderr; a
 malformed command line is exit `2` with the usage block.

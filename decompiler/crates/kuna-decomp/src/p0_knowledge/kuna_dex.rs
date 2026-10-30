@@ -16,6 +16,7 @@
 //! `dexmodel` is on.
 
 pub mod format;
+pub mod links;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -122,6 +123,19 @@ impl DexModel {
 
     fn string(&self, idx: u32) -> String {
         self.file.string(idx).unwrap_or_else(|| format!("string_{idx:x}"))
+    }
+
+    /// `(class descriptor, name, prototype descriptor)` of method `method_idx`.
+    pub fn method_key(&self, method_idx: u32) -> Option<(String, String, String)> {
+        let id = self.file.method_id(method_idx)?;
+        let proto = self.file.proto_id(id.proto_idx)?;
+        let mut desc = String::from("(");
+        for param in &proto.parameters {
+            desc.push_str(&self.descriptor(*param));
+        }
+        desc.push(')');
+        desc.push_str(&self.descriptor(proto.return_type_idx));
+        Some((self.descriptor(id.class_idx), self.string(id.name_idx), desc))
     }
 
     fn descriptor(&self, type_idx: u32) -> String {
