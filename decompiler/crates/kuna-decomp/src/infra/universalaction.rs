@@ -691,6 +691,13 @@ pub fn universal_sched(
             // passes above: mainloop has settled the count and the searched byte
             // to constants, and the repeating fullloop folds what it leaves.
             act!(Box::new(crate::kuna_strlenscan::ActionStrlenScan::new(false, "returnsplit"))),
+            // (kuna) repstring (option `repstring`): the same loop shape for
+            // `rep movs`/`rep stos`, collapsed into memcpy/memset by removing
+            // the edge into the copy; mainloop then deletes the orphaned body.
+            act!(Box::new(crate::kuna_repstring::ActionRepString::new("returnsplit"))),
+            // (kuna) copyrun (option `copyrun`): an unrolled run of element
+            // copies within one block, collapsed into memcpy.
+            act!(Box::new(crate::kuna_copyrun::ActionCopyRun::new("returnsplit"))),
             act!(ActionReturnSplit::boxed("returnsplit")),
             // (kuna) angr SAILR gotoless `ReturnDuplicatorHigh` (option `returndup`,
             // default-OFF).  Runs right after ActionReturnSplit (the goto-driven

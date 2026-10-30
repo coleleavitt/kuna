@@ -1336,6 +1336,12 @@ pub struct ArchContext {
     pub pow2_select: bool,
     /// (kuna) `whilecontinue` — recover `continue;` in while-do and do-while loops.
     pub while_continue: bool,
+    /// (kuna) Collapse an x86 `rep movs`/`rep stos` loop into `memcpy`/`memset`
+    /// (option `repstring`).  See [`crate::p3_dataflow::kuna_repstring`].
+    pub rep_string: bool,
+    /// (kuna) Collapse an unrolled element-copy run into `memcpy` (option
+    /// `copyrun`).  See [`crate::p3_dataflow::kuna_copyrun`].
+    pub copy_run: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -2059,6 +2065,8 @@ impl ArchContext {
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)
             while_continue: false, // whilecontinue (live value copied from the Architecture)
+            rep_string: false, // repstring (live value copied from the Architecture)
+            copy_run: false, // copyrun (live value copied from the Architecture)
             stack_store_guard: false,
             region_structure: false,     // regionstructure (opt-in default-off)
             guard_arm: false,            // guardarm (opt-in default-off)

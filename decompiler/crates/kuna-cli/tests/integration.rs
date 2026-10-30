@@ -242,6 +242,9 @@ mod library_names;
 #[path = "libgcc_divdi3.rs"]
 mod libgcc_divdi3;
 
+#[path = "repstring_round_trip.rs"]
+mod repstring_round_trip;
+
 #[path = "rettriangle_round_trip.rs"]
 mod rettriangle_round_trip;
 
