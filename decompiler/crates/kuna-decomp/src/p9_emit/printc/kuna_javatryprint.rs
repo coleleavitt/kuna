@@ -384,9 +384,7 @@ impl PrintC {
         }
         self.context.push_mod();
         self.context.set_mod(modifiers::NO_BRANCH);
-        for piece in after {
-            self.emit_java_try_piece(fd, arch, piece, first);
-        }
+        self.emit_java_piece_run(fd, arch, &after, first);
         self.context.pop_mod();
         consumed
     }

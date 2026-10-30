@@ -419,33 +419,20 @@ impl ActionJavaThrowPrune {
     }
 }
 
-/// The exceptional edge of `bb` (its out-index) when it is redundant.
-fn redundant_throws_edge(data: &Funcdata, bb: crate::context::BlockId) -> Option<i32> {
-    let tail = data.bb_op_tail(bb)?;
-    if !is_throws_edge(data, tail) {
-        return None;
-    }
-    let block = data.bblocks_ref().block(bb);
-    if block.size_out() != 2 {
-        return None;
-    }
-    let taken = if data.obank().get(tail)?.is_fallthru_true() { 0 } else { 1 };
-    let handler = block.get_out(taken);
-    let slot = data.bblocks_ref().block(handler).get_in_index(bb);
-    if slot < 0 {
-        return None;
-    }
-    for op in data.bb_ops(handler) {
-        let o = data.obank().get(op)?;
-        if o.code() != OpCode::CPUI_MULTIEQUAL {
+/// The exceptional edges of the function, by the handler block they enter:
+/// `(block, out-index)` of each.
+fn throws_edges(data: &Funcdata) -> std::collections::BTreeMap<crate::context::BlockId, Vec<(crate::context::BlockId, i32)>> {
+    let mut by_handler: std::collections::BTreeMap<_, Vec<_>> = std::collections::BTreeMap::new();
+    for i in 0..data.bblocks_get_size() {
+        let bb = data.bblocks_get_block(i);
+        let Some(tail) = data.bb_op_tail(bb) else { continue };
+        if !is_throws_edge(data, tail) || data.bblocks_ref().block(bb).size_out() != 2 {
             continue;
         }
-        let mine = o.get_in(slot)?;
-        if !(0..o.num_input()).any(|k| k != slot && o.get_in(k) == Some(mine)) {
-            return None;
-        }
+        let taken = if data.obank().get(tail).is_some_and(|o| o.is_fallthru_true()) { 0 } else { 1 };
+        by_handler.entry(data.bblocks_ref().block(bb).get_out(taken)).or_default().push((bb, taken));
     }
-    Some(taken)
+    by_handler
 }
 
 impl crate::action::Action for ActionJavaThrowPrune {
@@ -464,30 +451,74 @@ impl crate::action::Action for ActionJavaThrowPrune {
         if !data.get_arch().java_try {
             return 0;
         }
-        let mut i = 0;
-        while i < data.bblocks_get_size() {
-            let bb = data.bblocks_get_block(i);
-            i += 1;
-            let Some(taken) = redundant_throws_edge(data, bb) else { continue };
-            let test = data
-                .bb_op_tail(bb)
-                .and_then(|op| data.obank().get(op)?.get_in(1))
-                .and_then(|v| data.vbank().get(v)?.get_def());
-            if data.remove_branch(bb, taken).is_err() {
-                continue;
-            }
-            if let Some(test) = test {
-                let unused = data
-                    .obank()
-                    .get(test)
-                    .and_then(|o| o.get_out())
-                    .and_then(|v| data.vbank().get(v))
-                    .is_some_and(|v| v.has_no_descend());
-                if unused {
-                    data.op_destroy(test);
+        let mut removed = false;
+        for (handler, edges) in throws_edges(data) {
+            // How many in-edges bring each value, per MULTIEQUAL of the handler.
+            let phis: Vec<OpId> = data
+                .bb_ops(handler)
+                .into_iter()
+                .filter(|&op| data.obank().get(op).is_some_and(|o| o.code() == OpCode::CPUI_MULTIEQUAL))
+                .collect();
+            let mut counts: Vec<std::collections::HashMap<crate::context::VarnodeId, usize>> = phis
+                .iter()
+                .map(|&op| {
+                    let mut map = std::collections::HashMap::new();
+                    let o = data.obank().get(op).expect("phi");
+                    for k in 0..o.num_input() {
+                        if let Some(v) = o.get_in(k) {
+                            *map.entry(v).or_insert(0) += 1;
+                        }
+                    }
+                    map
+                })
+                .collect();
+            for (bb, taken) in edges {
+                let slot = data.bblocks_ref().block(handler).get_in_index(bb);
+                if slot < 0 {
+                    continue;
                 }
+                let brings: Vec<Option<crate::context::VarnodeId>> = phis
+                    .iter()
+                    .map(|&op| {
+                        data.obank().get(op).filter(|o| o.code() == OpCode::CPUI_MULTIEQUAL).and_then(|o| o.get_in(slot))
+                    })
+                    .collect();
+                let redundant = brings
+                    .iter()
+                    .zip(&counts)
+                    .all(|(v, map)| v.is_none_or(|v| map.get(&v).copied().unwrap_or(0) >= 2));
+                if !redundant {
+                    continue;
+                }
+                let test = data
+                    .bb_op_tail(bb)
+                    .and_then(|op| data.obank().get(op)?.get_in(1))
+                    .and_then(|v| data.vbank().get(v)?.get_def());
+                if data.branch_remove_internal(bb, taken).is_err() {
+                    continue;
+                }
+                for (v, map) in brings.iter().zip(counts.iter_mut()) {
+                    if let Some(c) = v.and_then(|v| map.get_mut(&v)) {
+                        *c -= 1;
+                    }
+                }
+                if let Some(test) = test {
+                    let unused = data
+                        .obank()
+                        .get(test)
+                        .and_then(|o| o.get_out())
+                        .and_then(|v| data.vbank().get(v))
+                        .is_some_and(|v| v.has_no_descend());
+                    if unused {
+                        data.op_destroy(test);
+                    }
+                }
+                removed = true;
+                self.base.count += 1;
             }
-            self.base.count += 1;
+        }
+        if removed {
+            data.structure_reset();
         }
         0
     }
