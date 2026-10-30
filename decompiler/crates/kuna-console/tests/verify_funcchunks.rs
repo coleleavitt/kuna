@@ -48,6 +48,32 @@ fn shared_tail_belongs_to_both_jumpers_and_not_to_the_clip_neighbour() {
     assert!(clip_h.contains(&SHARED), "the clip hands the shared tail to h");
 }
 
+/// The inventory `size` is the chunk body under `funcchunks`: `h` is its own two
+/// instructions (the clip handed it the shared tail too), `f` and `g` count the
+/// tail they jump into.
+#[test]
+fn inventory_size_is_the_chunk_body() {
+    let spec_roots = vec![repo_root().join("specs").to_str().unwrap().to_string()];
+    let bin = repo_root().join("decompiler/crates/kuna-analysis/tests/fixtures/funcchunks_x86_64");
+    let sizes = |on: bool| {
+        let mut prog = bootstrap_from_object(bin.to_str().unwrap(), "", &spec_roots).expect("bootstrap");
+        prog.arch_mut().set_kuna_option("listing", "on").unwrap();
+        if on {
+            prog.arch_mut().set_kuna_option("funcchunks", "on").unwrap();
+        }
+        prog.commit_pending_analysis().expect("commit");
+        prog.function_entries_canonical()
+            .into_iter()
+            .map(|e| (e.addr.get_offset(), e.size))
+            .collect::<std::collections::BTreeMap<u64, u64>>()
+    };
+    let (clip, body) = (sizes(false), sizes(true));
+    assert_eq!(clip[&H], 12, "the clip runs to the end of .text");
+    assert_eq!(body[&H], 6);
+    assert_eq!(body[&F], 11 + 6);
+    assert_eq!(body[&G], 12 + 6);
+}
+
 /// Measurement: `KUNA_FUNCCHUNKS_BINS=a:b:c cargo test ... -- --ignored --nocapture`
 /// prints functions, tails, shared instructions and how many function bodies
 /// differ from the `[entry, next)` clip.

@@ -3706,7 +3706,7 @@ impl Architecture {
         self.fold_boolean_mask = true; // (kuna) DIV-2 default-on (GH-1282)
         self.mba = false;
         self.avx_intrinsics = true; // (kuna) presentation only; 0/675 datatest assertions move
-        self.bit_idioms = false;
+        self.bit_idioms = true;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
         self.ret_split_global = true; // (kuna) DIV-PENDING default-on: a shared RETURN block that stores to GLOBALS is not the bare epilogue `ActionReturnSplit::isSplittable` assumes, so it is no longer cloned into every predecessor. One-directional (it can only decline a split) and byte-identical (0/675) on the datatest corpus; restore the upstream predicate with `option retsplitglobal off`
         self.simd_lane_fold = true; // (kuna) DIV-PENDING default-on: an exact identity (pshufb with a constant mask IS a byte permutation), so a lane read resolves to the source lane instead of an opaque CALLOTHER temporary. Byte-identical (0/675) on the datatest corpus; restore the opaque rendering with `option simdlane off`
@@ -4099,7 +4099,7 @@ impl Architecture {
         self.analysis_flirtsites = true;
         self.analysis_fidproto = true;
         self.analysis_codestrings = true;
-        self.analysis_protomerge = false;
+        self.analysis_protomerge = true;
         self.analysis_gopclntab = true; // Go pclntab name recovery default-on (Go-only pass)
         self.analysis_gotypes = true; // Go runtime-type harvest default-on (Go-only pass)
         self.analysis_gonoreturn = true; // Go pclntab no-return list default-on (Go-only pass)
@@ -5815,7 +5815,7 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ABS, BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -5859,6 +5859,10 @@ impl Architecture {
             // (kuna bitidioms) byte swap and rotate.
             userops.register_builtin(BUILTIN_BSWAP, &adapter)?;
             userops.register_builtin(BUILTIN_ROTL, &adapter)?;
+            userops.register_builtin(BUILTIN_ABS, &adapter)?;
+            userops.register_builtin(BUILTIN_LABS, &adapter)?;
+            userops.register_builtin(BUILTIN_BITREV, &adapter)?;
+            userops.register_builtin(BUILTIN_CTZ, &adapter)?;
             Ok(())
         })();
         self.userops = userops;

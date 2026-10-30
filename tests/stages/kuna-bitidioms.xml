@@ -18,8 +18,8 @@
     bytes through shifts, masks and ORs). Hex-Rays prints _byteswap_ulong and
     __ROL4__ for these.
 
-    Pass 1 (default, bitidioms off) shows the shift-and-mask expressions.
-    Pass 2 (bitidioms on) prints bswap(...) twice and rotl(x,0xd) once.
+    Pass 1 (default, bitidioms on) prints bswap(...) twice and rotl(x,0xd) once.
+    Pass 2 (bitidioms off) shows the shift-and-mask expressions.
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 0008c05ac0035fd6004c8013c0035fd6000cc0dac0035fd6
@@ -35,20 +35,20 @@
   <com>lo fu rot13</com>
   <com>decompile</com>
   <com>print C</com>
-  <com>option bitidioms on</com>
+  <com>lo fu swap64</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option bitidioms off</com>
   <com>lo fu swap32</com>
   <com>decompile</com>
   <com>print C</com>
   <com>lo fu rot13</com>
   <com>decompile</com>
   <com>print C</com>
-  <com>lo fu swap64</com>
-  <com>decompile</com>
-  <com>print C</com>
   <com>quit</com>
 </script>
-<stringmatch name="KUNA-BITIDIOMS #1: the staged rev swaps fold to bswap (bitidioms on)" min="2" max="2">return bswap\(</stringmatch>
-<stringmatch name="KUNA-BITIDIOMS #2: ror folds to rotl by 13 (bitidioms on)" min="1" max="1">rotl\(\w+,0xd\)</stringmatch>
-<stringmatch name="KUNA-BITIDIOMS #3: default (off) keeps the rotate as a shift pair" min="1" max="1">&lt;&lt; 0xd</stringmatch>
-<stringmatch name="KUNA-BITIDIOMS #4: default (off) keeps the halfword stage of the swap" min="1" max="2">0xff00ff</stringmatch>
+<stringmatch name="KUNA-BITIDIOMS #1: the staged rev swaps fold to bswap (default)" min="2" max="2">return bswap\(</stringmatch>
+<stringmatch name="KUNA-BITIDIOMS #2: ror folds to rotl by 13 (default)" min="1" max="1">rotl\(\w+,0xd\)</stringmatch>
+<stringmatch name="KUNA-BITIDIOMS #3: bitidioms off keeps the rotate as a shift pair" min="1" max="1">&lt;&lt; 0xd</stringmatch>
+<stringmatch name="KUNA-BITIDIOMS #4: bitidioms off keeps the halfword stage of the swap" min="1" max="2">0xff00ff</stringmatch>
 </decompilertest>

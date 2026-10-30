@@ -636,6 +636,9 @@ pub struct AnalysisOutput {
     /// path only, and only when a `.fid` database is configured); empty otherwise.
     /// See [`FidMatch`].
     pub fid_names: Vec<FidMatch>,
+    /// (kuna `funcchunks`) Each function's flow body size in bytes (the sum of
+    /// its chunks, shared tails included), by `(entry, bytes)`.
+    pub function_bodies: Vec<(u64, u64)>,
     /// (kuna `cppproto`) The DWARF recoveries that only the C++ arm of the DWARF
     /// pass produces, held APART from the streams above so the commit boundary can
     /// drop them wholesale under `--option cppproto off`. The producing pass runs
@@ -885,6 +888,7 @@ impl AnalysisOutput {
         self.locals.extend(other.locals);
         self.comments.extend(other.comments);
         self.fid_names.extend(other.fid_names);
+        self.function_bodies.extend(other.function_bodies);
         self.cpp_dwarf.symbols.extend(other.cpp_dwarf.symbols);
         self.cpp_dwarf.locals.extend(other.cpp_dwarf.locals);
         self.cpp_dwarf.prototypes.extend(other.cpp_dwarf.prototypes);

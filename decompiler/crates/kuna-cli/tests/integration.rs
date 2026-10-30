@@ -481,6 +481,9 @@ mod xrefs_own_export_plt;
 #[path = "xrefs_switch_case_calls.rs"]
 mod xrefs_switch_case_calls;
 
+#[path = "cppsig_hidden_return.rs"]
+mod cppsig_hidden_return;
+
 #[path = "zero_extended_returns.rs"]
 mod zero_extended_returns;
 

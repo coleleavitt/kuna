@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3684,
-    3684
+    3689,
+    3689
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1051,10 +1051,15 @@
     "data:KUNA-ASSERT #1: routed assertions take effect (compareform original + namelock rename)",
     "data:KUNA-ASSERT #2: kassert list reports the P3 config assertion with rewind scope",
     "data:KUNA-ASSERT #3: kassert list reports the cosmetic P9 assertion as HINT via HARD mechanism",
-    "data:KUNA-BITIDIOMS #1: the staged rev swaps fold to bswap (bitidioms on)",
-    "data:KUNA-BITIDIOMS #2: ror folds to rotl by 13 (bitidioms on)",
-    "data:KUNA-BITIDIOMS #3: default (off) keeps the rotate as a shift pair",
-    "data:KUNA-BITIDIOMS #4: default (off) keeps the halfword stage of the swap",
+    "data:KUNA-BITIDIOMS #1: the staged rev swaps fold to bswap (default)",
+    "data:KUNA-BITIDIOMS #2: ror folds to rotl by 13 (default)",
+    "data:KUNA-BITIDIOMS #3: bitidioms off keeps the rotate as a shift pair",
+    "data:KUNA-BITIDIOMS #4: bitidioms off keeps the halfword stage of the swap",
+    "data:KUNA-BITSCAN #1: cmov abs folds to abs (default)",
+    "data:KUNA-BITSCAN #2: the tzcnt loop folds to ctz (default)",
+    "data:KUNA-BITSCAN #3: the bsr loop folds to LZCOUNT (default)",
+    "data:KUNA-BITSCAN #4: bitidioms off keeps the tzcnt loop",
+    "data:KUNA-BITSCAN #5: bitidioms off keeps the negation diamond",
     "data:KUNA-CALLPLACEHOLDER #1: strncpy takes its three declared arguments",
     "data:KUNA-CALLPLACEHOLDER #2: strlen takes its one declared argument",
     "data:KUNA-CALLPLACEHOLDER #3: no call reads the return-address slot as an argument",

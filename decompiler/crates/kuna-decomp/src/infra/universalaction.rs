@@ -373,6 +373,7 @@ pub fn universal_sched(
         rrow!("x87truncate", "analysis", crate::kuna_x87truncate::RuleX87Truncate::new("analysis")),
         rrow!("selectdiv", "analysis", crate::kuna_selectdiv::RuleSelectDiv::new("analysis")),
         rrow!("bitidioms", "analysis", crate::kuna_bitidioms::RuleBitIdioms::new("analysis")),
+        rrow!("intabs", "analysis", crate::kuna_bitidioms::RuleIntAbs::new("analysis")),
         rrow!("gobool", "analysis", crate::kuna_gobool::RuleGoBoolReturn::with_group(false, "analysis")),
         rrow!("boolsignless", "analysis", crate::kuna_flagcompare::RuleBoolSignLess::with_group(false, "analysis")),
         rrow!("sborrowge", "analysis", crate::kuna_flagcompare::RuleSborrowGe::with_group(false, "analysis")),
@@ -693,6 +694,9 @@ pub fn universal_sched(
             // passes above: mainloop has settled the count and the searched byte
             // to constants, and the repeating fullloop folds what it leaves.
             act!(Box::new(crate::kuna_strlenscan::ActionStrlenScan::new(false, "returnsplit"))),
+            // (kuna) bitidioms: the one-instruction bsf/tzcnt/bsr loop becomes
+            // ctz / LZCOUNT, removed the same way.
+            act!(Box::new(crate::kuna_bitidioms::ActionBitScanLoop::new("returnsplit"))),
             // (kuna) repstring (option `repstring`): the same loop shape for
             // `rep movs`/`rep stos`, collapsed into memcpy/memset by removing
             // the edge into the copy; mainloop then deletes the orphaned body.

@@ -143,6 +143,14 @@ pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
 pub const BUILTIN_BSWAP: uint4 = 0x1000000c;
 /// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
 pub const BUILTIN_ROTL: uint4 = 0x1000000d;
+/// (kuna) Built-in id for `abs` (`bitidioms`).
+pub const BUILTIN_ABS: uint4 = 0x1000000e;
+/// (kuna) Built-in id for `bitreverse` (`bitidioms`).
+pub const BUILTIN_BITREV: uint4 = 0x1000000f;
+/// (kuna) Built-in id for `ctz`, the count of trailing zero bits (`bitidioms`).
+pub const BUILTIN_CTZ: uint4 = 0x10000010;
+/// (kuna) Built-in id for `labs`, the 64-bit `abs` (`bitidioms`).
+pub const BUILTIN_LABS: uint4 = 0x10000011;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1023,6 +1031,13 @@ impl UserOpManage {
             BUILTIN_EH_SELECTOR => UserPcodeOp::new_unspecialized(b"eh_selector", BUILTIN_EH_SELECTOR as int4),
             BUILTIN_BSWAP => UserPcodeOp::new_unspecialized(b"bswap", BUILTIN_BSWAP as int4),
             BUILTIN_ROTL => UserPcodeOp::new_unspecialized(b"rotl", BUILTIN_ROTL as int4),
+            BUILTIN_ABS | BUILTIN_LABS => {
+                let int_type = types.get_base_int(if i == BUILTIN_ABS { 4 } else { 8 });
+                let name: &[u8] = if i == BUILTIN_ABS { b"abs" } else { b"labs" };
+                UserPcodeOp::new_datatype(name, i as int4, Some(Rc::clone(&int_type)), &[Some(int_type)])
+            }
+            BUILTIN_BITREV => UserPcodeOp::new_unspecialized(b"bitreverse", BUILTIN_BITREV as int4),
+            BUILTIN_CTZ => UserPcodeOp::new_unspecialized(b"ctz", BUILTIN_CTZ as int4),
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };
         self.builtinmap.insert(i, res);

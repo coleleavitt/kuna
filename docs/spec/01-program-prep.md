@@ -3352,23 +3352,20 @@ moves.
   `dwarfstructs off` stays exactly the pre-DIV-86 name-only mapping its own row
   promises.
 
-- **Prototype merge** (`protomerge`, default-off; kuna;
+- **Prototype merge** (`protomerge`, default-on; kuna;
   `decompiler/crates/kuna-decomp/src/p4_calls/kuna_protomerge.rs (merge)`): the
   load-time sources park whole prototypes on a function at the analysis commit
   (the by-name and by-address libc tables, the demangled C++ signature, DWARF),
-  and the last used to replace the earlier wholesale. With the option on, two
-  prototypes of the same shape (arity, variadic slot, the same size in every
-  slot) merge slot by slot: each slot keeps the type that says more (a named
-  aggregate or enum, or a pointer to one, over a pointer to a scalar, over a
-  pointer to void, over a float or bool, over an integer, over an undefined),
-  ties going to the later source; names fill in from the earlier one; a return
-  type survives a later source that leaves the return open. Different shapes
-  replace as before, and directive, console and decompile-time prototypes are
-  never merged. This is IDA's per-argument `score_tinfo` merge. It is off
-  because on Lua 5.4.8 with DWARF it changes 4 of 893 signatures and not all for
-  the better: `luaL_checkstack` gains its `char *` message, `luaF_closeupval`
-  loses its `StackValue *` to `unsigned long`, and `bcmp`/`memcmp` take
-  `unsigned char *` where DWARF declares `void *`.
+  and the last used to replace the earlier wholesale. Two prototypes of the same
+  shape (arity, variadic slot, the same size in every slot) now merge slot by
+  slot: a typed slot (pointer, float, bool, aggregate, enum) beats a plain
+  integer, which beats an undefined; two typed slots, two pointers included, are
+  a tie that the later source wins, so DWARF's `void *` stays even where a table
+  spelled `unsigned char *`. Names fill in from the earlier source; a return type
+  survives a later source that leaves it open. Different shapes replace as
+  before; directive, console and decompile-time prototypes never merge. IDA's
+  per-argument `score_tinfo` merge. On Lua 5.4.8 with DWARF, llvm-objdump, bzip2
+  and an i386 C++ fixture it changes no signature.
 
 - **Name ladder** (`nameladder`, default-on; kuna;
   `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
@@ -3722,7 +3719,12 @@ moves.
   `libproto` also parks `void *(size_t[, ...])` / `void(void *[, size_t])` on the
   imported Itanium allocation functions (`_Znwm`, `_Znam`, `_ZdlPv`, `_ZdlPvm`,
   their `nothrow_t` and `align_val_t` forms and the 32-bit `j` spellings), so a
-  `T *p = operator new(n)` no longer needs a cast.
+  `T *p = operator new(n)` no longer needs a cast. On an i386 System V ELF a
+  defined function whose last instruction is `ret $4` pops a hidden struct-return
+  pointer the mangled parameter list never spells, so a `void *rethidden`
+  parameter is put in front (IDA's `func_has_stkframe_hole` test, read off the
+  function's own epilogue): `_Z2mkii` reads `mk(void *rethidden,int a1,int a2)`
+  instead of the shifted `mk(int a0,int a1)`.
 - **MSVC declarations** (`msvcsig`, `on|off`, default `on`, applied only while
   `cppsig` is not `off`;
   `decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_msvcsig.rs`, the
@@ -7167,7 +7169,10 @@ from several entries is shared, and the model keeps the list of every function
 that reaches it, as IDA's tail keeps its referers. With the option on, the FID
 matcher hashes this body (all chunks, ascending, Ghidra's `func.getBody()`
 order) instead of the clip. Analysis-tier and Listing-only; it changes FID's
-input and nothing else, so it is inert on the XML datatest path.
+input and nothing else, so it is inert on the XML datatest path. The inventory `size` the console reports (`kuna functions`) is the
+chunk body under the option (the sum of the chunks, shared tails included)
+instead of the clip's upper bound; on the fixture a function placed before a
+shared tail reports its own 6 bytes instead of 12.
 
 **Literal-pool inference** (`poolentry`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/analyzers/aif/kuna_poolentry.rs`) is aimed at
