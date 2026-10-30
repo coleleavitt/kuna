@@ -656,3 +656,6 @@ mod storage_load_transfers;
 
 #[path = "ppc32_imports.rs"]
 mod ppc32_imports;
+
+#[path = "dwarf_global_addresses.rs"]
+mod dwarf_global_addresses;

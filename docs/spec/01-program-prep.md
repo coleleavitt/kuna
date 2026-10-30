@@ -2427,7 +2427,9 @@ moves.
   parser wholesale-substituted by `gimli` (the same dependency-substitution loss as
   BFD → `object`). Three recoveries: (1) names — each defined `DW_TAG_subprogram`
   emits a function symbol, each top-level `DW_TAG_variable` with a `DW_OP_addr`
-  location a data symbol; (2) typed signatures — return + formal-parameter DIEs
+  location a data symbol (the operand read in the file's byte order; a DWARF 5
+  `DW_OP_addrx`, or GNU `DW_OP_GNU_addr_index`, resolved through the unit's
+  `.debug_addr` table); (2) typed signatures — return + formal-parameter DIEs
   mapped to kuna `Datatype`s (structs as named opaques, with a cycle guard on the
   DIE walk — see `typedepth` below), registered *after* libproto so real source
   signatures win,

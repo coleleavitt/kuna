@@ -468,7 +468,7 @@ fn snapshot_unit_for_abi(
         }
         if let Some(loc) = entry.attr_value(gimli::DW_AT_location) {
             snap.has_location = true;
-            snap.addr_location = simple_addr_location(&loc);
+            snap.addr_location = simple_addr_location(dwarf, unit, &loc);
             snap.fbreg_location = simple_fbreg_location(&loc);
             if snap.tag == gimli::DW_TAG_formal_parameter && kuna_dwarfbyref::is_fortran(language) {
                 let entry = parent_off
@@ -498,27 +498,37 @@ fn snapshot_unit_for_abi(
 
 /// Decode a `DW_AT_location` that is a single `DW_OP_addr <vma>` expression (the
 /// only global-variable location form this pass handles), returning the VMA.
-/// Anything else (`DW_OP_fbreg`, register, multi-op) returns `None` — a
-/// `DW_OP_fbreg` stack local is handled separately by [`simple_fbreg_location`]
-/// (subtask 3); a register/multi-op location has no static address.
-fn simple_addr_location(loc: &gimli::AttributeValue<Reader<'_>>) -> Option<u64> {
-    let expr = match loc {
-        gimli::AttributeValue::Exprloc(e) => e.clone(),
-        gimli::AttributeValue::Block(b) => gimli::Expression(b.clone()),
+/// The operand is read in the file's byte order; a DWARF 5 `DW_OP_addrx` (and
+/// its GNU split-DWARF predecessor) resolves through the unit's `.debug_addr`
+/// table. Anything else (`DW_OP_fbreg`,
+/// register, multi-op) returns `None` — a `DW_OP_fbreg` stack local is handled
+/// separately by [`simple_fbreg_location`] (subtask 3); a register/multi-op
+/// location has no static address.
+fn simple_addr_location<'a>(
+    dwarf: &gimli::Dwarf<Reader<'a>>,
+    unit: &gimli::Unit<Reader<'a>>,
+    loc: &gimli::AttributeValue<Reader<'a>>,
+) -> Option<u64> {
+    use gimli::Reader as _;
+    let mut operand = match loc {
+        gimli::AttributeValue::Exprloc(e) => e.0,
+        gimli::AttributeValue::Block(b) => *b,
         _ => return None,
     };
-    // A DW_OP_addr expression is the opcode 0x03 followed by an address-sized
-    // operand. Parse it with a temporary 64-bit encoding (address_size only
-    // affects DW_OP_addr operand width); we only accept the single-op case.
-    let bytes = expr.0.slice();
-    if bytes.first() != Some(&0x03) {
+    let opcode = gimli::DwOp(operand.read_u8().ok()?);
+    if opcode == gimli::DW_OP_addrx || opcode == gimli::DW_OP_GNU_addr_index {
+        let index = operand.read_uleb128().ok()?;
+        if !operand.is_empty() {
+            return None;
+        }
+        return dwarf.address(unit, gimli::DebugAddrIndex(usize::try_from(index).ok()?)).ok();
+    }
+    if opcode != gimli::DW_OP_addr {
         return None;
     }
-    match bytes.len() {
-        5 => Some(u32::from_le_bytes([bytes[1], bytes[2], bytes[3], bytes[4]]) as u64),
-        9 => Some(u64::from_le_bytes([
-            bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8],
-        ])),
+    match operand.len() {
+        4 => operand.read_u32().ok().map(u64::from),
+        8 => operand.read_u64().ok(),
         _ => None,
     }
 }
