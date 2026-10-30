@@ -378,6 +378,9 @@ pub struct Funcdata {
     /// wider than its Symbol (C++ `Funcdata::coverVarnodes`): `(address, size,
     /// name)`.
     global_covers: Vec<(Address, int4, String)>,
+    /// (kuna `mapglobalsyms`) The global storage `mapGlobals` found no Symbol
+    /// for, with the type it would get one under.
+    new_globals: Vec<(Address, Rc<crate::dtype::Datatype>)>,
     /// (kuna `structsynth`) Did the last `ActionInferTypes` pass reach the
     /// lattice fixpoint -- i.e. run a full propagation that changed nothing?
     ///
@@ -798,6 +801,7 @@ impl Funcdata {
             callee_memory: std::collections::HashMap::new(),
             pending_comments: Vec::new(),
             global_covers: Vec::new(),
+            new_globals: Vec::new(),
             kuna_infertypes_settled: false,
             kuna_call_target_types: std::collections::HashMap::new(),
             kuna_field_calls: Vec::new(),
@@ -984,6 +988,15 @@ impl Funcdata {
 
     pub fn set_global_covers(&mut self, covers: Vec<(Address, int4, String)>) {
         self.global_covers = covers;
+    }
+
+    /// (kuna `mapglobalsyms`) The unheld global storage `mapGlobals` recorded.
+    pub fn new_globals(&self) -> &[(Address, Rc<crate::dtype::Datatype>)] {
+        &self.new_globals
+    }
+
+    pub fn set_new_globals(&mut self, globals: Vec<(Address, Rc<crate::dtype::Datatype>)>) {
+        self.new_globals = globals;
     }
 
     /// Buffer an already-prefixed comment triple (the cross-function carry path:

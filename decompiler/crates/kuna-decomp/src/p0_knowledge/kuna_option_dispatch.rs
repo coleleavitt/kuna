@@ -1292,6 +1292,9 @@ kuna_options! { self, p1;
     "rawdiscover" => {
         on_off!(analysis_rawdiscover, "Raw-image recursive function discovery")
     },
+    "mapglobalsyms" => {
+        on_off!(mapglobalsyms, "Global scope keeps the data Symbols mapGlobals creates")
+    },
     "objectview" => {
         on_off!(analysis_objectview, "Object-file analysis passes on TE and raw images")
     },

@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_412() {
-    assert_eq!(kuna_num_settables(), 412);
-    assert_eq!(SETTABLE_TABLE.len(), 412);
+fn settable_count_is_413() {
+    assert_eq!(kuna_num_settables(), 413);
+    assert_eq!(SETTABLE_TABLE.len(), 413);
 }
 
 #[test]
-fn tier_counts_are_130_core_153_transform_128_analysis() {
+fn tier_counts_are_131_core_153_transform_129_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_153_transform_128_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 153, 128));
+    assert_eq!((core, transform, analysis), (131, 153, 129));
 }
 
 #[test]
@@ -407,6 +407,9 @@ fn option_values_live_value_present_for_187() {
         // gate read console-side via kuna_live_value, like the gates around it.
         // Default-ON, raw-container only.
         "rawdiscover",
+        // (kuna) The TE / raw-image object view -- an analysis-tier gate read at
+        // the commit, console-side via kuna_live_value, like `rawdiscover`.
+        "objectview",
         "noreturn_disc",
         // (kuna, GH-312) The positive-evidence-only tally for `noreturn_disc` -- a
         // sub-rule gate with no codegen live reader (read console-side via
@@ -659,6 +662,9 @@ fn option_values_live_value_present_for_187() {
                             | "regionlooprefine"
                             | "loopcontinue"
                             | "regionedgeorder"
+                            // (kuna) `mapglobalsyms` is read by the decompile
+                            // driver after the function, console-side.
+                            | "mapglobalsyms"
                             | "condfold"
                             // (kuna) `condstmts` takes `off` or an INTEGER cap;
                             // its live value is `Architecture::cond_stmts`.
@@ -1247,7 +1253,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `ehcold`.
     // +1 for `tailcontract`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `fidcallees`; +1 `flirtsites`.
-    assert_eq!(json.matches("},\n").count(), 410);
+    // +1 for `objectview`, beside `rawdiscover`; +1 for `mapglobalsyms`.
+    assert_eq!(json.matches("},\n").count(), 412);
 }
 
 #[test]

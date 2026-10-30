@@ -279,6 +279,10 @@ pub struct Architecture {
     pub aggressive_ext_trim: bool,
     /// Treat readonly values as constants (C++ `readonlypropagate`).
     pub readonlypropagate: bool,
+    /// (kuna `mapglobalsyms`) Keep the data Symbol `Funcdata::mapGlobals`
+    /// creates for unnamed global storage in the global scope, so later
+    /// functions see it; default **off**.
+    pub mapglobalsyms: bool,
     /// (kuna `dynrelocs`) `[start, stop]` (inclusive) offsets whose read-only
     /// contents fold even with [`Self::readonlypropagate`] off — the loader's
     /// `PT_GNU_RELRO`-frozen dynamic-relocation slots
@@ -3126,6 +3130,7 @@ impl Architecture {
             max_jumptable_size: 0,
             aggressive_ext_trim: false,
             readonlypropagate: false,
+            mapglobalsyms: false,
             dynreloc_const: Rc::new(Vec::new()),
             litpool_const: Rc::new(Vec::new()),
             globalref_ranges: Rc::new(Vec::new()),
@@ -4973,6 +4978,7 @@ impl Architecture {
         // flipped by `option readonly`) so `ActionVarnodeProps` reaches it to gate
         // `Funcdata::fillinReadOnly` (the readonly-RAM-global constant fold).
         ctx.readonlypropagate = self.readonlypropagate;
+        ctx.mapglobalsyms = self.mapglobalsyms;
         // (kuna `dynrelocs`) Carry the PT_GNU_RELRO-frozen dynamic-relocation
         // slots so `ActionVarnodeProps` folds those loads with global read-only
         // propagation still off. `Rc` clone: the list is built once at load.

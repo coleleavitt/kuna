@@ -1497,6 +1497,8 @@ Three tiers:
 | vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
 | fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
 | avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
+| a global one function accessed whole prints as unrelated dat_ names in another | [`mapglobalsyms`](#mapglobalsyms) |
+| later functions do not see the DAT_ symbol an earlier decompile created, unlike upstream decomp_dbg sessions | [`mapglobalsyms`](#mapglobalsyms) |
 | a loop that only reads a stack buffer prints a store into its first element | [`tiedphitrim`](#tiedphitrim) |
 | a while condition tests buf[0] and the loop body assigns a later element into buf[0] | [`tiedphitrim`](#tiedphitrim) |
 | a byte fetched through a pointer is assigned to a stack-offset variable the binary never writes | [`tiedphitrim`](#tiedphitrim) |
@@ -4723,6 +4725,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default: vector code reads as intrinsics. Turn it off to see the SLEIGH user-op names, for example to grep for a mnemonic.
 - **Where / provenance:** P9/naming-policy · kuna · presentation-default · ida95-46
 - **Example:** `--option avxintrinsics off`
+
+### `mapglobalsyms` -- on | off, default `off`
+
+- **Symptoms:** a global one function accessed whole prints as unrelated dat_ names in another; later functions do not see the DAT_ symbol an earlier decompile created, unlike upstream decomp_dbg sessions.
+- **What it does:** Keep the data Symbol Funcdata::mapGlobals creates for global storage no Symbol holds. Upstream adds a DAT_ Symbol to the global scope for each such group of persistent Varnodes, typed by the widest access when it spans the group and undefined<N> otherwise, and every later function sees it. Kuna's per-function GlobalQuery is a read-only snapshot, so ActionMapGlobals records the groups on the Funcdata and the decompile driver adds them to the global scope, under the dat_<addr> / DAT_%08x name kuna prints them with, once the function is done.
+- **When to flip:** Off by default: the output of a function then depends on which functions were decompiled before it in the same session. Turn on to get upstream's session behaviour: a global a first function read as 8 bytes stays one 8-byte object, so a later function's 4-byte access to its upper half prints as a piece of it (dat_x._4_4_) instead of a separate dat_<addr+4>.
+- **Where / provenance:** P9/naming-policy · ghidra · presentation-default · kuna-mapglobals-dat-symbols
+- **Example:** `option mapglobalsyms on`
 
 ### `tiedphitrim` -- on | off, default `on`
 

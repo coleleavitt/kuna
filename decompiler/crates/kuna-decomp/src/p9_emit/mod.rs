@@ -7,6 +7,7 @@ pub mod comment;
 pub mod coreaction_casts;
 pub mod printlanguage;
 pub mod printc;
+pub mod kuna_mapglobalsyms; // (kuna `mapglobalsyms`) keep mapGlobals' DAT_ Symbols in the global scope
 pub mod kuna_avxintrin; // (kuna `avxintrinsics`) Intel intrinsic names for the SLEIGH AVX user-ops
 pub mod kuna_partialconcat;
 pub mod kuna_partialaccess;
