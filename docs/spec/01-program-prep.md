@@ -5367,7 +5367,9 @@ pairs exist, they carry the confident shapes already. On an ELF a weak hit is
 taken only outside every FDE body, because the unwind table already describes
 the functions it covers. A Mach-O or PE
 image's own function tables list everything such a hint could add, so the weak
-tier is not used there.
+tier is not used there. A directory named by `KUNA_PATTERN_DIR` (IDA's
+`PATTERN_SEARCH_DIR`) can replace any vendored pattern file with a file of the
+same name (`patterns/mod.rs (user_file)`).
 
 **LSDA landing pads** (`eh_frame_full`, default-off): the deeper
 `GccExceptionAnalyzer` markup — follow each FDE's CIE `L` augmentation to its

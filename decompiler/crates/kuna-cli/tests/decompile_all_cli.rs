@@ -1590,7 +1590,7 @@ fn decompile_all_error_nonzero_does_not_absorb_next_function() {
     // `funcboundflow` (default-on, DIV-67) is a SECOND, name-independent bound that
     // stops the same overrun at `compute`'s entry, so it must also be off to expose
     // the pre-fix overrun this test isolates.
-    let off = code(&["--option", "noreturn_error", "off", "--option", "funcboundflow", "off"]);
+    let off = code(&["--option", "noreturn_error", "off", "--option", "funcboundflow", "off", "--option", "fdeflowbound", "off"]);
     // ON (default): the CALL_RETURN prune stops err_fatal at the no-return call.
     let on = code(&[]);
     // `err_warn` belongs to `compute_warn` — a DIFFERENT function two hops after
@@ -1629,7 +1629,7 @@ fn kuna_decompile_single_error_nonzero_does_not_absorb_next_function() {
     // output ONLY if the flow overran past `call error(2)`.  `funcboundflow` (default-on,
     // DIV-67) is a second, name-independent bound at `compute`'s entry, so it too must be
     // off to expose the pre-fix overrun.
-    let off = code(&["--option", "noreturn_error", "off", "--option", "funcboundflow", "off"]);
+    let off = code(&["--option", "noreturn_error", "off", "--option", "funcboundflow", "off", "--option", "fdeflowbound", "off"]);
     let on = code(&[]);
     assert!(
         off.contains("err_warn"),
@@ -2085,8 +2085,9 @@ fn raw_image_rejects_missing_metadata_and_object_only_surfaces() {
          "--raw-image requires --target"),
         (&["functions", &binary, "--raw-image", "--target", target, "--entry", "0"],
          "--raw-image requires --base"),
-        (&["functions", &binary, "--raw-image", "--target", target, "--base", "0"],
-         "--raw-image requires at least one"),
+        (&["functions", &binary, "--raw-image", "--target", target, "--base", "0",
+           "--option", "funcstart_patterns", "off"],
+         "--raw-image with funcstart_patterns off requires at least one"),
         (&["functions", &binary, "--base", "0"], "--base requires --raw-image"),
         (&["functions", &binary, "--entry", "0"], "--entry requires --raw-image"),
         (&["functions", &binary, "--raw-image", "--target", target, "--base", "0",

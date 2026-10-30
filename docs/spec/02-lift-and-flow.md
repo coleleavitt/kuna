@@ -2341,8 +2341,9 @@ table, and the jump stays a computed call. A bounded table
 never reaches this arm.
 
 **`fdeflowbound`, default on** (`flow.rs (leaves_own_fde)`). An unwind-table
-extent (an `.eh_frame` FDE, a `.pdata` record, a Go `functab` entry: the extents
-the analysis tier hands `fdeinterior`) states where its function ends. A call to
+extent (an `.eh_frame` FDE or a Go `functab` entry: the extents the analysis tier
+hands `fdeinterior`) states where its function ends. A PE `.pdata` record is
+not used, because it can be one chunk of a chained function. A call to
 an import that kuna cannot know never returns (`call mydie@plt` as a function's
 last instruction, `call [GOT _Unwind_Resume]` closing a cleanup rung) is taken
 to return. Flow then walks off the function's end into whatever bytes follow:

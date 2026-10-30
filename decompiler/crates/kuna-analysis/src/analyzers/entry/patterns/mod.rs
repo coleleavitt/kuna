@@ -501,27 +501,41 @@ fn collect_data(body: &str) -> Vec<Ditted> {
 
 // The vendored upstream pattern XMLs (provenance: docs/UPSTREAM.md GHIDRA_REV).
 // Embedded so the analyzer tier needs no spec-root file handle.
-const X86_64_GCC: &str = include_str!("x86-64gcc_patterns.xml");
-const X86_64_WIN: &str = include_str!("x86-64win_patterns.xml");
-const X86_GCC: &str = include_str!("x86gcc_patterns.xml");
-const X86_GCC_PRE: &str = include_str!("x86gcc_prepatterns.xml");
-const X86_WIN: &str = include_str!("x86win_patterns.xml");
-const AARCH64_LE: &str = include_str!("AARCH64_LE_patterns.xml");
-const ARM_LE: &str = include_str!("ARM_LE_patterns.xml");
-const ARM_BE: &str = include_str!("ARM_BE_patterns.xml");
-const RISCV_GC: &str = include_str!("riscv_gc_patterns.xml");
-const MIPS_LE: &str = include_str!("MIPS_LE_patterns.xml");
-const MIPS_BE: &str = include_str!("MIPS_BE_patterns.xml");
-const PPC_LE: &str = include_str!("PPC_LE_patterns.xml");
-const PPC_BE: &str = include_str!("PPC_BE_patterns.xml");
+const X86_64_GCC: (&str, &str) = ("x86-64gcc_patterns.xml", include_str!("x86-64gcc_patterns.xml"));
+const X86_64_WIN: (&str, &str) = ("x86-64win_patterns.xml", include_str!("x86-64win_patterns.xml"));
+const X86_GCC: (&str, &str) = ("x86gcc_patterns.xml", include_str!("x86gcc_patterns.xml"));
+const X86_GCC_PRE: (&str, &str) = ("x86gcc_prepatterns.xml", include_str!("x86gcc_prepatterns.xml"));
+const X86_WIN: (&str, &str) = ("x86win_patterns.xml", include_str!("x86win_patterns.xml"));
+const AARCH64_LE: (&str, &str) = ("AARCH64_LE_patterns.xml", include_str!("AARCH64_LE_patterns.xml"));
+const ARM_LE: (&str, &str) = ("ARM_LE_patterns.xml", include_str!("ARM_LE_patterns.xml"));
+const ARM_BE: (&str, &str) = ("ARM_BE_patterns.xml", include_str!("ARM_BE_patterns.xml"));
+const RISCV_GC: (&str, &str) = ("riscv_gc_patterns.xml", include_str!("riscv_gc_patterns.xml"));
+const MIPS_LE: (&str, &str) = ("MIPS_LE_patterns.xml", include_str!("MIPS_LE_patterns.xml"));
+const MIPS_BE: (&str, &str) = ("MIPS_BE_patterns.xml", include_str!("MIPS_BE_patterns.xml"));
+const PPC_LE: (&str, &str) = ("PPC_LE_patterns.xml", include_str!("PPC_LE_patterns.xml"));
+const PPC_BE: (&str, &str) = ("PPC_BE_patterns.xml", include_str!("PPC_BE_patterns.xml"));
+
+/// The environment variable naming a directory of pattern files that replace
+/// the vendored ones of the same name (IDA's `PATTERN_SEARCH_DIR`).
+pub const PATTERN_DIR_ENV: &str = "KUNA_PATTERN_DIR";
+
+/// The contents of `name` in the user's pattern directory, when it has one.
+fn user_file(name: &str) -> Option<String> {
+    user_file_in(std::path::Path::new(&std::env::var_os(PATTERN_DIR_ENV)?), name)
+}
+
+fn user_file_in(dir: &std::path::Path, name: &str) -> Option<String> {
+    std::fs::read_to_string(dir.join(name)).ok()
+}
 
 /// Compile a set of vendored XMLs into one [`FuncStartPatterns`] with the given
 /// instruction alignment.
-fn compile(xmls: &[&str], align: u64) -> FuncStartPatterns {
+fn compile(xmls: &[(&str, &'static str)], align: u64) -> FuncStartPatterns {
     let mut pairs = Vec::new();
     let mut bare = Vec::new();
-    for xml in xmls {
-        parse_patternlist(xml, &mut pairs, &mut bare);
+    for &(name, embedded) in xmls {
+        let xml = user_file(name);
+        parse_patternlist(xml.as_deref().unwrap_or(embedded), &mut pairs, &mut bare);
     }
     let mut first = [false; 256];
     let mut accept = |d: &Ditted, k: usize| {
@@ -651,6 +665,22 @@ pub fn for_language(language_id: &str) -> Option<&'static FuncStartPatterns> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_user_pattern_file_replaces_the_vendored_one() {
+        let dir = std::env::temp_dir().join(format!("kuna-patterns-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let xml = "<patternlist><patternpairs><prepatterns><data>0xc3</data></prepatterns>\
+                   <postpatterns><data>0x0f 0x0b</data><funcstart/></postpatterns></patternpairs></patternlist>";
+        std::fs::write(dir.join("x86-64gcc_patterns.xml"), xml).unwrap();
+        let text = user_file_in(&dir, "x86-64gcc_patterns.xml").unwrap();
+        let mut pairs = Vec::new();
+        let mut bare = Vec::new();
+        parse_patternlist(&text, &mut pairs, &mut bare);
+        assert_eq!(pairs.len(), 1);
+        assert!(user_file_in(&dir, "ARM_LE_patterns.xml").is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn aarch64_possiblefuncstart_pairs_are_weak_hits() {
