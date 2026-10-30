@@ -427,6 +427,8 @@ Three tiers:
 | no Win32 API names anywhere in a decompiled PE | [`peimportcall`](#peimportcall) |
 | an arm64e call renders as (*dat_<addr>)(...) through an __auth_ptr slot | [`authptrcall`](#authptrcall) |
 | ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall) |
+| an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method | [`arm64evcall`](#arm64evcall) |
+| c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls | [`arm64evcall`](#arm64evcall) |
 | heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
 | dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
 | caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
@@ -2291,6 +2293,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: an arm64e call through __auth_ptr renders by name (___chkstk_darwin(...)) instead of (*dat_<addr>)(...). Flip off to restore the anonymous slot call. Inert on any image without an __auth_ptr bind.
 - **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-apple-authptrcall
 - **Example:** `option authptrcall off`
+
+### `arm64evcall` -- on | off, default `on`
+
+- **Symptoms:** an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method; c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls.
+- **What it does:** Resolve arm64e C++ virtual calls by their pointer-auth discriminator. arm64e signs every vtable slot with key IA, address diversity and a 16-bit constant, the hash of the method's mangled name; the constant survives in each slot's LC_DYLD_CHAINED_FIXUPS entry and is re-materialized at every call site (movk x17, #d, lsl #48; blraa x8, x17). So (slot index, diversifier) names a method without any class type, which is how IDA's arm64 module resolves these calls. The analysis tier files every run of consecutive IA-signed, address-diversified slots in a __const section under (index in run, diversifier), skipping __cxa_pure_virtual/__cxa_deleted_virtual and slots bound to another image; it then walks back up to 24 raw A64 words from each blraa/braa with a register modifier to the movk and the authenticated vtable-pointer load (autda/autdb/autdza/ldraa), summing add #imm and pre-index ldr writebacks into the slot offset. When the slot holds one method in this image the CALLIND is built as a direct call to it; when it holds several, the call gets a warning naming the candidates.
+- **When to flip:** On by default: an arm64e virtual call whose slot one class of this image fills reads as that method's call, and an overridden one names its candidates. Flip off to see every virtual call as (**(code **)(*obj + off))(...). The unique-target case trusts that no other image overrides the method; a plugin or kext built against this image could. Inert on any image without IA-signed __const slots.
+- **Where / provenance:** P1/external-refinement · kuna · structure-recovery · kuna-apple-arm64evcall
+- **Example:** `option arm64evcall off`
 
 ### `noreturn_disc` -- on | off, default `on`
 

@@ -891,6 +891,7 @@ kuna_options! { self, p1;
     "noreturn_known" => on_off!(analysis_noreturn_known, "No-return-known analysis pass"),
     "peimportcall" => on_off!(analysis_peimportcall, "PE/Mach-O import-slot call binding"),
     "authptrcall" => on_off!(analysis_authptrcall, "arm64e __auth_ptr call binding"),
+    "arm64evcall" => on_off!(analysis_arm64evcall, "arm64e virtual-call resolution"),
     "libproto" => on_off!(analysis_libproto, "Library-prototype analysis pass"),
     "libcsigs" => on_off!(analysis_libcsigs, "Measured libc signature extension"),
     "libgccsigs" => on_off!(analysis_libgccsigs, "libgcc __divdi3 DI-mode contract"),

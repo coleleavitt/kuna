@@ -488,6 +488,9 @@ pub struct AnalysisOutput {
     /// the import, but never registered in the function inventory: the slot is a
     /// pointer word, not a function.
     pub import_slot_names: Vec<(u64, String)>,
+    /// (kuna `arm64evcall`) arm64e virtual call sites and the methods their
+    /// vtable slot can hold. See [`crate::rtti::kuna_arm64evcall`].
+    pub vcall_sites: Vec<crate::rtti::kuna_arm64evcall::VcallSite>,
     /// Detected NUL-terminated string literals (a typed `char[N]` per address).
     pub strings: Vec<StringFact>,
     /// (kuna `fatstr`) Length-BOUNDED string literals recovered from static
@@ -789,6 +792,7 @@ impl AnalysisOutput {
         self.objc_self_types.extend(other.objc_self_types);
         self.externref.extend(other.externref);
         self.import_slot_names.extend(other.import_slot_names);
+        self.vcall_sites.extend(other.vcall_sites);
         self.strings.extend(other.strings);
         self.bounded_strings.extend(other.bounded_strings);
         self.wide_strings.extend(other.wide_strings);

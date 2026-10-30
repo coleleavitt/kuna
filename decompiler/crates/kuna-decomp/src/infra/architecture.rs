@@ -1701,6 +1701,12 @@ pub struct Architecture {
     /// (kuna) Gate the arm64e `__auth_ptr` call binding (`authptrcall`).
     /// Default on.
     pub analysis_authptrcall: bool,
+    /// (kuna) Gate the arm64e virtual-call resolution (`arm64evcall`).
+    /// Default on.
+    pub analysis_arm64evcall: bool,
+    /// (kuna `arm64evcall`) `call site → methods its vtable slot can hold`,
+    /// committed from the analysis tier; read when flow builds the CALLIND.
+    pub kuna_vcall_targets: std::collections::BTreeMap<u64, Vec<u64>>,
     /// (kuna) Gate the library-prototype pass (`libproto`); default on.
     pub analysis_libproto: bool,
     /// (kuna) Gate the measured libc signature extension (`libcsigs`); default on.
@@ -3237,6 +3243,8 @@ impl Architecture {
             analysis_noreturn_known: false,
             analysis_peimportcall: false,
             analysis_authptrcall: false,
+            analysis_arm64evcall: false,
+            kuna_vcall_targets: std::collections::BTreeMap::new(),
             analysis_libproto: false,
             analysis_libcsigs: false,
             analysis_libgccsigs: false,
@@ -3662,6 +3670,7 @@ impl Architecture {
         self.analysis_noreturn_known = true;
         self.analysis_peimportcall = true; // (kuna) DIV-57/DIV-171 import-slot binding default-on
         self.analysis_authptrcall = true; // (kuna) arm64e __auth_ptr call binding; Mach-O only, 0/675 datatests
+        self.analysis_arm64evcall = true; // (kuna) arm64e virtual calls by PAC discriminator; Mach-O only, 0/675 datatests
         self.analysis_libproto = true;
         // (kuna) DIV-65 measured libc signature extension — default-ON.
         self.analysis_libcsigs = true;

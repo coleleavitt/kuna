@@ -136,6 +136,22 @@ pub struct ChainedFixups {
     binds: HashMap<u64, (Rc<str>, i64)>,
     /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
     readonly_segments: Vec<(u64, u64)>,
+    /// `slot_vma → signing context` for every authenticated arm64e entry,
+    /// rebase or bind.
+    auth: HashMap<u64, AuthContext>,
+}
+
+/// How dyld signs an authenticated chained pointer at load: the key, whether
+/// the slot address is blended into the discriminator, and the 16-bit constant
+/// diversifier. A C++ virtual-function slot carries the hash of the method's
+/// mangled name here, so the same method has the same diversifier in every
+/// vtable and at every call site.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AuthContext {
+    /// `0` IA, `1` IB, `2` DA, `3` DB.
+    pub key: u8,
+    pub addr_div: bool,
+    pub diversity: u16,
 }
 
 impl ChainedFixups {
@@ -172,6 +188,17 @@ impl ChainedFixups {
     /// Every `(slot_vma, resolved_pointer)` rebase, in no particular order.
     pub fn rebases(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.rebases.iter().map(|(&va, &target)| (va, target))
+    }
+
+    /// The signing context of the authenticated entry at slot `va`.
+    pub fn auth(&self, va: u64) -> Option<AuthContext> {
+        self.auth.get(&va).copied()
+    }
+
+    /// Every `(slot_vma, signing context)` authenticated entry, in no particular
+    /// order.
+    pub fn auth_slots(&self) -> impl Iterator<Item = (u64, AuthContext)> + '_ {
+        self.auth.iter().map(|(&va, &ctx)| (va, ctx))
     }
 
     /// The import symbol the bind fixup at slot `va` names, if `va` is a bind
@@ -457,6 +484,9 @@ fn walk_chain(
         let Some(fo) = va_to_fileoff(segs, va) else { return };
         let Some(raw) = rd_u64(file, fo as usize) else { return };
         let (next, decoded) = decode_ptr(raw, pointer_format, imagebase);
+        if let Some(ctx) = auth_context(raw, pointer_format) {
+            out.auth.insert(va, ctx);
+        }
         if let Some(target) = decoded {
             out.rebases.insert(va, target);
         } else if let Some((ordinal, addend)) = bind_entry(raw, pointer_format) {
@@ -543,6 +573,27 @@ fn decode_ptr(raw: u64, pointer_format: u16, imagebase: u64) -> (u64, Option<u64
         // An unhandled format leaves the slot unresolved and stops the chain.
         _ => (0, None),
     }
+}
+
+/// The signing context of an authenticated arm64e or kernel-cache entry: `auth`
+/// (bit 63) set, key in bits 49..50, address diversity bit 48, diversifier in
+/// bits 32..47. The layout is shared by the auth rebase and auth bind of every
+/// arm64e format and by `dyld_chained_ptr_64_kernel_cache_rebase`.
+fn auth_context(raw: u64, pointer_format: u16) -> Option<AuthContext> {
+    let arm64e = matches!(
+        pointer_format,
+        ptr_format::ARM64E
+            | ptr_format::ARM64E_USERLAND
+            | ptr_format::ARM64E_USERLAND24
+            | ptr_format::ARM64E_KERNEL
+            | ptr_format::ARM64E_FIRMWARE
+            | ptr_format::PTR_64_KERNEL_CACHE
+    );
+    (arm64e && (raw >> 63) & 1 == 1).then(|| AuthContext {
+        key: ((raw >> 49) & 3) as u8,
+        addr_div: (raw >> 48) & 1 == 1,
+        diversity: ((raw >> 32) & 0xFFFF) as u16,
+    })
 }
 
 /// The import ordinal and inline addend of a **bind** word, or `None` for a
@@ -856,6 +907,20 @@ mod tests {
     }
 
 
+
+    /// Every authenticated entry keeps its signing context: the `__const` rebase
+    /// of `macho_arm64e_auth` is IA, address-diversified, `0x1234`; its
+    /// `__auth_ptr` bind is IA with no diversity; a plain rebase has none.
+    #[test]
+    fn auth_context_is_kept() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_arm64e_auth");
+        let bytes = std::fs::read(path).expect("read fixture");
+        let file = object::File::parse(bytes.as_slice()).expect("parse Mach-O");
+        let fixups = resolve_chained_fixups(&file, &bytes);
+        assert_eq!(fixups.auth(0x100004000), Some(AuthContext { key: 0, addr_div: true, diversity: 0x1234 }));
+        assert_eq!(fixups.auth(0x100004018), Some(AuthContext { key: 0, addr_div: false, diversity: 0 }));
+        assert_eq!(fixups.auth(0x100008000), None);
+    }
 
     /// `resolve_chained_fixups` is a strict no-op on a non-Mach-O input.
     #[test]
