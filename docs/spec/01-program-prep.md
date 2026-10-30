@@ -6423,14 +6423,21 @@ ambiguity arbitration (`libida.so` 0x70c280): +4 for a site whose target has
 the expected name, -4 for one whose target has another name, 0 when it is
 unnamed. The strictly best name wins and a tie waits for a later round, when
 more targets are named; a round that names nothing new makes the next one the
-last. A name found at several entries in one round goes only to the strictly
-best scored one. Measured on stripped static programs built here against
-glibc 2.43 (names compared with the unstripped twin): x86-64 gcc `-O2`, clang
-`-O2` and gcc `-O0` each get 175 right and 2 wrong names (171 and 2 with the
-option off; 160 and 2 before the field-encoded targets), i386 gcc `-O2` with
-`glibc_i386.sig` gets 227 and 4 (220 and 5 off), and a stripped Go 1.26
-program with `gopclntab off` and the Go standard-library signatures gets 127
-and 1 (123 and 0 off). The remaining wrong names are functions whose code is
+last. In the last round a module whose CRC covers bytes past the trie prefix
+may keep its classic reference unnamed, so a long module whose callee no
+signature names (`rand` calling an unmatched `__random`) is still taken; a
+reference whose target carries another name still rejects it. A name found at
+several entries in one round goes only to the strictly best scored one. Measured on stripped static programs built here (names compared with the
+unstripped twin; right/wrong for the base matcher, then with the option off
+and on): x86-64 against Gentoo glibc 2.43 (gcc `-O2`, clang `-O2`, gcc `-O0`
+alike) 160/2, 171/2, 176/2; x86-64 against Debian 12 `libc.a` 320/0, 333/0,
+338/0, and Debian 13 318/1, 330/1, 337/1; i386 (`glibc_i386.sig`) 220/5,
+220/5, 227/4; AArch64 against Debian 13 `libc.a` (`glibc_arm64.sig`, clang
+`-O2`) 151/1, 151/1, 156/1; a stripped Go 1.26 program with `gopclntab off`
+and the Go standard-library signatures 123/0, 123/0, 127/1. On the AArch64
+program 848 of 1,030 functions match no module of the signature at all, and
+kuna names 156 of the 162 whose candidates include the right name, so the
+signature's coverage of that build is the limit. The remaining wrong names are functions whose code is
 identical to the library function named (`buffer_free` for
 `__libio_freemem`). Off restores the rule that renames an entry only when
 every matching module agrees and skips every prefix-only module without a

@@ -193,7 +193,8 @@ pub fn match_all(
             let mut best: BTreeMap<String, i32> = BTreeMap::new();
             for s in sigs {
                 for m in candidates(s, code) {
-                    if !module_matches(s, m, code) || !reference_ok(m, ea, image, listing, &known) {
+                    let unnamed_ok = sites && last && m.length as usize > s.pattern_len;
+                    if !module_matches(s, m, code) || !reference_ok(m, ea, image, listing, &known, unnamed_ok) {
                         continue;
                     }
                     let Some(name) = function_name(m, s.pattern_len, sites) else { continue };
@@ -381,18 +382,30 @@ fn site_tally(m: &Module, ea: u64, image: &Image<'_>, listing: &Listing, known: 
 
 /// A module's reference (and, for a module of at most 16 bytes, its named v11
 /// sites) must name a function the instruction at that offset points to. A
-/// target with no name yet leaves the module for a later round.
-fn reference_ok(m: &Module, ea: u64, image: &Image<'_>, listing: &Listing, known: &HashMap<u64, String>) -> bool {
-    let reference = m.reference.as_ref().filter(|(_, n)| n != ".").map(|(o, n)| (*o, n.as_str()));
-    let tiny_sites = m
-        .sites
-        .iter()
-        .filter(|s| m.length <= 0x10 && s.name.len() >= 2 && s.flags & 0x08 == 0)
-        .map(|s| (i64::from(s.off), s.name.as_str()));
-    reference
-        .into_iter()
-        .chain(tiny_sites)
-        .all(|(off, name)| site_match(ea, off, name, image, listing, known) == Some(SiteMatch::Agrees))
+/// target with no name yet leaves the module for a later round; with
+/// `unnamed_ok` (the last round, for a module whose CRC covers bytes past the
+/// trie prefix) the classic reference may stay unnamed.
+fn reference_ok(
+    m: &Module,
+    ea: u64,
+    image: &Image<'_>,
+    listing: &Listing,
+    known: &HashMap<u64, String>,
+    unnamed_ok: bool,
+) -> bool {
+    let reference_ok = m.reference.as_ref().filter(|(_, n)| n != ".").is_none_or(|(off, name)| {
+        match site_match(ea, *off, name, image, listing, known) {
+            Some(SiteMatch::Agrees) => true,
+            Some(SiteMatch::Unnamed) => unnamed_ok,
+            _ => false,
+        }
+    });
+    reference_ok
+        && m
+            .sites
+            .iter()
+            .filter(|s| m.length <= 0x10 && s.name.len() >= 2 && s.flags & 0x08 == 0)
+            .all(|s| site_match(ea, i64::from(s.off), &s.name, image, listing, known) == Some(SiteMatch::Agrees))
 }
 
 /// FLIRT names carry the object file's spelling (`_strlen` on a Mach-O or COFF
