@@ -1333,23 +1333,32 @@ kuna_options! { self, p1;
     },
     "tailcallentry" => {
         on_off!(analysis_tailcallentry, "Tail-call function-entry recovery Listing consumer")
-    },    "funcchunks" => {
+    },
+    "funcchunks" => {
         on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
-    },    "tailcallentryall" => {
+    },
+    "tailcallentryall" => {
         on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
-    },    "compacttable" => {
+    },
+    "compacttable" => {
         on_off!(analysis_compacttable, "AArch64 compact jump-table reads in the reference walk")
-    },    "nameladder" => {
+    },
+    "nameladder" => {
         on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
-    },    "flirt" => {
+    },
+    "flirt" => {
         on_off!(analysis_flirt, "FLIRT signature matching")
-    },    "flirtsites" => {
+    },
+    "flirtsites" => {
         on_off!(analysis_flirtsites, "FLIRT reference-site checks and arbitration")
-    },    "fidproto" => {
+    },
+    "fidproto" => {
         on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
-    },    "codestrings" => {
+    },
+    "codestrings" => {
         on_off!(analysis_codestrings, "Code-section string acceptance rule")
-    },    "protomerge" => {
+    },
+    "protomerge" => {
         on_off!(analysis_protomerge, "Slot-by-slot merge of load-time prototypes")
     },
 
