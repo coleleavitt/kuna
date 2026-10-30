@@ -16,6 +16,9 @@
     Pass 1 (model extrapop): `g(1); return 2;`
     Pass 2 (`option extrapop 12 g`): `g(1,2); return a0;`
 
+    `calleeretpurge` (default on) already reads g's `ret 8`, so both passes
+    run with it off.
+
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 6a026a01e8170000008b442404c39090909090909090909090909090909090908b442404c20800
@@ -24,6 +27,7 @@
 <symbol space="ram" offset="0x100020" name="g"/>
 </binaryimage>
 <script>
+  <com>option calleeretpurge off</com>
   <com>lo fu f</com>
   <com>decompile</com>
   <com>print C</com>

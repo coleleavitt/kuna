@@ -112,9 +112,9 @@ c3
 <stringmatch name="NORETURNNAMES #3: std::rethrow_exception ends the flow" min="1" max="1">std::rethrow_exception\(&amp;v1\); // no-return$</stringmatch>
 <stringmatch name="NORETURNNAMES #4: off, _Exit and thrd_exit run to the next entry" min="2" max="2">funcboundflow: fall-through reached the next function entry</stringmatch>
 <stringmatch name="NORETURNNAMES #9: off, replay runs on into its landing pad" min="1" max="1">_Unwind_Resume\(v1\);</stringmatch>
-<stringmatch name="NORETURNNAMES #10: through a RELRO .got slot the panic helpers end the flow, with relronoreturn off (after the restart) and on (during flow)" min="2" max="2">core::option::unwrap_failed\(0x3b00\); // no-return$</stringmatch>
-<stringmatch name="NORETURNNAMES #5: v0 core::option::unwrap_failed ends the flow" min="1" max="1">core::option::unwrap_failed\(0x2003f8\); // no-return$</stringmatch>
-<stringmatch name="NORETURNNAMES #6: v0 core::slice::index::slice_index_fail ends the flow" min="1" max="1">core::slice::index::slice_index_fail\(0,a2,a1,0x200428\); // no-return$</stringmatch>
-<stringmatch name="NORETURNNAMES #7: v0 panic_const_add_overflow ends the flow in all three, and in both PIE passes" min="5" max="5">core::panicking::panic_const::panic_const_add_overflow\(0x[0-9a-f]+\); // no-return$</stringmatch>
+<stringmatch name="NORETURNNAMES #10: through a RELRO .got slot the panic helpers end the flow, with relronoreturn off (after the restart) and on (during flow)" min="2" max="2">core::option::unwrap_failed\((0x3b00|&amp;panic_loc_rust_noreturn_pie_\w+)\); // no-return$</stringmatch>
+<stringmatch name="NORETURNNAMES #5: v0 core::option::unwrap_failed ends the flow" min="1" max="1">core::option::unwrap_failed\((0x2003f8|&amp;panic_loc_rust_noreturn_v0_\w+)\); // no-return$</stringmatch>
+<stringmatch name="NORETURNNAMES #6: v0 core::slice::index::slice_index_fail ends the flow" min="1" max="1">core::slice::index::slice_index_fail\(0,a2,a1,(0x200428|&amp;panic_loc_\w+)\); // no-return$</stringmatch>
+<stringmatch name="NORETURNNAMES #7: v0 panic_const_add_overflow ends the flow in sum and add (rangefold drops the dead check in opt)" min="2" max="2">core::panicking::panic_const::panic_const_add_overflow\((0x[0-9a-f]+|&amp;panic_loc_\w+)\); // no-return$</stringmatch>
 <stringmatch name="NORETURNNAMES #8: off, the Rust calls run into their int3 padding" min="3" max="3">// int3-pad x</stringmatch>
 </decompilertest>

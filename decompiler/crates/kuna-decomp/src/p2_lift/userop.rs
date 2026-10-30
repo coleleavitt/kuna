@@ -140,9 +140,9 @@ pub const BUILTIN_EH_EXCEPTION: uint4 = 0x1000000a;
 /// (kuna) Built-in id for `eh_selector`, the catch-clause selector at a landing pad.
 pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
 /// (kuna) Built-in id for `bswap`, a byte reversal (`bitidioms`).
-pub const BUILTIN_BSWAP: uint4 = 0x10000009;
+pub const BUILTIN_BSWAP: uint4 = 0x1000000c;
 /// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
-pub const BUILTIN_ROTL: uint4 = 0x1000000a;
+pub const BUILTIN_ROTL: uint4 = 0x1000000d;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)

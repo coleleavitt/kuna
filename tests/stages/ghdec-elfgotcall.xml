@@ -109,6 +109,6 @@ c3
 <stringmatch name="ELFGOTCALL #8: die joins the no-return set through its exit slot, in both passes" min="2" max="2">^\s*die\("usage"\); // no-return$</stringmatch>
 <stringmatch name="ELFGOTCALL #9: the address of a bound slot stays an address, not the import's name" min="1" max="1">v1 = \(unsigned long \*\)0x3fd8;</stringmatch>
 <stringmatch name="ELFGOTCALL #10: no bound slot address prints as a function name" min="0" max="0">= (lgetxattr|getxattr);</stringmatch>
-<stringmatch name="ELFGOTCALL #11: AArch64 die joins the no-return set through its exit slot" min="1" max="1">^\s*die\(0x[0-9a-f]+\); // no-return$</stringmatch>
+<stringmatch name="ELFGOTCALL #11: AArch64 die joins the no-return set through its exit slot" min="1" max="1">^\s*die\((0x[0-9a-f]+|"big")\); // no-return$</stringmatch>
 <stringmatch name="ELFGOTCALL #7: the .data.rel.ro function-pointer table stays a table in both passes" min="2" max="2">&amp;classes\[</stringmatch>
 </decompilertest>
