@@ -875,6 +875,7 @@ kuna_options! { self, p1;
     "javanew" => on_off!(java_new, "Java new T(args) from an allocation and its <init> call"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
+    "unmergecall" => on_off!(unmerge_calls, "tail-merged call un-merging"),
     "dirtypool" => on_off!(dirty_pool, "dirty-op rule scheduling"),
     "latecse" => on_off!(late_cse, "late common-subexpression elimination"),
     "gotosink" => on_off!(goto_sink, "goto sinking and backward-goto loops"),

@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3707,
-    3707
+    3711,
+    3711
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1066,7 +1066,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 417 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 418 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -3592,6 +3592,10 @@
     "data:unknown single-slot call does not acquire a stale argument",
     "data:unlocked entry input survives every overlap level",
     "data:unmapped base is not guessed",
+    "data:unmergecall #1: option off keeps pick's single call with merged arguments (bug reproduced)",
+    "data:unmergecall #2: option off keeps pick3's single call with merged arguments (bug reproduced)",
+    "data:unmergecall #3: option on gives pick one call per path",
+    "data:unmergecall #4: option on gives pick3 one call per path",
     "data:unrolledguard #1: both gates off, the interleaved dispatches degrade to computed calls (bug reproduced); neither fix adds any (7 pass1 + 0 pass2 + 0 pass3)",
     "data:unrolledguard #2 / jtsharepartial #1: both fixes recover every interleaved table as a switch, independently (1 pass1 + 16 pass2 unrolledguard + 16 pass3 shipped default = 33)",
     "data:unscaled short index is not anchored",

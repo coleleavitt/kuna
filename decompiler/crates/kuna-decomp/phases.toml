@@ -1952,6 +1952,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "unmergecall"
+values = "on|off"
+default = "off"
+destructive = false
+phase = "P8"
+subphase = "goto-quality"
+strength = "HARD"
+rewind = "P8"
+issue = "kuna-unmergecall"
+summary = "Split a block that ends in one direct CALL and a RETURN once per predecessor when an argument of the call is computed from a MULTIEQUAL in the block (a tail shared by cross-jumping, gcc -Os). Funcdata::node_split_calls clones the block's ops for one in-edge, gives the cloned call its own copy of the call spec and points cloned INDIRECTs at the cloned call; each path then prints its own call with its own arguments. Blocks with more than 16 ops, more than four predecessors, a second call or an INDIRECT that still creates the call's output are left alone."
+use_when = "Turn on when -Os code shows `if (c) { a = b; k = 2; } return f(a, k);` where the source called f on each path. Default off: it moves 3/675 datatest assertions, and over 4,072 x86-64 functions it changes 183 (lines 180,432 -> 180,303, returns 7,829 -> 7,916) but often where the source passed a ternary argument (lua math_type, luaG_opinterror), which the merged form matches better."
+example = "option unmergecall on"
+source_decompiler = "kuna"
+inspiration = "Hex-Rays un-merges calls that the compiler tail-merged; kuna kept one call with merged arguments"
+change_kind = "presentation-default"
+tier = "transform"
+symptoms = "if (c) x = a; else x = b; return f(x); where the source called f on each path|the compiler shared one call block between two paths and the arguments became a merged variable"
+live_field = "unmerge_calls"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "strlenscan"
 values = "on|off"
 default = "on"

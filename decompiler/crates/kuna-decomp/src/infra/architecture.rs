@@ -1199,6 +1199,8 @@ pub struct Architecture {
     /// (kuna) Collapse an inline `repnz scasb` string length into `strlen`
     /// (option `strlenscan`).  See [`crate::p3_dataflow::kuna_strlenscan`].
     pub strlen_scan: bool,
+    /// (kuna) Split a block that ends in one call and a return once per predecessor when the call's arguments are merged values. (option `unmergecall`).
+    pub unmerge_calls: bool,
     /// (kuna) Let a repeated rule-pool sweep visit only the ops near the previous sweep's rewrites. (option `dirtypool`).
     pub dirty_pool: bool,
     /// (kuna) Merge identical pure ops that read the same varnode once the rules settle. (option `latecse`).
@@ -3360,6 +3362,7 @@ impl Architecture {
             wide_slice_reduce: false, // (kuna) option wideslice; reset_defaults sets the shipped default (on)
             devectorize_reduction: false, // (kuna) option devectorize (opt-in default-off)
             strlen_scan: false, // (kuna) option strlenscan; reset_defaults sets the shipped default
+            unmerge_calls: false, // (kuna) option unmergecall; reset_defaults sets the shipped default
             dirty_pool: false, // (kuna) option dirtypool; reset_defaults sets the shipped default
             late_cse: false, // (kuna) option latecse; reset_defaults sets the shipped default
             goto_sink: false, // (kuna) option gotosink; reset_defaults sets the shipped default
@@ -3911,6 +3914,7 @@ impl Architecture {
         self.goto_sink = true; // (kuna) option gotosink default-on: list edits around existing jumps only; 0/675 datatest assertions
         self.late_cse = false; // (kuna) option latecse
         self.dirty_pool = false; // (kuna) option dirtypool default off: a repeat sweep limited to the rewritten neighbourhood misses rules that act at a distance (wide-slice, devectorize stage tests)
+        self.unmerge_calls = false; // (kuna) option unmergecall
         self.strlen_scan = true; // (kuna) option strlenscan default-on: an inline repnz scasb length prints as strlen; byte-identical on gcc 11 decbench output, 0/675 datatest assertions
         self.rep_string = true; // (kuna) option repstring default-on: a rep movs/stos loop prints as memcpy/memset
         self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
@@ -4856,6 +4860,7 @@ impl Architecture {
         ctx.wide_slice_reduce = self.wide_slice_reduce; // wideslice
         ctx.devectorize_reduction = self.devectorize_reduction; // devectorize
         ctx.strlen_scan = self.strlen_scan; // strlenscan
+        ctx.unmerge_calls = self.unmerge_calls; // unmergecall
         ctx.dirty_pool = self.dirty_pool; // dirtypool
         ctx.late_cse = self.late_cse; // latecse
         ctx.goto_sink = self.goto_sink; // gotosink

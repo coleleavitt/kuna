@@ -44,6 +44,8 @@ Three tiers:
 | the same arithmetic expression on the same values is computed twice into two temporaries | [`latecse`](#latecse) |
 | v1 = a + b * 4; ... v2 = a + b * 4; where one would do | [`latecse`](#latecse) |
 | duplicated address arithmetic in both arms of an if | [`latecse`](#latecse) |
+| if (c) x = a; else x = b; return f(x); where the source called f on each path | [`unmergecall`](#unmergecall) |
+| the compiler shared one call block between two paths and the arguments became a merged variable | [`unmergecall`](#unmergecall) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -1650,6 +1652,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Turn on to see a value the source computed once and the compiler recomputed print once. Default off: over 4,072 x86-64 functions it changes 560 (many through synthesized struct numbering), and the shared values become explicit temporaries, so output grows (lines 180,432 -> 180,724, gotos 8,892 -> 8,940).
 - **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-latecse
 - **Example:** `option latecse on`
+
+### `unmergecall` -- on | off, default `off`
+
+- **Symptoms:** if (c) x = a; else x = b; return f(x); where the source called f on each path; the compiler shared one call block between two paths and the arguments became a merged variable.
+- **What it does:** Split a block that ends in one direct CALL and a RETURN once per predecessor when an argument of the call is computed from a MULTIEQUAL in the block (a tail shared by cross-jumping, gcc -Os). Funcdata::node_split_calls clones the block's ops for one in-edge, gives the cloned call its own copy of the call spec and points cloned INDIRECTs at the cloned call; each path then prints its own call with its own arguments. Blocks with more than 16 ops, more than four predecessors, a second call or an INDIRECT that still creates the call's output are left alone.
+- **When to flip:** Turn on when -Os code shows `if (c) { a = b; k = 2; } return f(a, k);` where the source called f on each path. Default off: it moves 3/675 datatest assertions, and over 4,072 x86-64 functions it changes 183 (lines 180,432 -> 180,303, returns 7,829 -> 7,916) but often where the source passed a ternary argument (lua math_type, luaG_opinterror), which the merged form matches better.
+- **Where / provenance:** P8/goto-quality · kuna · presentation-default · kuna-unmergecall
+- **Example:** `option unmergecall on`
 
 ### `strlenscan` -- on | off, default `on`
 

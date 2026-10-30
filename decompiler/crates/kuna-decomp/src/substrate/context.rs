@@ -1347,6 +1347,8 @@ pub struct ArchContext {
     pub devectorize_reduction: bool,
     /// (kuna) `strlenscan` — collapse an inline `repnz scasb` length into `strlen`.
     pub strlen_scan: bool,
+    /// (kuna) `unmergecall` — split a block that ends in one call and a return once per predecessor when the call's arguments are merged values.
+    pub unmerge_calls: bool,
     /// (kuna) `dirtypool` — let a repeated rule-pool sweep visit only the ops near the previous sweep's rewrites.
     pub dirty_pool: bool,
     /// (kuna) `latecse` — merge identical pure ops that read the same varnode once the rules settle.
@@ -2104,6 +2106,7 @@ impl ArchContext {
             wide_slice_reduce: false,    // wideslice (Architecture::reset_defaults sets the shipped default: on)
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
+            unmerge_calls: false, // unmergecall (live value copied from the Architecture)
             dirty_pool: false, // dirtypool (live value copied from the Architecture)
             late_cse: false, // latecse (live value copied from the Architecture)
             goto_sink: false, // gotosink (live value copied from the Architecture)
