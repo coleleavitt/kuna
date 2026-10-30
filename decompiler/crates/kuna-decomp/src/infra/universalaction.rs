@@ -658,6 +658,7 @@ pub fn universal_sched(
                 ))
             })),
             act!(Box::new(crate::kuna_stackguard::ActionStripStackGuard::new(false, "returnsplit"))),
+            act!(crate::kuna_vastart::ActionVaStart::boxed("returnsplit")),
             // (kuna) msvcstackguard (option `msvcstackguard`, default-OFF): the
             // Windows sibling of ActionStripStackGuard.  MSVC `/GS` puts the
             // compare inside `__security_check_cookie`, so the guarded function

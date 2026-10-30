@@ -672,6 +672,8 @@ pub struct Architecture {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
     pub dyn_alloca: bool,
+    /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
+    pub va_start: bool,
     /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
     pub type_vote: bool,
     /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
@@ -3233,6 +3235,7 @@ impl Architecture {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            va_start: false,
             type_vote: false,
             switch_guard_merge: false,
             global_array_anchor: false,
@@ -3734,6 +3737,7 @@ impl Architecture {
         self.bit_idioms = true;
         self.helper_roles = true;
         self.dyn_alloca = true;
+        self.va_start = true;
         self.type_vote = true;
         self.switch_guard_merge = true;
         self.cancel_byte_arithmetic = true; // (kuna) DIV-174 default-on: exact low-byte modular cancellation; corpus evidence is recorded with the feature
@@ -4732,6 +4736,7 @@ impl Architecture {
         ctx.bit_idioms = self.bit_idioms;
         ctx.helper_roles = self.helper_roles;
         ctx.dyn_alloca = self.dyn_alloca;
+        ctx.va_start = self.va_start;
         ctx.type_vote = self.type_vote;
         ctx.switch_guard_merge = self.switch_guard_merge;
         ctx.global_array_anchor = self.global_array_anchor;
@@ -5852,7 +5857,7 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ABS, BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ, BUILTIN_STRCPY, BUILTIN_ALLOCA,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ABS, BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ, BUILTIN_STRCPY, BUILTIN_ALLOCA, BUILTIN_VASTART,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -5902,6 +5907,7 @@ impl Architecture {
             userops.register_builtin(BUILTIN_CTZ, &adapter)?;
             userops.register_builtin(BUILTIN_STRCPY, &adapter)?;
             userops.register_builtin(BUILTIN_ALLOCA, &adapter)?;
+            userops.register_builtin(BUILTIN_VASTART, &adapter)?;
             Ok(())
         })();
         self.userops = userops;

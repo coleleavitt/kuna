@@ -155,6 +155,8 @@ pub const BUILTIN_LABS: uint4 = 0x10000011;
 pub const BUILTIN_STRCPY: uint4 = 0x10000012;
 /// (kuna) Built-in id for `alloca` (`dynalloca`).
 pub const BUILTIN_ALLOCA: uint4 = 0x10000013;
+/// (kuna) Built-in id for `va_start` (`vastart`).
+pub const BUILTIN_VASTART: uint4 = 0x10000014;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1041,6 +1043,7 @@ impl UserOpManage {
                 UserPcodeOp::new_datatype(name, i as int4, Some(Rc::clone(&int_type)), &[Some(int_type)])
             }
             BUILTIN_BITREV => UserPcodeOp::new_unspecialized(b"bitreverse", BUILTIN_BITREV as int4),
+            BUILTIN_VASTART => UserPcodeOp::new_unspecialized(b"va_start", BUILTIN_VASTART as int4),
             BUILTIN_ALLOCA => {
                 let ptr_size = types.get_size_of_pointer();
                 let word_size = types.get_default_data_space_word_size();

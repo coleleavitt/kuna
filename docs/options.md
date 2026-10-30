@@ -181,6 +181,8 @@ Three tiers:
 | a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
 | a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote) |
 | a cast back to a variable's own declared type at each read | [`typevote`](#typevote) |
+| a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
+| a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
 | pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
 | 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
@@ -1964,6 +1966,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see which values type inference left undefined.
 - **Where / provenance:** P5/type-propagation · kuna · presentation-default · kuna-typevote
 - **Example:** `--option typevote off`
+
+### `vastart` -- on | off, default `on`
+
+- **Symptoms:** a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores; a stripped printf-like function recovers 14 parameters.
+- **What it does:** Print the x86-64 SysV va_start prologue as va_start(ap, last). A variadic function that materializes a va_list spills the unnamed argument registers (and, under test al, the eight XMM registers) to a 176-byte register save area and sets gp_offset, fp_offset, overflow_arg_area and reg_save_area; kuna printed each spill and field store. With this on, the two offset constants (gp_offset 8 per named integer argument, fp_offset 48 plus 16 per named float argument) beside the two pointer writes in one block become effects of a va_start(&ap, last) CALLOTHER, the register save area loses its forced liveness so the spills go, and an unlocked prototype is marked variadic: a stripped image's 14-parameter signature becomes (a0, a1, ...).
+- **When to flip:** On (default). Flip off to see the register save area spills and the four va_list field stores.
+- **Where / provenance:** P4/prototype-recovery · kuna · presentation-default · kuna-vastart
+- **Example:** `--option vastart off`
 
 ### `switchsharedcase` -- on | off, default `on` (destructive opt-in)
 

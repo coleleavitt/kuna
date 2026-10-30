@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
+    pub va_start: bool,
     /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
     pub type_vote: bool,
     /// (kuna `switchguardmerge`) Merge an equality guard into its switch.
@@ -1953,6 +1955,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            va_start: false,
             type_vote: false,
             switch_guard_merge: false,
             global_array_anchor: false,

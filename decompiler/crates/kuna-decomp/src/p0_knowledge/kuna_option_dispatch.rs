@@ -109,6 +109,7 @@ kuna_options! { self, p1;
     "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
     "helperroles" => on_off!(helper_roles, "Role-tagged helper-call rewrites"),
     "dynalloca" => on_off!(dyn_alloca, "Run-time stack moves as alloca"),
+    "vastart" => on_off!(va_start, "va_start prologue as one call"),
     "typevote" => on_off!(type_vote, "Type vote for leftover undefined varnodes"),
     "switchguardmerge" => on_off!(switch_guard_merge, "Equality guards merged into their switch"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),

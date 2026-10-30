@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3703,
-    3703
+    3706,
+    3706
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1175,6 +1175,9 @@
     "data:KUNA-UNMAPPEDENTRY #1: the option parses and round-trips in both directions, and is inert on the XML path -- the source form x <= 8 renders identically in all three passes",
     "data:KUNA-UNMAPPEDENTRY #2: the catalog documents it as a default-on P1 code/data-partition correctness fix, live-toggled back on",
     "data:KUNA-UNMAPPEDENTRY #3: the catalog row carries the correctness-fix change_kind an agent reads to judge the flip",
+    "data:KUNA-VASTART #1: the prologue is one va_start call naming the last fixed argument (default)",
+    "data:KUNA-VASTART #2: vastart off sets fp_offset field by field",
+    "data:KUNA-VASTART #3: vastart off keeps the XMM spills under the al test",
     "data:KUNA-WIDESTRINGS32 #1: off, the literal prints as its address",
     "data:KUNA-WIDESTRINGS32 #2: on, the literal prints as L\"hellow\"",
     "data:KUNA-WIDESTRINGS32 #3: on, the NULL default prints as a literal",
