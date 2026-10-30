@@ -2135,7 +2135,8 @@ mod tests {
         // and kuna-dex-apk / an APK's classes*.dex files mapped one after another
         // and kuna-dex-javanew / an allocation and its <init> call as new T(args)
         // and kuna-gotonext / a goto to the next statement, a case fall-through, a loop or switch exit
-        assert_eq!(count, 622, "corpus file count drifted");
+        // and kuna-rangefold / a test or mask a dominating branch's range decides
+        assert_eq!(count, 623, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
