@@ -5,9 +5,10 @@
     (option debuglink, default on, a load-time gate). Fixtures from
     fixtures/debuglink/p.c as its header says. Both images are stripped:
     before, the only names were the dynamic symbol `main` and the call printed
-    as sub_1149(). #1: link's .gnu_debuglink names link.debug next to it
-    (CRC32 checked) and its .symtab names the calls. #2: mini carries its
-    function symbols as XZ-compressed MiniDebugInfo in .gnu_debugdata.
+    as sub_1149(). #1-#2: link's .gnu_debuglink names link.debug next to it
+    (CRC32 checked); its .symtab names the functions and its DWARF their
+    parameters. #3: mini carries only function symbols, as XZ-compressed
+    MiniDebugInfo in .gnu_debugdata.
     (The build-id path, <dir>/.build-id/xx/rest.debug under KUNA_DEBUG_DIRS,
     is the same lookup; a host directory cannot be pinned in a stage test.)
 -->
@@ -29,5 +30,7 @@
   <com>print C</com>
   <com>quit</com>
 </script>
-<stringmatch name="debuglink #1: .gnu_debuglink names the callee" min="2" max="2">return helper_alpha\(\) \+ -3;</stringmatch>
+<stringmatch name="debuglink #1: the .gnu_debuglink companion supplies names and DWARF" min="1" max="1">^int4 helper_beta\(int4 x\)</stringmatch>
+<stringmatch name="debuglink #2: the companion's DWARF parameter reaches the call" min="1" max="1">return helper_alpha\(x\) \+ -3;</stringmatch>
+<stringmatch name="debuglink #3: .gnu_debugdata supplies names only" min="1" max="1">return helper_alpha\(\) \+ -3;</stringmatch>
 </decompilertest>

@@ -1000,8 +1000,11 @@ matches. `<dir>` is each entry of `KUNA_DEBUG_DIRS`, then `/usr/lib/debug`.
 Failing a companion, the XZ-compressed ELF in `.gnu_debugdata` (Fedora's
 MiniDebugInfo, decompressed with `lzma-rs`) supplies a function-only symbol
 table. The companion's defined function symbols join the loader's function
-symbols; an address that already has a name keeps it. Only the names are read:
-the companion's DWARF is not yet applied. The loader also reports a `PT_LOAD`
+symbols; an address that already has a name keeps it. A companion that carries
+DWARF also feeds the DWARF analyzer
+(`decompiler/crates/kuna-analysis/src/analyzers/dwarf/mod.rs (DwarfPass)` runs
+over the companion when the image has no `.debug_info`), since the addresses
+are the image's own; MiniDebugInfo has no DWARF. The loader also reports a `PT_LOAD`
 that maps an address another `PT_LOAD` already mapped from different file bytes
 (`elf_debuglink.rs (overlapping_loads)`), a shape only a hand-made or hostile
 image has; which bytes win is unchanged.

@@ -76,7 +76,7 @@ fn fixture_has_no_current_field() {
 }
 
 #[test]
-fn fixture_has_all_354_settables() {
+fn fixture_has_all_355_settables() {
     // One `"option":` per settable row; the authoritative per-option list is
     // phases.toml settableTable (counts asserted in kuna_phases/tests.rs).
     assert_eq!(FIXTURE.matches("\"option\": ").count(), 355);
