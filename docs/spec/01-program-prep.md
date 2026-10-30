@@ -6333,6 +6333,29 @@ mnemonics, and it also knows x86 `pop` / `leave` / `add rsp`, AArch64
 built `-O2` gains 5 functions on x86-64 and 12 on AArch64, every one a real
 function start, with no entry lost.
 
+**FLIRT signatures** (`flirt`, default-off; kuna;
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/mod.rs (FlirtPass)`,
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/sig.rs (parse)`) names
+library functions from IDA `.sig` files (versions 5 to 11; raw, deflate, zlib
+or zstd bodies) listed in `KUNA_FLIRT_SIGS`. A Listing consumer: at every
+discovered entry the trie is walked over the first `pattern_len` bytes, and a
+module matches when the byte-swapped CRC-16/X.25 of the `crc_len` bytes after
+the prefix, its tail bytes (offsets counted after the CRC region) and its
+expected instruction bits agree. A module with a reference is accepted only
+when the instruction at the reference offset branches or calls to a function of
+that name; names from one round can satisfy references in the next, for three
+rounds. A rename needs every matching module at the entry to agree; a name
+given to two addresses or already present is withheld; unnamed, doubtful and
+prefix-only modules without a reference name nothing. The names go out through
+the FID rename stream. **Rename facts** (`fidproto`, default-on;
+`decompiler/crates/kuna-console/src/engine.rs (apply_renamed_library_facts)`):
+when that rename replaces a placeholder, the function also gets the libc
+prototype of its name (or a `nameladder` spelling) and the no-return flag when
+the no-return lists name it, as IDA applies the type and `noret.cfg` on a
+FLIRT rename. All 212 signature files IDA 9.5 ships parse to the last byte; on
+the stripped static-pie `/sbin/ldconfig` with `glibc_amd64.sig`, 207 of 1,611
+functions are named in 1.9 s.
+
 **Function chunks** (`funcchunks`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
 gives a discovered function a body. The Listing keys a function by its entry,

@@ -756,6 +756,12 @@ Three tiers:
 | a firmware image decompiles only at addresses passed by hand | [`rawdiscover`](#rawdiscover) |
 | stripped static-linked library function stays sub_<addr> although its fingerprint is known | [`fid`](#fid) |
 | no .fid database renames applied in a stripped binary | [`fid`](#fid) |
+| a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
+| kuna cannot use ida flirt signatures | [`flirt`](#flirt) |
+| memcpy and printf in a static binary have no names | [`flirt`](#flirt) |
+| a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto) |
+| a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto) |
+| code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto) |
 | msvc c++ class names missing and vftables left as unnamed data | [`rtti`](#rtti) |
 | no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes | [`rtti`](#rtti) |
 | gcc/clang c++ class names missing and vtables left as unnamed DAT_ data | [`itaniumrtti`](#itaniumrtti) |
@@ -2981,6 +2987,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off (default; no Listing consumer runs and there is zero behavior change). Flip on (with option listing on, and `kuna_fid_db` pointing at a `.fid` database built by `kuna fid build`) to re-identify library functions in a STRIPPED real-ELF target by full-hash fingerprint — renaming a FUN_*/sub_* placeholder back to its known library name.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-fid
 - **Example:** `option listing on --option fid on`
+
+### `flirt` -- on | off, default `off`
+
+- **Symptoms:** a stripped static binary lists libc functions as sub_<addr>; kuna cannot use ida flirt signatures; memcpy and printf in a static binary have no names.
+- **What it does:** Name library functions in a stripped binary with IDA FLIRT .sig signature files (versions 5 to 11, raw, deflate, zlib or zstd bodies), named by the KUNA_FLIRT_SIGS environment variable (a :-separated list of paths; IDA ships them under <ida>/sig/<processor>). A Listing consumer: at every discovered function entry the signature trie is walked over the first pattern_len bytes, and a module matches when the CRC-16/X.25 (byte-swapped) of its crc_len bytes after the prefix, its tail bytes (offsets counted after the CRC region) and its expected instruction bits agree. A module that names a referenced function is accepted only when the instruction at the reference offset branches or calls to a function of that name; names found in one round can satisfy references in the next, for up to three rounds (IDA's AU_LIBF queues). A function is renamed only when every matching module agrees on the name; a name given to two addresses, or one the binary already carries, is withheld (IDA's collision rule); unnamed (?) and doubtful publics, and modules no longer than the trie prefix with no reference, name nothing (IDA's tiny-module guard). The names go out through the FID rename, so only a sub_ placeholder is replaced. Requires the Listing (option listing on); inert without a signature file.
+- **When to flip:** Off (default). Flip on with listing on and KUNA_FLIRT_SIGS pointing at IDA's .sig files (for example sig/pc/glibc_amd64.sig for a static x86-64 glibc binary, sig/arm/glibc_arm64.sig for AArch64) when a stripped statically linked binary shows hundreds of sub_ functions that are libc. With fidproto on the renamed functions also get the libc prototype and no-return verdict.
+- **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-flirt
+- **Example:** `KUNA_FLIRT_SIGS=$IDADIR/sig/pc/glibc_amd64.sig kuna functions ./static-stripped --option listing on --option flirt on`
+
+### `fidproto` -- on | off, default `on`
+
+- **Symptoms:** a function fid or flirt named memcpy keeps its recovered parameters; a flirt-named exit or abort is not treated as no-return; code after a call to a renamed library abort is decompiled as reachable.
+- **What it does:** When a FID or FLIRT match renames a sub_ placeholder (the fid_names rename at the analysis commit), give the function what its new name means: the built-in libc/libm prototype for the name or one of its nameladder spellings (the declaredlibcproto tables, parked by address), and the no-return flag when the shipped no-return lists (ELF and PE/Mach-O) name it. IDA applies the type library prototype and the no-return attribute on every FLIRT rename; without this a function FID or FLIRT names memcpy or exit still renders with recovered parameters and keeps its callers' code after the call.
+- **When to flip:** On (default). It only acts on a function a FID/FLIRT/PDB/Objective-C/Swift rename just named, and only when the name is a libc/libm name or on the no-return list. Flip off to keep the renamed function's recovered prototype.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-fidproto
+- **Example:** `--option fidproto off`
 
 ### `rtti` -- on | off, default `off`
 

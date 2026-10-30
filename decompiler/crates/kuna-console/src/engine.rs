@@ -2412,6 +2412,32 @@ impl ConsoleProgram {
         Ok(name)
     }
 
+    /// (kuna `fidproto`) After a FID / FLIRT rename, park the libc prototype the
+    /// name (or one of its `nameladder` spellings) has, and mark the function
+    /// no-return when the no-return list names it.
+    fn apply_renamed_library_facts(&mut self, sid: kuna_decomp::database::SymbolId, name: &str, addr: &Address) {
+        let spellings: Vec<String> = std::iter::once(name.to_string())
+            .chain(kuna_analysis::protos::kuna_nameladder::fallbacks(name))
+            .collect();
+        if let Some(found) = spellings.iter().find(|n| self.has_declared_libc_prototype(n)) {
+            self.seed_declared_libc_prototype(found, addr);
+        }
+        if kuna_analysis::loader::noreturn::listed_noreturn(name) {
+            self.arch_mut().symboltab.set_function_no_return(sid, true);
+        }
+    }
+
+    fn has_declared_libc_prototype(&self, name: &str) -> bool {
+        let (_addr_size, word_size) = self.arch().data_org();
+        kuna_analysis::protos::declared_libc_prototype(
+            name,
+            self.arch().types(),
+            word_size,
+            kuna_decomp::kuna_libctypes::LibcTypesLayout::Opaque,
+        )
+        .is_some()
+    }
+
     /// (kuna `declaredlibcproto`) Park the built-in libc signature for `name` on the
     /// FunctionSymbol at `addr`, when the tables know the name.
     ///
@@ -3129,6 +3155,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "noreturn_propagate" => arch.analysis_noreturn_propagate,
         "callerreads" => arch.caller_reads,
         "fid" => arch.analysis_fid,
+        "flirt" => arch.analysis_flirt,
         // (kuna) MSVC RTTI / vftable recovery — a standalone load-time pass whose
         // class-name + RTTI_* labels are computed at LOAD but COMMITTED only when
         // this gate is on. Default-OFF (output-changing: adds named data symbols),
@@ -4988,7 +5015,12 @@ fn commit_analysis_output(
                 prog.arch_mut().symboltab.rename_symbol(sid, &m.name)?;
                 // Make the new name resolvable by `load function <name>` (the same
                 // name->addr binding the entry/symbol arms register).
-                prog.register_symbol(&m.name, addr);
+                prog.register_symbol(&m.name, addr.clone());
+                // (kuna `fidproto`) The new name brings what the name means: the
+                // libc prototype and the no-return verdict.
+                if prog.arch().analysis_fidproto {
+                    prog.apply_renamed_library_facts(sid, &m.name, &addr);
+                }
             }
         }
     }

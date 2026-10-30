@@ -1276,7 +1276,13 @@ kuna_options! { self, p1;
         on_off!(analysis_compacttable, "AArch64 compact jump-table reads in the reference walk")
     },    "nameladder" => {
         on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
+    },    "flirt" => {
+        on_off!(analysis_flirt, "FLIRT signature matching")
+    },    "fidproto" => {
+        on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
     },
+
+
 
 
 

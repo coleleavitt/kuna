@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_358() {
-    assert_eq!(kuna_num_settables(), 358);
-    assert_eq!(SETTABLE_TABLE.len(), 358);
+fn settable_count_is_360() {
+    assert_eq!(kuna_num_settables(), 360);
+    assert_eq!(SETTABLE_TABLE.len(), 360);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_103_analysis() {
+fn tier_counts_are_121_core_134_transform_105_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_103_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 103));
+    assert_eq!((core, transform, analysis), (121, 134, 105));
 }
 
 #[test]
@@ -496,6 +496,8 @@ fn option_values_live_value_present_for_156() {
         "tailcallentryall",
         "compacttable",
         "nameladder",
+        "flirt",
+        "fidproto",
         // (kuna) ARM literal-pool inference — an analysis-pass gate with no codegen
         // live reader (read console-side via kuna_live_value), same as
         // `tailcallentry` above. Default-off, ARM-only.
@@ -1162,8 +1164,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unwindstarts`; its P1 row sits beside `eh_frame_full`.
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
-    // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`.
-    assert_eq!(json.matches("},\n").count(), 357);
+    // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`.
+    assert_eq!(json.matches("},\n").count(), 359);
 }
 
 #[test]

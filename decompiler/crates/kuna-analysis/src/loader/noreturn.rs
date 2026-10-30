@@ -167,6 +167,17 @@ pub(crate) fn name_matches_ladder(name: &str, exact: &[String], wildcard: &[Stri
                 .any(|f| name_matches(f, exact, wildcard)))
 }
 
+/// Does the shipped no-return list (ELF and PE/Mach-O lists together) name
+/// `name` under any `nameladder` spelling? For a name a rename gave a function
+/// after the load-time scan.
+pub fn listed_noreturn(name: &str) -> bool {
+    let (mut exact, mut wildcard) = parse_list(ELF_NORETURN_LIST);
+    let (e, w) = parse_list(PE_MAC_NORETURN_LIST);
+    exact.extend(e);
+    wildcard.extend(w);
+    name_matches_ladder(name, &exact, &wildcard, true)
+}
+
 /// Scan an ELF object's FUNC symbols (`.symtab` + `.dynsym`) for known no-return
 /// names. Emits a [`NoReturnFact`] carrying the symbol **address** alongside its
 /// **original installed name** (not the stripped form) for each hit. The address

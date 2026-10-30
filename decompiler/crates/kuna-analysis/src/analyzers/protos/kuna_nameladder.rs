@@ -14,7 +14,7 @@
 /// itself. Empty when nothing can be stripped.
 pub fn fallbacks(name: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    let mut push = |s: &str, out: &mut Vec<String>| {
+    let push = |s: &str, out: &mut Vec<String>| {
         if !s.is_empty() && s != name && !out.iter().any(|o| o == s) {
             out.push(s.to_string());
         }
