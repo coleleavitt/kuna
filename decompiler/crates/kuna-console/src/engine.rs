@@ -4157,9 +4157,12 @@ fn file_is_dex(path: &str) -> bool {
     if file.read_exact(&mut prefix).is_err() {
         return false;
     }
-    kuna_analysis::loadimage_dex::is_dex(&prefix)
-        || (prefix.starts_with(b"PK\x03\x04")
-            && std::fs::read(path).is_ok_and(|bytes| kuna_analysis::loadimage_dex::is_apk(&bytes)))
+    use kuna_analysis::loadimage_dex::{is_apk, is_dex, is_oat, is_odex, is_vdex};
+    is_dex(&prefix)
+        || is_odex(&prefix)
+        || is_vdex(&prefix)
+        || (prefix.starts_with(b"PK\x03\x04") && std::fs::read(path).is_ok_and(|bytes| is_apk(&bytes)))
+        || (prefix.starts_with(b"\x7fELF") && std::fs::read(path).is_ok_and(|bytes| is_oat(&bytes)))
 }
 
 /// (kuna `dexmodel`) Bootstrap a DEX file, or an APK's `classes*.dex` files:
@@ -4175,16 +4178,10 @@ pub fn bootstrap_from_dex_bytes(
 ) -> KunaResult<ConsoleProgram> {
     let target = kuna_analysis::loadimage_object::explicit_language_target(target).unwrap_or("");
     let registry = build_registry();
+    let language = kuna_analysis::loadimage_dex::dex_language(&bytes);
     let models = kuna_analysis::loadimage_dex::load_dex_models(bytes)?;
-    let mut loader = kuna_analysis::loadimage_dex::DexLoadImage::new(path, models.clone());
-    let mut sleigh = build_sleigh_for_loader(
-        path,
-        target,
-        spec_roots,
-        &registry,
-        kuna_analysis::loadimage_dex::DEX_LANGUAGE,
-        None,
-    )?;
+    let mut loader = kuna_analysis::loadimage_dex::DexLoadImage::new(path, models.clone()).with_language(language);
+    let mut sleigh = build_sleigh_for_loader(path, target, spec_roots, &registry, language, None)?;
     let code_space = default_code_space(&sleigh)?;
     loader.attach_to_space(Rc::clone(&code_space));
     let readonly_ranges = loader_readonly_ranges(&loader, sleigh.base().unwrap().manage());
@@ -6287,7 +6284,7 @@ pub fn bootstrap_from_file(
             .flatten();
         return bootstrap_from_te_bytes(path, &bytes, target, spec_roots, isa);
     }
-    if kuna_analysis::loadimage_dex::is_dex(&bytes) || kuna_analysis::loadimage_dex::is_apk(&bytes) {
+    if kuna_analysis::loadimage_dex::is_dex_image(&bytes) {
         return bootstrap_from_dex_bytes(path, bytes, target, spec_roots);
     }
     if is_object_binary(&bytes) || is_apple_container(&bytes) {

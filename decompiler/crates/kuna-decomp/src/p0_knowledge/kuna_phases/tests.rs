@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_432() {
-    assert_eq!(kuna_num_settables(), 432);
-    assert_eq!(SETTABLE_TABLE.len(), 432);
+fn settable_count_is_433() {
+    assert_eq!(kuna_num_settables(), 433);
+    assert_eq!(SETTABLE_TABLE.len(), 433);
 }
 
 #[test]
-fn tier_counts_are_139_core_159_transform_134_analysis() {
+fn tier_counts_are_139_core_159_transform_135_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_139_core_159_transform_134_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (139, 159, 134));
+    assert_eq!((core, transform, analysis), (139, 159, 135));
 }
 
 #[test]
@@ -1016,7 +1016,7 @@ fn option_values_live_value_present_for_194() {
     // +1 for `dirtypool`.
     // +1 for `unmergecall`.
     // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`, +1 for `gortti`.
-    assert_eq!(with_live, 201);
+    assert_eq!(with_live, 202);
 }
 
 #[test]
@@ -1279,7 +1279,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `implweight`.
     // +1 for `dirtypool`.
     // +1 for `unmergecall`.
-    assert_eq!(json.matches("},\n").count(), 431);
+    assert_eq!(json.matches("},\n").count(), 432);
 }
 
 #[test]

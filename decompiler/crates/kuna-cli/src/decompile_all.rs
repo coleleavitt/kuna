@@ -1833,6 +1833,10 @@ pub fn detected_output_language(
     });
     if head.as_ref().is_ok_and(|head| {
         kuna_analysis::loadimage_dex::is_dex(head)
+            || kuna_analysis::loadimage_dex::is_odex(head)
+            || kuna_analysis::loadimage_dex::is_vdex(head)
+            || (head.starts_with(b"\x7fELF")
+                && std::fs::read(binary).is_ok_and(|bytes| kuna_analysis::loadimage_dex::is_oat(&bytes)))
             || (head.starts_with(b"PK\x03\x04")
                 && std::fs::read(binary).is_ok_and(|bytes| kuna_analysis::loadimage_dex::is_apk(&bytes)))
     }) {

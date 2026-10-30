@@ -875,6 +875,7 @@ kuna_options! { self, p1;
     "dexmodel" => on_off!(dex_model, "DEX constant pool and register payloads"),
     "jumpassist" => on_off!(jump_assist, "jump-assist switch recovery"),
     "javanew" => on_off!(java_new, "Java new T(args) from an allocation and its <init> call"),
+    "javatry" => on_off!(java_try, "Java try/catch from a DEX method's try items"),
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
     "unmergecall" => on_off!(unmerge_calls, "tail-merged call un-merging"),

@@ -578,6 +578,9 @@ Three tiers:
 | a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel) |
 | a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel) |
 | invoke-range calls lose their arguments | [`dexmodel`](#dexmodel) |
+| a DEX method's catch blocks are missing from the output | [`javatry`](#javatry) |
+| code after a call that can throw runs on as if nothing could be thrown | [`javatry`](#javatry) |
+| throwException(x); return; instead of throw x; | [`javatry`](#javatry) |
 | puts/printf arguments untyped so string literals render as bare constants or dat_ addresses | [`libproto`](#libproto) |
 | imports carry no signatures and call arguments stay untyped | [`libproto`](#libproto) |
 | a caller's parameter is unsigned long where it is only ever passed to a libc function that takes a char */int | [`libcsigs`](#libcsigs) |
@@ -1156,6 +1159,7 @@ Three tiers:
 | want the explicit condition-flag math visible (flip off) | [`flagcompare`](#flagcompare) |
 | Java output prints v = new(T); followed by v.<init>(args); | [`javanew`](#javanew) |
 | a constructor call prints as a method named <init> | [`javanew`](#javanew) |
+| a constructor prints as void <init>(...) calling this.<init>(...) | [`javanew`](#javanew) |
 | &pxVar[-0x1000] page-probe noise in a large-frame function | [`stackprobeloop`](#stackprobeloop) |
 | calls rendered argument-less because the stack pointer never resolved to a constant offset | [`stackprobeloop`](#stackprobeloop) |
 | gcc stack-clash probe loop leaves the frame layout unrecovered | [`stackprobeloop`](#stackprobeloop) |
@@ -2932,6 +2936,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/environment-binding · ghidra-upstream · analysis-enablement · kuna-dex-loader
 - **Example:** `option dexmodel off`
 
+### `javatry` -- on | off, default `on`
+
+- **Symptoms:** a DEX method's catch blocks are missing from the output; code after a call that can throw runs on as if nothing could be thrown; throwException(x); return; instead of throw x;.
+- **What it does:** Recover a DEX method's try/catch blocks from its code_item try table and print them as Java try { } catch (T e) { }. Flow enters each catch handler once, from the start of the first range that names it (`java_try`), gives every other throwing instruction in a range an exceptional edge to its handlers (`java_throws`, data flow only: the structurer drops them, and the ones that bring the handler no value of their own are removed), and defines the move-exception register (`java_caught`). Handlers of one try item that are D8 stubs into the same code merge into one multi-type clause. Dalvik's throw becomes a halt, printed as a Java throw statement. A range's statement that cannot throw may print inside the try; a protected tail that can throw but lies outside the range is marked with a comment.
+- **When to flip:** On by default; it changes only DEX input. Turn OFF to see the method without its catch handlers (upstream Ghidra never reaches them).
+- **Where / provenance:** P2/flow-classification · kuna · analysis-enablement · kuna-dex-loader
+- **Example:** `option javatry off`
+
 ### `libproto` -- on | off, default `on`
 
 - **Symptoms:** puts/printf arguments untyped so string literals render as bare constants or dat_ addresses; imports carry no signatures and call arguments stay untyped.
@@ -4178,8 +4190,8 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 
 ### `javanew` -- on | off, default `on`
 
-- **Symptoms:** Java output prints v = new(T); followed by v.<init>(args);; a constructor call prints as a method named <init>.
-- **What it does:** In java-language output, print an allocation and the `<init>` call that initializes it as one `new T(args)` expression. Dalvik allocates with `new-instance` and initializes with a separate `invoke-direct` of `<init>`, which upstream's Java output keeps as two statements (`v = new(T); v.<init>(args);`). The pair folds only when the object reaches nothing but that call before it, in the same basic block; the arguments keep their own statements and order.
+- **Symptoms:** Java output prints v = new(T); followed by v.<init>(args);; a constructor call prints as a method named <init>; a constructor prints as void <init>(...) calling this.<init>(...).
+- **What it does:** In java-language output, print Java's constructor syntax. An allocation and the `<init>` call that initializes it print as one `new T(args)` expression: Dalvik allocates with `new-instance` and initializes with a separate `invoke-direct` of `<init>`, which upstream's Java output keeps as two statements (`v = new(T); v.<init>(args);`). The pair folds only when the object reaches nothing but that call before it, in the same basic block; the arguments keep their own statements and order. A constructor is declared by its class name, its call of another constructor on its own object prints as `this(args)` (same class) or `super(args)` (the superclass), and the implicit no-argument `super()` to java.lang.Object prints nothing.
 - **When to flip:** On by default; it changes only java-language output. Turn OFF to see the bytecode's two steps, or to diff against upstream Ghidra's Java output.
 - **Where / provenance:** P9/readability-rewrites · kuna · presentation-default · kuna-dex-loader
 - **Example:** `option javanew off`

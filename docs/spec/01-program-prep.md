@@ -1147,8 +1147,39 @@ after the previous one, one DEX model per file. Index spaces are per file, so
 each function's snapshot carries the model whose mapping holds its entry
 (`architecture.rs (Architecture::build_arch_handle_for_entry)`): a constant-pool
 index resolves in the method's own file. A call into a class defined in another
-file of the APK prints by name through that pool, but the call is not linked to
-the other file's function.
+file of the APK prints by name through that pool. Its target is linked across
+the files by `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_dex/links.rs
+(MethodIndex)`: a method reference is the declaring class's descriptor, the
+name and the prototype descriptor, which name the same method in every file, so
+an index of every defined method by that key, plus each class's superclass for
+a method a subclass inherits, resolves an `invoke` in any file to the code
+address of the method it runs. `links.rs (calls)` lists every `invoke` of the
+loaded files that way, and `kuna xrefs` answers from it for DEX and APK input
+(`--to` a method: its call sites in every file; `--from` a method: what it
+calls, a framework method that no loaded file defines appearing by name with
+no address).
+
+The on-device forms of a DEX file load the same way, through
+`loadimage_dex.rs (load_dex_models)`. A **compact DEX** file (`cdex` and a
+three-digit version, ART's `compact_dex_file.h`) is parsed by the same reader
+(`kuna_dex/format.rs (DexFile)`): its header is 0x88 bytes, the offsets of its
+string data, type lists, class data and code items count from the header's
+`data_off`, and a code item packs registers, ins, outs and tries into four 4-bit
+fields and the instruction count into 11 bits, with a preheader of 16-bit
+additions before the item for larger values (`DexFile::read_code_item`). An
+**ODEX** (`dey\n`) wraps one DEX file at its `DexOptHeader`'s `dexOffset`; it
+decodes with `Dalvik:LE:32:ODEX_KitKat`, whose tables hold the quickened
+instructions an optimized file may contain (`loadimage_dex.rs (dex_language)`).
+A version-027 **VDEX** (Android 12 and later) lists its sections in its header;
+the DEX section holds one DEX file per checksum, each 4-byte aligned after the
+previous one's `file_size`, and runs to the section's end so a compact DEX file's
+shared data stays reachable. An **OAT** file is an ELF whose `oatdata` dynamic
+symbol starts with `oat\n` and a version; up to Android 7 it embeds the DEX
+files, which are found by their own headers (a DEX magic on a 4-byte boundary
+whose header size, endian tag and file size hold up), since the `OatDexFile`
+records that locate them change with every OAT version. Every form is
+synthesized from `tests/stages/fixtures/dex/hello.dex` and `tries.dex` by
+`tests/stages/fixtures/dex/containers.py`.
 
 (kuna) **A stripped ELF's separate debug information** (`debuglink`,
 default on, a load-time gate read through `KUNA_DEBUGLINK`). Distributions

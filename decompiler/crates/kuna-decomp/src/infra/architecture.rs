@@ -2917,6 +2917,9 @@ pub struct Architecture {
     /// (kuna) Print an allocation and its `<init>` call as `new T(args)` in
     /// Java (option `javanew`).
     pub java_new: bool,
+    /// (kuna) Recover a DEX method's try/catch blocks from its `try_item`s
+    /// (option `javatry`).
+    pub java_try: bool,
     /// Comments for this architecture (C++ `commentdb`).  // STUB(comment.cc)
     pub commentdb: CommentDatabase,
 
@@ -3720,6 +3723,7 @@ impl Architecture {
             dex: Vec::new(),
             dex_model: true,
             java_new: true,
+            java_try: true,
             commentdb: CommentDatabase::new(),
             // C++ ctor leaves types/print/defaultfp null; init() fills them.
             types: Rc::new(TypeFactoryImpl::new()),
@@ -3876,6 +3880,7 @@ impl Architecture {
         self.cookie_scramble = true; // (kuna) DIV-126 default-on: an `xor rax,rsp` cookie mix no longer collapses the local-alias boundary to the bottom of the frame (0/675 ablation)
         self.jump_assist = true; // (kuna) option jumpassist default-on: only the Dalvik and JVM specs declare a <jumpassist>, and no datatest uses either
         self.java_new = true; // (kuna) option javanew default-on: changes java-language output only
+        self.java_try = true; // (kuna) option javatry default-on: DEX methods only
         self.dex_model = true; // (kuna) option dexmodel default-on: only a DEX image carries a model, so no other input changes
         self.call_mechanism_effects = false; // (kuna) option callmechanisms default-off: ppc_64_le.cspec's uponreturn stores r2Save at the ELFv1 TOC slot 0x28(r1), an ordinary frame slot under ELFv2
         self.callee_proto_stack = true; // (kuna) default-on (0/675 ablation): a locked callee prototype states how much it pops and how much of the caller's stack it can reach
@@ -4669,6 +4674,7 @@ impl Architecture {
         ctx.dex = entry.and_then(|addr| {
             self.dex_models().iter().find(|model| model.contains(addr.get_offset())).cloned()
         }); // dexmodel
+        ctx.java_try = self.java_try && ctx.dex.is_some(); // javatry
         if self.jump_assist {
             ctx.jump_assists = Rc::clone(&self.jump_assists); // jumpassist
         }
@@ -6070,6 +6076,10 @@ impl Architecture {
                 crate::userop::BUILTIN_EH_SELECTOR,
                 crate::userop::BUILTIN_SWIFT_ERROR,
                 crate::userop::BUILTIN_SWIFT_THROW,
+                // (kuna javatry) the DEX try dispatch, exceptional edge and caught value.
+                crate::userop::BUILTIN_JAVA_TRY,
+                crate::userop::BUILTIN_JAVA_THROWS,
+                crate::userop::BUILTIN_JAVA_CAUGHT,
             ] {
                 userops.register_builtin(id, &adapter)?;
             }

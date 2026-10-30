@@ -139,6 +139,15 @@ pub const BUILTIN_EH_UNWINDING: uint4 = 0x10000009;
 pub const BUILTIN_EH_EXCEPTION: uint4 = 0x1000000a;
 /// (kuna) Built-in id for `eh_selector`, the catch-clause selector at a landing pad.
 pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
+/// (kuna) Built-in id for `java_try`, the opaque test that sends a DEX `try`
+/// block's entry to one of its catch handlers (`javatry`).
+pub const BUILTIN_JAVA_TRY: uint4 = 0x1000000e;
+/// (kuna) Built-in id for `java_throws`, the opaque "this instruction threw"
+/// test on a DEX exceptional edge (`javatry`).
+pub const BUILTIN_JAVA_THROWS: uint4 = 0x1000000f;
+/// (kuna) Built-in id for `java_caught`, the exception a DEX catch handler
+/// receives (`move-exception`).
+pub const BUILTIN_JAVA_CAUGHT: uint4 = 0x10000010;
 /// (kuna) Built-in id for `bswap`, a byte reversal (`bitidioms`).
 pub const BUILTIN_BSWAP: uint4 = 0x1000000c;
 /// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
@@ -1039,6 +1048,13 @@ impl UserOpManage {
             }
             BUILTIN_EH_EXCEPTION => UserPcodeOp::new_unspecialized(b"eh_exception", BUILTIN_EH_EXCEPTION as int4),
             BUILTIN_EH_SELECTOR => UserPcodeOp::new_unspecialized(b"eh_selector", BUILTIN_EH_SELECTOR as int4),
+            BUILTIN_JAVA_TRY => {
+                UserPcodeOp::new_datatype(b"java_try", BUILTIN_JAVA_TRY as int4, Some(types.get_type_bool()), &[])
+            }
+            BUILTIN_JAVA_THROWS => {
+                UserPcodeOp::new_datatype(b"java_throws", BUILTIN_JAVA_THROWS as int4, Some(types.get_type_bool()), &[])
+            }
+            BUILTIN_JAVA_CAUGHT => UserPcodeOp::new_unspecialized(b"java_caught", BUILTIN_JAVA_CAUGHT as int4),
             BUILTIN_BSWAP => UserPcodeOp::new_unspecialized(b"bswap", BUILTIN_BSWAP as int4),
             BUILTIN_SWIFT_ERROR | BUILTIN_SWIFT_THROW => {
                 let ptr_size = types.get_size_of_pointer();

@@ -26,6 +26,134 @@ const DEX_ALIGN: u64 = 0x1_0000;
 /// Largest DEX file kuna inflates out of an APK.
 const MAX_DEX_SIZE: usize = 1 << 30;
 
+/// The language an ODEX file decodes with: its instructions may be the
+/// optimized (quickened) forms only the ODEX spec decodes.
+pub const ODEX_LANGUAGE: &str = "Dalvik:LE:32:ODEX_KitKat";
+
+/// Is `bytes` an optimized DEX (`dey\n` and a three-digit version), which wraps
+/// one DEX file?
+pub fn is_odex(bytes: &[u8]) -> bool {
+    bytes.len() >= 40 && bytes.starts_with(b"dey\n") && bytes[4..7].iter().all(u8::is_ascii_digit) && bytes[7] == 0
+}
+
+/// Is `bytes` a version-027 VDEX (Android 12 and later), which may hold the
+/// DEX files of an APK?
+pub fn is_vdex(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && bytes.starts_with(b"vdex027\0")
+}
+
+/// Is `bytes` any DEX input kuna loads: a DEX or compact DEX file, an ODEX,
+/// a VDEX, an OAT file that embeds its DEX files, or an APK?
+pub fn is_dex_image(bytes: &[u8]) -> bool {
+    is_dex(bytes) || is_odex(bytes) || is_vdex(bytes) || is_oat(bytes) || is_apk(bytes)
+}
+
+/// The `oatdata` region of an OAT file: an ELF whose `oatdata` symbol starts
+/// with the `oat\n` magic and a three-digit version.
+fn oat_data(bytes: &[u8]) -> Option<&[u8]> {
+    use object::{Object, ObjectSymbol};
+    if !bytes.starts_with(b"\x7fELF") {
+        return None;
+    }
+    let file = object::File::parse(bytes).ok()?;
+    let symbol = file.dynamic_symbols().find(|s| s.name() == Ok("oatdata"))?;
+    let section = file.section_by_index(symbol.section_index()?).ok()?;
+    use object::ObjectSection;
+    let (sec_off, sec_len) = section.file_range()?;
+    let start = usize::try_from(sec_off + (symbol.address() - section.address())).ok()?;
+    let end = usize::try_from(sec_off + sec_len).ok()?;
+    let data = bytes.get(start..end)?;
+    (data.len() >= 8 && data.starts_with(b"oat\n") && data[4..7].iter().all(u8::is_ascii_digit) && data[7] == 0)
+        .then_some(data)
+}
+
+/// Is `bytes` an OAT file that embeds DEX files (Android 7 and earlier; later
+/// releases keep them in the VDEX)?
+pub fn is_oat(bytes: &[u8]) -> bool {
+    oat_data(bytes).is_some_and(|data| !oat_dex_files(data).is_empty())
+}
+
+/// The DEX files an OAT's `oatdata` embeds. The `OatDexFile` records that
+/// locate them differ in every OAT version, so the files are found by their
+/// own headers: a DEX magic on a 4-byte boundary whose header size, endian tag
+/// and file size hold up.
+fn oat_dex_files(data: &[u8]) -> Vec<Vec<u8>> {
+    let mut files = Vec::new();
+    let mut at = 8;
+    while at + 0x70 <= data.len() {
+        let here = &data[at..];
+        let sized = le32(here, 0x20).map(|s| s as usize).filter(|&s| s >= 0x70 && s <= here.len());
+        let valid = is_dex(here) && le32(here, 0x24) == Some(0x70) && le32(here, 0x28) == Some(0x1234_5678);
+        match sized.filter(|_| valid) {
+            Some(size) => {
+                files.push(here[..size].to_vec());
+                at += (size + 3) & !3;
+            }
+            None => at += 4,
+        }
+    }
+    files
+}
+
+/// The language `bytes` decodes with.
+pub fn dex_language(bytes: &[u8]) -> &'static str {
+    if is_odex(bytes) {
+        ODEX_LANGUAGE
+    } else {
+        DEX_LANGUAGE
+    }
+}
+
+/// The DEX file an ODEX wraps (`DexOptHeader.dexOffset`, `dexLength`).
+fn odex_dex_file(bytes: &[u8]) -> KunaResult<Vec<u8>> {
+    let offset = le32(bytes, 8).ok_or_else(|| bad_odex("truncated header"))? as usize;
+    let length = le32(bytes, 12).ok_or_else(|| bad_odex("truncated header"))? as usize;
+    bytes
+        .get(offset..offset.checked_add(length).ok_or_else(|| bad_odex("bad DEX extent"))?)
+        .map(<[u8]>::to_vec)
+        .ok_or_else(|| bad_odex("DEX extent past the end of the file"))
+}
+
+fn bad_odex(what: &str) -> KunaError {
+    KunaError::lowlevel(format!("malformed ODEX: {what}"))
+}
+
+/// The DEX files of a VDEX's DEX section: one per checksum, each starting
+/// 4-byte aligned after the previous one's `file_size`. A compact DEX file's
+/// data may lie in a section shared after the last file, so each runs to the
+/// section's end.
+fn vdex_dex_files(bytes: &[u8]) -> KunaResult<Vec<Vec<u8>>> {
+    let bad = |what: &str| KunaError::lowlevel(format!("malformed VDEX: {what}"));
+    let sections = le32(bytes, 8).ok_or_else(|| bad("truncated header"))? as usize;
+    let section = |kind: u32| -> KunaResult<Option<(usize, usize)>> {
+        for k in 0..sections.min(16) {
+            let at = 12 + 12 * k;
+            if le32(bytes, at).ok_or_else(|| bad("truncated section table"))? == kind {
+                let offset = le32(bytes, at + 4).ok_or_else(|| bad("truncated section table"))? as usize;
+                let size = le32(bytes, at + 8).ok_or_else(|| bad("truncated section table"))? as usize;
+                return Ok(Some((offset, size)));
+            }
+        }
+        Ok(None)
+    };
+    let count = section(0)?.map_or(0, |(_, size)| size / 4);
+    let Some((start, size)) = section(1)?.filter(|&(_, size)| size > 0) else {
+        return Err(bad("no DEX section: the DEX files are in the APK"));
+    };
+    let end = start.checked_add(size).filter(|&e| e <= bytes.len()).ok_or_else(|| bad("DEX section past the end"))?;
+    let mut files = Vec::with_capacity(count);
+    let mut at = start;
+    for _ in 0..count {
+        let file_size = le32(bytes, at + 0x20).ok_or_else(|| bad("truncated DEX header"))? as usize;
+        if at + file_size > end || file_size == 0 {
+            return Err(bad("DEX file past the section end"));
+        }
+        files.push(bytes[at..end].to_vec());
+        at = (at + file_size + 3) & !3;
+    }
+    Ok(files)
+}
+
 /// Is `bytes` a zip whose root holds a `classes.dex`?
 pub fn is_apk(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK\x03\x04") && apk_dex_names(bytes).is_ok_and(|names| !names.is_empty())
@@ -34,7 +162,17 @@ pub fn is_apk(bytes: &[u8]) -> bool {
 /// Parse a DEX file, or every `classes*.dex` of an APK, mapping them in
 /// order from address 0.
 pub fn load_dex_models(bytes: Vec<u8>) -> KunaResult<Vec<Rc<DexModel>>> {
-    let files = if is_dex(&bytes) { vec![bytes] } else { apk_dex_files(&bytes)? };
+    let files = if is_dex(&bytes) {
+        vec![bytes]
+    } else if is_odex(&bytes) {
+        vec![odex_dex_file(&bytes)?]
+    } else if is_vdex(&bytes) {
+        vdex_dex_files(&bytes)?
+    } else if let Some(data) = oat_data(&bytes) {
+        oat_dex_files(data)
+    } else {
+        apk_dex_files(&bytes)?
+    };
     let mut models = Vec::with_capacity(files.len());
     let mut base: u64 = 0;
     for file in files {
@@ -153,11 +291,24 @@ pub struct DexLoadImage {
     models: Vec<Rc<DexModel>>,
     space: Option<Rc<AddrSpace>>,
     section_cursor: std::cell::Cell<usize>,
+    language: &'static str,
 }
 
 impl DexLoadImage {
     pub fn new(filename: &str, models: Vec<Rc<DexModel>>) -> DexLoadImage {
-        DexLoadImage { filename: filename.to_string(), models, space: None, section_cursor: std::cell::Cell::new(0) }
+        DexLoadImage {
+            filename: filename.to_string(),
+            models,
+            space: None,
+            section_cursor: std::cell::Cell::new(0),
+            language: DEX_LANGUAGE,
+        }
+    }
+
+    /// Decode with `language` (an ODEX's) rather than [`DEX_LANGUAGE`].
+    pub fn with_language(mut self, language: &'static str) -> DexLoadImage {
+        self.language = language;
+        self
     }
 
     /// The default code space the image maps into.
@@ -226,7 +377,7 @@ impl LoadImage for DexLoadImage {
     }
 
     fn get_arch_type(&self) -> Vec<u8> {
-        DEX_LANGUAGE.as_bytes().to_vec()
+        self.language.as_bytes().to_vec()
     }
 
     fn adjust_vma(&mut self, _adjust: i64) {}
@@ -309,5 +460,23 @@ mod tests {
     fn a_zip_without_classes_dex_is_not_an_apk() {
         assert!(!is_apk(&zip(&[("classes.jar", 0, hello())])));
         assert!(load_dex_models(zip(&[("classes.dex", 0, b"dex\n035\0".to_vec())])).is_err());
+    }
+
+    fn fixture(name: &str) -> Vec<u8> {
+        std::fs::read(format!("{}/../../../tests/stages/fixtures/dex/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
+    }
+
+    #[test]
+    fn containers_yield_their_dex_files() {
+        let hello = hello();
+        for name in ["hello.odex", "hello.vdex", "hello.oat"] {
+            let bytes = fixture(name);
+            assert!(is_dex_image(&bytes), "{name}");
+            let models = load_dex_models(bytes).unwrap();
+            assert_eq!(models.len(), 1, "{name}");
+            assert_eq!(&models[0].file.bytes()[..hello.len()], &hello[..], "{name}");
+        }
+        assert_eq!(dex_language(&fixture("hello.odex")), ODEX_LANGUAGE);
+        assert!(!is_oat(&std::fs::read("/proc/self/exe").unwrap_or_default()));
     }
 }

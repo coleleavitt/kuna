@@ -705,6 +705,9 @@ pub fn universal_sched(
             // (kuna) copyrun (option `copyrun`): an unrolled run of element
             // copies within one block, collapsed into memcpy.
             act!(Box::new(crate::kuna_copyrun::ActionCopyRun::new("returnsplit"))),
+            // (kuna) javatry: drop the DEX exceptional edges that bring their
+            // handler no value of its own; the next mainloop splices the halves.
+            act!(crate::kuna_javatry::ActionJavaThrowPrune::boxed("returnsplit")),
             act!(ActionReturnSplit::boxed("returnsplit")),
             // (kuna) angr SAILR gotoless `ReturnDuplicatorHigh` (option `returndup`,
             // default-OFF).  Runs right after ActionReturnSplit (the goto-driven
