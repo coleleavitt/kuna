@@ -26,6 +26,9 @@ Three tiers:
 | a vectorised reduction is followed by a second copy of the loop over the remainder | [`devectorize`](#devectorize) |
 | an array sum is guarded by if (8 <= length) with a stride-eight do-while behind it | [`devectorize`](#devectorize) |
 | a line like v8 + v12 + v6 + v10 + v7 + v11 + v5 + v9 follows a loop | [`devectorize`](#devectorize) |
+| v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4 | [`pow2select`](#pow2select) |
+| a signed remainder by a power of two prints as a select between x & m and -(-x & m) | [`pow2select`](#pow2select) |
+| (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4 | [`pow2select`](#pow2select) |
 | a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
 | if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
 | ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
@@ -1361,6 +1364,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Turn ON when an -O2/-O3 loop that sums the elements of an array comes out as a guard `if (8 <= length)`, a do-while adding `v2 & 0xff`, `v2 >> 8 & 0xff`, ... into eight separate accumulators, a line summing those accumulators, and a second do-while over `bytes[v4]` for the remainder -- and you want the source loop `v1 += bytes[v2]` instead. OFF (the default) keeps the compiler's shape, which shows the stride, the alignment of the handoff and the duplicated body. Inert on a function with no loop of that shape.
 - **Where / provenance:** P3/simplification-quiescence · kuna · structure-recovery · wide-ssa-slices
 - **Example:** `option devectorize on`
+
+### `pow2select` -- on | off, default `on`
+
+- **Symptoms:** v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4; a signed remainder by a power of two prints as a select between x & m and -(-x & m); (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4.
+- **What it does:** Rewrite a signed division or remainder by a power of two that the compiler wrote as a select or a sign-mask shift. Signed `x / 2^k` rounds toward zero, so a negative x is biased by `2^k - 1` before the arithmetic shift. With a conditional move (x86-64 cmov, AArch64 csel) the bias lifts as a branch and a MULTIEQUAL, printed `v = x + 3; if (0 <= x) v = x; return v >> 2;`; the -O0 branch form is the same graph. AArch64 writes `x % 2^k` with csneg as a select between `x & m` and `-(-x & m)` (`-(x & 1)` for `x % 2`). ARM writes the division as `(x + ((x s>> 31) >> (32 - k))) s>> k`. `RuleSelectDiv` (oppool1) rewrites the shift to `x / 2^k` and replaces the MULTIEQUAL of the remainder with `x % 2^k`. A select is taken only when the CBRANCH of the MULTIEQUAL block's immediate dominator sends each input down its own out-edge (directly or through one block between) and compares x or -x against a constant whose CircleRange pull-back puts every positive x on the unbiased input and every negative x on the other; at x = 0 and the most negative x both inputs agree, so either edge is fine. Inputs are matched through COPY chains.
+- **When to flip:** On by default: 0/675 datatest assertions move; four stage assertions that pinned the select (`kuna-storealias` #1/#2/#4, `kuna-globalvalue` #17, whose fixtures return `gi / 16`) now read the division. Flip off to see the select or shift the compiler emitted. Measured over 4,072 functions in ten x86-64 binaries (gcc/clang -O2 and gcc -O0 Lua 5.4.8 and bzip2 1.0.8, -O2 zlib, libexpat, libyaml): 15 functions change, ` / ` 142 -> 166, `if` statements 22,188 -> 22,163, lines 184,891 -> 184,802, e.g. bzip2 sendMTFValues `nBytes / 8` and fallbackSort `nblock / 32`. Near misses (a test other than the sign, a bias other than 2^k - 1, `-(-x & 7)` chosen only below -4) keep their select.
+- **Where / provenance:** P3/simplification-quiescence · kuna · transform · kuna-pow2select
+- **Example:** `option pow2select off`
 
 ### `strlenscan` -- on | off, default `on`
 
