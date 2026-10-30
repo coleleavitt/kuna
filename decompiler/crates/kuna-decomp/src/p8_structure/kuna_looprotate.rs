@@ -329,7 +329,7 @@ fn below(data: &Funcdata, v: VarnodeId) -> Option<(Result<VarnodeId, (u64, int4)
             Some((left, b, o.code() == OpCode::CPUI_INT_LESS))
         }
         OpCode::CPUI_INT_SLESSEQUAL | OpCode::CPUI_INT_LESSEQUAL => {
-            let (k, size) = constant(data, a)?;
+            let (k, size) = constant(data, a).filter(|&(_, s)| (1..=8).contains(&s))?;
             let signed = o.code() == OpCode::CPUI_INT_SLESSEQUAL;
             let min = if signed { 1u64 << (8 * size - 1) } else { 0 };
             (k & crate::kuna_strlenscan::mask(size) != min).then(|| (Err((k.wrapping_sub(1) & crate::kuna_strlenscan::mask(size), size)), b, !signed))

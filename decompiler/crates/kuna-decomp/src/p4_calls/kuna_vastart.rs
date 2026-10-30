@@ -119,7 +119,7 @@ fn find(data: &Funcdata) -> Option<VaStart> {
         let (offsets, gp, fp) = match (size, copied(data, op)) {
             (8, Some(v)) if gp_ok(v & 0xffff_ffff) && fp_ok(v >> 32) => (vec![op], v & 0xffff_ffff, v >> 32),
             (4, Some(gp)) if gp_ok(gp) => {
-                let Some((fop, fp)) = at(x + 4, 4).find_map(|f| copied(data, f).filter(|&fp| fp_ok(fp)).map(|fp| (f, fp))) else {
+                let Some((fop, fp)) = at(x.wrapping_add(4), 4).find_map(|f| copied(data, f).filter(|&fp| fp_ok(fp)).map(|fp| (f, fp))) else {
                     continue;
                 };
                 (vec![op, fop], gp, fp)
@@ -128,8 +128,8 @@ fn find(data: &Funcdata) -> Option<VaStart> {
         };
         let block = data.obank().get(op)?.get_parent()?;
         let same = |o: &OpId| data.obank().get(*o).and_then(|p| p.get_parent()) == Some(block) && written(data, *o).is_some();
-        let Some(overflow) = at(x + 8, 8).find(same) else { continue };
-        let Some((save, spacebase, save_area, address_op)) = at(x + 16, 8).filter(same).find_map(|s| {
+        let Some(overflow) = at(x.wrapping_add(8), 8).find(same) else { continue };
+        let Some((save, spacebase, save_area, address_op)) = at(x.wrapping_add(16), 8).filter(same).find_map(|s| {
             stack_address(data, written(data, s)?).map(|(sb, off, code)| (s, sb, off, code))
         }) else {
             continue;

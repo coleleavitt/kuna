@@ -169,7 +169,7 @@ fn a_narrowing_into_a_destination_of_its_type_round_trips_through_the_printed_c(
             for p in PROTOTYPES {
                 args.extend_from_slice(&["--assert", p]);
             }
-            args.extend_from_slice(&["--option", "castnarrow", opt, "--option", "bitidioms", "off"]);
+            args.extend_from_slice(&["--option", "castnarrow", opt, "--option", "bitidioms", "off", "--option", "typevote", "off"]);
             let (text, err, rc) = common::run_kuna(&args);
             assert_eq!(rc, 0, "{image} castnarrow {opt}: {err}");
             for &(off, on) in lines {
