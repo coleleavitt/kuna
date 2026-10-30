@@ -2138,7 +2138,11 @@ mod tests {
         // and kuna-rangefold / a test or mask a dominating branch's range decides
         // and kuna-pow2select + kuna-pow2select-aarch64 / x / 2^k and x % 2^k written as a select
         // and kuna-whilecontinue / a jump to a do-while test continues
-        assert_eq!(count, 620, "corpus file count drifted");
+        // and kuna-iokitclasses / IOKit class and vtable recovery
+        // and kuna-kernelcache-merge / several kernel-collection entries in one image
+        // and kuna-xnutables / kalloc_type views and external-method tables
+        // and kuna-osclassinfo / DriverKit class records
+        assert_eq!(count, 624, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

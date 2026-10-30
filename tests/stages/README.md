@@ -370,3 +370,19 @@ bare MH_FILESET with `kernelcache off` (one image, no symbols), its kext out of 
 IMG4(IM4P(LZFSE)) wrapper, and its kernel out of a bare IM4P(complzss). The
 fixtures and their generator live in
 `decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/`.
+
+`kuna-iokitclasses.xml` decompiles a stripped synthetic kext
+(`decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/gen_iokit.py`) with
+`iokitclasses` off and on: the OSMetaClass constructor, the metaclass objects and
+a vtable-only override gain their names.
+
+`kuna-kernelcache-merge.xml` loads the synthetic kernel collection's kext alone
+and then together with the kernel (`kernelcache com.apple.kernel,Widget`): only
+the merged image names the kernel object the kext points at.
+
+`kuna-xnutables.xml` decompiles the same synthetic kext with `xnutables` off and
+on: a `kalloc_type` view and an `IOExternalMethodDispatch` handler gain names.
+
+`kuna-osclassinfo.xml` decompiles a synthetic DriverKit executable
+(`gen_dext.py`) with `osclassinfo` off and on: its metaclass global and `New`
+function take their class's name.

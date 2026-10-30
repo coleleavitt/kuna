@@ -3212,6 +3212,9 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // symbols). Registered here so the fail-open `_ => true` never silently
         // runs it by default; `off` renders `dat_<addr>` exactly as before.
         "cfstrings" => arch.analysis_cfstrings,
+        "iokitclasses" => arch.analysis_iokitclasses,
+        "xnutables" => arch.analysis_xnutables,
+        "osclassinfo" => arch.analysis_osclassinfo,
         // (kuna) PE PDB metadata recovery — default-OFF (output-changing: renames
         // stripped functions to their real PDB names). PE-only + externally gated on
         // a fingerprint-matching `.pdb` (the `kuna_pdb_path` env var). Registered

@@ -869,7 +869,31 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   header it would overwrite. `auto` takes the `MH_EXECUTE` entry (the kernel);
   any other value names an entry by its bundle id, exactly or by a unique
   case-insensitive dotted suffix (`IOSurface`), a miss lists the
-  candidates, and `list` stops the load with every entry id. A kext calls into the kernel and into the kexts it depends on
+  candidates, and `list` stops the load with every entry id, each followed by
+  what the collection's `__PRELINK_INFO,__info` plist says of it (version, load
+  address, the `IOClass` of each of its `IOKitPersonalities`;
+  `decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/prelink.rs (kexts)`,
+  a small XML plist reader that resolves `ID`/`IDREF`). A pre-fileset
+  (prelinked) kernelcache loads as its kernel; `list` prints its plist's kexts,
+  and naming one is refused because extracting a prelinked kext is not
+  implemented.
+  A comma-separated list or `all` loads several entries as one image
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset/merge.rs (merge)`):
+  their segment commands are concatenated at their collection addresses (one
+  shared `__LINKEDIT` kept), and a symbol table, indirect-symbol table and
+  `LC_FUNCTION_STARTS` are rebuilt behind the collection. The entries' symbols
+  are renumbered into one local / external-defined / undefined order; a
+  symbol's section ordinal moves to the merged section list, or, past the 255
+  ordinals an `nlist` can name, to the first merged section of the same kind
+  (code or data), since only the kind is read from it; and each stub or
+  pointer section's `reserved1` moves to its entry's part of the merged
+  indirect table. The rebuilt header goes in front of the collection, so every
+  file offset moves by the header's page-rounded size; the kernel's
+  `LC_UNIXTHREAD`, `LC_UUID` and version commands are kept. The collection's
+  `__BRANCH_STUBS` / `__BRANCH_GOTS` segments, where a release cache's
+  cross-entry branches land, are added to whatever is loaded, which sends even
+  a single entry through this path when they exist. `kuna functions` on the
+  whole iOS 16.4.1 collection takes 45 s and 1.5 GB and lists 166,184 entries. A kext calls into the kernel and into the kexts it depends on
   with a direct `bl` that the collection's builder resolved, so the only record
   of the callee's name is the kext's undefined `nlist`; when the chosen entry is
   not the kernel, each undefined symbol that another entry exports from an
@@ -4059,6 +4083,85 @@ every other binary's pass list is byte-identical to before the pass existed):
   marked read-only (a CFString constant is immutable), which the route requires on
   the historical writable `__DATA,__cfstring` layout (`__DATA_CONST` is already
   read-only).
+- **IOKit classes** (kuna, `iokitclasses`, Mach-O arm64 XNU images only,
+  default-on; `decompiler/crates/kuna-analysis/src/analyzers/iokit/mod.rs`): every
+  libkern class registers itself from a static initializer that calls
+  `OSMetaClass::OSMetaClass(&X::gMetaClass, "X", &Super::gMetaClass, sizeof(X))`
+  and then stores the `X::MetaClass` vtable into `X::gMetaClass`. The pass runs
+  only on a kext (`MH_KEXT_BUNDLE`) or a kernel (a `__KLD` segment). It follows
+  each `__mod_init_func` / `__init_offsets` initializer with a forward register
+  tracker (`decompiler/crates/kuna-analysis/src/analyzers/iokit/a64.rs (trace)`)
+  that models `ADRP`/`ADD`/`ADR`/`MOV`/`MOVZ`, loads from a constant slot, the
+  PAC sign/strip instructions as no-ops, and calls (which clear the
+  caller-saved registers, except that a constructor returns its `this`); any
+  other instruction that writes a register makes it unknown. The constructor
+  is the callee most calls share whose `x1` is a class-name C string and whose
+  `w3` is a plausible size, so no symbol is needed. Each such call gives a
+  class (name, metaclass object, superclass metaclass, instance size); the
+  first store into the metaclass object after the call is the metaclass
+  vtable. A class's own vtable is a run of code pointers in a data section,
+  behind two zero header words, whose first twelve slots hold
+  `X::getMetaClass() const`: a leaf that returns `&X::gMetaClass` within five
+  instructions. For a kext cut out of a collection a slot may point outside the
+  image, at the kernel or another kext, so a run also accepts aligned pointers
+  into unmapped addresses of the same 4 GiB region. Every unnamed vtable method
+  is named after its owner, the nearest class that is an ancestor of every
+  class whose vtable holds it, and the method the same slot has in the owner's
+  nearest ancestor with a symbol there (`Derived::m2` for an override of a
+  named `Base::m2`), else `X::vfn_<offset>`. A function found at two different
+  slots (the pure-virtual trap, folded stubs) is not named. The metaclass
+  vtable's destructors and its `alloc` (the slot past them whose function
+  differs between the most metaclass vtables) are named too. Output: sized data
+  objects `X::gMetaClass` (the gap between consecutive metaclass objects),
+  `vtable for X` and `vtable for X::MetaClass` where the image has no symbol,
+  placeholder-only function names, and every vtable slot as a function entry,
+  which is what discovers methods reachable only through a vtable. Measured
+  against the symbols of the iOS 16.4.1 kernelcache while ignoring them: all
+  149 kernel classes, 22/22 IOSurface and 85/85 AGXG12P classes have the right
+  metaclass object; every metaclass vtable and every class vtable with a symbol
+  is found at that symbol's address; method names are right or a class-right
+  `vfn_` wherever no ancestor slot is named, except where an abstract class has
+  no vtable in the image (AGXG12P: 627 of 1,979 methods are credited to the one
+  concrete subclass instead). The pass takes 13 ms on the kernel.
+- **XNU data tables** (kuna, `xnutables`, the same XNU images, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/iokit/tables.rs`): three kinds
+  of table that need no class knowledge to find. Each `__kalloc_type` record (a
+  0x40-byte `kalloc_type_view`, its `site.<type>` name at +0x10) and
+  `__kalloc_var` record (a 0x50-byte `kalloc_type_var_view`) becomes a sized data
+  object under its symbol, or else `kalloc_type_view_<T>` / `kalloc_type_var_view_<T>`
+  (`struct` dropped, `*` spelled `_ptr`); the typed allocator entry points
+  (`kalloc_type_impl`, `IOMallocTypeImpl`, `OSObject_typed_operator_new`, their
+  `var` and `free` forms) get prototypes whose first parameter is a pointer,
+  parked by name and at every address the image calls one at, so the view an
+  allocation passes renders by name. A run of at least four
+  `IOExternalMethodDispatch` (0x18-byte) or `IOExternalMethodDispatch2022`
+  (0x28-byte) records in `__const`, each a pointer into this image's code with
+  at most 16 scalars each way and struct sizes up to 256 KiB or variable, at
+  least one variable (the checks IDA's kcu applies), is a dispatch table: it
+  becomes a data object (its symbol, else `<Owner>_sMethods`) and every unnamed
+  handler `<Owner>::externalMethod_<selector>`, the owner being the class whose
+  vtable holds a method that computes the table's address (`a64::constants`),
+  else the class of the table's named handlers. A `__got` / `__auth_got` /
+  `__auth_ptr` slot the indirect-symbol table does not name, whose rebased
+  pointer reaches a named function or object of this image, is named
+  `<target>_ptr`. On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
+  views, 1,687 var views and 56 dispatch tables (901 records); in IOSurface,
+  `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
+  `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)`.
+- **DriverKit class records** (kuna, `osclassinfo`, Mach-O with an
+  `__osclassinfo` section, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/iokit/osclassinfo.rs (classes)`):
+  a DriverKit extension lists every class it defines as pointers to
+  `OSClassLoadInformation` records (0xa0 bytes: `description`, `metaPointer`,
+  `version`, `instanceSize`, eight reserved words, `New`, eight more), each
+  pointing at an `OSClassDescription` (`descriptionSize`, `name[96]`,
+  `superName[96]`, then the size/offset pairs of the method-option,
+  queue-name and method-name tables, 0x138 bytes before the tables). A record
+  is used when it and its description are mapped, `descriptionSize` is at
+  least 0x138 and the name is a C identifier. It yields sized data objects
+  `<Name>_Class`, `<Name>_ClassDescription` and `g<Name>MetaClass` (the global
+  `metaPointer` points at), and names `New` `<Name>_New`, adding it as an
+  entry. The names come from the records, so nothing is inferred from code.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the

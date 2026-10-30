@@ -498,6 +498,14 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         passes.push(Box::new(crate::cfstring::CFStringPass));
     }
 
+    // (kuna `iokitclasses`) IOKit class + vtable recovery on an XNU kernel or
+    // kext (the pass itself checks for one); Mach-O only.
+    if format == object::BinaryFormat::MachO {
+        passes.push(Box::new(crate::iokit::IokitClassesPass));
+        passes.push(Box::new(crate::iokit::XnuTablesPass));
+        passes.push(Box::new(crate::iokit::OsClassInfoPass));
+    }
+
     // S1 Mach-O Objective-C metadata recovery (ObjcMetadataPass): when the binary
     // is a Mach-O, walk the `__objc_*` metadata (classlist → class_t → class_ro_t
     // → method_list_t) and rename each IMP function `-[Class sel]` / `+[Class sel]`
@@ -1893,7 +1901,7 @@ mod tests {
         let macho_neutral: Vec<&str> = macho
             .iter()
             .copied()
-            .filter(|&p| !matches!(p, "authptrcall" | "cfstrings" | "objc"))
+            .filter(|&p| !matches!(p, "authptrcall" | "cfstrings" | "iokitclasses" | "xnutables" | "osclassinfo" | "objc"))
             .collect();
         assert!(!elf_neutral.contains(&"itaniumrtti"));
         assert_eq!(
