@@ -395,6 +395,8 @@ pub struct Architecture {
     /// (kuna `itaniumeh`) Give each call covered by a `.gcc_except_table`
     /// call-site record an exceptional edge to its landing pad.
     pub itanium_eh: bool,
+    /// (kuna `itaniumeh catch`) Only pads with a catch clause get an edge.
+    pub itanium_eh_catch_only: bool,
     /// (kuna `vexzeroupper`) Split each VEX zero-upper ZMM write at the result's
     /// width (`kuna_vexzeroupper`).
     pub vex_zero_upper: bool,
@@ -3166,6 +3168,7 @@ impl Architecture {
             caller_reads: true, // (kuna) option callerreads; reset_defaults sets the shipped default
             kuna_call_returns: Vec::new(),
             itanium_eh: false,
+            itanium_eh_catch_only: false,
             vex_zero_upper: false,
             vector_abi: false,
             lane_fuse: false,
@@ -3909,6 +3912,7 @@ impl Architecture {
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
         self.itanium_eh = false;
+        self.itanium_eh_catch_only = false;
         self.vex_zero_upper = true;
         self.vector_abi = true;
         self.lane_fuse = true;
@@ -4997,6 +5001,7 @@ impl Architecture {
         // propagation still off. `Rc` clone: the list is built once at load.
         ctx.dynreloc_const = Rc::clone(&self.dynreloc_const);
         ctx.eh_table = self.itanium_eh.then(|| Rc::clone(&self.eh_table));
+        ctx.itanium_eh_catch_only = self.itanium_eh_catch_only;
         ctx.vex_zero_upper = self.vex_zero_upper && self.archid.starts_with("x86:LE:64");
         ctx.lane_fuse = self.lane_fuse && self.archid.starts_with("x86:LE:64");
         ctx.lane_fuse_all = self.lane_fuse_all;

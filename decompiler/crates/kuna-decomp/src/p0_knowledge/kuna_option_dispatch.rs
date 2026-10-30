@@ -874,7 +874,12 @@ kuna_options! { self, p1;
     "calltargettype" => on_off!(call_target_type, "indirect-call target types"),
     "floatglobals" => on_off!(float_globals, "float typing of globals moved only through float registers"),
     "callerreads" => on_off!(caller_reads, "return recovery from what the callers read"),
-    "itaniumeh" => on_off!(itanium_eh, "Itanium exception edges to landing pads"),
+    "itaniumeh" => {
+        let catch = p1.trim().eq_ignore_ascii_case("catch");
+        self.itanium_eh = catch || on_or_off(p1)?;
+        self.itanium_eh_catch_only = catch;
+        Ok(format!("Itanium exception edges to landing pads turned {}", if catch { "catch" } else if self.itanium_eh { "on" } else { "off" }))
+    },
     "vexzeroupper" => on_off!(vex_zero_upper, "VEX zero-upper writes split at the result width"),
     "vectorabi" => on_off!(vector_abi, "SysV x86-64 vector arguments and returns"),
     "lanefuse" => {

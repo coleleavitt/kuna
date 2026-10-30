@@ -1735,6 +1735,8 @@ pub struct ArchContext {
     pub eh_table: Option<Rc<crate::kuna_itaniumeh::EhTable>>,
     /// (kuna `vexzeroupper`) See [`crate::kuna_vexzeroupper`].
     pub vex_zero_upper: bool,
+    /// (kuna `itaniumeh catch`) Only pads with a catch clause get an edge.
+    pub itanium_eh_catch_only: bool,
     /// (kuna `lanefuse`) See [`crate::kuna_lanefuse`].
     pub lane_fuse: bool,
     /// (kuna `lanefuse all`) See [`crate::kuna_lanefuse`].
@@ -2194,6 +2196,7 @@ impl ArchContext {
             dynreloc_const: Rc::new(Vec::new()),
             eh_table: None,
             vex_zero_upper: false,
+            itanium_eh_catch_only: false,
             lane_fuse: false,
             lane_fuse_all: false,
             vector_userops: Rc::new(Vec::new()),

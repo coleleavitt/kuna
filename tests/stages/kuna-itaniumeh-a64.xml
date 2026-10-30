@@ -30,7 +30,7 @@
   <com>quit</com>
 </script>
 <stringmatch name="itaniumeh a64 #1: off has no catch code (the one match is the on pass)" min="1" max="1">__cxa_begin_catch</stringmatch>
-<stringmatch name="itaniumeh a64 #2: on gives the call an exceptional edge" min="1" max="1">if \(!eh_unwinding\(\)\)</stringmatch>
+<stringmatch name="itaniumeh a64 #2: on prints the pad as a try region" min="1" max="1">try \{</stringmatch>
 <stringmatch name="itaniumeh a64 #3: on passes x0 to __cxa_begin_catch" min="1" max="1">__cxa_begin_catch\(eh_exception\(\)\)</stringmatch>
 <stringmatch name="itaniumeh a64 #4: on names the catch type and selector" min="1" max="1">landing pad: catch \(Err\) when selector == 2; catch \(\.\.\.\) when selector == 1</stringmatch>
 </decompilertest>

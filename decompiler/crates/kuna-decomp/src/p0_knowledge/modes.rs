@@ -136,6 +136,10 @@ const RELIABLE_OVERRIDES: &[(&str, &str)] = &[];
 const AGGRESSIVE_OVERRIDES: &[(&str, &str)] = &[
     // transform-tier default-off recovery/structuring passes.
     ("switchmodbound", "on"),
+    // (kuna) Itanium try/catch for the landing pads with a catch clause: +0.5%
+    // instructions on a 252 KB g++ binary (`itaniumeh on`, every cleanup pad
+    // too, costs +25%).
+    ("itaniumeh", "catch"),
     // (kuna) Recover a CMOV/predicated indirect dispatch over constant code
     // addresses. Default OFF because a conditional tail call between two nearby
     // function entries has the same shape and recovering it splices both callee
@@ -606,10 +610,6 @@ mod tests {
               // `relronoreturn` trades structure for speed (it skips a restart
               // whose second pass renders better), the opposite of this preset.
               "relronoreturn",
-              // `itaniumeh` adds the exception paths of every C++ function, which
-              // roughly doubles the size of a catch-heavy body; it is a reading
-              // aid to ask for, not a better default rendering.
-              "itaniumeh",
               // `mba` targets obfuscated code; on ordinary code it can only
               // refold arithmetic the compiler already chose.
               "mba",

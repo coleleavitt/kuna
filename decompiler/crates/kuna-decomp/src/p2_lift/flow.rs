@@ -702,6 +702,8 @@ pub struct FlowInfo<'a, E: FlowEnvironment> {
     /// (kuna `itaniumeh`) Instructions of a landing-pad stub: the pad and its
     /// fall-through successors, up to the stub's first branch.
     eh_pad_stub: std::collections::BTreeSet<Address>,
+    /// (kuna `itaniumeh`) Landing pads that already have their edge.
+    eh_records_seen: std::collections::BTreeSet<u64>,
 }
 
 /// Apply explicit-flow and declared-extent precedence before consulting either
@@ -774,6 +776,7 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
             overlap_cbranch_target: None,
             injecting_entry: None,
             eh_pad_stub: std::collections::BTreeSet::new(),
+            eh_records_seen: std::collections::BTreeSet::new(),
         }
     }
 
@@ -1991,7 +1994,13 @@ truncating the fall-through here"
                 }
             }
             if let Some(site) = eh_table.as_deref().and_then(|t| t.site_at(curaddr.get_offset())) {
-                if !self.is_flow_for_inline() {
+                // One edge per landing pad: the first covered call reaches the
+                // pad, and later calls that unwind to it print inside the same
+                // `try` without their own edge. `itaniumeh catch` keeps only the
+                // pads with a catch clause.
+                if !self.is_flow_for_inline() && self.eh_records_seen.insert(site.pad)
+                    && (!self.data.get_arch().itanium_eh_catch_only || site.clauses.iter().any(|c| *c != crate::kuna_itaniumeh::EhClause::Cleanup))
+                {
                     let pad = Address::new(curaddr.get_space().expect("eh: code space").clone(), site.pad);
                     let mut cursor = Some(firstop);
                     while let Some(op) = cursor {

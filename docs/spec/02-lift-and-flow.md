@@ -3066,8 +3066,39 @@ if (eh_selector() == 1) {
   `tail_call_kind` does not classify a branch from those instructions, so the
   cold code is decoded as part of the function.
 
-A `try` region kind in `p8_structure` would be the next step. The edges and
-helpers are what it would read. **Limits.** SjLj and ARM EHABI tables are not
+**One edge per pad.** Only the first call that unwinds to a pad gets the
+edge (`FlowInfo::eh_records_seen`); later calls to the same pad stay plain
+calls. That keeps the cost down (one extra block per pad, not per call), and
+the printer shows those calls inside the same `try`. Under `itaniumeh catch`
+only pads with a catch clause get an edge, so cleanup pads stay hidden. On
+`/usr/bin/patchelf` (252 KB, g++, decompile-all, user-mode instruction count
+on one P-core) `off` takes 102.87 G instructions, `catch` 103.35 G (+0.5%) and
+`on` 128.95 G (+25%). The aggressive preset uses `catch`.
+
+**try/catch in the C output**
+(`decompiler/crates/kuna-decomp/src/p9_emit/printc.rs (emit_eh_try,
+is_eh_if, eh_pad_start)`). An `if` whose condition is the `eh_unwinding()`
+CBRANCH prints as `try { <condition-block statements> } catch (..) { <pad> }`:
+
+- when its true branch starts at a landing pad, that branch is the handler;
+- when the structurer negated it (`if (!eh_unwinding()) { normal }`, whose
+  normal path never falls through) and the rest of the enclosing list starts
+  at the pad, the normal path prints inside the `try` and the rest of the list
+  is the handler. If that list is on the function's top-level spine (only
+  lists above it, or `if`s it is the condition of: the pad's own selector
+  tests), the catch brace stays open to the end of the body
+  (`eh_open_catch`), because everything after that point is reached only
+  through the pad;
+- inside a `try`, an exceptional edge to the same pad
+  (`eh_open_pad`, compared with the CBRANCH target) prints as its plain
+  statements: the calls of one try region share it.
+
+The header is `catch (T &)` when the pad has exactly one typed clause, and
+`catch (...)` otherwise. With several clauses the selector tests stay in the
+handler (`if (eh_selector() == 1)`) and the pad comment maps each selector to
+its type.
+
+**Limits.** SjLj and ARM EHABI tables are not
 read. Pinned by
 `tests/stages/kuna-itaniumeh.xml` (two passes over the `itaniumeh/eh_x86_64.elf`
 fixture), `tests/stages/kuna-itaniumeh-cold.xml` (the partitioned build) and

@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3698,
-    3698
+    3701,
+    3701
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2895,16 +2895,19 @@
     "data:interior replacement retains its native definition",
     "data:interior uses never emit undefined storage or partial tokens",
     "data:intfloatround off folds the float rounding away",
+    "data:itaniumeh #10: the second call of cleanup prints once per pass (inside the one try when on)",
+    "data:itaniumeh #11: no exceptional edge prints as a bare if",
     "data:itaniumeh #1: off shows catcher as the normal path only",
-    "data:itaniumeh #2: off drops the catch bodies (both matches are the on pass's)",
-    "data:itaniumeh #3: on gives each covered call an exceptional edge",
-    "data:itaniumeh #4: on tests the selector at the catch pad",
+    "data:itaniumeh #2: off drops the catch bodies (all three matches are the on pass's)",
+    "data:itaniumeh #3: on prints each landing pad as a try region (catcher two, cleanup one, typed one)",
+    "data:itaniumeh #4: on tests the selector at the catch pads (catcher, typed)",
     "data:itaniumeh #5: on passes the exception to __cxa_begin_catch",
     "data:itaniumeh #6: on names the catch clauses by selector",
-    "data:itaniumeh #7: on resumes unwinding from the cleanup pads",
+    "data:itaniumeh #7: on resumes unwinding from the cleanup pads and the unmatched selector",
     "data:itaniumeh #8: the destructor keeps its one argument on both paths (one off, two on)",
+    "data:itaniumeh #9: a pad with one typed clause is catch (T &)",
     "data:itaniumeh a64 #1: off has no catch code (the one match is the on pass)",
-    "data:itaniumeh a64 #2: on gives the call an exceptional edge",
+    "data:itaniumeh a64 #2: on prints the pad as a try region",
     "data:itaniumeh a64 #3: on passes x0 to __cxa_begin_catch",
     "data:itaniumeh a64 #4: on names the catch type and selector",
     "data:itaniumeh cold #1: off shows catcher as the normal path only",
