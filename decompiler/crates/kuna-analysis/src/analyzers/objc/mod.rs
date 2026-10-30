@@ -112,7 +112,20 @@ impl AnalysisPass for ObjcMetadataPass {
         } else {
             crate::loader::format::macho::resolve_dyld_info_binds(ctx.file, ctx.bytes)
         };
-        let img = MachoImage::with_fixups(ctx.file, fixups).with_binds(binds);
+        let mut img = MachoImage::with_fixups(ctx.file, fixups).with_binds(binds);
+        // An image of a dyld shared cache: its selector strings, class
+        // references and method names live in the cache's shared regions, and
+        // its method lists offset their selectors from the cache's base.
+        let cache = ctx
+            .image_path
+            .filter(|p| crate::loader::kuna_dyldcache::is_dyld_cache_file(p))
+            .and_then(|p| crate::loader::kuna_dyldcache::DyldCache::open(p).ok())
+            .map(Rc::new);
+        if let Some(cache) = cache {
+            let base = cache.objc_selector_base();
+            let reader = Rc::clone(&cache);
+            img = img.with_cache(Rc::new(move |va, n| reader.read_slid(va, n).ok()), base);
+        }
         let architecture = ctx.file.architecture();
 
         // The type-mapping context for IMP/ivar prototypes (PR-O2).
@@ -163,7 +176,7 @@ impl AnalysisPass for ObjcMetadataPass {
         for (class, name) in &classes {
             let meta_ro = classt::metaclass_ro(&img, class.isa);
             for ro in [Some(class.ro), meta_ro].into_iter().flatten() {
-                if let Some(list) = classt::base_methods(&img, ro) {
+                for list in classt::method_lists(&img, ro) {
                     for m in methods::walk_method_list(&img, list, architecture) {
                         selectors.record(&m.selector, m.types.as_deref());
                     }
@@ -215,10 +228,10 @@ impl AnalysisPass for ObjcMetadataPass {
                 kind: SymKind::Data,
             });
             let self_type = objcivars.then(|| structs.self_type(&tctx, name)).flatten();
-            if let Some(list) = classt::base_methods(&img, class.ro) {
+            for list in classt::method_lists(&img, class.ro) {
                 self.emit_methods(&img, &tctx, architecture, name, '-', list, self_type.as_ref(), &mut selectors, &mut out);
             }
-            if let Some(list) = classt::metaclass_ro(&img, class.isa).and_then(|ro| classt::base_methods(&img, ro)) {
+            for list in classt::metaclass_ro(&img, class.isa).map(|ro| classt::method_lists(&img, ro)).unwrap_or_default() {
                 self.emit_methods(&img, &tctx, architecture, name, '+', list, None, &mut selectors, &mut out);
             }
             if let Some(ivar_list) = classt::base_ivars(&img, class.ro) {

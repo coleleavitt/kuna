@@ -27,6 +27,11 @@ use object::Architecture;
 /// large absolute-pointer form.
 pub const METHOD_LIST_SMALL: u32 = 0x8000_0000;
 
+/// `entsizeAndFlags` bit: a small list's `name` field is an offset from the
+/// dyld shared cache's selector base, not a self-relative selref (objc4
+/// `smallMethodListFlag | 0x40000000`, set when the cache uniques selectors).
+const METHOD_LIST_DIRECT_SELECTORS: u32 = 0x4000_0000;
+
 /// The low bits of `entsizeAndFlags` are the per-entry size in bytes.
 const ENTSIZE_MASK: u32 = 0x0000_ffff;
 
@@ -69,6 +74,7 @@ pub fn walk_method_list(img: &MachoImage, list_va: u64, architecture: Architectu
         return out;
     };
     let small = ent & METHOD_LIST_SMALL != 0;
+    let direct = small && ent & METHOD_LIST_DIRECT_SELECTORS != 0;
     let entsize = (ent & ENTSIZE_MASK) as u64;
     if entsize == 0 {
         return out;
@@ -84,12 +90,19 @@ pub fn walk_method_list(img: &MachoImage, list_va: u64, architecture: Architectu
         let m = list_va
             .wrapping_add(method_list::FIRST)
             .wrapping_add(i.wrapping_mul(entsize));
-        let method = if small {
+        let method = if direct {
+            read_small_direct(img, m, architecture)
+        } else if small {
             read_small(img, m, architecture)
         } else {
             read_large(img, m, architecture)
         };
         if let Some(method) = method {
+            // An IMP of this image lies in one of its sections; a preattached
+            // category of another cache image (or a corrupt entry) does not.
+            if method.imp != 0 && img.read(method.imp, 4).is_none() {
+                continue;
+            }
             out.push(method);
         }
     }
@@ -145,6 +158,20 @@ fn read_small(img: &MachoImage, m: u64, architecture: Architecture) -> Option<Me
         types,
         imp: normalize_imp(architecture, imp),
     })
+}
+
+/// A small `method_t` whose `name` is an offset from the shared cache's
+/// selector base (the `0x40000000` list flag); `types`/`imp` as in [`read_small`].
+fn read_small_direct(img: &MachoImage, m: u64, architecture: Architecture) -> Option<Method> {
+    let base = img.selector_base?;
+    let n_rel = img.read_i32(m)?;
+    let t_rel = img.read_i32(m.wrapping_add(4))?;
+    let i_rel = img.read_i32(m.wrapping_add(8))?;
+    let sel_ptr = rel_to(base, n_rel);
+    let selector = img.read_cstr(sel_ptr)?;
+    let types = img.read_cstr(rel_to(m.wrapping_add(4), t_rel));
+    let imp = if i_rel == 0 { 0 } else { rel_to(m.wrapping_add(8), i_rel) };
+    Some(Method { selector, selector_va: sel_ptr, types, imp: normalize_imp(architecture, imp) })
 }
 
 /// Add a signed self-relative `i32` displacement to a base VMA with wrapping

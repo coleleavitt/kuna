@@ -14,6 +14,7 @@
 //! [`MachoImage::classlist`], so the pass is an additive no-op.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use object::read::{Object, ObjectSection};
 use object::{Endianness, SectionKind};
@@ -50,9 +51,32 @@ pub struct MachoImage<'a> {
     /// pre-chained-fixup twin of [`ChainedFixups::bind_name`]. Empty on a chained
     /// image.
     binds: HashMap<u64, String>,
+    /// Bytes outside the image's own sections — the dyld shared cache regions
+    /// an image's selector references, class references and method names
+    /// point into (`__OBJC_RO`, `__OBJC_RW`). `None` on a standalone image.
+    outside: Option<Rc<dyn Fn(u64, usize) -> Option<Vec<u8>> + 'a>>,
+    /// The selector base a direct-selector method list (`0x40000000`) offsets
+    /// its selectors from: the dyld shared cache's.
+    pub selector_base: Option<u64>,
 }
 
 impl<'a> MachoImage<'a> {
+    /// Read addresses outside the image through `outside` (a dyld shared cache),
+    /// and resolve direct selectors from `selector_base`.
+    pub fn with_cache(
+        mut self,
+        outside: Rc<dyn Fn(u64, usize) -> Option<Vec<u8>> + 'a>,
+        selector_base: Option<u64>,
+    ) -> MachoImage<'a> {
+        self.outside = Some(outside);
+        self.selector_base = selector_base;
+        self
+    }
+
+    fn read_outside(&self, va: u64, n: usize) -> Option<Vec<u8>> {
+        (self.outside.as_ref()?)(va, n)
+    }
+
     /// Build the VMA→bytes map from a parsed Mach-O `file`. Skips zero-fill
     /// sections (no file content) and zero-length sections. `None` is never
     /// returned — an image with no usable sections yields an empty map (every read
@@ -92,7 +116,7 @@ impl<'a> MachoImage<'a> {
         }
         spans.sort_unstable_by_key(|&(lo, _, _)| lo);
         let ptr_size = if file.is_64() { 8 } else { 4 };
-        MachoImage { spans, endian: file.endianness(), ptr_size, fixups, binds: HashMap::new() }
+        MachoImage { spans, endian: file.endianness(), ptr_size, fixups, binds: HashMap::new(), outside: None, selector_base: None }
     }
 
     /// Attach the classic `LC_DYLD_INFO` bind slots (`slot_vma → import`), so
@@ -134,7 +158,15 @@ impl<'a> MachoImage<'a> {
         if let Some(resolved) = self.fixups.resolved_ptr(va) {
             return Some(resolved);
         }
-        let bytes = self.read(va, self.ptr_size as usize)?;
+        let n = self.ptr_size as usize;
+        let owned;
+        let bytes: &[u8] = match self.read(va, n) {
+            Some(b) => b,
+            None => {
+                owned = self.read_outside(va, n)?;
+                &owned
+            }
+        };
         Some(match (self.endian, self.ptr_size) {
             (Endianness::Little, 8) => u64::from_le_bytes(bytes.try_into().ok()?),
             (Endianness::Big, 8) => u64::from_be_bytes(bytes.try_into().ok()?),
@@ -173,7 +205,14 @@ impl<'a> MachoImage<'a> {
     /// A little/big-endian `u32` at `va` (the `method_list_t` header fields +
     /// the relative-method-list `i32` offsets are read through this).
     pub fn read_u32(&self, va: u64) -> Option<u32> {
-        let bytes = self.read(va, 4)?;
+        let owned;
+        let bytes: &[u8] = match self.read(va, 4) {
+            Some(b) => b,
+            None => {
+                owned = self.read_outside(va, 4)?;
+                &owned
+            }
+        };
         Some(match self.endian {
             Endianness::Little => u32::from_le_bytes(bytes.try_into().ok()?),
             Endianness::Big => u32::from_be_bytes(bytes.try_into().ok()?),
@@ -190,7 +229,19 @@ impl<'a> MachoImage<'a> {
     /// encoding). `None` for an unmapped address or a string with no terminator in
     /// its section. Reads byte-by-byte across the covering section only.
     pub fn read_cstr(&self, va: u64) -> Option<String> {
-        let &(lo, hi, data) = self.spans.iter().find(|&&(lo, hi, _)| va >= lo && va < hi)?;
+        let Some(&(lo, hi, data)) = self.spans.iter().find(|&&(lo, hi, _)| va >= lo && va < hi) else {
+            // Outside the image: a bounded window, widened while it holds no NUL.
+            for n in [64usize, 512, 4096] {
+                let Some(bytes) = self.read_outside(va, n) else { break };
+                let end = bytes.iter().position(|&b| b == 0);
+                if end.is_none() && n < 4096 {
+                    continue;
+                }
+                let s = &bytes[..end?];
+                return s.iter().all(|b| (0x20..0x7f).contains(b)).then(|| String::from_utf8_lossy(s).into_owned());
+            }
+            return None;
+        };
         let start = (va - lo) as usize;
         let max = (hi - lo) as usize;
         let mut s = String::new();
