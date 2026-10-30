@@ -27,7 +27,7 @@
     `sub rsp,reg` rewrite at ActionStart, option alloca off|on. Pass 1 (off)
     pins the bug, pass 2 (on, the default) the fix.
 
-    `dynalloca` (default on) is the later fallback for the same stack move, so this test runs with it off.
+    `dynalloca` (default off) is the later fallback for the same stack move; this test pins it off.
 -->
 <bytechunk space="ram" offset="0x401140">
 f30f1efac3

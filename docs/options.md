@@ -1700,13 +1700,13 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-helperroles
 - **Example:** `--option helperroles off`
 
-### `dynalloca` -- on | off, default `on`
+### `dynalloca` -- on | off, default `off`
 
 - **Symptoms:** a variable-length array prints as &(&Stack[-8])[-n]; sub rsp, rax decompiles to stack pointer arithmetic instead of alloca.
 - **What it does:** Print a stack pointer moved down by a run-time amount as alloca(n). A variable-length array or an alloca call compiles to sub rsp, n (sub sp, sp, xN) with n computed at run time; once types are in, the new stack pointer value is PTRADD(stack pointer, -n, 1), which printed as &(&Stack[-8])[-n]. With this on, that PTRADD with a non-constant n becomes the typed builtin alloca(n), returning void *.
-- **When to flip:** On (default). Flip off to see the stack-pointer arithmetic a dynamic allocation lowers to.
+- **When to flip:** Off by default: `alloca` (P3, default on) rewrites the same stack move before heritage, including gcc/clang stack-clash probe loops. Turn ON for a run-time stack move alloca declines, which then still prints as &(&Stack[-8])[-n].
 - **Where / provenance:** P7/edge-virtualization · kuna · presentation-default · kuna-dynalloca
-- **Example:** `--option dynalloca off`
+- **Example:** `--option dynalloca on`
 
 ### `mulblob` -- on | off, default `on`
 
@@ -4348,13 +4348,13 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **Where / provenance:** P4/output-prototype · kuna · correctness-fix · ida95-51
 - **Example:** `option x87depth off`
 
-### `varargsave` -- on | off, default `on`
+### `varargsave` -- on | off, default `off`
 
 - **Symptoms:** a variadic function has fourteen parameters a0..a13; if (al) guards stores of xmm registers in a printf wrapper; va_list fields are assigned 8 and 0x30 by hand; __builtin_dwarf_cfa() appears in a variadic function; the format argument of a logging function is the ninth parameter.
 - **What it does:** Read the System V x86-64 register save area of a variadic function as `...` and `va_start`. Such a function spills every argument register its named parameters do not use into a 176-byte area (rdi..r9 at base+8*i, then `test al,al` around a block that stores xmm0..xmm7 at base+48+16*j) and builds its `va_list` (gp_offset, fp_offset, overflow_arg_area, reg_save_area). Every one of those stores reads an argument register, so input recovery gave `log_msg(const char *fmt, ...)` fourteen parameters, eight xmm copies under `if (al)` on an undefined byte, and `__builtin_dwarf_cfa()`. Before heritage the pass matches the layout exactly - a suffix of rdi..r9 at stride 8 ending at r9, a suffix of xmm0..7 at stride 16 behind the branch, and in the join block the four va_list stores whose offsets agree with the named-register counts (clang writes gp_offset and fp_offset as one 8-byte store) - removes the save stores, pins the branch around the vector block, turns the va_list set-up into `va_start(&ap)` and marks the prototype variadic: `void log_msg(char *a0,...) { va_start(v1); __vfprintf_chk(stderr,1,a0,v1); }`. It declines when the function reads its own save area (an inlined va_arg: the area's address reaches anything but the reg_save_area store, stays live past the block, or any other load or store addresses the area), and on an -O0 spill of named arguments, which has no vector block. x86-64 non-Windows language ids only.
-- **When to flip:** On by default. The OFF symptom is a gcc or clang x86-64 variadic function (a printf-style logger) printed with fourteen parameters a0..a13, an `if (v1)` block of xmm copies on an undefined `al`, and its va_list as four separate stores. Flip off to see the save area as compiled. A function whose own va_arg loop reads the save area keeps that form either way.
+- **When to flip:** Off by default: `vastart` (default on) folds the same va_list prologue, and the va_arg work builds on it. Turn ON for a function vastart declines, or to get the variadic prototype from the save-area layout. The symptom it fixes is a gcc or clang x86-64 variadic function (a printf-style logger) printed with fourteen parameters a0..a13, an `if (v1)` block of xmm copies on an undefined `al`, and its va_list as four separate stores. A function whose own va_arg loop reads the save area keeps that form either way.
 - **Where / provenance:** P4/input-prototype · kuna · type-inference · ida95-52
-- **Example:** `option varargsave off`
+- **Example:** `option varargsave on`
 
 ### `alloca` -- on | off, default `on`
 

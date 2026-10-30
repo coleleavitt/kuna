@@ -3444,7 +3444,7 @@ impl Architecture {
             x87_depth: true,
             trap_after_call: true,
             retpoline_thunk: true,
-            vararg_save: true,
+            vararg_save: false,
             alloca_calls: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
@@ -3872,7 +3872,7 @@ impl Architecture {
         self.avx_intrinsics = true; // (kuna) presentation only; 0/675 datatest assertions move
         self.bit_idioms = true;
         self.helper_roles = true;
-        self.dyn_alloca = true;
+        self.dyn_alloca = false; // (kuna) option dynalloca: default-off, `alloca` handles the stack move
         self.index_rescale = true;
         self.loop_rotate = true;
         self.post_increment = true;
@@ -3960,7 +3960,7 @@ impl Architecture {
         self.x87_depth = true;
         self.trap_after_call = true;
         self.retpoline_thunk = true;
-        self.vararg_save = true;
+        self.vararg_save = false; // (kuna) option varargsave: default-off, `vastart` folds the prologue
         self.alloca_calls = true;
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)

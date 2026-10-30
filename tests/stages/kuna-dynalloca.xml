@@ -11,10 +11,11 @@
     Stage: P7, RuleDynAlloca: PTRADD(stack pointer, -n, 1) with n not a
     constant becomes alloca(n) (Hex-Rays prints alloca for sub rsp, reg).
 
-    Pass 1 (default) prints alloca(...); pass 2 (dynalloca off) the stack
-    pointer arithmetic.
+    Pass 1 (dynalloca off, the default) prints the stack pointer arithmetic;
+    pass 2 (dynalloca on) prints alloca(...).
 
-    `alloca` (default on) recognises the same stack move earlier, so this test runs with it off.
+    `alloca` (default on) recognises the same stack move earlier, so this test
+    runs with it off; dynalloca is its default-off fallback.
 -->
 <bytechunk space="ram" offset="0x401000" readonly="true">
 f30f1efa4088374863f60fbe4437ffc3f30f1efa554863c74889c64883c00f4883e0f04889e54829c44889e7e8cfffffffc9c3
@@ -24,14 +25,15 @@ f30f1efa4088374863f60fbe4437ffc3f30f1efa554863c74889c64883c00f4883e0f04889e54829
 </binaryimage>
 <script>
   <com>option alloca off</com>
+  <com>option dynalloca off</com>
   <com>lo fu vla</com>
   <com>decompile</com>
   <com>print C</com>
-  <com>option dynalloca off</com>
+  <com>option dynalloca on</com>
   <com>decompile</com>
   <com>print C</com>
   <com>quit</com>
 </script>
-<stringmatch name="KUNA-DYNALLOCA #1: the run-time stack move is alloca (default)" min="1" max="1">alloca\(</stringmatch>
-<stringmatch name="KUNA-DYNALLOCA #2: dynalloca off keeps the stack arithmetic" min="1" max="1">Stack</stringmatch>
+<stringmatch name="KUNA-DYNALLOCA #1: dynalloca on, the run-time stack move is alloca" min="1" max="1">alloca\(</stringmatch>
+<stringmatch name="KUNA-DYNALLOCA #2: dynalloca off (default), the stack arithmetic stays" min="1" max="1">Stack</stringmatch>
 </decompilertest>

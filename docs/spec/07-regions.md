@@ -600,7 +600,7 @@ identification is recomputed by every consumer. How the structurer matches
 schemas over this tree, virtualizes edges, and falls back to
 `CollapseStructure` is chapter [08 — Structuring](08-structuring.md).
 
-**Dynamic alloca** (`dynalloca`, default on; kuna;
+**Dynamic alloca** (`dynalloca`, default off; kuna;
 `decompiler/crates/kuna-decomp/src/p7_regions/kuna_dynalloca.rs (RuleDynAlloca)`):
 a variable-length array or an `alloca` moves the stack pointer by a run-time
 amount (`sub rsp, rax`); once types are in, the new stack pointer value is
@@ -609,6 +609,7 @@ amount (`sub rsp, rax`); once types are in, the new stack pointer value is
 into the typed builtin `alloca(n)` (`void *`), as Hex-Rays prints `alloca` for a
 run-time stack move. gcc `-O2` `vla(int n) { char buf[n]; return use(buf, n); }`
 reads `v1 = alloca((long)a0 + 0xfU & 0xfffffffffffffff0); return use(v1,(long)a0);`.
-The P3 `alloca` option rewrites the same stack move before heritage; with it
-on (the default) the PTRADD never forms, so this rule is the fallback for
-functions `alloca` declines or with `alloca` off. Both use `BUILTIN_ALLOCA`.
+The P3 `alloca` option (default on) rewrites the same stack move before
+heritage, stack-clash probe loops included, and is the default mechanism;
+with it on the PTRADD never forms. This rule is its opt-in fallback for
+functions `alloca` declines. Both use `BUILTIN_ALLOCA`.

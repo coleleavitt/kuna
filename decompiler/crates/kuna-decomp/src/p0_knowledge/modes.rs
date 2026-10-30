@@ -633,7 +633,12 @@ mod tests {
               // `mapglobalsyms` makes a function's output depend on which functions
               // were decompiled before it in the same run; in the preset that would
               // make every `decompile-all` under 500 KiB order-dependent.
-              "mapglobalsyms"];
+              "mapglobalsyms",
+              // `varargsave` and `dynalloca` are fallbacks for the default-on
+              // `vastart` and `alloca`, which fold the same code; turning both on
+              // only adds a second pass over it.
+              "varargsave",
+              "dynalloca"];
 
         /// Default-off options that predate this test and are **not** in the preset,
         /// i.e. are currently unreachable on the default path. Each is a genuine open
