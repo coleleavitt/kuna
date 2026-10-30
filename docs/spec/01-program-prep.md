@@ -2642,7 +2642,9 @@ moves.
 - **DWARF** (`dwarf`, the `DWARFAnalyzer` port,
   `decompiler/crates/kuna-analysis/src/analyzers/dwarf/mod.rs (DwarfPass)`), the
   parser wholesale-substituted by `gimli` (the same dependency-substitution loss as
-  BFD → `object`). Three recoveries: (1) names — each defined `DW_TAG_subprogram`
+  BFD → `object`). Compressed sections (`SHF_COMPRESSED` zlib/zstd and GNU
+  `.zdebug_*`) are inflated by `object` before `gimli` reads them. Three
+  recoveries: (1) names — each defined `DW_TAG_subprogram`
   emits a function symbol, each top-level `DW_TAG_variable` with a `DW_OP_addr`
   location a data symbol (the operand read in the file's byte order; a DWARF 5
   `DW_OP_addrx`, or GNU `DW_OP_GNU_addr_index`, resolved through the unit's
