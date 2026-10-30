@@ -2602,7 +2602,30 @@ impl BlockGraph {
         let sole = self.arena[clause].list[0];
         self.arena[sole].parent = Some(if_id);
         self.arena[if_id].list[i] = sole;
+        self.retarget_gotos(clause, sole);
         self.arena.remove(clause);
+    }
+
+    /// (kuna) Point every `goto` that targets `old` at `new` instead: the
+    /// `BlockGoto`/`BlockIf` goto targets and `BlockMultiGoto` edges.  Used when a
+    /// tree edit frees `old` in favour of `new`, which must share its front leaf so
+    /// the goto still lands on the same label.
+    fn retarget_gotos(&mut self, old: BlockId, new: BlockId) {
+        for (_, b) in self.arena.iter_mut() {
+            match &mut b.kind {
+                BlockKind::Goto { gototarget, .. } | BlockKind::If { gototarget, .. } => {
+                    if *gototarget == Some(old) {
+                        *gototarget = Some(new);
+                    }
+                }
+                BlockKind::MultiGoto { gotoedges, .. } => {
+                    for e in gotoedges.iter_mut().filter(|e| **e == old) {
+                        *e = new;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
 
     /// (kuna) Inline a duplicated **cross-jump tail** into a `BlockGoto` that
