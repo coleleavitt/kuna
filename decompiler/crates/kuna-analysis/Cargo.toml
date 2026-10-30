@@ -20,7 +20,6 @@ msvc-demangler.workspace = true
 undname.workspace = true
 gimli.workspace = true
 pdb.workspace = true
-flate2.workspace = true
 lzma-rs.workspace = true
 brotli-decompressor.workspace = true
 
