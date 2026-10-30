@@ -2741,7 +2741,7 @@ impl PrintC {
             None
         };
         self.java_caught_shown.clear();
-        self.java_throw_userop = (self.out_lang == crate::kuna_lang::OutLang::Java)
+        self.java_throw_userop = (self.out_lang == crate::kuna_lang::OutLang::Java && arch.java_try)
             .then(|| arch.userops.get_op_by_name(b"throwException").map(|u| u.get_index() as u64))
             .flatten();
         let _emitted_decls = self.emit_local_var_decls(fd, arch);
@@ -4647,7 +4647,7 @@ impl PrintC {
             return;
         }
         let n = list.len();
-        if self.java_catches.is_some() && list.iter().any(|&b| self.java_try_shape(fd, b, &[]).is_some()) {
+        if self.java_catches.is_some() && self.list_has_java_try(fd, &list) {
             self.emit_block_ls_java_try(fd, arch, &list);
             return;
         }
@@ -5043,6 +5043,15 @@ impl PrintC {
         }
         let Some(id) = o.get_in(0).and_then(|v| fd.vbank().get(v)).map(|v| v.get_offset()) else { return false };
         self.java_throw_userop == Some(id)
+    }
+
+    /// (kuna `javatry`) Does the list, nested lists included, hold a `try`
+    /// dispatch?
+    fn list_has_java_try(&self, fd: &Funcdata, list: &[BlockId]) -> bool {
+        list.iter().any(|&b| match fd.sblocks_ref().block(b).get_type() {
+            crate::block::BlockType::Ls => self.list_has_java_try(fd, fd.sblocks_ref().block(b).get_list()),
+            _ => self.java_try_shape(fd, b, &[]).is_some(),
+        })
     }
 
     /// (kuna `javatry`) `emit_block_ls` for a list holding a `try` dispatch: the

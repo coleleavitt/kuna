@@ -296,15 +296,6 @@ impl PrintC {
         // leaves such instructions out of the ranges).
         let flat: Vec<(usize, BlockId)> =
             units.iter().enumerate().flat_map(|(u, list)| list.iter().map(move |&b| (u, b))).collect();
-        if std::env::var_os("KUNA_JT_DEBUG").is_some() {
-            eprintln!(
-                "[jt] shape catches={:?} body={:?} ranges={:x?} flat={:x?}",
-                shape.catches,
-                shape.body,
-                table.ranges(first),
-                flat.iter().map(|&(u, b)| (u, front_addr(fd, b), fd.sblocks_ref().block(b).get_type())).collect::<Vec<_>>()
-            );
-        }
         let mut split = 0;
         for (k, &(_, b)) in flat.iter().enumerate() {
             if front_addr(fd, b).is_some_and(|a| table.covers(first, a)) {
@@ -338,14 +329,12 @@ impl PrintC {
             if !clauses_exit {
                 if after.iter().any(|&p| self.part_can_throw(fd, &table, p, first)) {
                     loose_from = Some(inside.len());
-                    if std::env::var_os("KUNA_JT_DEBUG").is_some() {
-                        eprintln!("[jt] loose try at {:#x}", fd.get_address().get_offset());
-                    }
                 }
-                if let Some(straddler) = inside.last_mut().filter(|p| p.1.is_some()) {
-                    straddler.1 = None;
-                    after.remove(0);
-                    loose_from = loose_from.map(|k| k - 1);
+                if loose_from.is_none() {
+                    if let Some(straddler) = inside.last_mut().filter(|p| p.1.is_some()) {
+                        straddler.1 = None;
+                        after.remove(0);
+                    }
                 }
                 inside.append(&mut after);
             }
@@ -443,24 +432,29 @@ impl PrintC {
         self.context.push_mod();
         self.context.set_mod(modifiers::NO_BRANCH);
         let id = self.emit.open_brace_indent(self.lang().kw_open_curly, to_emit_brace(self.options.brace_ifelse));
+        match loose_from {
+            Some(k) => {
+                self.emit_java_piece_run(fd, arch, &pieces[..k], handler);
+                self.emit.tag_line();
+                self.emit.print("// outside the try range from here: an exception below skips the catch", SyntaxHighlight::CommentColor);
+                self.emit_java_piece_run(fd, arch, &pieces[k..], handler);
+            }
+            None => self.emit_java_piece_run(fd, arch, pieces, handler),
+        }
+        self.emit.close_brace_indent(self.lang().kw_close_curly, id);
+        self.context.pop_mod();
+    }
+
+    /// Statements in order, a straddling block printing only its share.
+    fn emit_java_piece_run(&mut self, fd: &Funcdata, arch: &Architecture, pieces: &[Piece], handler: u64) {
         for &(blk, filter) in pieces {
             self.java_push_filter(fd, blk, filter, handler);
         }
         let blocks: Vec<BlockId> = pieces.iter().map(|p| p.0).collect();
-        match loose_from {
-            Some(k) => {
-                self.emit_block_ls_java_try(fd, arch, &blocks[..k]);
-                self.emit.tag_line();
-                self.emit.print("// outside the try range from here: an exception below skips the catch", SyntaxHighlight::CommentColor);
-                self.emit_block_ls_java_try(fd, arch, &blocks[k..]);
-            }
-            None => self.emit_block_ls_java_try(fd, arch, &blocks),
-        }
+        self.emit_block_ls_java_try(fd, arch, &blocks);
         for &(blk, filter) in pieces.iter().rev() {
             self.java_pop_filter(fd, blk, filter);
         }
-        self.emit.close_brace_indent(self.lang().kw_close_curly, id);
-        self.context.pop_mod();
     }
 
     /// A catch clause that is one jump: `{ continue; }`, `{ goto L; }`.
