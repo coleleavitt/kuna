@@ -1326,6 +1326,8 @@ pub struct ArchContext {
     pub strlen_scan: bool,
     /// (kuna) `rangefold` — fold comparisons and masks a dominating branch decides.
     pub range_fold: bool,
+    /// (kuna) `pow2select` — rewrite a signed division or remainder by a power of two written as a select or a sign-mask shift.
+    pub pow2_select: bool,
     /// Guard stack slots against stores through stack-derived pointers.
     pub stack_store_guard: bool,
     /// (kuna) region-based (Phoenix/SAILR) structurer: structure the CFG by
@@ -2038,6 +2040,7 @@ impl ArchContext {
             devectorize_reduction: false, // devectorize (opt-in default-off)
             strlen_scan: false, // strlenscan (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
+            pow2_select: false, // pow2select (live value copied from the Architecture)
             stack_store_guard: false,
             region_structure: false,     // regionstructure (opt-in default-off)
             guard_arm: false,            // guardarm (opt-in default-off)

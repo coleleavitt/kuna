@@ -2136,7 +2136,8 @@ mod tests {
         // and kuna-dex-javanew / an allocation and its <init> call as new T(args)
         // and kuna-gotonext / a goto to the next statement, a case fall-through, a loop or switch exit
         // and kuna-rangefold / a test or mask a dominating branch's range decides
-        assert_eq!(count, 617, "corpus file count drifted");
+        // and kuna-pow2select + kuna-pow2select-aarch64 / x / 2^k and x % 2^k written as a select
+        assert_eq!(count, 619, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
