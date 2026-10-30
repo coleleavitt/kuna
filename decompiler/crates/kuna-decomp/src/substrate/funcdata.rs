@@ -461,6 +461,9 @@ pub struct Funcdata {
         (int4, kuna_base::types::uintb),
         std::rc::Rc<crate::kuna_rustabi::CalleeReturnWrites>,
     >,
+    /// (kuna `calleeretpurge`) Per direct-call-target extrapop read off the
+    /// callee's own `ret imm16`, keyed by `(space index, entry offset)`.
+    kuna_callee_purge: std::collections::HashMap<(int4, kuna_base::types::uintb), int4>,
     /// (kuna `bejoin evidence`) The model's output pair, the wide-return
     /// verdicts of this function and its callees, and the callees a call asked
     /// about without one. Seeded by the driver
@@ -807,6 +810,7 @@ impl Funcdata {
             kuna_wrapped_wire_storage: std::collections::BTreeMap::new(),
             kuna_wire_symbol_for_high: std::collections::BTreeMap::new(),
             kuna_callee_ret_writes: std::collections::HashMap::new(),
+            kuna_callee_purge: std::collections::HashMap::new(),
             kuna_wide: None,
             kuna_callwide: None,
             kuna_callee_entry_dead: std::collections::HashMap::new(),
@@ -1130,6 +1134,19 @@ impl Funcdata {
         if let Some(sp) = entry.get_space() {
             self.kuna_callee_ret_writes.insert((sp.get_index(), entry.get_offset()), writes);
         }
+    }
+
+    /// (kuna `calleeretpurge`) Record the extrapop `entry`'s own returns take.
+    pub fn kuna_set_callee_purge(&mut self, entry: &Address, purge: int4) {
+        if let Some(sp) = entry.get_space() {
+            self.kuna_callee_purge.insert((sp.get_index(), entry.get_offset()), purge);
+        }
+    }
+
+    /// (kuna `calleeretpurge`) The recorded return purge of `entry`, if any.
+    pub fn kuna_callee_purge(&self, entry: &Address) -> Option<int4> {
+        let sp = entry.get_space()?;
+        self.kuna_callee_purge.get(&(sp.get_index(), entry.get_offset())).copied()
     }
 
     /// (kuna `rustabi`) The recorded probe of `entry`'s body, if one was taken.

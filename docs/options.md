@@ -706,6 +706,10 @@ Three tiers:
 | Foo *this renders as void * | [`cppproto`](#cppproto) |
 | a namespaced or templated function loses its dwarf prototype | [`cppproto`](#cppproto) |
 | one unmappable parameter type discards the whole dwarf signature | [`cppproto`](#cppproto) |
+| a clang -O2 static function's dwarf prototype names a parameter the body never reads | [`dwarfnocall`](#dwarfnocall) |
+| a parameter renders under the name of the one before it | [`dwarfnocall`](#dwarfnocall) |
+| callers of an optimized static function pass an undefined extra argument | [`dwarfnocall`](#dwarfnocall) |
+| a constant argument folded away by the compiler still appears in the prototype | [`dwarfnocall`](#dwarfnocall) |
 | a dwarf-typed local or parameter renders void * despite -g debug info | [`typedepth`](#typedepth) |
 | const char ** or char *const [] loses its element type | [`typedepth`](#typedepth) |
 | a typedef'd struct pointer degrades to void * | [`typedepth`](#typedepth) |
@@ -1140,6 +1144,10 @@ Three tiers:
 | a get-PC thunk or PIE GOT-base helper eats a live register | [`calleepreserves`](#calleepreserves) |
 | an argument register that provably crosses a helper renders as `unsigned int v1; // edx` with no definition | [`calleepreserves`](#calleepreserves) |
 | the recovered return of a call is sourced from a register the callee never writes | [`calleepreserves`](#calleepreserves) |
+| an i386 caller of a struct-returning function splits one local into two after the call | [`calleeretpurge`](#calleeretpurge) |
+| a local written before a call to a `ret $4` callee reads back undefined after it | [`calleeretpurge`](#calleeretpurge) |
+| stack offsets drift by 4 after every call that returns a struct through a hidden pointer | [`calleeretpurge`](#calleeretpurge) |
+| a stdcall callee's argument bytes are never removed from the caller's stack | [`calleeretpurge`](#calleeretpurge) |
 | a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
 | main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
 | a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
@@ -2856,6 +2864,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-cppproto
 - **Example:** `option cppproto off`
 
+### `dwarfnocall` -- on | off, default `on`
+
+- **Symptoms:** a clang -O2 static function's dwarf prototype names a parameter the body never reads; a parameter renders under the name of the one before it; callers of an optimized static function pass an undefined extra argument; a constant argument folded away by the compiler still appears in the prototype.
+- **What it does:** Drop the parameters a DW_CC_nocall DWARF subprogram no longer receives before its prototype is locked. A DWARF prototype is applied locked, so its parameter list decides which registers the function reads. clang's dead-argument elimination rewrites an internal function's convention -- an unused or constant parameter is removed and the remaining ones move into the earlier argument slots -- and marks the subprogram DW_AT_calling_convention DW_CC_nocall, but still lists every source parameter. The removed ones carry no DW_AT_location (a constant one carries DW_AT_const_value instead). Locking the source list put `work(int *p,int unused,int k)` on a body that reads k from ESI: the loop bound printed as `unused`, and every caller passed an undefined third argument. With the option on (default) the commit removes the location-less parameters of a DW_CC_nocall subprogram from both DWARF prototype streams (by name and by entry address), so the body reads `work(int *p,int k)` and callers pass two arguments. GCC's IPA clones (`.constprop`, `.isra`, `.part`) are concrete instances linked by DW_AT_abstract_origin, which neither DWARF arm follows, so they never get a source prototype to begin with. The return type is kept: DWARF does not say whether the return value was removed too.
+- **When to flip:** On by default. Keep it on for clang -O2 -g binaries: a static function whose debug-info prototype names a parameter the body never reads while the real argument renders under the wrong name, or calls that pass an undefined extra argument. Flip OFF to see the source-level DWARF prototype unchanged.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · ida95-14-dwarf-nocall
+- **Example:** `option dwarfnocall off`
+
 ### `typedepth` -- on | off, default `on`
 
 - **Symptoms:** a dwarf-typed local or parameter renders void * despite -g debug info; const char ** or char *const [] loses its element type; a typedef'd struct pointer degrades to void *; a global array of string pointers is marked one byte wide; deep pointer chains (char ***) truncate to void **.
@@ -3771,6 +3787,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when a value that provably crosses a call in the disassembly renders as an undefined local -- the standard shape is an i386 PIE where an argument is loaded into EDX/ECX before a call to a two-byte get-PC thunk and reappears as `v1` with no assignment, while a second argument loaded after the same call is recovered. Same shape on any hand-written or compiler-emitted helper that preserves more registers than its ABI promises. It only ever fires against a fully decoded callee whose paths end at returns or known unconditional no-return calls, and only ever KEEPS a value, so it cannot invent one. Flip OFF to get the convention-only answer back: the way this could be wrong is a callee decoded in the wrong instruction mode (an ARM/Thumb boundary), where the bytes read are not the instructions that run, or to bisect whether this pass rather than trial scoring changed a call's surroundings.
 - **Where / provenance:** P3/call-guard · kuna · correctness-fix · repipe-get-pc-helper-loses
 - **Example:** `option calleepreserves off`
+
+### `calleeretpurge` -- on | off, default `on`
+
+- **Symptoms:** an i386 caller of a struct-returning function splits one local into two after the call; a local written before a call to a `ret $4` callee reads back undefined after it; stack offsets drift by 4 after every call that returns a struct through a hidden pointer; a stdcall callee's argument bytes are never removed from the caller's stack.
+- **What it does:** Take a direct callee's extrapop from its own `ret imm16` instead of the prototype model. An x86 callee that ends `ret N` pops N argument bytes on top of the return address: i386 SysV does it for every function that returns a struct through a hidden pointer (`ret $4`), and every callee-cleans convention does it for its parameter area. x86gcc.cspec states extrapop=4 for every call, so ActionExtraPopSetup planted `ESP = ESP + 4` after the call, the caller's own `sub esp,4` that re-reserves the popped slot was taken at face value, and every stack reference after the call drifted by N -- one local split into two variables and the read half had no definition. The driver decodes each direct callee once per image (fall-through, direct branches and calls; a path ends at a RETURN or an indirect branch) and records the net stack-pointer change of every RETURN instruction it reaches. When they all agree, ActionExtraPopSetup uses that change as the call's extrapop, exact, in place of the model's or of an unknown model's guess. A callee with no reachable return (a PLT stub, a no-return function), or whose returns disagree, keeps the prototype's answer.
+- **When to flip:** On by default. Keep it on for i386 code: a caller of a struct-returning function shows locals that change name after the call, or reads a slot the source wrote before the call as an undefined value. Flip OFF to get the prototype model's extrapop back, e.g. to bisect a stack-offset change on an x86 image or when a callee was decoded at a wrong entry.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-9-callee-ret-purge
+- **Example:** `option calleeretpurge off`
 
 ### `calleeretpreserves` -- on | off, default `on`
 

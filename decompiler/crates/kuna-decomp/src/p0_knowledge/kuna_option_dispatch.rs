@@ -151,6 +151,7 @@ kuna_options! { self, p1;
     "v850indirectbranch" => on_off!(v850_indirect_branch, "V850 indirect-branch reclassification"),
     "fastfailnoreturn" => on_off!(fastfail_noreturn, "Windows int 0x29 (__fastfail) no-return"),
     "ptrauthtrap" => on_off!(ptrauth_trap, "arm64e pointer-auth failure-check removal"),
+    "calleeretpurge" => on_off!(callee_ret_purge, "Callee `ret imm16` extrapop"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;
@@ -1161,6 +1162,7 @@ kuna_options! { self, p1;
     "dwarf_lines" => {
         on_off!(analysis_dwarf_lines, "DWARF .debug_line source-line comment pass")
     },
+    "dwarfnocall" => on_off!(analysis_dwarfnocall, "DWARF nocall parameter drop"),
     "cppproto" => {
         on_off!(analysis_cppproto, "DWARF C++ prototype recovery arm")
     },

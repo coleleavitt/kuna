@@ -1112,6 +1112,7 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
         // (kuna `calleepreserves`) And for the call-guard seam's view of the
         // callee's writes; shares rustabi's cache, so this is a map lookup.
         crate::p4_calls::kuna_calleepreserves::seed_callee_preserves(arch, fd);
+        crate::p4_calls::kuna_calleeretpurge::seed(arch, fd);
         crate::kuna_calleememory::seed(arch, fd);
     }
 }
@@ -1839,6 +1840,7 @@ fn decompile_func_full_with_objects_inner(
         // decode: the registers the callee is proven NOT to write; inert unless
         // `option calleepreserves` is live.
         crate::p4_calls::kuna_calleepreserves::seed_callee_preserves(arch, &mut fd);
+        crate::p4_calls::kuna_calleeretpurge::seed(arch, &mut fd);
         crate::kuna_calleememory::seed(arch, &mut fd);
         // Report a pass panic as a per-function failure at the driver boundary.
         let res =

@@ -3339,6 +3339,28 @@ pointer that is still an unresolved frame-derived expression keeps the INDIRECT
 too, until the merge resolves. Elsewhere such a pointer is usually a cursor into
 a local buffer, and it defers to the mark.
 
+### (kuna) `calleeretpurge` — the callee's own `ret imm16`
+
+A model that states an extrapop states it for every call. `x86gcc.cspec` says 4,
+yet an i386 SysV function that returns a struct through a hidden pointer ends
+`ret $4`: it pops the pointer too. `ActionExtraPopSetup` planted `ESP = ESP + 4`
+after such a call, the caller's own `sub esp,4` that re-reserves the popped slot
+was then taken at face value, and every stack reference after the call moved by
+4. One local split into two variables, and the half read after the call had no
+definition.
+
+The driver now decodes each direct callee once per image, while the translator
+is still reachable (`kuna_calleeretpurge.rs (probe_return_purge)`). The walk
+follows fall-through, direct branches and direct calls from the entry; a path
+ends at a `RETURN` or at an indirect branch. For every `RETURN` instruction it
+reaches it sums the constant adds to the stack pointer inside that instruction:
+`ret` gives 4 (8 on x86-64) and `ret N` gives 4 + N. When every reached return
+agrees, `ActionExtraPopSetup` uses that value as the call's extrapop, exactly,
+in place of the prototype's, and in place of an unknown model's guess. A callee
+with no reachable return (a PLT stub, a no-return function), whose returns
+disagree, or whose return writes the stack pointer in any other way keeps the
+prototype's answer. `option calleeretpurge off` restores the model's extrapop.
+
 ### (kuna) `swiftcall` — Swift's `self` and error registers
 
 Swift's convention adds registers the C model has no row for: `swiftself` (x20

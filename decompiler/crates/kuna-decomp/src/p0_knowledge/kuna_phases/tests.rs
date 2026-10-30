@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_354() {
-    assert_eq!(kuna_num_settables(), 354);
-    assert_eq!(SETTABLE_TABLE.len(), 354);
+fn settable_count_is_356() {
+    assert_eq!(kuna_num_settables(), 356);
+    assert_eq!(SETTABLE_TABLE.len(), 356);
 }
 
 #[test]
-fn tier_counts_are_121_core_134_transform_99_analysis() {
+fn tier_counts_are_122_core_134_transform_100_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_121_core_134_transform_99_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (121, 134, 99));
+    assert_eq!((core, transform, analysis), (122, 134, 100));
 }
 
 #[test]
@@ -562,6 +562,9 @@ fn option_values_live_value_present_for_156() {
         // analysis COMMIT boundary (console-side via kuna_live_value), like the
         // analysis-pass gates above. Default-on.
         "cppproto",
+        // (kuna) DWARF DW_CC_nocall parameter drop -- the same commit-boundary
+        // gate as `cppproto`, read console-side. Default-on.
+        "dwarfnocall",
         // (kuna) Demangled C++ signature application — an analysis-tier gate read
         // at the analysis COMMIT boundary (console-side via kuna_live_value), like
         // `cppproto` above. Three-valued, default `proven`.
@@ -935,7 +938,8 @@ fn option_values_live_value_present_for_156() {
     // 154 -> 155: +1 for `ptrauthtrap` (live_field = ptrauth_trap).
     // 155 -> 156: +1 for `authptrcall` (live_field = analysis_authptrcall).
     // 156 -> 157: +1 for `importdata`.
-    assert_eq!(with_live, 157);
+    // 157 -> 158: +1 for `calleeretpurge` (live_field).
+    assert_eq!(with_live, 158);
 }
 
 #[test]
@@ -1158,7 +1162,9 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unwindstarts`; its P1 row sits beside `eh_frame_full`.
     // +2 for `dyldimage` and `dyldcrossrefs`; their P1 rows follow `swiftdemangle`.
     // +1 for `swiftcall`, beside `swifttypes`.
-    assert_eq!(json.matches("},\n").count(), 353);
+    // +1 for `calleeretpurge`.
+    // +1 for `dwarfnocall`.
+    assert_eq!(json.matches("},\n").count(), 355);
 }
 
 #[test]

@@ -4527,6 +4527,9 @@ fn commit_analysis_output(
     //    off, they are dropped and the DWARF recovery is the name-only walk,
     //    byte-identical to before this arm existed.
     let mut out = out;
+    if prog.arch().analysis_dwarfnocall {
+        out.apply_dwarf_nocall();
+    }
     if prog.arch().analysis_cppproto {
         let cpp = std::mem::take(&mut out.cpp_dwarf);
         out.symbols.extend(cpp.symbols);

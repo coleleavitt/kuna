@@ -941,6 +941,9 @@ pub struct Architecture {
     /// decode of the callee's own body proves it writes (option
     /// `calleepreserves`).  See [`crate::p4_calls::kuna_calleepreserves`].
     pub callee_preserves: bool,
+    /// (kuna) Take a direct callee's extrapop from its own `ret imm16`
+    /// (option `calleeretpurge`).  See [`crate::p4_calls::kuna_calleeretpurge`].
+    pub callee_ret_purge: bool,
     pub global_call_ranges: bool,
     /// (kuna) Let the callee's decoded body answer for the call's RETURN
     /// register too (option `calleeretpreserves`).  See
@@ -1583,6 +1586,9 @@ pub struct Architecture {
         (int4, uintb),
         std::rc::Rc<crate::kuna_rustabi::CalleeReturnWrites>,
     >,
+    /// (kuna `calleeretpurge`) Per-image cache of each direct callee's decoded
+    /// return purge, keyed by `(space index, entry offset)`.
+    pub kuna_callee_purge_cache: std::collections::HashMap<(int4, uintb), Option<int4>>,
     /// (kuna `bejoin evidence`) Per-image cache of the wide-return proof
     /// ([`crate::kuna_bejoin::seed_wide_returns`]): the model's pair, each
     /// function's verdict, keyed by its `(space index, entry offset)` so a
@@ -2163,6 +2169,9 @@ pub struct Architecture {
     /// entry ADDRESS instead of by name. Off restores the name-only walk, which
     /// drops the signature of every out-of-line C++ member function.
     pub analysis_cppproto: bool,
+    /// (kuna) Drop the parameters a `DW_CC_nocall` DWARF subprogram no longer
+    /// receives (option `dwarfnocall`).
+    pub analysis_dwarfnocall: bool,
     /// (kuna) Gate full-depth DWARF type resolution (`typedepth`); default
     /// **on**. The type mapper's recursion guard becomes upstream's per-DIE
     /// re-entry counter (`DWARFDataTypeImporter.trackRecursion`) instead of a
@@ -3101,6 +3110,7 @@ impl Architecture {
             zero_fill_return: true,
             zero_call_regs: true,
             callee_preserves: true,
+            callee_ret_purge: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
             callee_scratch_body: true,
@@ -3209,6 +3219,7 @@ impl Architecture {
             kuna_fn_budget: None,   // (kuna) decompile-all watchdog: no budget by default
             kuna_fn_deadline: None, // (kuna) set per drive from kuna_fn_budget
             kuna_callee_write_cache: std::collections::HashMap::new(),
+            kuna_callee_purge_cache: std::collections::HashMap::new(),
             kuna_wide: crate::kuna_bejoin::WideCache::default(),
             kuna_callwide: crate::p4_calls::kuna_callwide::ProofSlot::default(),
             kuna_callee_dead_cache: std::collections::HashMap::new(),
@@ -3300,6 +3311,7 @@ impl Architecture {
             analysis_datasyms: false,
             analysis_dwarf_lines: false,
             analysis_cppproto: false,
+            analysis_dwarfnocall: false,
             analysis_typedepth: false,
             analysis_dwarfstructs: false,
             analysis_dwarfvariants: false,
@@ -3521,6 +3533,7 @@ impl Architecture {
         self.zero_fill_return = true; // (kuna) default-on (0/675 ablation): the zero a narrow write leaves in a returned q register's upper half is no part of the value
         self.zero_call_regs = true; // (kuna) default-on (0/675 ablation): a register a -fzero-call-used-regs epilogue clears before the return is no part of the value
         self.global_call_ranges = true;
+        self.callee_ret_purge = true; // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)
         self.callee_scratch_body = true; // (kuna) DIV-149 default-on: a decoded callee that clobbers only SCRATCH registers still counts as a body for calleepreserves, so the value a caller sets before MSVC's out-of-line stack probe survives it (0/675 ablation)
@@ -3765,6 +3778,7 @@ impl Architecture {
         self.analysis_dwarfstructs = true; // (kuna) DIV: DWARF aggregate-layout import default-ON (a zero-size aggregate is not conservative -- the ABI classifier acts on it; real-ELF DWARF path only, so every parity gate is byte-identical)
         self.analysis_dwarfvariants = true; // (kuna) DIV-87: DWARF variant-part import default-ON (the compiler states the discriminant; real-ELF DWARF path only, so every parity gate is byte-identical)
         self.analysis_variantnames = true; // (kuna) discriminant-value naming default-ON (acts only where a variant part was imported, so the parity gates cannot see it)
+        self.analysis_dwarfnocall = true; // (kuna) a DW_CC_nocall function's DWARF prototype loses the parameters with no location; real-ELF DWARF path only
         self.analysis_cppproto = true; // (kuna) DIV: DWARF C++ prototype arm default-ON (recovers ground truth the name-only walk drops; real-ELF DWARF path only, so every parity gate is byte-identical)
         // (kuna) DIV: demangled C++ signatures default to the PROVEN tier — only
         // the prototypes the mangling entails (ctor/dtor/cv-qualified member/
