@@ -2127,7 +2127,8 @@ mod tests {
         // and kuna-cfstrings / a Mach-O __cfstring reference renders its string literal
         // and kuna-kernelcache / IMG4 + MH_FILESET kernelcache loading
         // and kuna-unwindstarts / a stripped Mach-O's __unwind_info starts join the inventory
-        assert_eq!(count, 606, "corpus file count drifted");
+        // and kuna-dyldcrossrefs / a dyld shared cache image names its calls into other images
+        assert_eq!(count, 607, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
