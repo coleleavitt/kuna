@@ -2902,7 +2902,7 @@ decode-table corrections with no option. Pinned by
 `tests/stages/kuna-a64-sysregs.xml`.
 
 
-## 2.12 Itanium exception edges
+## 2.15 Itanium exception edges
 
 **(kuna) `option itaniumeh on|off`, default off,
 `decompiler/crates/kuna-decomp/src/p2_lift/kuna_itaniumeh.rs`, fed by
