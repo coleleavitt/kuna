@@ -690,36 +690,90 @@ fn reaches_only_noreturn_walk<B: InstructionBody + ?Sized>(
 
 /// The call sites that call an import no-return through its `.got` slot: an x86
 /// `call qword ptr [rip+disp32]` (x86-64) or `call dword ptr [abs32]` (i386),
-/// optionally `notrack`, whose slot the load-time passes flagged no-return. Such a
-/// call names no function in the Listing, so the static-target test above cannot
-/// see it; without this a `-fno-plt` wrapper ending in `exit()` never joins the
-/// terminal set.
+/// optionally `notrack`, or an AArch64 `blr xN` whose `xN` an `adrp`/`ldr` pair
+/// just before it loaded from the slot, where the load-time passes flagged the
+/// slot no-return. Such a call names no function in the Listing, so the
+/// static-target test above cannot see it; without this a `-fno-plt` wrapper
+/// ending in `exit()` never joins the terminal set.
 fn terminal_slot_calls(listing: &Listing, file: &object::File) -> BTreeSet<u64> {
     use object::read::Object;
     let mut out = BTreeSet::new();
-    let wide = match file.architecture() {
-        object::Architecture::X86_64 => true,
-        object::Architecture::I386 => false,
-        _ => return out,
-    };
+    let arch = file.architecture();
+    if !matches!(arch, object::Architecture::X86_64 | object::Architecture::I386 | object::Architecture::Aarch64) {
+        return out;
+    }
     for (&vma, insn) in listing.instructions() {
         if !insn.flow.is_call || !insn.flows.is_empty() {
             continue;
         }
-        let Some(bytes) = bytes_at(file, vma, insn.len as usize) else { continue };
-        let op = if bytes.first() == Some(&0x3e) { &bytes[1..] } else { bytes };
-        let [0xff, 0x15, d0, d1, d2, d3] = *op else { continue };
-        let disp = u32::from_le_bytes([d0, d1, d2, d3]);
-        let slot = if wide {
-            vma.wrapping_add(u64::from(insn.len)).wrapping_add(disp as i32 as i64 as u64)
-        } else {
-            u64::from(disp)
+        let slot = match arch {
+            object::Architecture::Aarch64 => aarch64_call_slot(file, vma),
+            _ => x86_call_slot(file, vma, insn.len, arch == object::Architecture::X86_64),
         };
-        if listing.is_noreturn_target(slot) {
+        if slot.is_some_and(|slot| listing.is_noreturn_target(slot)) {
             out.insert(vma);
         }
     }
     out
+}
+
+/// The slot an x86 `[notrack] call [rip+disp32]` / `call [abs32]` at `vma` reads.
+fn x86_call_slot(file: &object::File, vma: u64, len: u32, wide: bool) -> Option<u64> {
+    let bytes = bytes_at(file, vma, len as usize)?;
+    let op = if bytes.first() == Some(&0x3e) { &bytes[1..] } else { bytes };
+    let [0xff, 0x15, d0, d1, d2, d3] = *op else { return None };
+    let disp = u32::from_le_bytes([d0, d1, d2, d3]);
+    Some(if wide {
+        vma.wrapping_add(u64::from(len)).wrapping_add(disp as i32 as i64 as u64)
+    } else {
+        u64::from(disp)
+    })
+}
+
+/// The slot an AArch64 `blr xN` at `vma` reads: the nearest preceding
+/// `ldr xN, [xM, #imm]` within four instructions, and the nearest `adrp xM`
+/// before that load, with neither register written in between.
+fn aarch64_call_slot(file: &object::File, vma: u64) -> Option<u64> {
+    let word = |at: u64| bytes_at(file, at, 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let blr = word(vma)?;
+    if blr & 0xffff_fc1f != 0xd63f_0000 {
+        return None;
+    }
+    let target = (blr >> 5) & 0x1f;
+    let writes = |w: u32, reg: u32| w & 0x1f == reg && !is_store_or_branch(w);
+    let mut at = vma;
+    let (load_at, base, offset) = loop {
+        at = at.checked_sub(4).filter(|&a| vma - a <= 16)?;
+        let w = word(at)?;
+        if w & 0xffc0_0000 == 0xf940_0000 && w & 0x1f == target {
+            break (at, (w >> 5) & 0x1f, u64::from((w >> 10) & 0xfff) * 8);
+        }
+        if writes(w, target) {
+            return None;
+        }
+    };
+    let mut at = load_at;
+    loop {
+        at = at.checked_sub(4).filter(|&a| load_at - a <= 16)?;
+        let w = word(at)?;
+        if w & 0x9f00_0000 == 0x9000_0000 && w & 0x1f == base {
+            let imm = (((w >> 5) & 0x7_ffff) << 2) | ((w >> 29) & 0x3);
+            let page = ((i64::from(imm as i32) << 43) >> 31) as u64;
+            return Some((at & !0xfff).wrapping_add(page).wrapping_add(offset));
+        }
+        if writes(w, base) {
+            return None;
+        }
+    }
+}
+
+/// Is `w` an AArch64 store or branch, whose low five bits name no destination?
+fn is_store_or_branch(w: u32) -> bool {
+    let op0 = (w >> 25) & 0xf;
+    let load_store = op0 & 0x5 == 0x4;
+    let store = load_store && (w >> 22) & 1 == 0;
+    let branch = op0 & 0xe == 0xa;
+    store || branch
 }
 
 /// The `len` file bytes at `vma`, from the section that holds them.

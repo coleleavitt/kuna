@@ -1474,10 +1474,11 @@ the deindirect schedule the restart whose re-flow plants the artificial halt. Th
 extra upstream Win32 no-return-name list remains on the PE/COFF arm only. An ELF
 slot named `abort`, `exit` or `_Unwind_Resume` takes the base ELF no-return list's
 fact at the slot address, like a PLT stub. Off, PE, Mach-O and ELF import-slot
-calls render byte for byte as before; other formats are unaffected either way. One
-rendering is still wrong on: code that takes the slot's *address* (`lea slot(%rip)`,
-then `call *(%rax)`) prints that address as the import's name, because the slot and
-the function share one symbol.
+calls render byte for byte as before; other formats are unaffected either way. Code that
+takes the slot's *address* (`lea slot(%rip)`, then `call *(%rax)`) keeps the constant:
+`ActionConstantPtr` (`p9_emit/coreaction_render.rs (is_pointer)`) declines a code
+Symbol whose address carries `externref`, because the slot and the function share one
+Symbol and the function's name would state the wrong value.
 The `externref` mark also protects the slot until that resolution: P3 read-only
 folding cannot replace it with an on-disk thunk/name RVA, even if a hostile or
 single-section PE mapped the IAT executable and non-writable.
@@ -7022,8 +7023,10 @@ gates still control this inference.
 A seed need not be a function: an import a `-fno-plt` build reaches only through
 its `.got` slot is flagged at the slot's address (§1.3), and the call through it
 names no target the Listing can see. `terminal_slot_calls` therefore decodes each
-x86 `call [rip+disp32]` (x86-64) or `call [abs32]` (i386), `notrack` allowed,
-whose static target is unknown, and a call whose slot is a no-return seed ends its
+x86 `call [rip+disp32]` (x86-64) or `call [abs32]` (i386), `notrack` allowed, and
+each AArch64 `blr xN` whose register an `adrp`/`ldr` pair at most four instructions
+earlier loaded from the slot, whose static target is unknown, and a call whose slot
+is a no-return seed ends its
 path in both rules exactly as a call to a terminal function does, so a `die()`
 ending in `exit()` through the GOT is concluded no-return as its PLT twin is.
 

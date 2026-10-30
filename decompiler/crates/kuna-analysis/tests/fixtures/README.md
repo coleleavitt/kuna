@@ -721,6 +721,21 @@ exe is the only non-ELF binary in this tree large enough to statically link the
 MinGW CRT (≈0.5 MB), on par with the existing `mcount_x86_64` (0.9 MB).
 **Pin the VMAs as test consts** (`x86_64-w64-mingw32-objdump -d/-p`).
 
+`elf_got_slotaddr_x86_64` (15312 B, source `elf_got_slotaddr_x86_64.s`, `gcc -O2 -fPIC`) takes the
+ADDRESS of the `lgetxattr`/`getxattr` `.got` slots (`lea sym@GOTPCREL(%rip)`) in `pickx`@`0x1129`
+and jumps through the one it selects; `elf_got_noreturn_aarch64` (3040 B, source
+`elf_got_noreturn_aarch64.c`, stub library `elf_got_noreturn_aarch64_stub.c`) is the AArch64
+`-fno-plt` twin of the x86-64 fixture below: `die`@`0x103bc` reaches `exit` through
+`adrp/ldr/blr` and `check`@`0x10394` calls `die`. Both serve `tests/stages/ghdec-elfgotcall.xml`.
+
+```bash
+gcc -O2 -fPIC -Wl,--build-id=none -o elf_got_slotaddr_x86_64 elf_got_slotaddr_x86_64.s
+clang --target=aarch64-linux-gnu -fPIC -O2 -nostdlib -shared -fuse-ld=lld \
+    -Wl,-soname,libstub.so -o libstub.so elf_got_noreturn_aarch64_stub.c
+clang --target=aarch64-linux-gnu -fPIC -O2 -fno-plt -nostdlib -fuse-ld=lld -Wl,-e,main \
+    -Wl,--build-id=none -o elf_got_noreturn_aarch64 elf_got_noreturn_aarch64.c ./libstub.so
+```
+
 `elf_got_noreturn_x86_64` (15824 B, ELF x86-64 PIE, source `elf_got_noreturn_x86_64.c`) is the
 ELF **GOT import-call** fixture (`--option peimportcall`, `tests/stages/ghdec-elfgotcall.xml`).
 Built with `-fno-plt`, so every libc call is `call *slot(%rip)` through a `R_X86_64_GLOB_DAT`

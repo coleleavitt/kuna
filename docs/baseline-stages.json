@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3241,
-    3241
+    3244,
+    3244
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -463,14 +463,17 @@
     "data:ELFALIASNAMES #5: an alias spelled like a static function still selects that function",
     "data:ELFALIASNAMES #6: the alias's own definition keeps its name and body",
     "data:ELFALIASNAMES #7: no name is reported ambiguous",
+    "data:ELFGOTCALL #10: no bound slot address prints as a function name",
+    "data:ELFGOTCALL #11: AArch64 die joins the no-return set through its exit slot",
     "data:ELFGOTCALL #1: off leaves the abort GOT call unnamed",
     "data:ELFGOTCALL #2: off leaves the exit GOT call unnamed",
     "data:ELFGOTCALL #3: off truncates both functions at the next entry",
     "data:ELFGOTCALL #4: on binds the abort slot and ends the flow there",
-    "data:ELFGOTCALL #5: on binds the exit slot and ends the flow there",
+    "data:ELFGOTCALL #5: on binds the exit slot and ends the flow there (x86-64 and AArch64)",
     "data:ELFGOTCALL #6: on names the other GOT call in die",
     "data:ELFGOTCALL #7: the .data.rel.ro function-pointer table stays a table in both passes",
     "data:ELFGOTCALL #8: die joins the no-return set through its exit slot, in both passes",
+    "data:ELFGOTCALL #9: the address of a bound slot stays an address, not the import's name",
     "data:ELFMAIN #1: off, the entry is an anonymous sub with a body-driven signature",
     "data:ELFMAIN #2: off, the argument vector has no element type, so the string it holds is an integer",
     "data:ELFMAIN #3: default, the libc-start argument is named and declared, in both images",
