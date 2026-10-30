@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_395() {
-    assert_eq!(kuna_num_settables(), 395);
-    assert_eq!(SETTABLE_TABLE.len(), 395);
+fn settable_count_is_396() {
+    assert_eq!(kuna_num_settables(), 396);
+    assert_eq!(SETTABLE_TABLE.len(), 396);
 }
 
 #[test]
-fn tier_counts_are_125_core_148_transform_122_analysis() {
+fn tier_counts_are_125_core_148_transform_123_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_148_transform_122_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 148, 122));
+    assert_eq!((core, transform, analysis), (125, 148, 123));
 }
 
 #[test]
@@ -268,6 +268,8 @@ fn option_values_live_value_present_for_168() {
         // gate read via the `kuna_dynrelocs` env var (the relocations are applied
         // while the loader snapshots the image), like `relocrebase`.
         "dynrelocs",
+        // (kuna) Separate debug files: a load-time env gate like `dynrelocs`.
+        "debuglink",
         "noreturn_known",
         "libproto",
         // (kuna) The measured libc signature extension — an analysis-pass gate with
@@ -1224,7 +1226,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
     // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
     // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `codestrings`; +1 `protomerge`; +1 `bitidioms`; +1 `canaryglobal`.
-    assert_eq!(json.matches("},\n").count(), 394);
+    assert_eq!(json.matches("},\n").count(), 395);
 }
 
 #[test]

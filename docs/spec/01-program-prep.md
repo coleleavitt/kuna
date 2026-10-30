@@ -135,6 +135,7 @@ Two timing consequences shape the tier. First, anything that must influence the
 bridged across the process by environment variables the CLI exports:
 `KUNA_RELOC_OBJECTS` (`relocobjects`), `KUNA_I386_PIE_PLT` (`i386_pie_plt`),
 `KUNA_RELOCREBASE` (`relocrebase`), `KUNA_DYNRELOCS` (`dynrelocs`),
+`KUNA_DEBUGLINK` (`debuglink`),
 `KUNA_MSVCFPCONST` (`msvcfpconst`), `KUNA_PDATACHAINED` (`pdatachained`),
 `KUNA_REXTHUNK` (`rexthunk`), `KUNA_PEORDINAL` (`peordinal`),
 `KUNA_MACHO_ARM64E` (`macho-arm64e`),
@@ -687,7 +688,39 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   the object's byte order, plus the instruction fields and ABI formulas for ARM
   `CALL`/`JUMP24`/Thumb branches/`REL32`/`PREL31`, AArch64 branch/page/low-12
   forms, PowerPC64 `REL24`/TOC forms, and 32-bit SPARC `WDISP30`/`WPLT30`/
-  `HI22`/`LO10`/`PC22`/`PC10`/`DISP32` forms. An entry that cannot be encoded is left
+  `HI22`/`LO10`/`PC22`/`PC10`/`DISP32` forms. AArch64 also covers `ADR_PREL_LO21`,
+  `LD_PREL_LO19`, `CONDBR19`, `TSTBR14` and `MOVW_UABS_G0..G3` (the checked
+  groups range-checked). RISC-V covers `HI20`/`LO12_I`/`LO12_S`,
+  `PCREL_HI20`/`PCREL_LO12_I`/`PCREL_LO12_S`, the 8-byte `CALL`/`CALL_PLT`
+  `auipc`+`jalr` pair, `BRANCH`, `JAL`, the two compressed branches, the
+  `ADD`/`SUB`/`SET` data families and `32_PCREL`; `RELAX` and `ALIGN` are no-ops,
+  since the layout keeps the assembler's bytes. A `PCREL_LO12` names the label of
+  its `auipc` rather than the target, so each section's `PCREL_HI20` values are
+  kept by place and the low half takes the low twelve bits of that value. MIPS
+  covers `HI16`/`LO16`, `R_MIPS_26`, `PC16` and `PC32` (`JALR` is a hint). A REL
+  object splits a `HI16`'s addend across the pair, so each `HI16` waits for the
+  next `LO16` against the same symbol and takes the carry-adjusted high half of
+  `S + (AHI << 16) + sext(ALO)`; a `HI16` that never meets one is reported as
+  unresolved. PIC MIPS code addresses its GOT through `$gp`, so the layout
+  places `_gp` 0x7ff0 past the synthetic GOT described below. `_gp_disp` is
+  `_gp - P` for its `HI16` and `_gp - P + 4` for its `LO16`, which with the
+  `t9 = entry` seed (§1.4, `mips_gp`) folds the prologue's `$gp` to `_gp`.
+  `CALL16` and a global `GOT16` take the offset of the symbol's GOT slot from
+  `_gp`. A local `GOT16` pairs with the next `LO16` like a `HI16`: its slot
+  holds the 64 KiB page of `S + AHL` and the `LO16` adds the rest. `CALL16`
+  marks its symbol as a code extern, so the call renders by name. `GPREL16`,
+  `GPREL32` and the n64 composite relocations are not handled. 32-bit PowerPC covers `ADDR16`/`_LO`/`_HI`/`_HA`,
+  `REL24`/`PLTREL24`/`LOCAL24PC`, `REL14` and its branch-hint forms, and
+  `REL32`. A relocation that addresses its symbol's GOT slot
+  (x86-64 `GOTPCREL`/`GOTPCRELX`/`REX_GOTPCRELX`, AArch64 `ADR_GOT_PAGE`/
+  `LD64_GOT_LO12_NC`, RISC-V `GOT_HI20`, ARM `GOT_PREL`) gets one: a pre-link
+  object has no GOT, so the layout reserves a synthetic one after the sections,
+  one pointer-sized slot per target holding the target's address, and encodes
+  the field against that slot. The slots are read-only and reported with the
+  `dynrelocs` constant ranges, so a load through one folds to the target and
+  `mov rax, [rip+sym@GOTPCREL]` reads as `&sym`. This is the linker's own
+  GOTPCRELX relaxation reached by folding rather than by rewriting `mov` into
+  `lea` in the image, as IDA does. An entry that cannot be encoded is left
   untouched and classified by reason (unsupported, unresolved target, missing
   TOC, section bounds, required veneer, alignment, range, or invalid encoding).
   The loader reports exact failure totals in at most eight groups with three
@@ -795,8 +828,10 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   a laid-out section has its `st_value` shifted by **its own section's** delta,
   since the layout is non-contiguous and there is no single global offset (a COFF
   symbol needs no shift — it is reported as `VirtualAddress + value`, so the section
-  write already moved it). Every pass then produces an already-rebased fact with no
-  source change of its own.
+  write already moved it). The header, symbol and relocation fields are read and
+  written in the object's own byte order, so a big-endian object (MIPS, PowerPC,
+  s390x, SPARC) is rebased as well. Every pass then produces an already-rebased
+  fact with no source change of its own.
   A field with no relocation still yields an address in no laid-out section, so
   `kuna_relocrebase (retain_in_image)` **drops** exactly those rather than letting a
   pre-link address through — that is the phantom class. The single exception is a
@@ -1114,6 +1149,28 @@ each function's snapshot carries the model whose mapping holds its entry
 index resolves in the method's own file. A call into a class defined in another
 file of the APK prints by name through that pool, but the call is not linked to
 the other file's function.
+
+(kuna) **A stripped ELF's separate debug information** (`debuglink`,
+default on, a load-time gate read through `KUNA_DEBUGLINK`). Distributions
+strip their binaries and ship the symbol table and DWARF in a separate file.
+When the image has no `.symtab`,
+`decompiler/crates/kuna-analysis/src/loader/elf_debuglink.rs (companion_symbols)`
+looks for that file the way gdb does: the GNU build-id note names
+`<dir>/.build-id/<xx>/<rest>.debug`, accepted only if its own build-id matches,
+and `.gnu_debuglink` names a file next to the image, in its `.debug/`
+directory, or under `<dir>/<image's directory>/`, accepted only if its CRC32
+matches. `<dir>` is each entry of `KUNA_DEBUG_DIRS`, then `/usr/lib/debug`.
+Failing a companion, the XZ-compressed ELF in `.gnu_debugdata` (Fedora's
+MiniDebugInfo, decompressed with `lzma-rs`) supplies a function-only symbol
+table. The companion's defined function symbols join the loader's function
+symbols; an address that already has a name keeps it. A companion that carries
+DWARF also feeds the DWARF analyzer
+(`decompiler/crates/kuna-analysis/src/analyzers/dwarf/mod.rs (DwarfPass)` runs
+over the companion when the image has no `.debug_info`), since the addresses
+are the image's own; MiniDebugInfo has no DWARF. The loader also reports a `PT_LOAD`
+that maps an address another `PT_LOAD` already mapped from different file bytes
+(`elf_debuglink.rs (overlapping_loads)`), a shape only a hand-made or hostile
+image has; which bytes win is unchanged.
 
 (kuna) **UEFI TE images take a bounded container path of their own.**
 `decompiler/crates/kuna-analysis/src/loadimage_te.rs (TeLoadImage)` parses a
@@ -1448,9 +1505,17 @@ funcsym stream:
   target and can never resolve, which is the `(*dat_<addr>)(...)` rendering of a
   callee that is a *named function in the very same image*. Zero is not an
   ambiguity to be judged; it is a byte the run-time image never holds.
-  `decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs.rs (resolve)` walks
-  `.rela.dyn`/`.rel.dyn`/`.rela.plt` and computes the value the dynamic loader
-  would store: for `RELATIVE` the image's load bias plus the addend (kuna maps a
+  `decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs.rs (resolve)` reads
+  the tables the way the run-time loader finds them, through `PT_DYNAMIC`
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs/dtable.rs
+  (dynamic_relocations)`): `DT_RELA`, `DT_REL` and `DT_JMPREL` entries, the
+  `DT_RELR` bitmap (an even word is a `RELATIVE` slot, an odd word marks the
+  next 63 or 31 slots), Android's `DT_ANDROID_RELR`, and Android's `APS2`
+  packed `DT_ANDROID_REL[A]` stream (SLEB128 groups sharing offset delta, info or
+  addend), with symbols read from `DT_SYMTAB`. Section headers are not consulted,
+  so an image whose section table is stripped or forged is still relocated; an
+  image with no `PT_DYNAMIC` falls back to the section walk. For each entry it
+  computes the value the dynamic loader would store: for `RELATIVE` the image's load bias plus the addend (kuna maps a
   linked image at the vaddrs it declares, so the bias is zero and the value is the
   addend); for `GLOB_DAT`/`JUMP_SLOT` the symbol's address, **and only when that
   symbol is defined in this same image**. An undefined one is an import — its
@@ -1458,8 +1523,14 @@ funcsym stream:
   naming above already covers the call — so it is skipped and that path is
   untouched, lazy-binding stub contents included. A `REL` table (32-bit ELF)
   carries no addend field, so the in-place word is read back as the addend, the
-  same in-place convention `relocobjects` uses. Architectures are named by their
-  relocation triple: x86-64, AArch64, i386 and ARM; a machine with no entry
+  same in-place convention `relocobjects` uses; a `RELR` slot always holds its
+  addend in place. The word-sized absolute relocation (`R_X86_64_64`,
+  `R_AARCH64_ABS64`, ...) against a defined symbol writes `S + A`. An
+  `IRELATIVE` slot is left alone, since only running the resolver gives its
+  value, but the resolver is a function no symbol may name: it joins the
+  function symbols as `ifunc_<addr>` unless one is already there (`ifunc_<addr>`
+  is IDA's spelling). Architectures are named by their relocation types: x86-64,
+  AArch64, i386, ARM, PowerPC64, RISC-V and s390x; a machine with no entry
   produces nothing rather than guessing at a number that means something else
   there.
 

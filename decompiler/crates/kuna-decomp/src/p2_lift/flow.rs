@@ -1610,7 +1610,11 @@ following this call as a branch"
         if self.is_inside_declared_extent(&dest) {
             return None;
         }
-        let outside = dest < self.baddr || self.eaddr < dest;
+        let mapped = self.env.mapped_flow_image().map_or_else(
+            || self.env.code_bytes_mapped(&dest),
+            |image| crate::kuna_mappedflowboundary::mapped_start(image, &dest),
+        );
+        let outside = dest < self.baddr || self.eaddr < dest || !mapped;
         self.env.is_tail_call_table(&self.data, op, &dest, outside).then_some(dest)
     }
 

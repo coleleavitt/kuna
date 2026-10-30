@@ -175,6 +175,7 @@ fn splice_laid_sections(file: &object::File, layout: &RelocLayout, out: &mut [u8
 /// every `DW_FORM_strp` resolves to `.debug_str`+0, so the DWARF pass names one
 /// phantom function after whatever string happens to sit at offset 0.
 fn relocate_unlaid_sections(file: &object::File, layout: &RelocLayout, out: &mut [u8]) {
+    let big = !file.is_little_endian();
     for sec in file.sections() {
         if layout.section_vma.contains_key(&sec.index()) {
             continue; // already spliced with the loader's relocated bytes
@@ -195,7 +196,7 @@ fn relocate_unlaid_sections(file: &object::File, layout: &RelocLayout, out: &mut
             let Some(s) = resolve_target(file, layout, &reloc) else { continue };
             let a = reloc.addend() as i128
                 + if reloc.has_implicit_addend() {
-                    implicit_addend(&out[at..at + nbytes])
+                    implicit_addend(&out[at..at + nbytes], big)
                 } else {
                     0
                 };
@@ -208,8 +209,7 @@ fn relocate_unlaid_sections(file: &object::File, layout: &RelocLayout, out: &mut
                 RelocationKind::Relative | RelocationKind::PltRelative => s as i128 + a - p,
                 _ => continue,
             };
-            let le = (value as u64).to_le_bytes();
-            out[at..at + nbytes].copy_from_slice(&le[..nbytes]);
+            write_elf_uint(out, at, nbytes, value as u64, big);
         }
     }
 }
@@ -250,12 +250,12 @@ fn resolve_target(
 
 /// Read the in-place addend of a REL-style relocation (COFF, 32-bit ELF), the
 /// twin of `reloc_object`'s helper.
-fn implicit_addend(field: &[u8]) -> i128 {
-    match field.len() {
-        4 => i32::from_le_bytes([field[0], field[1], field[2], field[3]]) as i128,
-        8 => i64::from_le_bytes([
-            field[0], field[1], field[2], field[3], field[4], field[5], field[6], field[7],
-        ]) as i128,
+fn implicit_addend(field: &[u8], big: bool) -> i128 {
+    let width = field.len();
+    let Some(raw) = read_uint(field, 0, width, big) else { return 0 };
+    match width {
+        4 => raw as u32 as i32 as i128,
+        8 => raw as i64 as i128,
         _ => 0,
     }
 }
@@ -296,18 +296,20 @@ fn patch_elf(file: &object::File, layout: &RelocLayout, out: &mut [u8]) -> Optio
         2 => true,
         _ => return None,
     };
-    if out[5] != 1 {
-        return None; // big-endian ELF: the field writes below are little-endian
-    }
+    let big = match out[5] {
+        1 => false,
+        2 => true,
+        _ => return None,
+    };
     let shape = if is64 {
         ElfShape { sh_addr: 16, st_value: 8, width: 8 }
     } else {
         ElfShape { sh_addr: 12, st_value: 4, width: 4 }
     };
     let (e_shoff, e_shentsize, e_shnum) = if is64 {
-        (read_u64(out, 0x28)?, read_u16(out, 0x3a)? as usize, read_u16(out, 0x3c)? as usize)
+        (read_uint(out, 0x28, 8, big)?, read_uint(out, 0x3a, 2, big)? as usize, read_uint(out, 0x3c, 2, big)? as usize)
     } else {
-        (read_u32(out, 0x20)? as u64, read_u16(out, 0x2e)? as usize, read_u16(out, 0x30)? as usize)
+        (read_uint(out, 0x20, 4, big)?, read_uint(out, 0x2e, 2, big)? as usize, read_uint(out, 0x30, 2, big)? as usize)
     };
     let shoff = usize::try_from(e_shoff).ok()?;
     if e_shentsize < shape.sh_addr + shape.width {
@@ -323,14 +325,14 @@ fn patch_elf(file: &object::File, layout: &RelocLayout, out: &mut [u8]) -> Optio
         if i >= e_shnum {
             return None;
         }
-        write_uint(out, shoff + i * e_shentsize + shape.sh_addr, shape.width, vma)?;
+        write_elf_uint(out, shoff + i * e_shentsize + shape.sh_addr, shape.width, vma, big)?;
     }
 
     // (4) st_value <- section VMA + st_value, for every symbol defined in a
     // laid-out section. An undefined/common/absolute symbol is left alone: the
     // engine addresses an extern through the loader's own synthetic slot, and a
     // pass that reads a zero address already treats it as "no address".
-    let (sym_off, sym_entsize) = elf_symtab_extent(out, shoff, e_shentsize, e_shnum, is64)?;
+    let (sym_off, sym_entsize) = elf_symtab_extent(out, shoff, e_shentsize, e_shnum, is64, big)?;
     if sym_entsize < shape.st_value + shape.width {
         return None;
     }
@@ -341,7 +343,7 @@ fn patch_elf(file: &object::File, layout: &RelocLayout, out: &mut [u8]) -> Optio
         if at + shape.width > out.len() {
             return None;
         }
-        write_uint(out, at, shape.width, base.wrapping_add(sym.address()))?;
+        write_elf_uint(out, at, shape.width, base.wrapping_add(sym.address()), big)?;
     }
     Some(())
 }
@@ -354,17 +356,18 @@ fn elf_symtab_extent(
     shentsize: usize,
     shnum: usize,
     is64: bool,
+    big: bool,
 ) -> Option<(usize, usize)> {
     const SHT_SYMTAB: u32 = 2;
     for i in 0..shnum {
         let h = shoff + i * shentsize;
-        if read_u32(out, h + 4)? != SHT_SYMTAB {
+        if read_uint(out, h + 4, 4, big)? != SHT_SYMTAB as u64 {
             continue;
         }
         return if is64 {
-            Some((usize::try_from(read_u64(out, h + 24)?).ok()?, usize::try_from(read_u64(out, h + 56)?).ok()?))
+            Some((usize::try_from(read_uint(out, h + 24, 8, big)?).ok()?, usize::try_from(read_uint(out, h + 56, 8, big)?).ok()?))
         } else {
-            Some((read_u32(out, h + 16)? as usize, read_u32(out, h + 36)? as usize))
+            Some((read_uint(out, h + 16, 4, big)? as usize, read_uint(out, h + 36, 4, big)? as usize))
         };
     }
     // No symbol table at all: nothing to shift, which is not a failure.
@@ -401,7 +404,29 @@ fn patch_coff(layout: &RelocLayout, out: &mut [u8]) -> Option<()> {
     Some(())
 }
 
-use super::le::{read_u16, read_u32, read_u64};
+use super::le::read_u16;
+
+fn read_uint(b: &[u8], at: usize, width: usize, big: bool) -> Option<u64> {
+    let field = b.get(at..at + width)?;
+    let mut buf = [0u8; 8];
+    if big {
+        buf[8 - width..].copy_from_slice(field);
+        Some(u64::from_be_bytes(buf))
+    } else {
+        buf[..width].copy_from_slice(field);
+        Some(u64::from_le_bytes(buf))
+    }
+}
+
+fn write_elf_uint(b: &mut [u8], at: usize, width: usize, value: u64, big: bool) -> Option<()> {
+    let field = b.get_mut(at..at + width)?;
+    if big {
+        field.copy_from_slice(&value.to_be_bytes()[8 - width..]);
+    } else {
+        field.copy_from_slice(&value.to_le_bytes()[..width]);
+    }
+    Some(())
+}
 
 fn write_uint(b: &mut [u8], at: usize, width: usize, value: u64) -> Option<()> {
     let field = b.get_mut(at..at + width)?;

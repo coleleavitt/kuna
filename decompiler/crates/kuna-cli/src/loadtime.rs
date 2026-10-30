@@ -9,7 +9,7 @@ use std::ffi::OsString;
 use std::process::Command;
 
 use kuna_decomp::{
-    kuna_calltargettype, kuna_dwarfstructs, kuna_exporttrie, kuna_dyldcache, kuna_dwarfvariants, kuna_dynrelocs, kuna_i386_pie_plt,
+    kuna_calltargettype, kuna_dwarfstructs, kuna_exporttrie, kuna_dyldcache, kuna_dwarfvariants, kuna_dynrelocs, kuna_debuglink, kuna_i386_pie_plt,
     kuna_ifuncfpret, kuna_kernelcache, kuna_libctypes, kuna_msvcfpconst, kuna_pdatachained, kuna_peordinal,
     kuna_goabi, kuna_goreg, kuna_gotypes, kuna_objcivars, kuna_objcsdk, kuna_relocrebase, kuna_rexthunk, kuna_sourcelang, kuna_swiftdemangle,
     kuna_symbolnamebound, kuna_symbolnamechars,
@@ -38,6 +38,7 @@ fn binding(name: &str) -> Option<(&'static str, Encoding)> {
         "ifuncfpret" => (kuna_ifuncfpret::IFUNCFPRET_ENV, DefaultOff),
         "relocrebase" => (kuna_relocrebase::RELOCREBASE_ENV, DefaultOn),
         "dynrelocs" => (kuna_dynrelocs::DYNRELOCS_ENV, DefaultOn),
+        "debuglink" => (kuna_debuglink::DEBUGLINK_ENV, DefaultOn),
         "kernelcache" => (kuna_kernelcache::KERNELCACHE_ENV, Kernelcache),
         "pdatachained" => (kuna_pdatachained::PDATACHAINED_ENV, DefaultOn),
         "rexthunk" => (kuna_rexthunk::REXTHUNK_ENV, DefaultOn),

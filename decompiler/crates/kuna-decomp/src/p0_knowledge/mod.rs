@@ -19,6 +19,7 @@ pub mod kuna_ifuncfpret;
 pub mod kuna_relocrebase;
 // (kuna) Linked-image dynamic-relocation application option gate (load-time, env-bridged).
 pub mod kuna_dynrelocs;
+pub mod kuna_debuglink;
 // (kuna) Apple firmware container / kernel-collection entry selection (load-time,
 // env-bridged).
 pub mod kuna_kernelcache;
