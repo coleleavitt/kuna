@@ -8193,5 +8193,6 @@ the `bitidioms` byte-swap, rotate, abs and ctz ones), Hex-Rays' `funcrole_t`.
 typed builtin `strcpy(d, s)` (`char *` in and out) when the length's source and
 the copy's source are one value through copies, extensions and the `INDIRECT`s
 a call leaves on a preserved register; the call spec of a rewritten `CALL` is
-deleted, and a `strlen` whose length nobody reads is removed (it has no other
-effect). On `-O2 -fno-builtin` `dup_into` the two calls print as `strcpy(a0,a1)`.
+deleted, along with its own return-address push under `callpush` (which only
+recognises a push ahead of a `CALL`), and a `strlen` whose length nobody reads
+is removed (it has no other effect). On `-O2 -fno-builtin` `dup_into` the two calls print as `strcpy(a0,a1)`.

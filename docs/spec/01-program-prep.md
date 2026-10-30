@@ -7166,9 +7166,12 @@ the size); a lone narrowing read (`(int)g1` of a `long`) changes nothing. IDA
 sizes items from the referencing operand (`insn_create_op_data`). The same scan
 gives **the AIF data veto** (`aifdataveto`, default-on;
 `decompiler/crates/kuna-analysis/src/listing/kuna_accesswidth.rs (data_targets)`):
-a discovered entry (not a symbol) whose first instruction the code reads or
-writes as data is dropped from the entry stream, and an AIF gap entry likewise,
-IDA's roll-back of a speculative run with a `dr_R`/`dr_W` xref. On the stripped
+a discovered entry (not a symbol, and not the target of a decoded call or
+branch) whose first instruction the code reads or writes as data is dropped from
+the entry stream, and an AIF gap entry likewise, IDA's roll-back of a
+speculative run with a `dr_R`/`dr_W` xref. On a Thumb literal-pool image an
+AIF-only entry whose first word a literal load reads is dropped too (the
+`poolentry` fixture's `F`, the split shape its corpus measurement disclosed). On the stripped
 Lua (x86-64, AArch64), ld.so, llvm-nm and llvm-objdump images it removes
 nothing; on the fixture it removes the function-shaped table the code reads.
 **Incremental walk** (`incrementalwalk`, default-on): the x86 callback rounds

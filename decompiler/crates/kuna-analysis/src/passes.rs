@@ -1302,19 +1302,22 @@ pub fn run_listing_consumers_replaying(
             if arch.analysis_aifdataveto {
                 if let Some(data) = arch.manage().get_default_data_space() {
                     let targets = crate::listing::kuna_accesswidth::data_targets(&listing, translate, code_space, data);
+                    let flow_target = |e: u64| {
+                        listing.refs_to(e).iter().any(|r| matches!(r.kind, crate::listing::RefKind::Call | crate::listing::RefKind::Code))
+                    };
                     let mut veto_out = AnalysisOutput::default();
                     veto_out.data_vetoed = listing
                         .functions()
                         .filter(|(_, f)| !f.from_symbol)
                         .map(|(&e, _)| e)
-                        .filter(|e| targets.contains(e))
+                        .filter(|&e| targets.contains(&e) && !flow_target(e))
                         .collect();
                     out.push(("aifdataveto", veto_out));
                     aif_out.entries.retain(|&e| {
                         let span = listing
                             .instruction_at(e)
                             .map_or(1, |i| u64::from(i.len).max(1));
-                        targets.range(e..e.saturating_add(span)).next().is_none()
+                        flow_target(e) || targets.range(e..e.saturating_add(span)).next().is_none()
                     });
                 }
             }

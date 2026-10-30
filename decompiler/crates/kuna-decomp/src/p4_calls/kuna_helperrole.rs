@@ -105,11 +105,34 @@ fn drop_unread_strlen(op: OpId, data: &mut Funcdata) -> int4 {
     if o.get_out().is_some_and(|l| !data.descend_snapshot(l).is_empty()) || o.get_out().is_none() {
         return 0;
     }
-    if o.code() == OpCode::CPUI_CALL {
-        data.delete_call_specs(op);
-    }
+    forget_call(data, op);
     data.op_destroy(op);
     1
+}
+
+/// Drop what belongs to `op` as a CALL before it stops being one: its call
+/// specs and (under `callpush`) its own return-address push, which
+/// `RuleCallPush` only recognises ahead of a CALL.
+fn forget_call(data: &mut Funcdata, op: OpId) {
+    if data.obank().get(op).is_none_or(|o| o.code() != OpCode::CPUI_CALL) {
+        return;
+    }
+    if data.get_arch().drop_call_push {
+        let addr = data.obank().get(op).map(|o| o.get_addr().clone());
+        let mut cur = data.obank().get(op).and_then(|o| o.basic_neighbours().0);
+        while let Some(p) = cur {
+            let Some(po) = data.obank().get(p) else { break };
+            if Some(po.get_addr()) != addr.as_ref() {
+                break;
+            }
+            cur = po.basic_neighbours().0;
+            if crate::kuna_callpush::is_call_push(data, p) {
+                data.op_destroy(p);
+                break;
+            }
+        }
+    }
+    data.delete_call_specs(op);
 }
 
 /// `memcpy(d, s, strlen(s) + 1)` (by role, either side a library call or a
@@ -172,11 +195,8 @@ impl Rule for RuleStrcpyChain {
             return 0;
         }
         let strlen_out = slo.get_out();
-        let was_call = o.code() == OpCode::CPUI_CALL;
         let id = data.new_constant(4, userop::BUILTIN_STRCPY as uintb);
-        if was_call {
-            data.delete_call_specs(op);
-        }
+        forget_call(data, op);
         if data.op_set_all_input(op, &[id, d, s]).is_err() {
             return 0;
         }
@@ -191,9 +211,7 @@ impl Rule for RuleStrcpyChain {
                 for u in users {
                     data.op_destroy(u);
                 }
-                if data.obank().get(sl).is_some_and(|p| p.code() == OpCode::CPUI_CALL) {
-                    data.delete_call_specs(sl);
-                }
+                forget_call(data, sl);
                 data.op_destroy(sl);
             }
         }

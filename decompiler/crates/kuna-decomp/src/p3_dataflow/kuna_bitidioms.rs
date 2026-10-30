@@ -161,15 +161,41 @@ fn rotate_source(data: &Funcdata, a: VarnodeId, b: VarnodeId, size: int4) -> Opt
 /// Does a reader of the rotate mask away every bit of one of its two shifted
 /// halves? Then it is a shift in disguise (PowerPC `rlwinm` writes shifts as
 /// rotate-and-mask), and the AND-of-shift rules fold it further than `rotl`.
-/// A mask not yet folded to a constant waits for the next pass.
+/// The AND may sit past a zero extension or a `PIECE` (the mask pushed onto a
+/// joined pair), whose bits are read at the rotate's position. A mask not yet
+/// folded to a constant waits for the next pass.
 fn masked_to_one_half(data: &Funcdata, out: VarnodeId, n: u64, size: int4) -> bool {
     let full = if size >= 8 { u64::MAX } else { (1u64 << (8 * size)) - 1 };
     let low = (1u64 << n) - 1;
     let high = full & !low;
-    data.descend_snapshot(out).into_iter().any(|d| {
-        data.obank().get(d).is_some_and(|o| o.code() == OpCode::CPUI_INT_AND)
-            && const_operand(data, d).is_none_or(|(_, m)| m & low == 0 || m & high == 0)
-    })
+    let mut reads: Vec<(VarnodeId, u32)> = vec![(out, 0)];
+    let mut depth = 0;
+    while let Some((vn, at)) = reads.pop() {
+        for d in data.descend_snapshot(vn) {
+            let Some(o) = data.obank().get(d) else { continue };
+            match o.code() {
+                OpCode::CPUI_INT_AND => {
+                    let Some((_, m)) = const_operand(data, d) else { return true };
+                    let m = m.checked_shr(at).unwrap_or(0) & full;
+                    if m & low == 0 || m & high == 0 {
+                        return true;
+                    }
+                }
+                OpCode::CPUI_INT_ZEXT if depth < 2 => reads.extend(o.get_out().map(|w| (w, at))),
+                OpCode::CPUI_PIECE if depth < 2 => {
+                    let shift = if o.get_in(0) == Some(vn) {
+                        o.get_in(1).and_then(|l| data.vbank().get(l)).map_or(0, |l| 8 * l.get_size() as u32)
+                    } else {
+                        0
+                    };
+                    reads.extend(o.get_out().map(|w| (w, at + shift)));
+                }
+                _ => {}
+            }
+        }
+        depth += 1;
+    }
+    false
 }
 
 /// `LZCOUNT(bitreverse(x))` (AArch64 `rbit` + `clz`, how compilers spell
@@ -196,6 +222,27 @@ fn count_trailing(op: OpId, data: &mut Funcdata) -> int4 {
     1
 }
 
+/// Turn `rotl(x, n)` back into `x << n | x >> (W - n)`, for a rotate a mask
+/// found later (past a `PIECE` the AND was pushed onto) shows is a shift.
+fn unrotate(op: OpId, x: VarnodeId, n: u64, size: int4, data: &mut Funcdata) -> kuna_base::error::KunaResult<()> {
+    let at = data.obank().get(op).map(|o| o.get_addr().clone()).ok_or_else(|| kuna_base::error::KunaError::lowlevel("unrotate: stale op"))?;
+    let mut half = |code: OpCode, by: u64, data: &mut Funcdata| -> kuna_base::error::KunaResult<VarnodeId> {
+        let s = data.new_op(2, at.clone());
+        data.op_set_opcode_code(s, code);
+        data.op_set_input(s, x, 0)?;
+        let c = data.new_constant(4, by as uintb);
+        data.op_set_input(s, c, 1)?;
+        let out = data.new_unique_out(size, s)?;
+        data.op_insert_before(s, op);
+        Ok(out)
+    };
+    let l = half(OpCode::CPUI_INT_LEFT, n, data)?;
+    let r = half(OpCode::CPUI_INT_RIGHT, 8 * size as u64 - n, data)?;
+    data.op_set_all_input(op, &[l, r])?;
+    data.op_set_opcode(op, crate::typeop::type_op_for(OpCode::CPUI_INT_OR));
+    Ok(())
+}
+
 /// Rewrite a byte swap or a rotate (see the module docs).
 pub struct RuleBitIdioms {
     group: String,
@@ -219,6 +266,12 @@ impl RuleBitIdioms {
             return 0;
         }
         let Some(n) = constant(n) else { return 0 };
+        if let Some(out) = o.get_out() {
+            let size = data.vbank().get(out).map_or(0, |w| w.get_size());
+            if masked_to_one_half(data, out, n, size) {
+                return unrotate(op, v, n, size, data).map_or(0, |()| 1);
+            }
+        }
         let Some((x, kind)) = reversal_source(data, v, n as usize) else { return 0 };
         let id = data.new_constant(4, reversal_builtin(kind));
         if data.op_set_all_input(op, &[id, x]).is_err() {

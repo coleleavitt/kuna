@@ -2476,7 +2476,9 @@ in bit `W - 1 - i` it becomes `bitreverse(x)`. Otherwise
 `(x << n) | (x >> (W - n))` with a constant `n` becomes `rotl(x, n)`, unless a
 reader masks away every bit of one of the two halves (PowerPC `rlwinm`/`rldic`
 write shifts as rotate-and-mask, and the shift rules fold those further; a mask
-not yet constant waits for the next pass). A `rotl(v, k)` whose `v` is a partial
+not yet constant waits for the next pass). The mask may sit past a zero extension
+or a `PIECE` the AND was pushed onto, read at the rotate's bit position; a
+`rotl` formed before such a mask appeared is turned back into its two shifts. A `rotl(v, k)` whose `v` is a partial
 reversal the rotate completes becomes `bswap`/`bitreverse` on a later visit,
 because AArch64 `rev`/`rbit` lift to staged swaps whose last stage can fold
 first. `LZCOUNT(bitreverse(x))`, AArch64's `rbit` + `clz` spelling of

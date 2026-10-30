@@ -1,6 +1,7 @@
 //! End-to-end gate for `aifpoolslide` on the `poolentry` fixture
 //! (`cortexm_poolentry_le32`, see `verify_poolentry.rs` for its three shapes),
-//! with the byte-granular gap cursor (`aifstrict` off) and `poolentry` off.
+//! with the byte-granular gap cursor (`aifstrict` off), `poolentry` off, and
+//! `aifdataveto` off (it drops `F`, whose first word `G` reads as data).
 //!
 //! Off, the gap walk plants an entry one halfword into each literal pool and the
 //! function behind it is never probed. On, both accepts are planted on the
@@ -28,6 +29,7 @@ fn bootstrap(slide: bool) -> kuna_console::engine::ConsoleProgram {
         ("aifstrict", false),
         ("poolentry", false),
         ("aifpoolslide", slide),
+        ("aifdataveto", false),
     ] {
         prog.arch_mut().set_kuna_option(name, if on { "on" } else { "off" }).unwrap();
     }
