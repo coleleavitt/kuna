@@ -1003,6 +1003,15 @@ pub struct Architecture {
     /// (kuna) A single-function drive states each tail-called callee's prototype
     /// first (option `tailcontract`).
     pub tail_contract: bool,
+    /// (kuna) The x87 stack depth proves ST0 empty at returns (option
+    /// `x87depth`). See [`crate::p4_calls::kuna_x87depth`].
+    pub x87_depth: bool,
+    /// (kuna) `ud2` or `int3 int3` after an x86 call marks the call no-return
+    /// (option `trapaftercall`).
+    pub trap_after_call: bool,
+    /// (kuna) A retpoline thunk recognized by its body gets the cspec's
+    /// `x86_indirect_thunk_<reg>` fixup (option `retpolinethunk`).
+    pub retpoline_thunk: bool,
     pub global_call_ranges: bool,
     /// (kuna) Let the callee's decoded body answer for the call's RETURN
     /// register too (option `calleeretpreserves`).  See
@@ -3290,6 +3299,9 @@ impl Architecture {
             callee_preserves: true,
             callee_ret_purge: true,
             tail_contract: true,
+            x87_depth: true,
+            trap_after_call: true,
+            retpoline_thunk: true,
             global_call_ranges: true,
             callee_ret_preserves: true,
             callee_scratch_body: true,
@@ -3770,6 +3782,9 @@ impl Architecture {
         self.global_call_ranges = true;
         self.callee_ret_purge = true;
         self.tail_contract = true; // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
+        self.x87_depth = true;
+        self.trap_after_call = true;
+        self.retpoline_thunk = true;
         self.callee_preserves = true; // (kuna) DIV-124 default-on: a fully decoded, call-free callee's own writes narrow the cspec killedbycall set, so a value that crosses a get-PC thunk survives (0/675 ablation)
         self.callee_ret_preserves = true; // (kuna) DIV-PENDING default-on: a fully decoded callee body that never writes the call's return register also answers for that register, so an MSVC /GS `main` returns the zero it set instead of the cookie check's invented result (0/675 ablation)
         self.callee_scratch_body = true; // (kuna) DIV-149 default-on: a decoded callee that clobbers only SCRATCH registers still counts as a body for calleepreserves, so the value a caller sets before MSVC's out-of-line stack probe survives it (0/675 ablation)
@@ -4617,6 +4632,8 @@ impl Architecture {
                 .collect()
         };
         ctx.x87_empty_storage = crate::p4_calls::kuna_x87emptyreturn::storage(self);
+        ctx.x87_depth = self.x87_depth;
+        ctx.trap_after_call = self.trap_after_call && self.get_description().starts_with("x86:");
         ctx.retsysreg_userops = ids(crate::kuna_retsysreg::STATE_USEROP_NAMES);
         ctx.retsysreg_cop_userops = ids(crate::kuna_retsysreg::COP_USEROP_NAMES);
         // (kuna) carry the terminal-no-return trial gate so `only_op_use` reaches

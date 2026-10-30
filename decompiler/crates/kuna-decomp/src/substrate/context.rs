@@ -628,6 +628,10 @@ mod tests;
 /// the function and its analysis passes.
 pub struct ArchContext {
     pub x87_empty_storage: Option<crate::p4_calls::kuna_x87emptyreturn::Storage>,
+    /// (kuna `x87depth`) Prove ST0 empty at returns from the x87 stack depth.
+    pub x87_depth: bool,
+    /// (kuna `trapaftercall`) A trap after an x86 call marks the call no-return.
+    pub trap_after_call: bool,
 
     pub call_mechanisms: Rc<crate::kuna_callmechanisms::Mechanisms>,
     /// (kuna) `callmechanisms` — apply compiler-spec prototype entry/return p-code.
@@ -1847,6 +1851,8 @@ impl ArchContext {
             manage,
             min_laned_register_size: 4,
             x87_empty_storage: None,
+            x87_depth: false,
+            trap_after_call: false,
             lanerecords: Vec::new(),
             split_records: Vec::new(),
             opbehaviors: Vec::new(),

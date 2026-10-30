@@ -7,7 +7,7 @@ use std::collections::{HashMap, VecDeque};
 #[derive(Clone)]
 pub struct Storage {
     pub(super) free: u64,
-    top: VarnodeData,
+    pub(super) top: VarnodeData,
     pub(super) tags: VarnodeData,
     pub(super) bank: Vec<VarnodeData>,
 }
@@ -171,6 +171,9 @@ pub fn capture(data: &mut Funcdata) {
     let Some(storage) = data.get_arch().x87_empty_storage.clone() else {
         return;
     };
+    if data.get_arch().x87_depth {
+        data.kuna_x87_empty_returns = crate::p4_calls::kuna_x87depth::empty_returns(data, &storage);
+    }
     let has_free = data.obank().iter_code(OpCode::CPUI_CALLOTHER).any(|id| {
         data.obank()
             .get(id)
@@ -229,10 +232,11 @@ pub fn capture(data: &mut Funcdata) {
             }
         }
     }
-    data.kuna_x87_empty_returns = returns
-        .into_iter()
-        .filter_map(|(addr, empty)| empty.then_some(addr))
-        .collect();
+    for addr in returns.into_iter().filter_map(|(addr, empty)| empty.then_some(addr)) {
+        if !data.kuna_x87_empty_returns.contains(&addr) {
+            data.kuna_x87_empty_returns.push(addr);
+        }
+    }
 }
 
 pub fn drop_empty(data: &Funcdata, active: &mut ParamActive, returns: &[OpId]) {
