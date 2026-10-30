@@ -1131,14 +1131,27 @@ fn drain_pipeline_comments(arch: &mut Architecture, fd: &mut Funcdata) {
     }
 }
 
+/// The comment types `Architecture::clearAnalysis` removes on a restart.
+const ANALYSIS_WARNINGS: kuna_base::types::uint4 =
+    crate::architecture::comment_type::warning | crate::architecture::comment_type::warningheader;
+
 /// Re-follow flow on an existing, already-analyzed `fd` after a restart request
 /// (C++ `ActionRestartGroup` → `clearAnalysis` + `ActionStart::startProcessing` →
 /// `followFlow`).  Clears the analysis-derived IR (`Funcdata::clear`) while
 /// preserving the per-function `Override`, then re-runs the flow follow in place.
 #[allow(clippy::mutable_key_type)]
 fn refollow_flow(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<()> {
-    // C++ `glb->clearAnalysis(&data)` == fd->clear() (the comment-DB clear is the
-    // W4 stub) — drops ops/vbank/blocks/qlst/heritage but keeps `localoverride`.
+    // C++ `glb->clearAnalysis(&data)`: fd->clear() — drops ops/vbank/blocks/qlst/
+    // heritage but keeps `localoverride` — plus
+    // `commentdb->clearType(fd->getAddress(),Comment::warning|Comment::warningheader)`,
+    // so a warning the previous pass raised (a flow truncated at a call the
+    // restart now knows does not return) does not outlive the analysis it
+    // described.
+    if arch.kuna_drive_publishes() {
+        let entry = fd.get_address().clone();
+        arch.commentdb.retain_comments(|c| c.func_addr != entry || c.tp & ANALYSIS_WARNINGS == 0);
+    }
+    fd.drop_pending_comments(ANALYSIS_WARNINGS);
     fd.clear();
     // Move the cleared shell out so `follow_flow_on_fd` can re-flow it (it takes
     // `fd` by value, mirroring the fresh-build path), then put the re-flowed IR

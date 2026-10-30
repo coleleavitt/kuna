@@ -63,7 +63,8 @@ pub(crate) fn slots(file: &object::File) -> Vec<(u64, u64)> {
 }
 
 /// Names each undefined-symbol `GLOB_DAT` slot for its import (a symbol-table
-/// name, not a function-inventory entry) and paints it `externref`. Its output is
+/// name, not a function-inventory entry) and paints it `externref`. A `.got`
+/// call slot `elf_plt` already names as a function import keeps that name. Its output is
 /// committed only when `importdata` is on.
 pub struct ElfGotImportPass;
 
@@ -79,9 +80,13 @@ impl AnalysisPass for ElfGotImportPass {
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
         let mut out = AnalysisOutput::default();
         let width = if ctx.file.is_64() { 8 } else { 4 };
+        let named: std::collections::HashSet<u64> =
+            crate::loader::elf_plt::got_call_slot_ranges(ctx.file, ctx.bytes).into_iter().map(|(lo, _)| lo).collect();
         for (slot, name) in resolve(ctx.file) {
             out.externref.push((slot, slot + width));
-            out.import_slot_names.push((slot, String::from_utf8_lossy(&name).into_owned()));
+            if !named.contains(&slot) {
+                out.import_slot_names.push((slot, String::from_utf8_lossy(&name).into_owned()));
+            }
         }
         out
     }
