@@ -3658,7 +3658,12 @@ every other binary's pass list is byte-identical to before the pass existed):
   string, so the name pointer is read with that bit cleared (IDA 9.5 rtti.so
   does the same, 0xd9b2). On a `-fixup_chains` dylib whose `Circle` and
   `Square` typeinfos are local, `make()` changes from `v1 = 0x40a8;` to
-  `v1 = Square_vptr;`. Pinned by `tests/stages/kuna-itaniumrtti-macho.xml`.
+  `v1 = Square_vptr;`. A classic `LC_DYLD_INFO` image already has the ELF
+  shape (rebased pointers in the file, zeros in bind slots); only its bind
+  names are needed, and they come from replaying the bind opcodes
+  (`loader/format/macho/dyldinfo.rs (resolve_dyld_info_binds)`), which carry
+  no addend, so the anchor is accepted on the name alone. Pinned by
+  `tests/stages/kuna-itaniumrtti-macho.xml` and its `-classic` twin.
 - **Objective-C** (`objc`, Mach-O-only, default-off;
   `decompiler/crates/kuna-analysis/src/analyzers/objc/mod.rs`): walk
   `__objc_classlist` → `class_t` → `class_ro_t` → method lists (both absolute and

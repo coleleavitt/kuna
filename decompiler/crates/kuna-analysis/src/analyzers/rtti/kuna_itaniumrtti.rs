@@ -242,13 +242,16 @@ impl AnalysisPass for ItaniumRttiPass {
 
 /// A Mach-O's sections with every chained-fixup slot replaced by what dyld
 /// writes there: the target of a rebase, or 0 for a bind (an import, the same
-/// shape an ELF slot with a dynamic relocation has in the file). IDA 9.5's
+/// shape an ELF slot with a dynamic relocation has in the file). A classic
+/// `LC_DYLD_INFO` image already has that shape; its bind names come from
+/// replaying the bind opcodes. IDA 9.5's
 /// rtti.so reads the same values through its fixup-applied database
 /// (rtti.so 0xd7a0).
 struct MachoSlots {
     sections: Vec<(u64, Vec<u8>)>,
     binds: HashSet<u64>,
-    fixups: crate::loader::format::macho::chained::ChainedFixups,
+    /// `(slot, import, addend)`; the addend is unknown for a classic bind.
+    named_binds: Vec<(u64, String, Option<i64>)>,
 }
 
 impl MachoSlots {
@@ -256,7 +259,17 @@ impl MachoSlots {
         use object::read::ObjectSection;
         let fixups = crate::loader::format::macho::chained::resolve_chained_fixups(file, bytes);
         let width = if file.is_64() { 8 } else { 4 };
-        let binds: HashSet<u64> = fixups.binds().map(|(va, _)| va).collect();
+        // A classic image (`LC_DYLD_INFO`) keeps its rebased pointers in the
+        // file and zeros in its bind slots; only the bind names are needed.
+        let named_binds: Vec<(u64, String, Option<i64>)> = if fixups.is_chained() {
+            fixups.binds().map(|(va, name)| (va, name.to_string(), fixups.bind(va).map(|(_, a)| a))).collect()
+        } else {
+            crate::loader::format::macho::dyldinfo::resolve_dyld_info_binds(file, bytes)
+                .into_iter()
+                .map(|(va, name)| (va, name, None))
+                .collect()
+        };
+        let binds: HashSet<u64> = named_binds.iter().map(|(va, ..)| *va).collect();
         let mut sections = Vec::new();
         for sec in file.sections() {
             let addr = sec.address();
@@ -283,17 +296,17 @@ impl MachoSlots {
             sections.push((addr, data));
         }
         sections.sort_by_key(|(a, _)| *a);
-        MachoSlots { sections, binds, fixups }
+        MachoSlots { sections, binds, named_binds }
     }
 
     /// The Mach-O form of [`discover_typeinfos`]: a bind to a `__cxxabiv1`
     /// typeinfo vtable with addend `2 * ptr`, plus the `__ZTI…` symbols.
     fn discover_typeinfos(&self, file: &object::File, ptr: u64) -> Vec<(u64, Option<Flavor>)> {
         let mut found: HashMap<u64, Option<Flavor>> = HashMap::new();
-        for (va, name) in self.fixups.binds() {
+        for (va, name, addend) in &self.named_binds {
             let Some(flavor) = name.strip_prefix('_').and_then(Flavor::from_abi_vtable) else { continue };
-            if self.fixups.bind(va).is_some_and(|(_, addend)| addend == 2 * ptr as i64) {
-                found.insert(va, Some(flavor));
+            if addend.is_none_or(|a| a == 2 * ptr as i64) {
+                found.insert(*va, Some(flavor));
             }
         }
         for sym in file.symbols() {
