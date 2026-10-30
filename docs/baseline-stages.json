@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3233,
-    3233
+    3242,
+    3242
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1331,6 +1331,15 @@
     "data:NATIVE SWITCH LABELS #7: unsigned 32-bit high labels stay positive",
     "data:NATIVE SWITCH LABELS #8: unsigned 64-bit high labels stay positive",
     "data:NATIVE SWITCH LABELS #9: a signed short load stays an expression selector",
+    "data:NORETURNNAMES #1: _Exit ends the flow",
+    "data:NORETURNNAMES #2: thrd_exit ends the flow",
+    "data:NORETURNNAMES #3: std::rethrow_exception ends the flow",
+    "data:NORETURNNAMES #4: off, _Exit and thrd_exit run to the next entry",
+    "data:NORETURNNAMES #5: v0 core::option::unwrap_failed ends the flow",
+    "data:NORETURNNAMES #6: v0 core::slice::index::slice_index_fail ends the flow",
+    "data:NORETURNNAMES #7: v0 panic_const_add_overflow ends the flow in all three",
+    "data:NORETURNNAMES #8: off, the Rust calls run into their int3 padding",
+    "data:NORETURNNAMES #9: off, replay runs on into its landing pad",
     "data:NULTERMINATOR #10: no array grows over the padding or the locals after its terminator",
     "data:NULTERMINATOR #11: gap_zero off declares [20]",
     "data:NULTERMINATOR #12: gap_zero on declares [21]",
