@@ -18,6 +18,10 @@ Three tiers:
 | a field access like f->_flags with no layout anywhere in the output | [`structdefs`](#structdefs) |
 | you have to run decompile-project just to read the .h for one function's struct | [`structdefs`](#structdefs) |
 | a synthesized struct_N appears in a parameter type with no definition | [`structdefs`](#structdefs) |
+| a byte swap prints as four masked shifts ORed together | [`bitidioms`](#bitidioms) |
+| a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms) |
+| bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms) |
+| hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
 | a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
 | `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
 | a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
@@ -350,6 +354,9 @@ Three tiers:
 | stack-protector canary compare against fs:0x28 and a __stack_chk_fail branch cluttering the epilogue | [`stackguard`](#stackguard) |
 | shared-return goto forced by the canary check block | [`stackguard`](#stackguard) |
 | flip off to keep the real canary instructions for auditing the protector | [`stackguard`](#stackguard) |
+| aarch64 functions keep the stack canary compare and __stack_chk_fail branch | [`canaryglobal`](#canaryglobal) |
+| an arm or powerpc function ends in a goto to a canary check | [`canaryglobal`](#canaryglobal) |
+| stackguard strips x86-64 canaries but not aarch64 ones | [`canaryglobal`](#canaryglobal) |
 | a Windows PE function opens with `v8 = dat_140074040 ^ (unsigned long long)v1;` and ends with a one-argument call taking `v8 ^ (unsigned long long)v1` | [`msvcstackguard`](#msvcstackguard) |
 | an unnamed one-argument callee (`__security_check_cookie`) called just before every return | [`msvcstackguard`](#msvcstackguard) |
 | `--option stackguard on` and `off` give byte-identical output on a Windows binary | [`msvcstackguard`](#msvcstackguard) |
@@ -793,6 +800,12 @@ Three tiers:
 | a firmware image decompiles only at addresses passed by hand | [`rawdiscover`](#rawdiscover) |
 | stripped static-linked library function stays sub_<addr> although its fingerprint is known | [`fid`](#fid) |
 | no .fid database renames applied in a stripped binary | [`fid`](#fid) |
+| a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
+| kuna cannot use ida flirt signatures | [`flirt`](#flirt) |
+| memcpy and printf in a static binary have no names | [`flirt`](#flirt) |
+| a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto) |
+| a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto) |
+| code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto) |
 | msvc c++ class names missing and vftables left as unnamed data | [`rtti`](#rtti) |
 | no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes | [`rtti`](#rtti) |
 | gcc/clang c++ class names missing and vtables left as unnamed DAT_ data | [`itaniumrtti`](#itaniumrtti) |
@@ -833,6 +846,19 @@ Three tiers:
 | protoorder decompiles a caller before the callees its switch cases call | [`switchreach`](#switchreach) |
 | every call inside a switch is missing from a gcc -O0 binary | [`switchreach`](#switchreach) |
 | a recursive interpreter function loses its pointer parameter types in a whole-binary run | [`switchreach`](#switchreach) |
+| kuna xrefs reports 0 references to a function called only from an aarch64 switch case | [`compacttable`](#compacttable) |
+| an aarch64 switch's case bodies are missing from decompile-graph | [`compacttable`](#compacttable) |
+| calleevote refuses an aarch64 function because its recorded calls differ from the call graph | [`compacttable`](#compacttable) |
+| j_printf gets no printf prototype | [`nameladder`](#nameladder) |
+| __imp_exit is not marked no-return | [`nameladder`](#nameladder) |
+| a flirt-named memcpy_0 has no memcpy prototype | [`nameladder`](#nameladder) |
+| a mach-o or coff name with a leading underscore misses its libc prototype | [`nameladder`](#nameladder) |
+| a char array literal appears at an address inside a function's code | [`codestrings`](#codestrings) |
+| instruction bytes print as a four-character string literal | [`codestrings`](#codestrings) |
+| a function pointer argument renders as a short garbage string | [`codestrings`](#codestrings) |
+| a libc function's FILE * parameter becomes void * because a later source declared it | [`protomerge`](#protomerge) |
+| a demangled C++ class pointer parameter is replaced by unsigned long | [`protomerge`](#protomerge) |
+| a dwarf prototype erases a parameter name the library table gave | [`protomerge`](#protomerge) |
 | a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide) |
 | a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide) |
 | a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide) |
@@ -842,6 +868,13 @@ Three tiers:
 | a shared ISR handler is swallowed by the two-instruction stub that branches to it | [`tailcallentry`](#tailcallentry) |
 | function entry missing where the previous function ends in an unconditional branch | [`tailcallentry`](#tailcallentry) |
 | kuna emits one oversized function where the ground truth has two | [`tailcallentry`](#tailcallentry) |
+| fid misses a library function whose body is split by the compiler | [`funcchunks`](#funcchunks) |
+| a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks) |
+| a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks) |
+| a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks) |
+| a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
+| a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
+| tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
 | a uefi te entry function decompiles as garbage a32 although its entry address is odd | [`entrythumbflow`](#entrythumbflow) |
 | a callee reached by bl from a thumb entry decodes as a32 | [`entrythumbflow`](#entrythumbflow) |
 | a32 code in the same section as a thumb entry decodes as thumb | [`entrythumbflow`](#entrythumbflow) |
@@ -1474,6 +1507,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Flip on when you are reading a function whose arguments are pointers to composites and want the layout in front of you -- `structsynth`'s synthesized `struct_N`, a DWARF struct on an unstripped binary, `libctypes`' opaque `FILE`/`DIR` shells -- instead of opening the `decompile-project` header to find it. Default OFF: it is a presentation default, and a preamble in front of every function is noise for a caller diffing bodies or feeding one function to a matcher. It changes nothing but the text above the function -- the body, its line contents and every recovered type are identical either way -- but it DOES move line numbers, so a consumer pinning a line number should read `line_mappings` rather than assume the first line is the signature. The preamble is documentation, not a compilable unit: a padding member spelled `undefined1` needs the export's recompile prelude to compile, which is one more reason the project surface keeps the definitions in the header.
 - **Where / provenance:** P9/type-definition-preamble · angr · presentation-default · kuna-structdefs
 - **Example:** `option structdefs on`
+
+### `bitidioms` -- on | off, default `off`
+
+- **Symptoms:** a byte swap prints as four masked shifts ORed together; a rotate prints as a pair of opposite shifts ORed together; bswap or rev instructions decompile to shift and mask soup; hash or crc code full of paired shifts.
+- **What it does:** Fold a byte swap or a constant rotate written out as shifts, masks and ORs into a call: bswap(x) when every leaf of an INT_OR tree moves whole bytes of the same x so that byte i lands in byte N-1-i (2, 4 or 8 bytes, each destination byte exactly once; masks, shifts and zero-extended byte pieces accepted), and rotl(x, n) for (x << n) | (x >> (W - n)) with a constant n. SLEIGH lifts bswap/rev and rol/ror into exactly that shift form, and compilers emit it for the portable C, so the decompiled C showed four masked shifts where the source said __builtin_bswap32. This is Hex-Rays' slot-filling bswap matcher and its rotate rule (it prints _byteswap_ulong and __ROL4__).
+- **When to flip:** Off by default: the datatest corpus has a leading-zero-count case and two PowerPC rotate-and-mask cases whose expected C it rewrites. Flip on for crypto, hashing, checksum and network-order code, where bswap/rev/rol/ror and their portable C spellings otherwise print as masked shift soup.
+- **Where / provenance:** P3/simplification-quiescence · kuna · presentation-default · kuna-bitidioms
+- **Example:** `--option bitidioms on`
 
 ### `mulblob` -- on | off, default `on`
 
@@ -2234,6 +2275,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default (DIV-14): removes compiler-inserted stack-protector boilerplate and the shared-return goto it forces. Flip OFF to keep the real canary-check instructions in the output (e.g. to audit the protector itself, or if an unusual non-glibc `ptr+0x28` compare guarding a call is being matched). It is marked destructive because it deletes those real instructions, but it is byte-identical over the 675 datatests (the `Partial splitting` cases opt out via `option stackguard off`).
 - **Where / provenance:** P7/edge-virtualization · angr · opt-in-tool · angr-StackCanarySimplifier
 - **Example:** `option stackguard on`
+
+### `canaryglobal` -- on | off, default `on`
+
+- **Symptoms:** aarch64 functions keep the stack canary compare and __stack_chk_fail branch; an arm or powerpc function ends in a goto to a canary check; stackguard strips x86-64 canaries but not aarch64 ones.
+- **What it does:** Let the stack-guard strip (stackguard) also recognise a canary read from a global variable named __stack_chk_guard (glibc on AArch64, ARM, PowerPC and the i386 PIC form; ___stack_chk_guard on Mach-O) or __security_cookie, as Hex-Rays does by name. The strip was pinned to the x86-64 glibc TLS slot fs:0x28, so on AArch64 the compare against the saved copy and the __stack_chk_fail branch stayed in every protected function. With this on, an unwritten read of such a named global (directly, or through the INDIRECTs a call adds) counts as a canary source in the compare test and in the slot release, under the same CBRANCH, no-return-handler and saved-slot rules.
+- **When to flip:** On (default); inert without stackguard on and without a global of one of those names. Flip off to keep the canary check of a function that reads one of those globals for another purpose.
+- **Where / provenance:** P7/edge-virtualization · kuna · correctness-fix · kuna-canaryglobal
+- **Example:** `--option canaryglobal off`
 
 ### `msvcstackguard` -- on | off, default `off` (destructive opt-in)
 
@@ -3151,6 +3200,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-fid
 - **Example:** `option listing on --option fid on`
 
+### `flirt` -- on | off, default `off`
+
+- **Symptoms:** a stripped static binary lists libc functions as sub_<addr>; kuna cannot use ida flirt signatures; memcpy and printf in a static binary have no names.
+- **What it does:** Name library functions in a stripped binary with IDA FLIRT .sig signature files (versions 5 to 11, raw, deflate, zlib or zstd bodies), named by the KUNA_FLIRT_SIGS environment variable (a :-separated list of paths; IDA ships them under <ida>/sig/<processor>). A Listing consumer: at every discovered function entry the signature trie is walked over the first pattern_len bytes, and a module matches when the CRC-16/X.25 (byte-swapped) of its crc_len bytes after the prefix, its tail bytes (offsets counted after the CRC region) and its expected instruction bits agree. A module that names a referenced function is accepted only when the instruction at the reference offset branches or calls to a function of that name; names found in one round can satisfy references in the next, for up to three rounds (IDA's AU_LIBF queues). A function is renamed only when every matching module agrees on the name; a name given to two addresses, or one the binary already carries, is withheld (IDA's collision rule); unnamed (?) and doubtful publics, and modules no longer than the trie prefix with no reference, name nothing (IDA's tiny-module guard). The names go out through the FID rename, so only a sub_ placeholder is replaced. Requires the Listing (option listing on); inert without a signature file.
+- **When to flip:** Off (default). Flip on with listing on and KUNA_FLIRT_SIGS pointing at IDA's .sig files (for example sig/pc/glibc_amd64.sig for a static x86-64 glibc binary, sig/arm/glibc_arm64.sig for AArch64) when a stripped statically linked binary shows hundreds of sub_ functions that are libc. With fidproto on the renamed functions also get the libc prototype and no-return verdict.
+- **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-flirt
+- **Example:** `KUNA_FLIRT_SIGS=$IDADIR/sig/pc/glibc_amd64.sig kuna functions ./static-stripped --option listing on --option flirt on`
+
+### `fidproto` -- on | off, default `on`
+
+- **Symptoms:** a function fid or flirt named memcpy keeps its recovered parameters; a flirt-named exit or abort is not treated as no-return; code after a call to a renamed library abort is decompiled as reachable.
+- **What it does:** When a FID or FLIRT match renames a sub_ placeholder (the fid_names rename at the analysis commit), give the function what its new name means: the built-in libc/libm prototype for the name or one of its nameladder spellings (the declaredlibcproto tables, parked by address), and the no-return flag when the shipped no-return lists (ELF and PE/Mach-O) name it. IDA applies the type library prototype and the no-return attribute on every FLIRT rename; without this a function FID or FLIRT names memcpy or exit still renders with recovered parameters and keeps its callers' code after the call.
+- **When to flip:** On (default). It only acts on a function a FID/FLIRT/PDB/Objective-C/Swift rename just named, and only when the name is a libc/libm name or on the no-return list. Flip off to keep the renamed function's recovered prototype.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-fidproto
+- **Example:** `--option fidproto off`
+
 ### `rtti` -- on | off, default `off`
 
 - **Symptoms:** msvc c++ class names missing and vftables left as unnamed data; no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes.
@@ -3231,6 +3296,38 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · jtxref-case-body-calls
 - **Example:** `--option switchreach off`
 
+### `compacttable` -- on | off, default `on`
+
+- **Symptoms:** kuna xrefs reports 0 references to a function called only from an aarch64 switch case; an aarch64 switch's case bodies are missing from decompile-graph; calleevote refuses an aarch64 function because its recorded calls differ from the call graph.
+- **What it does:** Read AArch64-style compact jump tables in the reference walk behind kuna xrefs, decompile-graph and switchreach. clang and gcc lower a dense AArch64 switch to a table of byte, halfword or word offsets counted in instructions: ldrb/ldrh w, [table, idx]; adr x, base; add x, x, w, uxtb|sxtb #2 (or lsl #2); br x. The register-chain fold knew 32-bit deltas added to a base and Thumb doubled offsets, but no shifted entry, so it read no case of such a table and every function called only from a case had no caller. On, the fold carries a sign- or zero-extended entry through a left shift by 1-3 (or a multiply by 2, 4 or 8) and an add of a constant base, and reads each case as base + (entry << shift), with the same range check, mask, executable-section and minimum-entry rules as the other table shapes. Off, such a dispatch is unresolved as before.
+- **When to flip:** On (default). It only reads a table whose dispatch adds a shifted table entry to a constant base under a range check or mask, so it adds case bodies and their callees to the call graph of AArch64 binaries. Flip off to reproduce the older call graph or if a hand-written dispatch with that shape is not a switch.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-compacttable
+- **Example:** `--option compacttable off`
+
+### `nameladder` -- on | off, default `on`
+
+- **Symptoms:** j_printf gets no printf prototype; __imp_exit is not marked no-return; a flirt-named memcpy_0 has no memcpy prototype; a mach-o or coff name with a leading underscore misses its libc prototype.
+- **What it does:** Try a function name under its undecorated spellings when the exact spelling is not in a built-in prototype or no-return table. The rungs, each stripping one more decoration than the last, are: a j_ jump-thunk prefix (repeated), an import prefix (__imp_, _imp_, imp__), a stdcall/fastcall @N decoration (f@12, @f@12), the leading ABI underscores of 32-bit COFF and Mach-O, and a trailing _<digits> duplicate-name suffix (memcpy_0). The first spelling the table holds gives the prototype or the no-return verdict, keyed to the image's own name. A name that is in the table as spelled is never retried, so this only adds facts. This is IDA's type-library lookup ladder (guess_tinfo / cleanup_name).
+- **When to flip:** On (default). It changes nothing for a name a table already holds as spelled; it adds the libc/libm prototype and the no-return verdict for decorated spellings such as j_printf, __imp_exit, _strlen@4 or memcpy_0. Flip off when a binary defines its own function whose name only differs from a libc name by such a decoration (sha256_2 is not sha256) and the added prototype is wrong.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-nameladder
+- **Example:** `--option nameladder off`
+
+### `codestrings` -- on | off, default `on`
+
+- **Symptoms:** a char array literal appears at an address inside a function's code; instruction bytes print as a four-character string literal; a function pointer argument renders as a short garbage string.
+- **What it does:** Apply IDA's final-pass string rule inside executable sections. The ASCII string pass scans every loaded section, code included, and plants a char[N] at any run of four printable bytes followed by a zero byte; in x86 and ARM code that is mostly instruction bytes (D$x%, ?w)=, oF(\r). With this on, a run inside a section the object marks as code is kept only when it is at least 16 visible characters long, or at least 4 when it starts right after one to three zero bytes (the padding a compiler puts before a string it places among instructions). Runs in data sections are unchanged.
+- **When to flip:** On (default). Flip off for firmware that keeps short, unpadded strings in its code section and loses their literals in the decompiled C.
+- **Where / provenance:** P1/code-data-partition · kuna · correctness-fix · kuna-codestrings
+- **Example:** `--option codestrings off`
+
+### `protomerge` -- on | off, default `off`
+
+- **Symptoms:** a libc function's FILE * parameter becomes void * because a later source declared it; a demangled C++ class pointer parameter is replaced by unsigned long; a dwarf prototype erases a parameter name the library table gave.
+- **What it does:** Merge the prototypes the load-time sources park on one function slot by slot instead of letting the later source replace the earlier wholesale. The libc tables (by name and by address), the named-aggregate libctypes tables, the demangled C++ signature and DWARF each park a whole prototype at the analysis commit, in that order; before this the last one won even where an earlier one knew more about a parameter. With this on, when both have the same shape (arity, variadic slot, and the same size in every slot), each slot keeps the type that says more (a named struct, union, enum or array, or a pointer to one, over a pointer to a scalar, over a pointer to void, over a float or bool, over an integer, over an undefined), ties going to the later source; names fill in from the earlier one when the later has none; a return type survives when the later source leaves the return open. Prototypes of a different shape replace each other as before. Directive, console and decompile-time prototypes are not merged.
+- **When to flip:** Off by default: on Lua 5.4.8 with DWARF (static musl) it changes 4 of 893 signatures: luaL_checkstack gains its char * message, but luaF_closeupval loses its StackValue * level to unsigned long and bcmp/memcmp take unsigned char * instead of the void * DWARF declares, so the source order or the shape test needs work before it can be on. Flip on to experiment with slot-by-slot merging of library, demangled and DWARF prototypes.
+- **Where / provenance:** P1/external-refinement · kuna · correctness-fix · kuna-protomerge
+- **Example:** `--option protomerge off`
+
 ### `aifpoolslide` -- on | off, default `on`
 
 - **Symptoms:** a sub_ entry starts on a literal pool word one word before a real function; a stripped arm function list lists a function 4 bytes early; a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches; a real arm function is missing from a stripped inventory while the entry just before it is a pool word; aif adds entries on literal pools.
@@ -3246,6 +3343,22 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off in the shipped catalog (it discovers more functions, so it changes emitted C by construction), but the `aggressive` preset carries it together with `listing` (DIV-93) and `auto` selects `aggressive` under 500 KiB, so on the whole-binary surfaces it is live by default for a stripped image of that size; the catalog default is what the datatest corpus and an explicit `--mode reliable` see. Flip on (with option listing on) on stripped ARM firmware when a routine reached only by a tail `B` — a shared ISR stub's handler, a `pop {r4,lr} ; b helper` tail call, a jump-thunk target — produces no output at all because the walk absorbed it into an earlier function. Measured on 96 Cortex-M images: +561 ground-truth functions, 94.6% of the new entries are real function starts, zero real bodies split, zero entries lost.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-tailcallentry
 - **Example:** `option listing on --option tailcallentry on`
+
+### `funcchunks` -- on | off, default `off`
+
+- **Symptoms:** fid misses a library function whose body is split by the compiler; a function's body in the inventory absorbs the function after it; a shared epilogue is counted in only one function; a .cold part after the next function is not part of its parent's fingerprint.
+- **What it does:** Give every discovered function a body made of chunks instead of the address clip [entry, next entry). After the Listing walk, a function's body is the flow closure of its entry: fall-through and branch targets, never a call target, and never another function's entry (a jump there is a tail call). The body is cut into address runs (undecoded alignment padding of up to 16 bytes joins two runs). The run that holds the entry is the main chunk; every other run is a tail. An instruction reached from several entries is a shared tail and lists every function that reaches it as an owner, the way IDA's func_t keeps tails with a referer list. The FID matcher hashes this body (main chunk plus tails, ascending, Ghidra's func.getBody() order) instead of the clip, so a function whose error path or epilogue sits after the next function, or that shares a tail with another function, hashes the instructions it really runs. Requires the Listing (option listing on) and only changes FID's input; inert without both.
+- **When to flip:** Flip on with listing on and fid on when FID misses a library function whose body is not one contiguous run (a gcc .cold split, a shared epilogue, an outlined error path after the next function), or when the clip makes a function absorb a neighbour that the walk never reaches from its entry. Off keeps the [entry, next) clip.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-funcchunks
+- **Example:** `--option listing on --option fid on --option funcchunks on`
+
+### `tailcallentryall` -- on | off, default `off`
+
+- **Symptoms:** a static function reached only by a tail jmp is missing from a stripped x86 function list; a stripped aarch64 binary emits a tail-called helper inside its caller; tailcallentry does nothing on x86 or aarch64.
+- **What it does:** Run tailcallentry on AArch64, x86 (32 and 64 bit) and RISC-V images as well as ARM. tailcallentry admits an unconditional-branch target as a new function entry when every predecessor is an unconditional branch, the branch crosses another discovered entry, the target's flow reaches a return or computed jump, and the target does not open with a stack restore. The four guards are architecture-neutral; only the stack-restore test reads mnemonics, and it now also knows x86 pop / leave / add rsp, AArch64 ldp x29,x30 and post-indexed loads off sp, and RISC-V ld/lw ra,(sp) and addi sp,sp,+n. This is IDA's tail-call split for jumps that leave the current function on every processor (a jump to code outside the function becomes a separate function unless it is a tail of the function). Inert unless tailcallentry and listing are on.
+- **When to flip:** Flip on with listing on and tailcallentry on for a stripped x86, AArch64 or RISC-V binary when a static function reached only by a tail jmp / b is missing from the function list and its body is emitted inside the function that jumps to it. Off keeps tailcallentry ARM-only, as it was measured.
+- **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-tailcallentryall
+- **Example:** `--option listing on --option tailcallentry on --option tailcallentryall on`
 
 ### `entrythumbflow` -- on | off, default `on`
 

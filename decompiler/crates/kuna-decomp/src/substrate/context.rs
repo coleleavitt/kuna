@@ -820,6 +820,8 @@ pub struct ArchContext {
     pub fold_boolean_mask: bool,
     /// (kuna `mba`) Read by [`RuleMbaSimplify`](crate::kuna_mba::RuleMbaSimplify).
     pub mba: bool,
+    /// (kuna `bitidioms`) Read by [`RuleBitIdioms`](crate::kuna_bitidioms::RuleBitIdioms).
+    pub bit_idioms: bool,
     /// Keep mapped global array bases separate from negative element offsets.
     pub global_array_anchor: bool,
     /// (kuna) Fold an exact one-byte modular cancellation around a bounded
@@ -1568,6 +1570,8 @@ pub struct ArchContext {
     /// `strip_stack_guard`, opt-in default-off).  Read by
     /// [`crate::kuna_stackguard`]'s `ActionStripStackGuard`.
     pub strip_stack_guard: bool,
+    /// (kuna `canaryglobal`) Read by `kuna_stackguard`.
+    pub canary_global: bool,
     /// (kuna) strip rustc's bounds / slice / divide-by-zero panic branches
     /// (kuna) Strip the MSVC `/GS` frame-cookie boilerplate (option
     /// `msvcstackguard`, default-off).  Read by
@@ -1918,6 +1922,7 @@ impl ArchContext {
             // unit tests (and the `infer_funcentry` stub-default convention).
             fold_boolean_mask: false,    // GH-1282 booleanmask
             mba: false,
+            bit_idioms: false,
             global_array_anchor: false,
             cancel_byte_arithmetic: false, // cancelbytearithmetic (the ArchSeam carries the real default)
             ret_split_global: false,     // retsplitglobal (the ArchSeam carries the real default)
@@ -2116,6 +2121,7 @@ impl ArchContext {
             mark_indirect_only: false, // indirectonly (opt-in default-off)
             hide_shadow: false,       // hideshadow (Architecture::reset_defaults sets the shipped default: on)
             strip_stack_guard: false,    // stackguard (opt-in default-off)
+            canary_global: false,
             strip_msvc_stack_guard: false, // msvcstackguard (fixture default-off; the live gate rides build_arch_handle)
             strip_security_check: false, // securitycheck (fixture default-off; the live gate rides build_arch_handle)
             branch_flip: false,          // branchflip (opt-in default-off)

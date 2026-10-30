@@ -704,6 +704,7 @@ fn listing_consumer_passes(arch: &Architecture) -> Vec<(bool, Box<dyn AnalysisPa
             Box::new(crate::noreturn_propagate::NoReturnPropagatePass),
         ),
         (arch.analysis_fid, Box::new(crate::fid::FidPass)),
+        (arch.analysis_flirt, Box::new(crate::flirt::FlirtPass)),
         // (kuna `formatstring static`) The load-time format-string resolver: a
         // Listing consumer like the rest, because the call edges are what it
         // walks. `full` runs it too — the decompile-time loop then covers only
@@ -1307,7 +1308,11 @@ pub fn run_listing_consumers_replaying(
     if arch.analysis_listing && arch.analysis_tailcallentry {
         let mut tce_out = AnalysisOutput::default();
         tce_out.entries =
-            crate::listing::kuna_tailcallentry::tail_call_entries(&file, &listing);
+            crate::listing::kuna_tailcallentry::tail_call_entries(
+                &file,
+                &listing,
+                arch.analysis_tailcallentryall,
+            );
         out.push(("tailcallentry", tce_out));
     }
 
@@ -1702,6 +1707,7 @@ mod tests {
                 ("noreturn_disc", false),
                 ("noreturn_propagate", true),
                 ("fid", false),
+                ("flirt", false),
                 ("formatstring", false)
             ]
         );

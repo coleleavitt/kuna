@@ -235,6 +235,17 @@ before `ActionReturnSplit`
 (`decompiler/crates/kuna-decomp/src/infra/universalaction.rs
 (universal_sched)`).
 
+With `canaryglobal` (default on;
+`decompiler/crates/kuna-decomp/src/p7_regions/kuna_stackguard.rs (is_named_guard)`)
+a canary source is also an unwritten read of a global named `__stack_chk_guard`
+(`___stack_chk_guard` on Mach-O) or `__security_cookie`, reached directly or
+through the `INDIRECT` a call adds. That is the AArch64, ARM, PowerPC and i386
+PIC shape, where the glibc canary is a global rather than the x86-64 TLS slot
+`fs:0x28`; Hex-Rays likewise recognises the canary by the global's name. The
+CBRANCH, no-return-handler and saved-slot rules are unchanged, so a function
+that compares that global for another reason keeps its compare unless its
+failing branch is a call.
+
 **What it matches.** Detection is purely structural — kuna's loader does not
 reliably resolve a PLT stub to `__stack_chk_fail`, so the callee *name* is
 never consulted. The canary check is pinned by its compare: a basic block with

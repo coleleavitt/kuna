@@ -635,12 +635,12 @@ impl AnalysisPass for LibcTypesPass {
         // ordinary import is in the union, and the two channels disagree about
         // the size slots.
         let defined = unambiguous_defined_function_names(ctx.file, ctx.bytes, &reloc_imports);
-        seed_named_prototypes(&mut out, &defined, LIBC_DEFINED_NAMED, types, word_size, layout);
-        seed_named_prototypes(&mut out, &imported, LIBC_IMPORTED_OBSTACK, types, word_size, layout);
+        seed_named_prototypes(&mut out, &defined, LIBC_DEFINED_NAMED, types, word_size, layout, ctx.arch.analysis_nameladder);
+        seed_named_prototypes(&mut out, &imported, LIBC_IMPORTED_OBSTACK, types, word_size, layout, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &resolved, LIBC_IMPORTED_OBSTACK, types, word_size, layout);
-        seed_named_prototypes(&mut out, &imported, LIBC_NAMED, types, word_size, layout);
+        seed_named_prototypes(&mut out, &imported, LIBC_NAMED, types, word_size, layout, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &resolved, LIBC_NAMED, types, word_size, layout);
-        seed_named_prototypes(&mut out, &imported, LIBC_EXT_NAMED, types, word_size, layout);
+        seed_named_prototypes(&mut out, &imported, LIBC_EXT_NAMED, types, word_size, layout, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &resolved, LIBC_EXT_NAMED, types, word_size, layout);
         // The stream slots themselves. Not a prototype: a data symbol whose type
         // the dynamic relocation states outright (see `streams`).

@@ -199,7 +199,7 @@ pub(crate) fn is_loaded_initialized<'a>(sec: &impl ObjectSection<'a>) -> bool {
 /// ([`SectionKind::UninitializedData`]) and any non-loaded metadata section is
 /// skipped. The string addresses are `section_vma + run_start`. Format-agnostic
 /// (ELF/PE/COFF/Mach-O), with the ELF path byte-identical to before.
-pub(crate) fn scan_strings(file: &object::File, min_len: usize) -> Vec<StringFact> {
+pub(crate) fn scan_strings(file: &object::File, min_len: usize, code_rule: bool) -> Vec<StringFact> {
     let mut out = Vec::new();
     for sec in file.sections() {
         if !is_loaded_initialized(&sec) {
@@ -209,9 +209,26 @@ pub(crate) fn scan_strings(file: &object::File, min_len: usize) -> Vec<StringFac
             Ok(d) if !d.is_empty() => d,
             _ => continue,
         };
-        out.extend(scan_run(data, sec.address(), min_len));
+        let mut found = scan_run(data, sec.address(), min_len);
+        if code_rule && sec.kind() == SectionKind::Text {
+            found.retain(|f| code_section_string(data, (f.addr - sec.address()) as usize, f.len as usize - 1));
+        }
+        out.extend(found);
     }
     out
+}
+
+/// (kuna `codestrings`) IDA's final-pass rule for a string inside code: a run
+/// of at least 17 bytes (16 visible plus the NUL), or of at least 5 (4 visible
+/// plus the NUL) that starts right after one to three zero bytes, the padding a
+/// compiler puts before a string it places among instructions. Instruction
+/// bytes that happen to spell `D$x%` before a zero byte are neither.
+pub(crate) fn code_section_string(data: &[u8], at: usize, visible: usize) -> bool {
+    if visible >= 16 {
+        return true;
+    }
+    let zeros = data[..at].iter().rev().take(4).take_while(|&&b| b == 0).count();
+    visible >= 4 && (1..=3).contains(&zeros)
 }
 
 /// Port of `StringsAnalyzer` ("ASCII Strings"): detect NUL-terminated ASCII
@@ -251,7 +268,7 @@ impl AnalysisPass for StringLiteralPass {
 
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
         let slots = kuna_ptrslot::PointerSlots::new(ctx.file);
-        let mut strings = scan_strings(ctx.file, self.min_len);
+        let mut strings = scan_strings(ctx.file, self.min_len, ctx.arch.analysis_codestrings);
         strings.retain(|fact| !slots.holds_address(fact.addr));
         AnalysisOutput {
             strings,
@@ -304,6 +321,14 @@ mod tests {
     }
 
     #[test]
+    fn code_section_strings_need_length_or_leading_padding() {
+        let data = b"\x48\x8bD$x%\x00\x00\x00Hello\x00\x90abcdefghijklmnop\x00";
+        assert!(!code_section_string(data, 2, 4), "D$x% after instruction bytes");
+        assert!(code_section_string(data, 9, 5), "Hello after zero padding");
+        assert!(code_section_string(data, 16, 16), "a 16-character run");
+    }
+
+    #[test]
     fn non_terminated_run_rejected() {
         // A long printable run with no NUL terminator (reaches end of slice) is
         // rejected by requireNullEnd.
@@ -337,7 +362,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fauxware");
         let bytes = std::fs::read(path).expect("read fauxware fixture");
         let file = object::File::parse(bytes.as_slice()).expect("parse fauxware");
-        let out = scan_strings(&file, DEFAULT_ASCII_MIN_LEN);
+        let out = scan_strings(&file, DEFAULT_ASCII_MIN_LEN, false);
 
         let has = |addr: u64, len: u32| out.contains(&StringFact { addr, len });
         // "SOSNEAKY"   @ 0x4008d0 (8 visible + NUL = 9)
@@ -359,7 +384,7 @@ mod tests {
         let bytes = std::fs::read(path).expect("read pe_imports.exe");
         let file = object::File::parse(bytes.as_slice()).expect("parse pe_imports.exe");
         assert_eq!(file.format(), object::BinaryFormat::Pe, "fixture is a PE");
-        let out = scan_strings(&file, DEFAULT_ASCII_MIN_LEN);
+        let out = scan_strings(&file, DEFAULT_ASCII_MIN_LEN, false);
         assert!(
             out.contains(&StringFact { addr: 0x140009000, len: 6 }),
             "\"hello\" @ 0x140009000 len 6 not detected in PE .rdata: {out:?}"

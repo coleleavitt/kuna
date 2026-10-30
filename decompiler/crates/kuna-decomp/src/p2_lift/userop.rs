@@ -139,6 +139,10 @@ pub const BUILTIN_EH_UNWINDING: uint4 = 0x10000009;
 pub const BUILTIN_EH_EXCEPTION: uint4 = 0x1000000a;
 /// (kuna) Built-in id for `eh_selector`, the catch-clause selector at a landing pad.
 pub const BUILTIN_EH_SELECTOR: uint4 = 0x1000000b;
+/// (kuna) Built-in id for `bswap`, a byte reversal (`bitidioms`).
+pub const BUILTIN_BSWAP: uint4 = 0x10000009;
+/// (kuna) Built-in id for `rotl`, a left rotate by a constant (`bitidioms`).
+pub const BUILTIN_ROTL: uint4 = 0x1000000a;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1017,6 +1021,8 @@ impl UserOpManage {
             }
             BUILTIN_EH_EXCEPTION => UserPcodeOp::new_unspecialized(b"eh_exception", BUILTIN_EH_EXCEPTION as int4),
             BUILTIN_EH_SELECTOR => UserPcodeOp::new_unspecialized(b"eh_selector", BUILTIN_EH_SELECTOR as int4),
+            BUILTIN_BSWAP => UserPcodeOp::new_unspecialized(b"bswap", BUILTIN_BSWAP as int4),
+            BUILTIN_ROTL => UserPcodeOp::new_unspecialized(b"rotl", BUILTIN_ROTL as int4),
             _ => return Err(KunaError::lowlevel("Bad built-in userop id")),
         };
         self.builtinmap.insert(i, res);

@@ -2439,6 +2439,32 @@ impl ConsoleProgram {
         Ok(name)
     }
 
+    /// (kuna `fidproto`) After a FID / FLIRT rename, park the libc prototype the
+    /// name (or one of its `nameladder` spellings) has, and mark the function
+    /// no-return when the no-return list names it.
+    fn apply_renamed_library_facts(&mut self, sid: kuna_decomp::database::SymbolId, name: &str, addr: &Address) {
+        let spellings: Vec<String> = std::iter::once(name.to_string())
+            .chain(kuna_analysis::protos::kuna_nameladder::fallbacks(name))
+            .collect();
+        if let Some(found) = spellings.iter().find(|n| self.has_declared_libc_prototype(n)) {
+            self.seed_declared_libc_prototype(found, addr);
+        }
+        if kuna_analysis::loader::noreturn::listed_noreturn(name) {
+            self.arch_mut().symboltab.set_function_no_return(sid, true);
+        }
+    }
+
+    fn has_declared_libc_prototype(&self, name: &str) -> bool {
+        let (_addr_size, word_size) = self.arch().data_org();
+        kuna_analysis::protos::declared_libc_prototype(
+            name,
+            self.arch().types(),
+            word_size,
+            kuna_decomp::kuna_libctypes::LibcTypesLayout::Opaque,
+        )
+        .is_some()
+    }
+
     /// (kuna `declaredlibcproto`) Park the built-in libc signature for `name` on the
     /// FunctionSymbol at `addr`, when the tables know the name.
     ///
@@ -3165,6 +3191,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "noreturn_propagate" => arch.analysis_noreturn_propagate,
         "callerreads" => arch.caller_reads,
         "fid" => arch.analysis_fid,
+        "flirt" => arch.analysis_flirt,
         // (kuna) MSVC RTTI / vftable recovery — a standalone load-time pass whose
         // class-name + RTTI_* labels are computed at LOAD but COMMITTED only when
         // this gate is on. Default-OFF (output-changing: adds named data symbols),
@@ -5169,7 +5196,12 @@ fn commit_analysis_output(
                 prog.arch_mut().symboltab.rename_symbol(sid, &m.name)?;
                 // Make the new name resolvable by `load function <name>` (the same
                 // name->addr binding the entry/symbol arms register).
-                prog.register_symbol(&m.name, addr);
+                prog.register_symbol(&m.name, addr.clone());
+                // (kuna `fidproto`) The new name brings what the name means: the
+                // libc prototype and the no-return verdict.
+                if prog.arch().analysis_fidproto {
+                    prog.apply_renamed_library_facts(sid, &m.name, &addr);
+                }
             }
         }
     }
@@ -5513,7 +5545,7 @@ fn commit_analysis_output(
             }
         }
         let name = pieces.name.clone();
-        prog.arch_mut().set_function_prototype_pieces(&name, pieces);
+        prog.arch_mut().merge_function_prototype_pieces(&name, pieces);
     }
 
     // 5c. Library prototypes bound by ENTRY ADDRESS. Same
@@ -5527,7 +5559,7 @@ fn commit_analysis_output(
     //     C++ streams below so DWARF ground truth still wins over both.
     for (addr, pieces) in out.prototypes_at {
         let a = Address::new(Rc::clone(code_space), addr);
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
     let held: Vec<_> = out
         .arm_float_prototypes
@@ -5592,7 +5624,7 @@ fn commit_analysis_output(
             }
             msvc_applied.insert(addr);
         }
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
     let space_index = code_space.get_index();
     for (addr, decl) in msvc_byval {
@@ -5615,7 +5647,7 @@ fn commit_analysis_output(
     //     global by-name query never reaches). Empty when the gate is off.
     for (addr, pieces) in out.cpp_dwarf.prototypes {
         let a = Address::new(Rc::clone(code_space), addr);
-        prog.arch_mut().set_function_prototype_pieces_at(&a, pieces);
+        prog.arch_mut().merge_function_prototype_pieces_at(&a, pieces);
     }
 
     // 6. Processor-context decode-mode paints (the kuna analog of ARM's

@@ -241,3 +241,32 @@ fn msvc_gate_picks_one_reading_of_an_msvc_name() {
     assert_eq!(off.iter().map(|s| s.pieces.name.as_str()).collect::<Vec<_>>(), ["itanium", "legacy"]);
     assert!(off.iter().all(|s| s.model.is_none() && !s.msvc));
 }
+
+#[test]
+fn allocation_operators_parse_as_static_pointer_returning() {
+    let new = decl("_Znwm");
+    assert_eq!(new.this_kind, ThisKind::ProvenNone);
+    assert!(new.returns_pointer);
+    assert_eq!(new.params, vec!["unsigned long"]);
+    let del = decl("_ZdlPvm");
+    assert!(!del.returns_pointer);
+    assert_eq!(del.params, vec!["void*", "unsigned long"]);
+    let class_new = decl("_ZN3FoonwEm");
+    assert_eq!(class_new.this_kind, ThisKind::ProvenNone);
+    assert!(class_new.returns_pointer);
+}
+
+#[test]
+fn std_namespace_functions_take_no_this() {
+    let d = decl("_ZSt20__throw_length_errorPKc");
+    assert_eq!(d.this_kind, ThisKind::ProvenNone);
+    assert_eq!(decl("_ZN9__gnu_cxx27__verbose_terminate_handlerEv").this_kind, ThisKind::ProvenNone);
+}
+
+#[test]
+fn signature_preserving_clones_parse_and_others_do_not() {
+    assert!(try_decl("_ZN7leveldb9NewMemEnvEPNS_3EnvE.localalias").is_some());
+    assert!(try_decl("_ZN7leveldb9NewMemEnvEPNS_3EnvE.lto_priv.0").is_some());
+    assert!(try_decl("_ZN7leveldb9NewMemEnvEPNS_3EnvE.constprop.0").is_none());
+    assert!(try_decl("_ZN7leveldb9NewMemEnvEPNS_3EnvE.isra.0").is_none());
+}

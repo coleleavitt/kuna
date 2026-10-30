@@ -2263,6 +2263,18 @@ from joining two neighbouring runs. The markup passes are untouched: they still
 scan at the ASCII and 2-byte widths only, so no `char[N]` fact and no emitted C
 moves.
 
+- **Strings in code** (`codestrings`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/strings/mod.rs (code_section_string)`):
+  the ASCII pass scans every loaded section, code included, so four printable
+  instruction bytes before a zero byte became a `char[5]` (`D$x%` from x86
+  `mov` encodings, `!@9m!` from AArch64 `ldrb`). Inside a section the object marks
+  as code a run is now kept only at 16 or more visible characters, or at 4 or
+  more right after one to three zero bytes, IDA's final-pass rule for strings
+  among instructions. Data sections are unchanged. Measured: 217 of 234 runs in
+  Lua's AArch64 `.text`, 214 of 215 in a static-pie `ldconfig`, 78 of 78 in
+  `lldb-dap` and 4 of 4 in `ld.so` are dropped, every dropped one instruction
+  bytes.
+
 - **Library prototypes** (`libproto`, the `ApplyDataArchiveAnalyzer` analog,
   `decompiler/crates/kuna-analysis/src/analyzers/protos/mod.rs (LibProtoPass)`):
   Ghidra ships parsed C headers as `.gdt` archives; kuna substitutes a built-in
@@ -3250,6 +3262,36 @@ moves.
   `dwarfstructs off` stays exactly the pre-DIV-86 name-only mapping its own row
   promises.
 
+- **Prototype merge** (`protomerge`, default-off; kuna;
+  `decompiler/crates/kuna-decomp/src/p4_calls/kuna_protomerge.rs (merge)`): the
+  load-time sources park whole prototypes on a function at the analysis commit
+  (the by-name and by-address libc tables, the demangled C++ signature, DWARF),
+  and the last used to replace the earlier wholesale. With the option on, two
+  prototypes of the same shape (arity, variadic slot, the same size in every
+  slot) merge slot by slot: each slot keeps the type that says more (a named
+  aggregate or enum, or a pointer to one, over a pointer to a scalar, over a
+  pointer to void, over a float or bool, over an integer, over an undefined),
+  ties going to the later source; names fill in from the earlier one; a return
+  type survives a later source that leaves the return open. Different shapes
+  replace as before, and directive, console and decompile-time prototypes are
+  never merged. This is IDA's per-argument `score_tinfo` merge. It is off
+  because on Lua 5.4.8 with DWARF it changes 4 of 893 signatures and not all for
+  the better: `luaL_checkstack` gains its `char *` message, `luaF_closeupval`
+  loses its `StackValue *` to `unsigned long`, and `bcmp`/`memcmp` take
+  `unsigned char *` where DWARF declares `void *`.
+
+- **Name ladder** (`nameladder`, default-on; kuna;
+  `decompiler/crates/kuna-analysis/src/analyzers/protos/kuna_nameladder.rs (fallbacks)`):
+  a function name that is not in a prototype table or the no-return list as
+  spelled is retried under its undecorated spellings, each rung stripping one
+  more decoration: a `j_` jump-thunk prefix, an import prefix (`__imp_`, `_imp_`,
+  `imp__`), a stdcall/fastcall `@N` decoration, the leading ABI underscores, and
+  a trailing `_<digits>` duplicate-name suffix. The first spelling a table holds
+  gives the prototype (keyed to the image's own name) or the no-return verdict.
+  A name the table holds as spelled is never retried, so the ladder only adds
+  facts. This is IDA's type-library lookup ladder (`guess_tinfo`,
+  `cleanup_name`).
+
 - **Discriminant-value naming** (`variantnames`, default-on,
   `decompiler/crates/kuna-analysis/src/analyzers/dwarf/kuna_variantnames.rs`;
   `docs/multilang.md`, the first `VariantLayout` consumer) closes the loop the
@@ -3578,6 +3620,19 @@ moves.
   below replaces it for MSVC names unless `msvcsig` is off. Like the DWARF arm the
   pass runs at `load file`, so both certainty tiers are computed there and stashed
   apart, and the mode selects which of them the analysis commit applies.
+  Three more shapes are read (kuna, after IDA's `guess_tinfo`): a scope that is
+  always a namespace (`std`, `std::__1`, `std::__cxx11`, `__gnu_cxx`,
+  `__cxxabiv1`, `boost` and a few more; IDA's `CPP_NAMESPACES`) proves a function
+  nested directly in it takes no `this`, so `proven` applies it; an
+  `operator new` / `operator delete` (global or class-scope, both static) parses
+  with `void *` as the return of the allocation forms; and a gcc
+  `[clone .localalias]` or `[clone .lto_priv.N]` suffix is dropped because those
+  copies keep the signature, while `.constprop`, `.isra`, `.part` and `.cold`
+  clones, whose signature differs, stay refused. While `cppsig` is not `off`,
+  `libproto` also parks `void *(size_t[, ...])` / `void(void *[, size_t])` on the
+  imported Itanium allocation functions (`_Znwm`, `_Znam`, `_ZdlPv`, `_ZdlPvm`,
+  their `nothrow_t` and `align_val_t` forms and the 32-bit `j` spellings), so a
+  `T *p = operator new(n)` no longer needs a cast.
 - **MSVC declarations** (`msvcsig`, `on|off`, default `on`, applied only while
   `cppsig` is not `off`;
   `decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_msvcsig.rs`, the
@@ -6743,7 +6798,56 @@ one that enables the models, so the check is invisible there; it is what keeps a
 later change to either gate from quietly reducing the four guards to the rule
 they replaced. Output-changing (more functions), hence default-off; ARM-only and Listing-tier, so
 it is a strict no-op on every other architecture, with `listing off`, and on the
-XML datatest path.
+XML datatest path. `tailcallentryall` (default-off; kuna) lifts the ARM gate for AArch64, x86
+(32 and 64 bit) and RISC-V, IDA's tail-call split on every processor. The four
+guards do not depend on the instruction set; only the stack-restore test reads
+mnemonics, and it also knows x86 `pop` / `leave` / `add rsp`, AArch64
+`ldp x29,x30` and post-indexed loads off `sp`, and RISC-V `ld`/`lw ra,(sp)` and
+`addi sp,sp,+n`. Measured against the symbol tables of unstripped twins, Lua 5.4.8
+built `-O2` gains 5 functions on x86-64 and 12 on AArch64, every one a real
+function start, with no entry lost.
+
+**FLIRT signatures** (`flirt`, default-off; kuna;
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/mod.rs (FlirtPass)`,
+`decompiler/crates/kuna-analysis/src/analyzers/flirt/sig.rs (parse)`) names
+library functions from IDA `.sig` files (versions 5 to 11; raw, deflate, zlib
+or zstd bodies) listed in `KUNA_FLIRT_SIGS`. A Listing consumer: at every
+discovered entry the trie is walked over the first `pattern_len` bytes, and a
+module matches when the byte-swapped CRC-16/X.25 of the `crc_len` bytes after
+the prefix, its tail bytes (offsets counted after the CRC region) and its
+expected instruction bits agree. A module with a reference is accepted only
+when the instruction at the reference offset branches or calls to a function of
+that name; names from one round can satisfy references in the next, for three
+rounds. A rename needs every matching module at the entry to agree; a name
+given to two addresses or already present is withheld; unnamed, doubtful and
+prefix-only modules without a reference name nothing. The names go out through
+the FID rename stream. **Rename facts** (`fidproto`, default-on;
+`decompiler/crates/kuna-console/src/engine.rs (apply_renamed_library_facts)`):
+when that rename replaces a placeholder, the function also gets the libc
+prototype of its name (or a `nameladder` spelling) and the no-return flag when
+the no-return lists name it, as IDA applies the type and `noret.cfg` on a
+FLIRT rename. All 212 signature files IDA 9.5 ships parse to the last byte; on
+the stripped static-pie `/sbin/ldconfig` with `glibc_amd64.sig`, 207 of 1,611
+functions are named in 1.9 s.
+
+**Function chunks** (`funcchunks`, default-off; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_funcchunks.rs (ChunkModel::build)`)
+gives a discovered function a body. The Listing keys a function by its entry,
+and every consumer that needs a body clips `[entry, next entry)`; that clip
+mis-assigns the two shapes compilers produce most: a tail several functions jump
+into (a shared epilogue or error path) and a part placed after another function.
+The chunk model is IDA's `func_t` with tails, computed after the walk from the
+decoded flow. A function's body is the flow closure of its entry over
+fall-through and branch targets; a call target is never followed, and neither is
+another function's entry, because a jump there is a tail call. The body is cut
+into address runs, where up to 16 undecoded bytes of alignment padding join two
+runs and any decoded instruction between them splits them. The run holding the
+entry is the main chunk and every other run is a tail. An instruction reached
+from several entries is shared, and the model keeps the list of every function
+that reaches it, as IDA's tail keeps its referers. With the option on, the FID
+matcher hashes this body (all chunks, ascending, Ghidra's `func.getBody()`
+order) instead of the clip. Analysis-tier and Listing-only; it changes FID's
+input and nothing else, so it is inert on the XML datatest path.
 
 **Literal-pool inference** (`poolentry`, default-off; kuna;
 `decompiler/crates/kuna-analysis/src/analyzers/aif/kuna_poolentry.rs`) is aimed at
@@ -7654,6 +7758,23 @@ eight instructions and at the first call, as they did. How the range check is
 read once it is found is *not* gated, so the option off is not the old walk:
 ssh `-O2`'s dispatch at `0x42a26` in `main` reads 9 of its 13 cases on the old
 walk, all 13 with the option on, and none with it off.
+
+*Compact tables* (`compacttable`, default-on; kuna;
+`decompiler/crates/kuna-analysis/src/listing/kuna_switchtable.rs (compact_targets)`).
+clang and gcc lower a dense AArch64 switch to a table of byte, halfword or word
+offsets counted in instructions: `ldrb w, [table, idx]; adr x, base;
+add x, x, w, lsl #2; br x` (gcc writes the add as `uxtb #2` or `sxtb #2`). The
+fold knew a 32-bit delta added to a base and a Thumb doubled offset but no
+shifted entry, so it read no case of such a table. With the option on the fold
+carries a sign- or zero-extended entry through a left shift by one to three (or
+a multiply by 2, 4 or 8) and through an add of a constant base, and reads each
+case as `base + (entry << shift)`, under the same range-check, mask,
+executable-section and minimum-entry rules as the other shapes; the slice also
+follows that shift. This is IDA's jump-table target formula (`(sext? elem) <<
+shift` added to the element base). On Lua 5.4.8 built `-O2` for AArch64 the
+call sites `kuna xrefs --from` lists grow from 17 to 53 in `luaK_posfix`, 8 to
+67 in `str_format`, 2 to 6 in `getoption`, 59 to 85 in musl's `printf_core` and
+0 to 1 in `pop_arg`; the other fourteen functions with a `br` are unchanged.
 
 *The `-O0` chain.* gcc spends seven instructions between its `ja` and the jump:
 `mov %eax,%eax; lea 0(,%rax,4),%rdx; lea jt(%rip),%rax; mov (%rdx,%rax,1),%eax;

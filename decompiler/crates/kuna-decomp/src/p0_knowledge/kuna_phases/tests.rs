@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_385() {
-    assert_eq!(kuna_num_settables(), 385);
-    assert_eq!(SETTABLE_TABLE.len(), 385);
+fn settable_count_is_395() {
+    assert_eq!(kuna_num_settables(), 395);
+    assert_eq!(SETTABLE_TABLE.len(), 395);
 }
 
 #[test]
-fn tier_counts_are_125_core_146_transform_114_analysis() {
+fn tier_counts_are_125_core_148_transform_122_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_125_core_146_transform_114_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (125, 146, 114));
+    assert_eq!((core, transform, analysis), (125, 148, 122));
 }
 
 #[test]
@@ -505,6 +505,15 @@ fn option_values_live_value_present_for_168() {
         // codegen live reader (read console-side via kuna_live_value), same as the
         // gates around it. Default-off, ARM-only.
         "tailcallentry",
+        "funcchunks",
+        "tailcallentryall",
+        "compacttable",
+        "nameladder",
+        "flirt",
+        "fidproto",
+        "codestrings",
+        "protomerge",
+        "canaryglobal",
         // (kuna) ARM literal-pool inference — an analysis-pass gate with no codegen
         // live reader (read console-side via kuna_live_value), same as
         // `tailcallentry` above. Default-off, ARM-only.
@@ -969,7 +978,8 @@ fn option_values_live_value_present_for_168() {
     // 154 -> 155: +1 for `arithhelpers` (live_field = arith_helpers).
     // 154 -> 155: +1 for `contextnames` (live_field = context_names).
     // 154 -> 155: +1 for `formatcallees` (live_field = analysis_format_callees).
-    assert_eq!(with_live, 177);
+    // 157 -> 158: +1 for `bitidioms` (live_field = bit_idioms).
+    assert_eq!(with_live, 178);
 }
 
 #[test]
@@ -1213,7 +1223,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `arithhelpers`; its P2 row sits beside `msvcftol`.
     // +1 for `contextnames`; its P6 row sits beside `libcnames`.
     // +1 for `formatcallees`; its P1 row sits beside `formatstring`.
-    assert_eq!(json.matches("},\n").count(), 384);
+    // +2 for `funcchunks` and `tailcallentryall`, beside `tailcallentry`; +1 `compacttable`; +1 `nameladder`; +1 `flirt` and `fidproto` beside `fid`; +1 `codestrings`; +1 `protomerge`; +1 `bitidioms`; +1 `canaryglobal`.
+    assert_eq!(json.matches("},\n").count(), 394);
 }
 
 #[test]

@@ -164,6 +164,27 @@ fn ptr_is_fs_canary(ptr: VarnodeId, data: &Funcdata) -> bool {
     }
 }
 
+/// The globals a stack protector reads its canary from, leading underscores
+/// dropped: glibc's and Darwin's `__stack_chk_guard` (Mach-O `___stack_chk_guard`)
+/// and MSVC's `__security_cookie`.
+const GUARD_GLOBALS: &[&str] = &["stack_chk_guard", "security_cookie"];
+
+/// (kuna `canaryglobal`) Is `vn` the unwritten value of a canary global (the
+/// AArch64, ARM, PowerPC and i386-PIC shape, where no TLS slot is involved)?
+fn is_named_guard(vn: VarnodeId, data: &Funcdata) -> bool {
+    if !data.get_arch().canary_global {
+        return false;
+    }
+    let Some(v) = data.vbank().get(vn) else { return false };
+    if v.is_constant() || v.is_written() {
+        return false;
+    }
+    let addr = v.get_addr().clone();
+    data.get_arch()
+        .name_for_global_varnode(&addr, v.get_size(), &addr)
+        .is_some_and(|(name, off, _)| off == 0 && GUARD_GLOBALS.contains(&name.trim_start_matches('_')))
+}
+
 /// Does `vn` ultimately derive from a LOAD of the canary slot?
 /// (C++ `derivesFromCanaryLoad`, `kuna_stackguard.cc:60`).
 ///
@@ -189,7 +210,7 @@ fn derives_from_canary_load(
         None => return false,
     };
     if !v.is_written() {
-        return false;
+        return is_named_guard(vn, data);
     }
     let def = v.get_def().expect("derivesFromCanaryLoad: def");
     let dop = data.obank().get(def).expect("derivesFromCanaryLoad: dop");
@@ -258,7 +279,7 @@ fn collect_canary_slots(
         None => return false,
     };
     if !written {
-        return false;
+        return is_named_guard(vn, data);
     }
     let def = def.expect("collectCanarySlots: written vn def");
     let (oc, in0, in1, nin) = {

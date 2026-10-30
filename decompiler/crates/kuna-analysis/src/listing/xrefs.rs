@@ -747,6 +747,7 @@ fn descend(
         max_entries,
         preserved: if arch.analysis_switchreach { &preserved } else { &[] },
         far: arch.analysis_switchreach,
+        compact: arch.analysis_compacttable && file.architecture() == object::Architecture::Aarch64,
     };
     let arm = file.architecture() == object::Architecture::Arm;
     let pic_image = pool.as_ref().map(|pool| kuna_picpool::Image {

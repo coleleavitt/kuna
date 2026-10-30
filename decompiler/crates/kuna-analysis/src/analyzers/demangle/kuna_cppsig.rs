@@ -134,6 +134,9 @@ struct Decl {
     /// ground truth spells it the same way (`TableBuilder *`, not
     /// `leveldb::TableBuilder *`).
     class: String,
+    /// The function returns a pointer the mangling does not spell (an
+    /// `operator new`).
+    returns_pointer: bool,
 }
 
 /// Apply the demangled C++ signature to every function whose mangled symbol the
@@ -287,6 +290,10 @@ fn class_scopes<'a>(file: &object::File, decls: impl Iterator<Item = &'a Decl>) 
 /// Parse a full c++filt-style demangled string into a [`Decl`], or `None` when
 /// the shape is one this pass refuses to act on.
 fn parse_decl(dem: &str) -> Option<Decl> {
+    let dem = strip_alias_clone(dem);
+    if let Some(decl) = alloc_operator(dem) {
+        return Some(decl);
+    }
     // An overloaded operator puts unbalanced `<`/`>`/`(` into the text, which the
     // depth-tracking split below cannot survive, and the free operator templates
     // are the densest source of false `this` positives. Reject them outright.
@@ -358,6 +365,8 @@ fn parse_decl(dem: &str) -> Option<Decl> {
             }
         } else if func.starts_with('~') || (!class.is_empty() && func == class) || cv {
             ThisKind::Proven
+        } else if is_namespace_only(&comps[..comps.len() - 1].join("::")) {
+            ThisKind::ProvenNone
         } else {
             ThisKind::Ambiguous
         };
@@ -394,6 +403,83 @@ fn parse_decl(dem: &str) -> Option<Decl> {
         varargs,
         this_kind,
         class,
+        returns_pointer: false,
+    })
+}
+
+/// Scopes that are always namespaces, never classes, so a function nested
+/// directly in one takes no `this` (IDA's `CPP_NAMESPACES` list).
+const NAMESPACES: &[&str] = &[
+    "std",
+    "std::__1",
+    "std::__cxx11",
+    "std::__ndk1",
+    "std::__detail",
+    "std::chrono",
+    "std::filesystem",
+    "std::__fs::filesystem",
+    "std::__1::chrono",
+    "__gnu_cxx",
+    "__cxxabiv1",
+    "boost",
+];
+
+fn is_namespace_only(scope: &str) -> bool {
+    NAMESPACES.contains(&scope)
+}
+
+/// Drop a trailing `[clone .localalias]` / `[clone .lto_priv.N]`: gcc names a
+/// local alias or an LTO-private copy that way, and both keep the signature.
+/// A `.constprop`, `.isra`, `.part` or `.cold` clone changes it and stays.
+fn strip_alias_clone(dem: &str) -> &str {
+    let mut cur = dem.trim_end();
+    while let Some(i) = cur.rfind(" [clone ") {
+        let tag = &cur[i + " [clone ".len()..];
+        if !tag.ends_with(']') {
+            break;
+        }
+        let kind = &tag[..tag.len() - 1];
+        if kind == ".localalias" || kind.starts_with(".lto_priv.") {
+            cur = cur[..i].trim_end();
+        } else {
+            break;
+        }
+    }
+    cur
+}
+
+/// The global or class-scope `operator new` / `operator delete` family: an
+/// allocation function returns `void *`, and both are static (no `this`).
+fn alloc_operator(dem: &str) -> Option<Decl> {
+    let (prefix, params_text, suffix) = signature_parens(dem)?;
+    if !is_cv_ref_only(suffix) || suffix.contains("const") {
+        return None;
+    }
+    let name = prefix.trim();
+    let base = name.rsplit_once("::").map_or(name, |(_, b)| b);
+    let returns_pointer = match base {
+        "operator new" | "operator new[]" => true,
+        "operator delete" | "operator delete[]" => false,
+        _ => return None,
+    };
+    let scope = name.rsplit_once("::").map_or("", |(s, _)| s).to_string();
+    let params: Vec<String> = split_params(params_text)
+        .into_iter()
+        .map(str::trim)
+        .filter(|p| !p.is_empty() && *p != "void")
+        .map(str::to_string)
+        .collect();
+    if params.iter().any(|p| p == "...") {
+        return None;
+    }
+    Some(Decl {
+        qualified: name.to_string(),
+        scope,
+        params,
+        varargs: false,
+        this_kind: ThisKind::ProvenNone,
+        class: String::new(),
+        returns_pointer,
     })
 }
 
@@ -571,9 +657,14 @@ fn build_pieces(
         return None;
     }
     let first_var_arg_slot = if decl.varargs { intypes.len() as int4 } else { -1 };
+    let outtype = if decl.returns_pointer {
+        Some(types.get_type_pointer(ptr, types.get_type_void().ok()?, word_size).ok()?)
+    } else {
+        None
+    };
     Some(PrototypePieces {
         name: decl.qualified.clone(),
-        outtype: None,
+        outtype,
         intypes,
         innames,
         first_var_arg_slot,

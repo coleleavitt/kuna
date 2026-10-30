@@ -195,6 +195,27 @@ fn path_matches(path: &str, exact: &[String], wildcard: &[String]) -> bool {
         || wildcard.iter().any(|w| w.contains("::") && path.starts_with(w.as_str()))
 }
 
+/// [`name_matches`], retried under the `nameladder` fallback spellings
+/// (`j_exit`, `__imp_abort`, `exit_0`) when `ladder` is set.
+pub(crate) fn name_matches_ladder(name: &str, exact: &[String], wildcard: &[String], ladder: bool) -> bool {
+    name_matches(name, exact, wildcard)
+        || (ladder
+            && crate::analyzers::protos::kuna_nameladder::fallbacks(name)
+                .iter()
+                .any(|f| name_matches(f, exact, wildcard)))
+}
+
+/// Does the shipped no-return list (ELF and PE/Mach-O lists together) name
+/// `name` under any `nameladder` spelling? For a name a rename gave a function
+/// after the load-time scan.
+pub fn listed_noreturn(name: &str) -> bool {
+    let (mut exact, mut wildcard) = parse_list(ELF_NORETURN_LIST);
+    let (e, w) = parse_list(PE_MAC_NORETURN_LIST);
+    exact.extend(e);
+    wildcard.extend(w);
+    name_matches_ladder(name, &exact, &wildcard, true)
+}
+
 /// Scan an ELF object's FUNC symbols (`.symtab` + `.dynsym`) for known no-return
 /// names. Emits a [`NoReturnFact`] carrying the symbol **address** alongside its
 /// **original installed name** (not the stripped form) for each hit. The address
@@ -208,7 +229,7 @@ fn path_matches(path: &str, exact: &[String], wildcard: &[String]) -> bool {
 /// ELF list (faithful to `noReturnFunctionConstraints.xml`'s per-`<compiler>`
 /// arms): `Rustc` → `RustFunctionsThatDoNotReturn`, `Go` →
 /// `GolangFunctionsThatDoNotReturn`, everything else → base ELF list only.
-fn scan_noreturn(file: &object::File, bytes: &[u8], compiler: Compiler) -> AnalysisOutput {
+fn scan_noreturn(file: &object::File, bytes: &[u8], compiler: Compiler, ladder: bool) -> AnalysisOutput {
     let mut out = AnalysisOutput::default();
     // Per-format base list (PR-10): an ELF gets the vendored ELF list (+ the
     // per-compiler Rust/Go widening); a PE/COFF/Mach-O gets the PE/Mac list
@@ -246,7 +267,7 @@ fn scan_noreturn(file: &object::File, bytes: &[u8], compiler: Compiler) -> Analy
     let rust_paths = compiler == Compiler::Rustc && file.format() == object::BinaryFormat::Elf;
     let mut seen = std::collections::HashSet::new();
     let mut emit = |out: &mut AnalysisOutput, addr: u64, n: String| {
-        let hit = name_matches(&n, &exact, &wildcard)
+        let hit = name_matches_ladder(&n, &exact, &wildcard, ladder)
             || (rust_paths && rust_path(&n).is_some_and(|p| path_matches(&p, &exact, &wildcard)));
         if hit && seen.insert((addr, n.clone())) {
             out.noreturn.push(NoReturnFact { addr, name: n });
@@ -295,7 +316,7 @@ fn scan_noreturn(file: &object::File, bytes: &[u8], compiler: Compiler) -> Analy
 /// (kuna `armfuncmode`) The addresses (Thumb bit cleared) of the image's
 /// functions and PLT stubs the base ELF list names as never returning.
 pub(crate) fn known_noreturn_addrs(file: &object::File) -> std::collections::BTreeSet<u64> {
-    scan_noreturn(file, &[], Compiler::Unknown).noreturn.iter().map(|fact| fact.addr & !1).collect()
+    scan_noreturn(file, &[], Compiler::Unknown, false).noreturn.iter().map(|fact| fact.addr & !1).collect()
 }
 
 impl AnalysisPass for NoReturnKnownPass {
@@ -308,7 +329,7 @@ impl AnalysisPass for NoReturnKnownPass {
     }
 
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
-        scan_noreturn(ctx.file, ctx.bytes, self.compiler)
+        scan_noreturn(ctx.file, ctx.bytes, self.compiler, ctx.arch.analysis_nameladder)
     }
 }
 
@@ -523,6 +544,16 @@ mod tests {
     }
 
     #[test]
+    fn nameladder_reaches_decorated_spellings() {
+        let (exact, wildcard) = sets();
+        for n in ["j_exit", "__imp_abort", "exit_0", "_abort@0"] {
+            assert!(!name_matches(n, &exact, &wildcard), "{n} is not listed as spelled");
+            assert!(name_matches_ladder(n, &exact, &wildcard, true), "{n} under the ladder");
+            assert!(!name_matches_ladder(n, &exact, &wildcard, false), "{n} without the ladder");
+        }
+    }
+
+    #[test]
     fn does_not_flag_unlisted_names() {
         let (exact, wildcard) = sets();
         for n in ["puts", "read", "main", "authenticate", "printf", "strcmp"] {
@@ -549,7 +580,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/fauxware");
         let bytes = std::fs::read(path).expect("read fauxware fixture");
         let file = object::File::parse(bytes.as_slice()).expect("parse fauxware");
-        let out = scan_noreturn(&file, &bytes, Compiler::Gcc);
+        let out = scan_noreturn(&file, &bytes, Compiler::Gcc, false);
         let exit = out.noreturn.iter().find(|f| f.name == "exit").expect("exit must be flagged");
         // The emitted address is the PLT-stub install address (a real code
         // address, never the UND `.dynsym` 0), so the commit resolves it by
@@ -572,7 +603,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/cpp_noreturn_x86_64");
         let bytes = std::fs::read(path).expect("read cpp_noreturn fixture");
         let file = object::File::parse(bytes.as_slice()).expect("parse cpp_noreturn");
-        let out = scan_noreturn(&file, &bytes, Compiler::Gcc);
+        let out = scan_noreturn(&file, &bytes, Compiler::Gcc, false);
 
         // The mangled std::terminate import is flagged under its RAW name (the
         // funcsym is later demangled to `std::terminate`; the scan matches the
@@ -614,7 +645,7 @@ mod tests {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/cxxthrow_noreturn_x86_64");
         let bytes = std::fs::read(path).expect("read cxxthrow fixture");
         let file = object::File::parse(bytes.as_slice()).expect("parse cxxthrow fixture");
-        let out = scan_noreturn(&file, &bytes, Compiler::Clang);
+        let out = scan_noreturn(&file, &bytes, Compiler::Clang, false);
 
         // PINNED: the `@plt` stubs at 0x401030 / 0x401040 (objdump -d -j .plt.sec).
         for (name, stub) in [
@@ -818,7 +849,7 @@ mod tests {
 
         // (2) Matching under the Go arm: `runtime.gopanic` (a defined FUNC in
         // `.symtab`) is flagged no-return, carrying its real code address.
-        let go_out = scan_noreturn(&file, &bytes, Compiler::Go);
+        let go_out = scan_noreturn(&file, &bytes, Compiler::Go, false);
         let gopanic = go_out
             .noreturn
             .iter()
@@ -842,7 +873,7 @@ mod tests {
         // names: the widening is gated on Go detection. (The base ELF list could
         // in principle still match a name like `exit`, but `runtime.gopanic` is
         // Go-only, so this isolates the gating.)
-        let c_out = scan_noreturn(&file, &bytes, Compiler::Gcc);
+        let c_out = scan_noreturn(&file, &bytes, Compiler::Gcc, false);
         assert!(
             !c_out.noreturn.iter().any(|f| f.name == "runtime.gopanic"),
             "runtime.gopanic must NOT be flagged under the C arm (Go list is gated)"

@@ -39,7 +39,7 @@ impl AnalysisPass for LibgccSigsPass {
         let names = super::loaded_function_names(ctx.file, ctx.bytes, &reloc_imports, false);
         let types = ctx.arch.types();
         let (_, word_size) = ctx.arch.data_org();
-        seed_named_prototypes(&mut out, &names, SIGNATURES, types, word_size, L);
+        seed_named_prototypes(&mut out, &names, SIGNATURES, types, word_size, L, ctx.arch.analysis_nameladder);
         seed_resolved_prototypes(&mut out, &imports, SIGNATURES, types, word_size, L);
         out
     }

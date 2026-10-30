@@ -2461,6 +2461,23 @@ is a boolean being smeared across the word. Rewrite: `INT_2COMP(b)` (`0 - b`,
 giving 0 or all-ones), which the surrounding compare rules then clean to a
 plain boolean test. Settable `booleanmask`, shipped default **on** (DIV-2).
 
+**bitidioms** (kuna) —
+`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_bitidioms.rs (RuleBitIdioms)`,
+group `analysis`, live gate `bit_idioms` (`option bitidioms`, default off: the
+datatest corpus has a leading-zero-count case and two PowerPC rotate-and-mask
+cases whose expected C it rewrites). On an
+`INT_OR` the rule follows where each byte of the result comes from, through
+byte-aligned shifts, byte masks, ORs of disjoint bytes, zero extensions and byte
+`SUBPIECE`s; when every byte `i` of one source `x` of the same size lands in byte
+`N - 1 - i` the `INT_OR` becomes `CALLOTHER bswap(x)`. Otherwise
+`(x << n) | (x >> (W - n))` with a constant `n` becomes `rotl(x, n)`. A
+`rotl(v, 8k)` whose `v` is a partial swap the rotate completes is turned into
+`bswap` on a later visit, because AArch64 `rev` lifts to three stages (bytes in
+halfwords, halfwords, halves) and the rotate on the last stage can fold before
+the stages under it are simplified. `bswap` and `rotl` are unspecialised
+builtins (`BUILTIN_BSWAP`, `BUILTIN_ROTL`), so their types come from the
+varnodes. This is Hex-Rays' bswap slot filling and rotate rule.
+
 **cancelbytearithmetic** (repipe `cancelling-byte-arithmetic-splits`) —
 `decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_cancelbytearithmetic.rs`
 owns the option and exact graph matcher; a small hook remains in the

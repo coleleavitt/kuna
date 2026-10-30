@@ -133,10 +133,17 @@ impl AnalysisPass for FidPass {
         // lookup path can supply an `reloc_object`-backed oracle here.
         let relocs = NoRelocations;
 
+        let chunks = ctx
+            .arch
+            .analysis_funcchunks
+            .then(|| crate::listing::kuna_funcchunks::ChunkModel::build(listing));
         for (&entry, _f) in listing.functions() {
-            // §4.3 extent: the address-contiguous `[entry, next)` clip over the
-            // Listing's decoded instructions (ascending).
-            let extent = extent::calculate_extent(listing, entry);
+            // §4.3 extent: the address-contiguous `[entry, next)` clip, or the
+            // flow body (main chunk plus tails) under `funcchunks`.
+            let extent = match &chunks {
+                Some(model) => extent::chunk_extent(listing, model, entry),
+                None => extent::calculate_extent(listing, entry),
+            };
             if extent.len() < hash::SHORT_HASH_CODE_UNIT_LENGTH as usize {
                 continue;
             }

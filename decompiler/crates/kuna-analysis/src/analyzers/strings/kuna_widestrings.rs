@@ -192,7 +192,7 @@ mod tests {
         );
         // And the 1-byte pass still sees nothing there — the gap this closes.
         assert!(
-            !super::super::scan_strings(&file, DEFAULT_WIDE_MIN_LEN)
+            !super::super::scan_strings(&file, DEFAULT_WIDE_MIN_LEN, false)
                 .iter()
                 .any(|f| f.addr == 0x140002100),
             "the ASCII width must not claim the wide literal"

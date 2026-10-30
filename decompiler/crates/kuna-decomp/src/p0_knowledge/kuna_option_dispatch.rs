@@ -106,6 +106,7 @@ kuna_options! { self, p1;
     "addcarrychain" => on_off!(add_carry_chain, "Carry-chain wide-add recovery"),
     "ovlesssimplify" => on_off!(ov_less_simplify, "OV-flag signed-compare simplification"),
     "booleanmask" => on_off!(fold_boolean_mask, "Boolean sign-mask folding"),
+    "bitidioms" => on_off!(bit_idioms, "Byte-swap and rotate idioms"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),
     "cancelbytearithmetic" => {
         let (val, msg) =
@@ -799,6 +800,7 @@ kuna_options! { self, p1;
         Ok(format!("Maximum jumptable size set to {val}"))
     },
     "stackguard" => on_off!(strip_stack_guard, "Stack-guard canary stripping"),
+    "canaryglobal" => on_off!(canary_global, "Stack-guard canary read from a named global"),
     "msvcstackguard" => {
         on_off!(strip_msvc_stack_guard, "MSVC /GS frame-cookie stripping")
     },
@@ -1311,7 +1313,31 @@ kuna_options! { self, p1;
     },
     "tailcallentry" => {
         on_off!(analysis_tailcallentry, "Tail-call function-entry recovery Listing consumer")
+    },    "funcchunks" => {
+        on_off!(analysis_funcchunks, "Function chunk bodies (main chunk + shared tails)")
+    },    "tailcallentryall" => {
+        on_off!(analysis_tailcallentryall, "Tail-call function-entry recovery on non-ARM targets")
+    },    "compacttable" => {
+        on_off!(analysis_compacttable, "AArch64 compact jump-table reads in the reference walk")
+    },    "nameladder" => {
+        on_off!(analysis_nameladder, "Prototype/no-return name lookup ladder")
+    },    "flirt" => {
+        on_off!(analysis_flirt, "FLIRT signature matching")
+    },    "fidproto" => {
+        on_off!(analysis_fidproto, "Prototype and no-return for FID/FLIRT renames")
+    },    "codestrings" => {
+        on_off!(analysis_codestrings, "Code-section string acceptance rule")
+    },    "protomerge" => {
+        on_off!(analysis_protomerge, "Slot-by-slot merge of load-time prototypes")
     },
+
+
+
+
+
+
+
+
     "gopclntab" => {
         on_off!(analysis_gopclntab, "Go pclntab function-name recovery pass")
     },
