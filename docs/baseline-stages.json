@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3684,
-    3684
+    3685,
+    3685
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1523,10 +1523,11 @@
     "data:OBJCRESOLVE #2: off, the send to it is the runtime entry point",
     "data:OBJCRESOLVE #3: off, the send to a typed ivar is the runtime entry point",
     "data:OBJCRESOLVE #4: default, objc_alloc_init on the class reference returns Base *",
-    "data:OBJCRESOLVE #5: default, the send to the Base * resolves to the method",
-    "data:OBJCRESOLVE #6: default, the send to the typed ivar resolves",
-    "data:OBJCRESOLVE #7: default, the stub send to self resolves",
+    "data:OBJCRESOLVE #5: default, the send to the Base * goes to the method, with its prototype (self, SEL, Base *)",
+    "data:OBJCRESOLVE #6: default, the send to the typed ivar goes to the method",
+    "data:OBJCRESOLVE #7: default, the stub send to self goes to the method with self typed (no cast)",
     "data:OBJCRESOLVE #8: the getter's result (Base *, from its property) resolves its own send",
+    "data:OBJCRESOLVE #9: the retargeted call carries the method's declared argument type (its encoding's id)",
     "data:OBJCSDK #1: without headers the double argument is lost",
     "data:OBJCSDK #2: without headers the CGRect argument is one garbage word",
     "data:OBJCSDK #3: with headers setAlpha: takes the receiver and its double",
@@ -1549,7 +1550,7 @@
     "data:OBJCTYPES #5: objcivars reads a field through the class-typed ivar",
     "data:OBJCTYPES #6: the getter returns the typed ivar",
     "data:OBJCTYPES #7: the setter takes the class",
-    "data:OBJCTYPES #8: a send to the typed ivar (resolved to the method by objcresolve)",
+    "data:OBJCTYPES #8: a send to the typed ivar (the call goes to the method, objcresolve)",
     "data:OSCLASSINFO #1: off leaves the metaclass global unnamed",
     "data:OSCLASSINFO #2: on names the metaclass global from the class record",
     "data:OSCLASSINFO #3: on names the class's New function",

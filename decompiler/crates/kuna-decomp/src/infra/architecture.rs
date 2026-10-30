@@ -562,6 +562,12 @@ pub struct Architecture {
     /// (kuna) The image's Objective-C classes, methods and selector strings,
     /// handed over by the ObjC analysis commit; empty on every other image.
     pub kuna_objc_classes: Rc<crate::kuna_objcrettype::ObjcClassTable>,
+    /// (kuna `objcresolve`) Message sends a first decompile resolved, by call
+    /// site: the IMP the second decompile's CALL goes to instead of the runtime
+    /// entry point (`FlowInfo::setup_call_specs`), and for an `objc_msgSend$<sel>`
+    /// stub site the prototype the call keeps (the stub's shape, `self` typed).
+    pub kuna_objc_retargets: std::collections::HashMap<u64, u64>,
+    pub kuna_objc_site_pieces: std::collections::HashMap<u64, crate::fspec::PrototypePieces>,
     /// (kuna tee-O2 tail-jumps) Recover a direct `jmp` to another function's
     /// entry (e.g. `jmp setlocale@plt`) as a tail call (CALL + RETURN) instead of
     /// flowing into the callee (`option tailcalljump on|direct`).
@@ -3191,6 +3197,8 @@ impl Architecture {
             objc_rettype: false, // (kuna) option objcrettype; reset_defaults sets the shipped default
             objc_resolve: false, // (kuna) option objcresolve; reset_defaults sets the shipped default
             kuna_objc_classes: Rc::new(Default::default()),
+            kuna_objc_retargets: Default::default(),
+            kuna_objc_site_pieces: Default::default(),
             tail_call_jumps: false,
             tail_call_tables: false, // (kuna) option tailcalljump; reset_defaults sets the shipped default
             tail_call_frame: false, // (kuna) option tailcallframe; reset_defaults sets the shipped default

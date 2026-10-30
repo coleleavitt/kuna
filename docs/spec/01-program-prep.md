@@ -4276,11 +4276,24 @@ every other binary's pass list is byte-identical to before the pass existed):
     a pointer to a class struct, or a value the P5 walk resolves — is the IMP
     found along the superclass chain: `-[Base setInner:](v1, sel_setInner_, …)`,
     `-[Base count](self->inner, sel_count)`, `-[Holder inner](self)` for the
-    `objc_msgSend$inner` stub (`objcresolve`). A selector no class of the chain
-    declares keeps the runtime entry point; the prototype, arguments and the
-    listing's call graph are unchanged (Hex-Rays also adds a code xref, which
-    this does not). The stage test `tests/stages/kuna-objcresolve.xml` runs
-    both fixtures with the options off and on.
+    `objc_msgSend$inner` stub (`objcresolve`). The resolution is not a
+    rendering: once the first decompile has resolved the sends of a function,
+    each site's IMP is recorded on the architecture
+    (`decompile_step.rs (objc_retargets)`) and the function is decompiled
+    again with every such CALL sent to the IMP — `FlowInfo::setup_call_specs`
+    asks `query_call_retarget` before the callee is looked up, so the call
+    carries the method's own prototype (`-[Base setInner:](self, SEL, id)`) and
+    `kuna xrefs` its edge. An `objc_msgSend$<sel>` stub site has no selector
+    argument, so it keeps the stub's argument shape (`query_call_site_pieces`)
+    with `self` typed as the receiver's class and the method's declared return.
+    The retarget is the kuna analog of Hex-Rays' `cot_obj` callee plus the code
+    xref it adds; `kuna xrefs --from f` decompiles `f` and `--to m` the callers
+    of the selector's stub and then of `objc_msgSend` (at most 512), reading the
+    retargets back. A method's `self`/`_cmd` parameter names are never adopted
+    for the caller's variables. A selector no class of the chain declares keeps
+    the runtime entry point. The stage test `tests/stages/kuna-objcresolve.xml`
+    runs both fixtures with the options off and on; `kuna-cli`'s
+    `xrefs_objc_resolved` test asks both directions.
 
   - **By-value aggregates and global blocks**
     (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (struct_leaves)`,

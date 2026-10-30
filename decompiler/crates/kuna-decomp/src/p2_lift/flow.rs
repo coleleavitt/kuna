@@ -459,6 +459,17 @@ pub trait FlowEnvironment {
         None
     }
 
+    /// (kuna `objcresolve`) The method a message send at `callsite` was resolved
+    /// to by an earlier decompile: the CALL goes there instead.
+    fn query_call_retarget(&self, _callsite: &Address) -> Option<Address> {
+        None
+    }
+
+    /// (kuna `objcresolve`) The prototype a retargeted stub site keeps.
+    fn query_call_site_pieces(&self, _callsite: &Address) -> Option<crate::fspec::PrototypePieces> {
+        None
+    }
+
     /// Does the function at the direct-call `entry` address have its prototype
     /// marked \e noreturn? (C++ `FlowInfo::queryCall` →
     /// `fspecs.copyFlowEffects(otherfunc->getFuncProto())` →
@@ -2775,6 +2786,11 @@ truncating the fall-through here"
                 entry = info.entry;
             }
         }
+        // (kuna `objcresolve`) A send whose method a first decompile resolved
+        // goes to the IMP.
+        if let Some(target) = self.data.obank().get(op).map(|o| o.get_addr().clone()).and_then(|at| self.env.query_call_retarget(&at)) {
+            entry = target;
+        }
         self.build_call_specs(op, entry.clone(), false)?;
         self.qlst_count += 1;
         // While weaving a call-fixup body, a nested direct CALL to the SAME
@@ -3012,7 +3028,7 @@ truncating the fall-through here"
             let ov = self.data.get_override().find_proto_override(&op_addr);
             if let Some(proto) = ov.and_then(|ov| ov.prototype()) {
                 fc.proto_mut().copy(proto);
-            } else if let Some(pieces) = ov.and_then(|ov| ov.pieces()).cloned() {
+            } else if let Some(pieces) = ov.and_then(|ov| ov.pieces()).cloned().or_else(|| self.env.query_call_site_pieces(&op_addr)) {
                 if let Some(proto) = self.env.build_override_proto(&pieces)? {
                     fc.proto_mut().copy(&proto);
                     if self.data.get_override().is_format_call(&op_addr) {

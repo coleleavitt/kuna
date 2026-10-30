@@ -19,7 +19,10 @@
     folded class reference with that class's pointer and for `init.../self/
     retain/autorelease/copy` with the receiver's class (`objcrettype`); the P9
     callee name of a send whose receiver's class is known is the method it
-    reaches, looked up along the superclass chain (`objcresolve`).
+    reaches, looked up along the superclass chain, and a second decompile
+    sends the CALL to that IMP (`FlowInfo::setup_call_specs` retarget), so
+    the call carries the method's prototype and `kuna xrefs` its edge
+    (`objcresolve`).
 
     Pass 1 (both off): `objc_object *v1`, `objc_msgSend(v1,sel_setInner_,...)`,
     `objc_msgSend(self->inner,sel_count)`. Pass 2 (default): `Base *v1`,
@@ -70,8 +73,9 @@ c0035fd6
 <stringmatch name="OBJCRESOLVE #2: off, the send to it is the runtime entry point" min="1" max="1">objc_msgSend\(v1,sel_setInner_,</stringmatch>
 <stringmatch name="OBJCRESOLVE #3: off, the send to a typed ivar is the runtime entry point" min="1" max="1">objc_msgSend\(self->inner,sel_count\)</stringmatch>
 <stringmatch name="OBJCRESOLVE #4: default, objc_alloc_init on the class reference returns Base *" min="1" max="1">Base \*v1; // x0 \| x19</stringmatch>
-<stringmatch name="OBJCRESOLVE #5: default, the send to the Base * resolves to the method" min="1" max="1">-\[Base setInner:\]\(v1,sel_setInner_,</stringmatch>
-<stringmatch name="OBJCRESOLVE #6: default, the send to the typed ivar resolves" min="1" max="1">-\[Base count\]\(self->inner,sel_count\)</stringmatch>
-<stringmatch name="OBJCRESOLVE #7: default, the stub send to self resolves" min="1" max="1">-\[Holder inner\]\(</stringmatch>
-<stringmatch name="OBJCRESOLVE #8: the getter's result (Base *, from its property) resolves its own send" min="1" max="1">-\[Base count\]\(v3,sel_count\)</stringmatch>
+<stringmatch name="OBJCRESOLVE #5: default, the send to the Base * goes to the method, with its prototype (self, SEL, Base *)" min="1" max="1">-\[Base setInner:\]\(v1,\(objc_selector \*\)sel_setInner_,</stringmatch>
+<stringmatch name="OBJCRESOLVE #6: default, the send to the typed ivar goes to the method" min="1" max="1">-\[Base count\]\(self->inner,\(objc_selector \*\)sel_count\)</stringmatch>
+<stringmatch name="OBJCRESOLVE #7: default, the stub send to self goes to the method with self typed (no cast)" min="1" max="1">-\[Holder inner\]\(self\)</stringmatch>
+<stringmatch name="OBJCRESOLVE #9: the retargeted call carries the method's declared argument type (its encoding's id)" min="1" max="1">-\[Base setInner:\]\(v1,\(objc_selector \*\)sel_setInner_,\(objc_object \*\)objc_alloc_init</stringmatch>
+<stringmatch name="OBJCRESOLVE #8: the getter's result (Base *, from its property) resolves its own send" min="1" max="1">-\[Base count\]\(v3,\(objc_selector \*\)sel_count\)</stringmatch>
 </decompilertest>

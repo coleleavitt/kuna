@@ -335,7 +335,7 @@ impl ObjcMetadataPass {
             out.fid_names.push(FidMatch { addr: m.imp, name: label.clone() });
             if let Some(table) = out.objc_classes.as_mut() {
                 let shown_owner = display_class_name(owner);
-                table.classes.entry(shown_owner).or_default().methods.insert((kind == '+', m.selector.clone()), label.clone());
+                table.classes.entry(shown_owner).or_default().methods.insert((kind == '+', m.selector.clone()), (label.clone(), m.imp));
             }
 
             // The typed prototype from the ObjC type encoding (PR-O2): `i20@0:8i16`
