@@ -6,7 +6,7 @@
 //! bookkeeping. Remaining architecture-dependent limitations are documented at
 //! their call sites.
 
-use kuna_base::address::{calc_mask, leastsigbit_set, sign_extend_sized, Address, SeqNum};
+use kuna_base::address::{calc_mask, leastsigbit_set, sign_extend_sized, Address};
 use kuna_base::types::{int4, uintb, Wrap};
 use kuna_num::opcodes::OpCode;
 use std::rc::Rc;
@@ -87,11 +87,6 @@ fn nzmask_of(data: &Funcdata, vn: VarnodeId) -> uintb {
 /// `op->getAddr()`.
 fn addr_of(data: &Funcdata, op: OpId) -> Address {
     data.obank().get(op).expect("addr_of: stale op").get_addr().clone()
-}
-
-/// `op->getSeqNum()`.
-fn seqnum_of(data: &Funcdata, op: OpId) -> SeqNum {
-    data.obank().get(op).expect("seqnum_of: stale op").get_seq_num().clone()
 }
 
 // =============================================================================
@@ -1959,13 +1954,6 @@ impl Rule for RuleHumptyOr {
 
 /// \brief Convert BRANCHIND with only one computed destination to a BRANCH
 /// (C++ `RuleSwitchSingle`).
-///
-/// STUB(W?-jumptable): the body needs `Funcdata::findJumpTable`,
-/// `removeJumpTable`, `getStructure`, `newCodeRef`, and `warningHeader` plus the
-/// `JumpTable` accessors — none ported to this wave's `Funcdata`.  The guard
-/// `bb->sizeOut() != 1` and the no-jumptable early-out are transcribed; with
-/// `findJumpTable` unported the rule short-circuits to "no jumptable" (the C++
-/// `jt == 0` early-out).  Recorded as a loss.
 pub struct RuleSwitchSingle;
 
 impl RuleSwitchSingle {
@@ -2000,11 +1988,36 @@ impl Rule for RuleSwitchSingle {
         if data.bblocks_ref().block(bb).size_out() != 1 {
             return 0;
         }
-        //   -- STUB(W?-jumptable): findJumpTable + JumpTable accessors + newCodeRef
-        //   + removeJumpTable + getStructure().clear() + warningHeader unported.
-        //   The remaining body (label scan, BRANCHIND->BRANCH conversion) is
-        //   transcribed in the C++ but unreachable until the jumptable surface lands.
-        0
+        let Some(jt_idx) = data.find_jump_table_index(op) else { return 0 };
+        let jt = data.get_jump_table(jt_idx as int4);
+        let num = jt.num_entries();
+        if num == 0 || !jt.is_labelled() {
+            return 0;
+        }
+        let addr = jt.get_address_by_index(0);
+        let mut needwarning = false;
+        let mut allcasesmatch = false;
+        if num != 1 {
+            needwarning = true;
+            allcasesmatch = (1..num).all(|i| jt.get_address_by_index(i) == addr);
+        }
+        if !data.vbank().get(in_vn(data, op, 0)).expect("RuleSwitchSingle: stale input").is_constant() {
+            needwarning = true;
+        }
+        if needwarning {
+            let mut s = String::from("Switch with 1 destination removed at ");
+            let _ = addr_of(data, op).print_raw(&mut s);
+            if allcasesmatch {
+                s.push_str(&format!(" : {num} cases all go to same destination"));
+            }
+            data.warning_header(&s);
+        }
+        set_opcode(data, op, OpCode::CPUI_BRANCH);
+        let coderef = data.new_code_ref(&addr);
+        data.op_set_input(op, coderef, 0).expect("RuleSwitchSingle: opSetInput");
+        data.remove_jump_table(jt_idx);
+        data.sblocks_clear();
+        1
     }
 }
 
@@ -2016,13 +2029,6 @@ impl Rule for RuleSwitchSingle {
 ///
 /// Structuring assigns a preferred true/false meaning to branch directions; this
 /// rule inserts a BOOL_NEGATE so the boolean calculation feeding a CBRANCH aligns.
-///
-/// STUB(W3-block): the body needs `Funcdata::opNormalizeFlip` and
-/// `opFlipCondition` (the CBRANCH condition-flip block primitives) — not ported
-/// to this wave's `Funcdata`.  The `isBooleanFlip` guard and the new-op shell are
-/// transcribed; the two flip calls are routed to stub shims, so the BOOL_NEGATE
-/// insertion path is reached but `opNormalizeFlip` always reports "no normalize"
-/// and `opFlipCondition` is a no-op.  Recorded as a loss.
 pub struct RuleCondNegate;
 
 impl RuleCondNegate {
@@ -2069,7 +2075,6 @@ impl Rule for RuleCondNegate {
         //   NOTE: fallthru block is still same status (the flag toggle clears the
         //   boolean_flip so the rule does not re-fire — the oscillation fix).
         data.op_flip_condition(op);
-        let _ = seqnum_of(data, op); // keep the op-read helper in scope (no-op)
         1
     }
 }
