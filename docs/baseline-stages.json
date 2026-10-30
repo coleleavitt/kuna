@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3706,
-    3706
+    3708,
+    3708
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1133,6 +1133,8 @@
     "data:KUNA-PICBASE #3: the catalog row carries the analysis-enablement change_kind an agent reads to judge the flip",
     "data:KUNA-PIPELINE #1: pipeline list names the variants with decompile current",
     "data:KUNA-PIPELINE #2: reduced normalize variant produces no structuring",
+    "data:KUNA-POSTINC #1: the step folds into the dereference (default)",
+    "data:KUNA-POSTINC #2: postinc off keeps the step as its own statement",
     "data:KUNA-QUALITY #1: full pipeline reports the single if-goto edge (before and after the sub-query)",
     "data:KUNA-QUALITY #2: unstructured total is the goto-count quality signal",
     "data:KUNA-REGIONS #1: region tree finds the single-block self-loop as a cyclic region at 0x3e0",

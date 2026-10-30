@@ -11,6 +11,7 @@ pub mod kuna_avxintrin; // (kuna `avxintrinsics`) Intel intrinsic names for the 
 pub mod kuna_partialconcat;
 pub mod kuna_partialaccess;
 pub mod kuna_widelocal;
+pub mod kuna_postinc; // (kuna `postinc`) `*p++` for a pointer step after its dereference
 pub mod prettyprint;
 pub mod cast;
 pub mod kuna_unknowncasts;

@@ -4093,3 +4093,18 @@ vector-register calling convention. A trial cspec with `YMM0`-`YMM7` input
 entries recovers the second and third `__m256` arguments, but the first one and
 the result stay hidden, because a VEX write zero-extends into `ZMM0` and the
 heritage reads `ZMM0` whole.
+
+**Post-increment** (`postinc`, default on, C output only; kuna;
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_postinc.rs (ActionPostIncrement)`,
+run after the final structure): an in-place pointer step `p = p + c` (an
+`INT_ADD` of a constant `c`, or a `PTRADD` of one element of `c` bytes, whose
+output and first input are the same variable) prints nothing, and the LOAD or
+STORE before it prints its pointer as `p++` (`PrintC::push_post_increment`,
+token `POST_INCREMENT`, a postfix like the call parentheses), when the stepped
+value is read by exactly that LOAD or STORE besides the step, the access is
+`c` bytes and `p` points to `c`-byte elements (so `p++` steps the same bytes),
+the access is not a stack byte copy, and the statement holding the access is
+the one printed right before the step in the same block. `v = *p; p = &p[1];`
+prints `v = *p++;`, `*d = c; d = &d[1];` prints `*d++ = c;`. Lua 5.4 x86-64:
+4 folds (`v2 = *envp++;` in `__init_libc`), ld.so 5; a step that goes through
+a copy the loop also compares (`v2 = &a0[1]; v1 += *a0; a0 = v2;`) is left.

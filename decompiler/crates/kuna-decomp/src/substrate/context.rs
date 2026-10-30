@@ -838,6 +838,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `postinc`) A pointer step after its dereference prints as `*p++`.
+    pub post_increment: bool,
     /// (kuna `vastart`) The x86-64 va_start prologue as va_start(ap, last).
     pub va_start: bool,
     /// (kuna `typevote`) Leftover undefined varnodes take their uses' vote.
@@ -1955,6 +1957,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            post_increment: false,
             va_start: false,
             type_vote: false,
             switch_guard_merge: false,
