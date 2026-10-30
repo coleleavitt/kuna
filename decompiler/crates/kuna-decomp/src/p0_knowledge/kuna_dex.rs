@@ -333,7 +333,7 @@ fn copy_operations(
 /// Insert the `uponentry` copies at the start of the function (the dynamic
 /// payload `ActionConstbase` injects upstream).
 pub fn apply_entry(data: &mut crate::funcdata::Funcdata) -> KunaResult<()> {
-    if data.kuna_call_mechanisms.dex_entry || data.bblocks_get_size() == 0 {
+    if data.get_arch().dex.is_none() || data.kuna_call_mechanisms.dex_entry || data.bblocks_get_size() == 0 {
         return Ok(());
     }
     let arch = data.get_arch().clone();
