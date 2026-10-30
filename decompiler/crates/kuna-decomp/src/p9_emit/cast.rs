@@ -961,9 +961,8 @@ impl CastStrategy for CastStrategyC {
 
 /// Casting strategy specific to the Java language (C++ `CastStrategyJava`,
 /// cast.hh:198-202).  Nearly identical to C, but accounts for how object
-/// references are encoded as pointer data-types.  Shared with the (deferred)
-/// `printjava` back-end: `cast.cc` defines this class, and it is kept here so the
-/// Java cast surface is complete even though `PrintJava` itself is deferred.
+/// references are encoded as pointer data-types.  The java-language output
+/// reaches the same rules through `CastStrategyC::with_java`.
 ///
 /// Only `cast_standard` and `is_zext_cast` differ from C; the rest inherit
 /// `CastStrategyC` behavior (C++ `CastStrategyJava : public CastStrategyC`).

@@ -1113,7 +1113,7 @@ pub fn main(argv: &[String]) -> Result<i32, String> {
 fn usage() {
     eprintln!(
         "usage: kuna decompile <binary> <name|0xaddr> [--addr] [--json] [--raw] [--regions] \\\n\
-         \x20                     [--language auto|c|rust] [--mode auto|reliable|aggressive|fast] \\\n\
+         \x20                     [--language auto|c|rust|java] [--mode auto|reliable|aggressive|fast] \\\n\
          \x20                     [--option N V].. [--kassert ARGS].. \\\n\
          \x20                     [--define-function S[-E][=N]|@FILE].. \\\n\
          \x20                     [--assert DIRECTIVE|@FILE].. [--assert-strict] \\\n\

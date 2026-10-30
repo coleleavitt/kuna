@@ -52,16 +52,10 @@ mod tag {
     pub const INSTANCEOF: u64 = 8;
 }
 
-#[derive(Clone, Copy, Debug)]
-struct MethodEntry {
-    method: EncodedMethod,
-    class_idx: u32,
-}
-
 /// A parsed DEX file plus the caches the engine's queries fill.
 pub struct DexModel {
     pub file: DexFile,
-    entries: HashMap<u64, MethodEntry>,
+    entries: HashMap<u64, EncodedMethod>,
     records: RefCell<HashMap<(u64, u64), Option<Rc<CPoolRecord>>>>,
     types: RefCell<HashMap<String, Rc<Datatype>>>,
 }
@@ -90,10 +84,7 @@ impl DexModel {
         for class in &file.classes {
             for method in &class.methods {
                 if let Some(code) = method.code {
-                    entries.insert(
-                        u64::from(code.insns_off),
-                        MethodEntry { method: *method, class_idx: class.class_idx },
-                    );
+                    entries.insert(u64::from(code.insns_off), *method);
                 }
             }
         }
@@ -153,13 +144,13 @@ impl DexModel {
     /// whose code starts at `addr`: `(from, to, size)` in register space.
     pub fn entry_copies(&self, addr: u64) -> Option<Vec<(u64, u64, u32)>> {
         let entry = self.entries.get(&addr)?;
-        let code = entry.method.code?;
-        let id = self.file.method_id(entry.method.method_idx)?;
+        let code = entry.code?;
+        let id = self.file.method_id(entry.method_idx)?;
         let proto = self.file.proto_id(id.proto_idx)?;
         let mut from = INPUT_REGISTER_START;
         let mut to = REGISTER_START + 4 * u64::from(code.registers_size - code.ins_size);
         let mut copies = Vec::new();
-        if !entry.method.is_static() {
+        if !entry.is_static() {
             copies.push((from, to, 4));
             from += 4;
             to += 4;

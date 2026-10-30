@@ -975,8 +975,8 @@ load file "/home/u/test dir/a.out"
 openfile write "/tmp/out dir/main.c"
 ```
 
-**`--language auto|c|rust`** selects the output language. **`auto` is the
-default and follows the binary**: a Rust binary renders as Rust, because kuna
+**`--language auto|c|rust|java`** selects the output language. **`auto` is the
+default and follows the binary**: a DEX file renders as Java, and a Rust binary renders as Rust, because kuna
 already detects one (`kuna-analysis`'s `sourcelang` pass, the port of Ghidra's
 `SourceLanguageAnalyzer`) and rendering it as C is worse in a way the reader has
 to undo by hand (DIV-80). Detection is high-precision, not heuristic; an
@@ -1113,6 +1113,41 @@ capability error naming the supported commands. `--slice` names a Mach-O fat
 slice and is ignored, as on any thin image. Project exports retain the TE entry
 (reported through the inventory, at its even address) and the named section
 table.
+
+### DEX files
+
+A `.dex` file (Android bytecode, `dex\n035`..`039`) loads like any other
+image: the file is mapped at address 0, every method with code is a function
+named `pkg::Class::method` (a method name shared by several overloads gets
+`_<addr>` appended), and its DEX prototype is its signature. The output
+language defaults to Java (`--language c` gives C).
+
+```bash
+kuna functions classes.dex | head -3
+#   0x350	demo::Hello::isHello
+#   0x368	demo::Hello::add
+#   0x37c	demo::Hello::callMany
+kuna decompile classes.dex 'demo::Hello::greet'
+#   String greet(String a0)
+#   {
+#     StringBuilder v1; // resultreg | v0 | v2
+#     v1 = new(StringBuilder);
+#     v1.<init>();
+#     v1 = v1.append("Hello, ");
+#     v1 = v1.append(a0);
+#     return v1.toString();
+#   }
+```
+
+Method, field, string and type references resolve through the DEX constant
+pool, a method's arguments are read from its input registers, and
+`sparse-switch` tables are recovered (`--option dexmodel off` and
+`--option jumpassist off` show the raw SLEIGH lifting instead). An object is
+created by `new(T)` and initialized by a separate `<init>` call, as the bytecode
+does it. The language is `Dalvik:LE:32:DEX_Android12`; `--target` selects another
+`Dalvik:` language. An APK is a zip: extract its `classes*.dex` and load each one;
+a call into a class defined in another of them prints by name. CDEX, ODEX, OAT
+and VDEX files are not supported.
 
 ### Headerless raw images
 

@@ -137,6 +137,8 @@ Three tiers:
 | indirect jump renders as a computed (code *)() call whose destinations are already constants in the emitted C | [`constselectjump`](#constselectjump) |
 | 'Treating indirect jump as call' on a CMOV/predicated dispatch | [`constselectjump`](#constselectjump) |
 | the body behind a conditional indirect branch is never decoded | [`constselectjump`](#constselectjump) |
+| a Dalvik sparse-switch prints as switchAssist(...) followed by a computed call | [`jumpassist`](#jumpassist) |
+| 'jump-as-call' on a switchAssist or lookupswitch user-op | [`jumpassist`](#jumpassist) |
 | 'Too many branches' jumptable failure where a cbranch range guard bounds the index | [`switchguardbound`](#switchguardbound) |
 | computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound) |
 | getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
@@ -485,6 +487,9 @@ Three tiers:
 | numerical integer conversion is stored in a float local | [`fputruncviews`](#fputruncviews) |
 | short call argument uses inverse floating storage unions | [`fputruncviews`](#fputruncviews) |
 | one floating register carries both integers and genuine floating values | [`fputruncviews`](#fputruncviews) |
+| a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel) |
+| a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel) |
+| invoke-range calls lose their arguments | [`dexmodel`](#dexmodel) |
 | puts/printf arguments untyped so string literals render as bare constants or dat_ addresses | [`libproto`](#libproto) |
 | imports carry no signatures and call arguments stay untyped | [`libproto`](#libproto) |
 | a caller's parameter is unsigned long where it is only ever passed to a libc function that takes a char */int | [`libcsigs`](#libcsigs) |
@@ -1586,6 +1591,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · re-conditional-indirect-branches-hide
 - **Example:** `option constselectjump on`
 
+### `jumpassist` -- on | off, default `on`
+
+- **Symptoms:** a Dalvik sparse-switch prints as switchAssist(...) followed by a computed call; 'jump-as-call' on a switchAssist or lookupswitch user-op.
+- **What it does:** Recover a switch whose destination a `<jumpassist>` user-op computes (upstream `JumpAssisted`): the processor spec's `<case_pcode>`, `<addr_pcode>`, `<default_pcode>` and `<size_pcode>` scripts are evaluated over the load image to build the case labels and the address table, and the user-op is replaced by its switch variable. Dalvik's `sparse-switch` and the JVM's `lookupswitch`/`tableswitch` use it.
+- **When to flip:** On by default; only the Dalvik and JVM processor specs declare a `<jumpassist>`. Turn OFF to see the indirect jump through the user-op, rendered as a call.
+- **Where / provenance:** P2/switch-model · ghidra-upstream · structure-recovery · kuna-dex-loader
+- **Example:** `option jumpassist off`
+
 ### `switchguardbound` -- on | off, default `off` (destructive opt-in)
 
 - **Symptoms:** 'Too many branches' jumptable failure where a cbranch range guard bounds the index; computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack.
@@ -2381,6 +2394,14 @@ The control surface: each of these can make output worse on the wrong source sha
 ## Analysis & loader passes
 
 Program-prep enablement: what is discovered, decoded, and named before any function is decompiled.
+
+### `dexmodel` -- on | off, default `on`
+
+- **Symptoms:** a DEX method prints CPOOLREF(...) calls and loads; a DEX method's parameters print as uninitialized locals; invoke-range calls lose their arguments.
+- **What it does:** Answer the Dalvik spec's questions from the loaded DEX file: resolve each `cpool` operator to the method, field, string or type it names (Ghidra's `ConstantPoolDex`), copy a method's arguments from the input registers into its frame at entry (`InjectPayloadDexParameters`), and copy an `invoke-*/range` register run into the input registers (`InjectPayloadDexRange`). Calls take the callee's DEX prototype, fields and strings print by name.
+- **When to flip:** On by default; only a DEX image carries a model, so no other input changes. Turn OFF to see the bare SLEIGH lifting of a DEX method: raw `CPOOLREF(...)` operators and arguments read as uninitialized frame registers.
+- **Where / provenance:** P1/environment-binding · ghidra-upstream · analysis-enablement · kuna-dex-loader
+- **Example:** `option dexmodel off`
 
 ### `libproto` -- on | off, default `on`
 

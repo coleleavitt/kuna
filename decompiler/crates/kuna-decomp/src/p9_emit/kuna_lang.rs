@@ -6,8 +6,8 @@
 //! `PrintLanguage` (the RPN driver and the mod/scope stacks) → `PrintC` →
 //! `PrintJava : public PrintC` — selected through a `PrintLanguageCapability`
 //! registry. The port flattened all of it into one concrete `PrintC`
-//! (`p9_emit/printc.rs`), and `p9_emit/printjava.rs` is the stub that records
-//! the loss. This module re-erects the seam, in the shape kuna actually needs.
+//! (`p9_emit/printc.rs`). This module re-erects the seam, in the shape kuna
+//! actually needs; `PrintJava` returns as [`OutLang::Java`].
 //!
 //! # The shape, and why it is not a trait object over the whole printer
 //!
