@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_362() {
-    assert_eq!(kuna_num_settables(), 362);
-    assert_eq!(SETTABLE_TABLE.len(), 362);
+fn settable_count_is_365() {
+    assert_eq!(kuna_num_settables(), 365);
+    assert_eq!(SETTABLE_TABLE.len(), 365);
 }
 
 #[test]
-fn tier_counts_are_123_core_139_transform_100_analysis() {
+fn tier_counts_are_123_core_139_transform_103_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_123_core_139_transform_100_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (123, 139, 100));
+    assert_eq!((core, transform, analysis), (123, 139, 103));
 }
 
 #[test]
@@ -521,6 +521,13 @@ fn option_values_live_value_present_for_163() {
         // with no codegen live reader (read console-side via kuna_live_value), like
         // the gates around it. Default-off, Mach-O-only.
         "cfstrings",
+        // (kuna) IOKit class and vtable recovery -- an analysis-pass gate on XNU
+        // images, read console-side. Default-on.
+        "iokitclasses",
+        // (kuna) XNU data tables -- the same kind of gate. Default-on.
+        "xnutables",
+        // (kuna) DriverKit __osclassinfo records -- the same kind of gate. Default-on.
+        "osclassinfo",
         // (kuna) The Swift calling-convention arm's gate, read inside that pass.
         "swiftcall",
         // (kuna) PE PDB metadata recovery — an analysis-pass gate with no codegen
@@ -1172,7 +1179,10 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `rangefold`; its P3 row sits beside `strlenscan`.
     // +1 for `pow2select`; its P3 row sits beside `strlenscan`.
     // +1 for `whilecontinue`.
-    assert_eq!(json.matches("},\n").count(), 361);
+    // +1 for `iokitclasses`, beside `cfstrings`.
+    // +1 for `xnutables`, beside `iokitclasses`.
+    // +1 for `osclassinfo`, beside `xnutables`.
+    assert_eq!(json.matches("},\n").count(), 364);
 }
 
 #[test]

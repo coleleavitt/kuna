@@ -8030,6 +8030,66 @@ tier = "analysis"
 symptoms = "core-foundation / objc string constants render as dat_<addr> instead of their text|a CFSTR(...) argument shows an address in a mach-o"
 
 [[settable]]
+option = "iokitclasses"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-iokitclasses"
+summary = "Recover IOKit C++ classes on an arm64 XNU kernel or kext (an MH_KEXT_BUNDLE, or an image with a __KLD segment). The pass traces each __mod_init_func / __init_offsets initializer with a small AArch64 register tracker and collects every direct call whose x1 is a class-name C string: the callee most of those calls share is OSMetaClass::OSMetaClass (found by vote, no symbol needed), and each such call gives a class name, its X::gMetaClass object (x0), its superclass's metaclass (x2) and the instance size (w3). The store the initializer makes into X::gMetaClass right after the call is the X::MetaClass vtable. A class's own vtable is a run of code pointers in a data section, behind two zero header words, whose first twelve slots hold X::getMetaClass() const, a leaf that returns &X::gMetaClass within five instructions. Emits data symbols X::gMetaClass, vtable for X and vtable for X::MetaClass where the image has none; renames placeholder functions OSMetaClass::OSMetaClass, X::getMetaClass, X::MetaClass::~MetaClass / X::MetaClass::alloc, and every vtable method by its owner (the nearest class that is an ancestor of every class whose vtable holds it) and the symbol name of that slot in the owner's nearest named ancestor, else X::vfn_<offset>; and adds every vtable slot as a function entry, so methods reachable only through a vtable are discovered."
+use_when = "On (default): a kernel or kext gains class-qualified names for metaclass objects, vtables and virtual methods even when stripped, and its vtable-only methods become functions. Flip off to see only what the symbol table names, or if a non-XNU arm64 image is misdetected."
+example = "option iokitclasses off"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 kcu.so OSMetaClass recovery (constructor vote, getMetaClass vtable match); XNU libkern OSDefineMetaClassAndStructors"
+change_kind = "new-analysis"
+tier = "analysis"
+symptoms = "a stripped kext shows sub_<addr> for every IOKit method|gMetaClass objects render as dat_<addr>|methods reachable only through a vtable are missing from kuna functions|a kext's vtables are unnamed data"
+
+
+[[settable]]
+option = "xnutables"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-xnutables"
+summary = "Name three kinds of XNU data table on an arm64 kernel or kext (an MH_KEXT_BUNDLE, or an image with a __KLD segment). kalloc_type views: each __kalloc_type record (a 0x40-byte kalloc_type_view) and __kalloc_var record (a 0x50-byte kalloc_type_var_view) is named <Type>::kalloc_type_view / <Type>::kalloc_type_var_view after the site.<type> string its zone view names (struct dropped, * spelled _ptr), so a kalloc_type_impl call shows which type it allocates. IOExternalMethodDispatch tables: runs of at least four 0x18-byte IOExternalMethodDispatch or 0x28-byte IOExternalMethodDispatch2022 records in __const, each a pointer into this image's code with at most 16 scalars each way and struct sizes up to 256 KiB or variable (0xFFFFFFFF), at least one of them variable; the table is named <Owner>::sMethods and each unnamed dispatched function <Owner>::externalMethod_<selector>, where the owner is the class (from iokitclasses' recovery) whose vtable holds a method that computes the table's address, else the class of the table's named functions. Pointer slots: a __got / __auth_got / __auth_ptr slot the indirect-symbol table does not name, whose rebased pointer reaches a named function or object of this image, is named <target>_ptr."
+use_when = "On (default): a user client's selector table and its handlers carry selector numbers even when stripped, and allocation sites name their kalloc_type views. Flip off to see only what the symbol table names."
+example = "option xnutables off"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 kcu.so kalloc_type view naming, IOExternalMethodDispatch(2022) table detection and __got slot naming"
+change_kind = "new-analysis"
+tier = "analysis"
+symptoms = "a user client's external methods are sub_<addr> with no selector numbers|an IOExternalMethodDispatch table renders as dat_<addr>|a kalloc_type_impl call passes dat_<addr> instead of a named view|a got slot in a stripped kext has no name"
+
+
+[[settable]]
+option = "osclassinfo"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-osclassinfo"
+summary = "Read a DriverKit extension's class records. A Mach-O with an __osclassinfo section lists every class it defines there: an array of pointers to OSClassLoadInformation records (0xa0 bytes: description, metaPointer, version, instanceSize, eight reserved words, New, eight more), each pointing at an OSClassDescription (descriptionSize, name[96], superName[96], then the method-option, queue-name and method-name tables). A record is used when it and its description are mapped, descriptionSize is at least the fixed 0x138 bytes, and the name is a C identifier. Emits sized data objects <Name>_Class (the load-information record), <Name>_ClassDescription and g<Name>MetaClass (the global metaPointer points at), and names the New function <Name>_New, adding it as a function entry. The names are the class's own, so no code is read."
+use_when = "On (default): a dext's class records, metaclass globals and New functions carry their class names even when stripped. Flip off to see only what the symbol table names."
+example = "option osclassinfo off"
+source_decompiler = "ida"
+inspiration = "IDA 9.5 dku.so __osclassinfo pass (OSClassLoadInformation / OSClassDescription, %s_Class, g%sMetaClass, %s_New)"
+change_kind = "new-analysis"
+tier = "analysis"
+symptoms = "a DriverKit dext's metaclass globals render as dat_<addr>|a dext's class New functions are sub_<addr>|__osclassinfo records are unnamed data"
+
+
+[[settable]]
 option = "pdb"
 values = "on|off"
 default = "on"
@@ -8193,7 +8253,7 @@ symptoms = "arm64e mach-o decoded with the generic v8A spec so pointer-auth ops 
 
 [[settable]]
 option = "kernelcache"
-values = "auto|off|<bundle-id>"
+values = "auto|off|all|<bundle-id>[,<bundle-id>...]"
 default = "auto"
 destructive = false
 phase = "P1"
@@ -8201,8 +8261,8 @@ subphase = "code-data-partition"
 strength = "HARD"
 rewind = "P1"
 issue = "kuna-kernelcache"
-summary = "Load an Apple kernelcache straight from its firmware container. An IMG4 or bare IM4P file is parsed as DER, its payload is decoded (LZFSE bvx2/bvxn/bvx- blocks or a complzss LZSS container, checked against the declared size and Adler-32), and an encrypted payload (one carrying a KBAG) is refused with a message instead of being misread. The decoded image is usually an MH_FILESET kernel collection: one Mach-O header per LC_FILESET_ENTRY (the kernel and every kext) sharing one file and one LC_DYLD_CHAINED_FIXUPS table. kuna applies every rebase of that table to its pointer slot (DYLD_CHAINED_PTR_64_KERNEL_CACHE, ARM64E_KERNEL and X86_64_KERNEL_CACHE, pointer-authentication bits stripped) and then loads ONE entry as a thin Mach-O: `auto` takes the kernel (the MH_EXECUTE entry), a bundle id takes that entry, matched exactly or by a unique dotted suffix (`IOSurface` finds com.apple.iokit.IOSurface). Loader-tier: read through the KUNA_KERNELCACHE env var, because the image is chosen inside load file."
-use_when = "Auto (default): `kuna functions kernelcache` lists the kernel's functions with their symbol names; `--option kernelcache com.apple.iokit.IOSurface` loads that kext instead, its direct calls into the kernel named after the kernel functions they reach; `--option kernelcache list` stops with the list of every entry id. Flip off to pass the bytes through untouched: an IMG4 is then an unrecognized format and a bare MH_FILESET loads as one image with no code sections."
+summary = "Load an Apple kernelcache straight from its firmware container. An IMG4 or bare IM4P file is parsed as DER, its payload is decoded (LZFSE bvx2/bvxn/bvx- blocks or a complzss LZSS container, checked against the declared size and Adler-32), and an encrypted payload (one carrying a KBAG) is refused with a message instead of being misread. The decoded image is usually an MH_FILESET kernel collection: one Mach-O header per LC_FILESET_ENTRY (the kernel and every kext) sharing one file and one LC_DYLD_CHAINED_FIXUPS table. kuna applies every rebase of that table to its pointer slot (DYLD_CHAINED_PTR_64_KERNEL_CACHE, ARM64E_KERNEL and X86_64_KERNEL_CACHE, pointer-authentication bits stripped) and then loads ONE entry as a thin Mach-O: `auto` takes the kernel (the MH_EXECUTE entry), a bundle id takes that entry, matched exactly or by a unique dotted suffix (`IOSurface` finds com.apple.iokit.IOSurface). Loader-tier: read through the KUNA_KERNELCACHE env var, because the image is chosen inside load file. Several entries load as ONE image when the value is a comma-separated list or `all`: their segment commands are concatenated at their collection addresses, and one symbol table (every entry's symbols renumbered into one local / external / undefined order, section ordinals moved to the merged section list), one indirect-symbol table (each stub and pointer section's reserved1 moved with it) and one LC_FUNCTION_STARTS are rebuilt behind the collection, with the rebuilt header in front of it. The collection's __BRANCH_STUBS / __BRANCH_GOTS segments, where a release kext's cross-entry branches land, are mapped with whatever entries are chosen."
+use_when = "Auto (default): `kuna functions kernelcache` lists the kernel's functions with their symbol names; `--option kernelcache com.apple.iokit.IOSurface` loads that kext instead, its direct calls into the kernel named after the kernel functions they reach; `--option kernelcache list` stops with the list of every entry id. Flip off to pass the bytes through untouched: an IMG4 is then an unrecognized format and a bare MH_FILESET loads as one image with no code sections. `--option kernelcache com.apple.kernel,com.apple.iokit.IOSurface` puts the kernel and that kext in one image, so the kext's references into the kernel name kernel functions and objects and the kernel's code decompiles beside it; `all` loads the whole collection (iOS 16.4.1: 233 entries, 45 s and 1.5 GB for kuna functions)."
 example = "--option kernelcache com.apple.iokit.IOSurface"
 source_decompiler = "kuna"
 inspiration = "Apple's public IMG4/IM4P DER layout, the lzfse reference format, mach-o/loader.h MH_FILESET + LC_FILESET_ENTRY and mach-o/fixup-chains.h kernel-cache pointer formats; unlace ios_img4.rs / apple_kernelcache.rs"
