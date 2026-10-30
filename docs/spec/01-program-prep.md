@@ -232,6 +232,36 @@ go1.22 pclntab carries no `.abi0` names and the canonical entry inventory
 collapses the unstripped symtab aliases, so no `.abi0` spelling reaches the
 engine — alias-aware symbol plumbing has to come first.
 
+(kuna) **The default model follows the image's Go version**
+(`decompiler/crates/kuna-analysis/src/loader/gobuildinfo.rs
+(go_uses_stack_abi)`, applied in the object bootstrap right after the
+architecture is built). The register ABI reached amd64 in go1.17 and arm64 in
+go1.18; 386 never got it, and its golang cspec already defaults to `abi0`. An
+older image passes every argument on the stack, so under `abi-internal` its
+calls lost all their arguments (`main.add3();` in a go1.16 build). IDA 9.5's
+golang plugin makes the same choice from the version (golang.so 0x7570). The
+version comes from the build-info blob, in either form: the inline strings of
+go1.18+, or the older pair of pointers to Go string headers, which is read
+through the image's sections. Without a blob the pclntab magic gives a range:
+`0xfffffffb` (go1.2-1.15) is stack, `0xfffffff0`/`0xfffffff1` (go1.18+) is
+register, and `0xfffffffa` (go1.16-1.17) is stack on arm64 and undecided on
+amd64, which keeps the cspec default. A stack-ABI image then takes `abi0` as
+its default model (`set_default_model("abi0")`). The cspec's `abi0` has no
+output, because a Go stack result sits after the arguments at an offset the
+model cannot state, so the callee's result is still not shown. Measured on a
+stripped go1.16.15 build: `main.main` went from `main.add3(); os.Exit();` to
+`main.add3(dat_4e7748,2,7); os.Exit(v1);`.
+
+(kuna) **Function ends come from the `pcsp` table**
+(`decompiler/crates/kuna-analysis/src/analyzers/pclntab/mod.rs
+(pcvalue_span)`). Each `_func` points at its `pcsp` pcvalue table; the sum of
+the table's pc deltas (in `minLC` quanta) is the length of the function's own
+code. The `fde_bodies` extent the pass reports is that end, bounded by the
+next functab entry, so the `int3` padding between functions is outside it
+(IDA golang.so 0x23950 takes the end the same way). On a go1.26 build the
+first function, `internal/cpu.Initialize`, ends at `+0x5e` rather than at the
+next entry's `+0x60`.
+
 (kuna) **With the golang cspec active, the goroutine register becomes the
 named, typed global `g`** (option `goreg on|off`, default on, carried as the
 `KUNA_GOREG` loadtime environment gate;

@@ -4402,6 +4402,15 @@ pub fn bootstrap_from_object_with_isa(
     // datatest corpus by construction.
     let compiler = kuna_analysis::sourcelang::effective_compiler_bytes(&bytes);
     sleigh.base_mut().unwrap().source_lang_detected = compiler.to_source_lang();
+    // (kuna `goabi`) A golang cspec defaults to the register ABI; a Go image
+    // built before the register ABI reached its CPU passes on the stack.
+    let go_stack_abi = {
+        let archid = &sleigh.base().unwrap().archid;
+        archid.contains(":golang")
+            && !archid.starts_with("x86:LE:32")
+            && kuna_analysis::loader::gobuildinfo::go_uses_stack_abi(&bytes, archid.starts_with("AARCH64"))
+                == Some(true)
+    };
     // (kuna `pebnames`) The same kind of one-bit image fact: is this a Windows
     // GUI/console PE, whose segment base holds a user-mode TEB?  `option pebnames
     // auto` acts only when it is.
@@ -4497,6 +4506,11 @@ pub fn bootstrap_from_object_with_isa(
 
     // (kuna `globalref`) ... and the sections a program's data objects live in.
     prog.arch_mut().globalref_ranges = std::rc::Rc::new(globalref_ranges);
+
+    if go_stack_abi {
+        use kuna_decomp::options::ArchOptionContext as _;
+        let _ = prog.arch_mut().set_default_model("abi0");
+    }
 
     // NB: the analysis-pass facts are committed later, gated, in
     // `commit_analysis_passes` (called from `IfcReadSymbols`), after the per-pass

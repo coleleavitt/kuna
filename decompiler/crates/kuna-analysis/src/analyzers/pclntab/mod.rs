@@ -261,6 +261,11 @@ struct PcHeader {
     /// 1.16+ this is `header_vma + pclnOffset`; for go1.2 it is the pclntab blob
     /// base (`header_vma`).
     funcdata_base: u64,
+    /// VMA the `pcsp`/`pcfile`/`pcln` offsets are relative to (`pctab`; the blob
+    /// base for go1.2).
+    pctab_vma: u64,
+    /// The instruction-size quantum the pc deltas are scaled by (`minLC`).
+    quantum: u8,
 }
 
 /// Parse the header at `header_vma` into a [`PcHeader`], resolving the table
@@ -268,7 +273,7 @@ struct PcHeader {
 /// `None` into an empty output).
 fn parse_header(img: &ImageBytes, header_vma: u64) -> Option<PcHeader> {
     let hdr8 = img.read(header_vma, 8)?;
-    let (ver, end, _min_lc, ptr_size) = probe_header(hdr8)?;
+    let (ver, end, quantum, ptr_size) = probe_header(hdr8)?;
     let ps = ptr_size as usize;
 
     if ver == GoVer::Go12 {
@@ -287,6 +292,8 @@ fn parse_header(img: &ImageBytes, header_vma: u64) -> Option<PcHeader> {
             functab_vma,
             nfunc,
             funcdata_base: header_vma,
+            pctab_vma: header_vma,
+            quantum,
         });
     }
 
@@ -312,7 +319,8 @@ fn parse_header(img: &ImageBytes, header_vma: u64) -> Option<PcHeader> {
     cur += ptr_size as u64; // funcnameOffset
     cur += ptr_size as u64; // cuOffset (skip)
     cur += ptr_size as u64; // filetabOffset (skip)
-    cur += ptr_size as u64; // pctabOffset (skip)
+    let pctab_off = rd_ptr(img.read(cur, ps)?, ptr_size, end);
+    cur += ptr_size as u64; // pctabOffset
     let pcln_off = rd_ptr(img.read(cur, ps)?, ptr_size, end); // pclnOffset
 
     let funcname_vma = header_vma.checked_add(funcname_off)?;
@@ -331,6 +339,8 @@ fn parse_header(img: &ImageBytes, header_vma: u64) -> Option<PcHeader> {
         functab_vma,
         nfunc,
         funcdata_base,
+        pctab_vma: header_vma.checked_add(pctab_off)?,
+        quantum,
     })
 }
 
@@ -339,6 +349,9 @@ fn parse_header(img: &ImageBytes, header_vma: u64) -> Option<PcHeader> {
 struct GoFunc {
     addr: u64,
     name: String,
+    /// One past the last PC the `pcsp` table covers, when it decodes: the end
+    /// of the function's own code, without the padding after it.
+    end: Option<u64>,
 }
 
 /// Decode the function table into `(entry_pc, name)` pairs. Walks the `nfunc`
@@ -410,9 +423,43 @@ fn decode_functions(img: &ImageBytes, h: &PcHeader) -> Vec<GoFunc> {
         if name.is_empty() || FUNCNAMES_TO_IGNORE.contains(&name.as_str()) {
             continue;
         }
-        out.push(GoFunc { addr: func_pc, name });
+        let end = img
+            .read(func_vma + name_field_off as u64 + 12, 4)
+            .map(|b| rd_u32(b, h.end))
+            .filter(|&off| off != 0)
+            .and_then(|off| pcvalue_span(img, h.pctab_vma.checked_add(off as u64)?, h.quantum))
+            .map(|span| func_pc + span);
+        out.push(GoFunc { addr: func_pc, name, end });
     }
     out
+}
+
+/// The PC span a pcvalue table at `vma` covers: the sum of its pc deltas
+/// (Go's `runtime.step`: a zigzag value delta, then a pc delta in quanta; a
+/// zero value delta after the first pair ends the table).
+fn pcvalue_span(img: &ImageBytes, vma: u64, quantum: u8) -> Option<u64> {
+    let mut pos = vma;
+    let mut pc = 0u64;
+    let mut uvarint = |pos: &mut u64| -> Option<u64> {
+        let mut v = 0u64;
+        for shift in (0..64).step_by(7) {
+            let b = img.read(*pos, 1)?[0];
+            *pos += 1;
+            v |= u64::from(b & 0x7f) << shift;
+            if b < 0x80 {
+                return Some(v);
+            }
+        }
+        None
+    };
+    for i in 0..100_000 {
+        let vdelta = uvarint(&mut pos)?;
+        if vdelta == 0 && i > 0 {
+            return (pc > 0).then_some(pc);
+        }
+        pc = pc.checked_add(uvarint(&mut pos)?.checked_mul(u64::from(quantum.max(1)))?)?;
+    }
+    None
 }
 
 /// Locate the pclntab header VMA. In precedence order (faithful to
@@ -611,12 +658,13 @@ impl AnalysisPass for GoPclntabPass {
         funcs.sort_unstable_by_key(|f| f.addr);
         let addrs: Vec<u64> = funcs.iter().map(|f| f.addr).collect();
         for (i, f) in funcs.into_iter().enumerate() {
-            // The next entry (the functab's closing `etext` for the last function) is
-            // this function's real end — the extent the symbol model lacks. It never
+            // The function's end is where its `pcsp` table stops, bounded by the next
+            // entry (the functab's closing `etext` for the last function); the
+            // padding between functions is in neither. It never
             // runs past the extent holding it, so a body cannot swallow an entry in
             // another section or the host code an external link places after Go's.
             let next = addrs.get(i + 1).copied().or(text_end.filter(|&e| e > f.addr));
-            let end = next.unwrap_or(u64::MAX);
+            let end = next.unwrap_or(u64::MAX).min(f.end.filter(|&e| e > f.addr).unwrap_or(u64::MAX));
             let end = end.min(exec_end(&exec, f.addr).unwrap_or(u64::MAX));
             if end > f.addr {
                 out.fde_bodies.push((f.addr, end));

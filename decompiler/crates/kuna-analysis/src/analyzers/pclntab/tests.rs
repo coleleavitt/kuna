@@ -189,9 +189,9 @@ fn decodes_go118_64bit_le() {
     let got = decode_functions(&img, &h);
     assert_eq!(got.len(), 3, "all three functions decoded");
     // entry PC = text_start + entryoff; name from funcnametab.
-    assert_eq!(got[0], GoFunc { addr: text_start + 0x10, name: "main.main".into() });
-    assert_eq!(got[1], GoFunc { addr: text_start + 0x80, name: "main.compute".into() });
-    assert_eq!(got[2], GoFunc { addr: text_start + 0x200, name: "runtime.gopanic".into() });
+    assert_eq!((got[0].addr, got[0].name.as_str()), (text_start + 0x10, "main.main"));
+    assert_eq!((got[1].addr, got[1].name.as_str()), (text_start + 0x80, "main.compute"));
+    assert_eq!((got[2].addr, got[2].name.as_str()), (text_start + 0x200, "runtime.gopanic"));
 }
 
 #[test]
@@ -277,8 +277,8 @@ fn decodes_go116_64bit_le_absolute_entries() {
     let got = decode_functions(&img, &h);
     assert_eq!(got.len(), 2);
     // entries are absolute (no text_start add).
-    assert_eq!(got[0], GoFunc { addr: 0x401000, name: "main.main".into() });
-    assert_eq!(got[1], GoFunc { addr: 0x401200, name: "fmt.Println".into() });
+    assert_eq!((got[0].addr, got[0].name.as_str()), (0x401000, "main.main"));
+    assert_eq!((got[1].addr, got[1].name.as_str()), (0x401200, "fmt.Println"));
 }
 
 // --- go1.2 legacy (64-bit LE) decode -----------------------------------------
@@ -335,8 +335,8 @@ fn decodes_go12_legacy_64bit_le() {
     assert_eq!(h.funcname_vma, header_vma);
     let got = decode_functions(&img, &h);
     assert_eq!(got.len(), 2);
-    assert_eq!(got[0], GoFunc { addr: 0x401000, name: "main.main".into() });
-    assert_eq!(got[1], GoFunc { addr: 0x401100, name: "runtime.main".into() });
+    assert_eq!((got[0].addr, got[0].name.as_str()), (0x401000, "main.main"));
+    assert_eq!((got[1].addr, got[1].name.as_str()), (0x401100, "runtime.main"));
 }
 
 // --- endianness ---------------------------------------------------------------
@@ -388,7 +388,7 @@ fn decodes_go118_big_endian() {
     assert_eq!(h.end, End::Big);
     let got = decode_functions(&img, &h);
     assert_eq!(got.len(), 1);
-    assert_eq!(got[0], GoFunc { addr: text_start + 0x10, name: "main.main".into() });
+    assert_eq!((got[0].addr, got[0].name.as_str()), (text_start + 0x10, "main.main"));
 }
 
 // --- defensiveness / never-fail ----------------------------------------------
@@ -530,9 +530,9 @@ fn macho_gopclntab_section_is_found_and_decoded() {
     assert_eq!(
         recover_go_functions(&file),
         vec![
-            GoFunc { addr: text_vma + 0x10, name: "main.main".into() },
-            GoFunc { addr: text_vma + 0x80, name: "main.compute".into() },
-            GoFunc { addr: text_vma + 0x200, name: "runtime.gopanic".into() },
+            GoFunc { addr: text_vma + 0x10, name: "main.main".into(), end: None },
+            GoFunc { addr: text_vma + 0x80, name: "main.compute".into(), end: None },
+            GoFunc { addr: text_vma + 0x200, name: "runtime.gopanic".into(), end: None },
         ]
     );
 }
@@ -549,8 +549,8 @@ fn zero_text_start_resolves_against_the_text_section() {
     assert_eq!(
         recover_go_functions(&file),
         vec![
-            GoFunc { addr: text_vma, name: "main.main".into() },
-            GoFunc { addr: text_vma + 0x80, name: "main.compute".into() },
+            GoFunc { addr: text_vma, name: "main.main".into(), end: None },
+            GoFunc { addr: text_vma + 0x80, name: "main.compute".into(), end: None },
         ]
     );
 }
@@ -598,8 +598,8 @@ fn zero_text_start_resolves_against_moduledata_text() {
         recover_go_table(&file),
         (
             vec![
-                GoFunc { addr: go_text, name: "main.main".into() },
-                GoFunc { addr: go_text + 0x80, name: "main.compute".into() },
+                GoFunc { addr: go_text, name: "main.main".into(), end: None },
+                GoFunc { addr: go_text + 0x80, name: "main.compute".into(), end: None },
             ],
             Some(go_text + 0x100)
         )
@@ -620,8 +620,8 @@ fn macho_lrodata_gopcln_section_is_found_and_decoded() {
     assert_eq!(
         recover_go_functions(&file),
         vec![
-            GoFunc { addr: text_vma + 0x10, name: "main.main".into() },
-            GoFunc { addr: text_vma + 0x140, name: "main.helper".into() },
+            GoFunc { addr: text_vma + 0x10, name: "main.main".into(), end: None },
+            GoFunc { addr: text_vma + 0x140, name: "main.helper".into(), end: None },
         ]
     );
 }
