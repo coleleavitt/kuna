@@ -13,10 +13,17 @@ use std::path::PathBuf;
 /// Unset, empty or `off` means no headers are read.
 pub const OBJCSDK_ENV: &str = "KUNA_OBJCSDK";
 
-/// The configured header root, if any.
+/// The configured header root, if any. A value that names no directory (set
+/// outside kuna, or removed since) reads no headers and says so once.
 pub fn sdk_path_from_env() -> Option<PathBuf> {
     let v = std::env::var(OBJCSDK_ENV).ok()?;
-    parse_option_value(&v).ok().flatten()
+    match parse_option_value(&v) {
+        Ok(path) => path,
+        Err(e) => {
+            kuna_base::notes::say_once(OBJCSDK_ENV, &format!("{OBJCSDK_ENV}: {e}; no SDK headers are read"));
+            None
+        }
+    }
 }
 
 /// Bridge a `set_kuna_option("objcsdk", val)` choice to [`OBJCSDK_ENV`] so a
