@@ -1470,6 +1470,28 @@ run (`option sourcelang c`). SHA-256
 `90cf3be2472839c78dc89df3305a665940a43deb01859e3fc41391c9bbeface3`; IMP
 `-[main.Car loadPerSeat:]`@`0x100000748`.
 
+### `macho_objc_outlined_retain_arm64` — outlined `objc_retain_x19` returns in `x0` (`objcarc`, `objc`)
+
+`macho_objc_outlined_retain_arm64` (arm64 Mach-O, 50 KB) with its source
+`macho_objc_outlined_retain_arm64.s` is the fixture for
+`tests/stages/kuna-objcoutlinedresult.xml`. Clang does not outline ARC retains
+from source here, so the source is hand-written arm64 assembly: `_holder_viewDidLoad`
+keeps its `self` in x19, calls an accessor that clobbers x0, builds the objc_super
+and calls `bl _objc_retain_x19`, then `mov x20, x0` and passes x20 to
+`_holder_vtable7`. Linked with `ld64.lld` (no SDK needed):
+
+```bash
+clang -target arm64-apple-macos11 -c macho_objc_outlined_retain_arm64.s -o m.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -undefined dynamic_lookup -e _main \
+  -o macho_objc_outlined_retain_arm64 m.o
+```
+
+SHA-256 `5e19f8a0c35206fe0ffa3a1b68c6d3414a4152b38ad3234f3d82fa14914f6b8a`. The
+import stub `_objc_retain_x19` sits at `0x100000510`, the entry at `0x1000004c4`.
+Before the fix the call read `_holder_vtable7((void *)_holder_type_accessor())`;
+the retain's result is in x0, so with `objcarc` on the call takes the entry's `a0`,
+and with `objcarc off` it reads `_holder_vtable7(objc_retain_x19(a0))`.
+
 ### `macho_objc_arc_arm64` — ARC bookkeeping (`objcarc`)
 
 `macho_objc_arc_arm64` (arm64, ~50 KB) is the fixture for

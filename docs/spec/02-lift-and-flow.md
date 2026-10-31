@@ -667,8 +667,9 @@ recovered switch table.
   an incidental copy, so its result keeps the argument's variable; `objc_release`
   has no effect; `objc_storeStrong(slot, value)` is the store `*slot = value`;
   clang's outlined arm64 `objc_retain_x<N>` / `objc_release_x<N>` — the object in
-  and out of `x<N>`, outside every calling convention — are the same copy per
-  register, `x0` through `x28`. Registration is guarded by language (arm64 when
+  `x<N>`, a retain's result in `x0`, outside every calling convention — are the
+  same per register, `x0` through `x28`: a retain copies `x<N>` into `x0`, a
+  release has no effect. Registration is guarded by language (arm64 when
   `x0`..`x30` resolve at an 8-byte code space, x86-64 when `RAX`/`RDI`/`RSI`/`RSP`
   do; the x86-64 bodies pop the `CALL`'s pushed return address as above). The
   install is where the gate lives: the analysis-tier call-fixup installer drops
@@ -681,7 +682,7 @@ recovered switch table.
   its header prototype (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcruntime.rs`,
   by stub and slot address: `id objc_retain(id)`, `void objc_storeStrong(id *, id)`,
   `id objc_alloc_init(Class)`, …, and `id objc_retain_x19(id obj @ x19)` returning
-  in `x19`), so `obj = objc_retainAutoreleasedReturnValue((objc_object *)objc_msgSend(arg1,sel_inner))`
+  in `x0`), so `obj = objc_retainAutoreleasedReturnValue((objc_object *)objc_msgSend(arg1,sel_inner))`
   reads with its argument. The stage test `tests/stages/kuna-objcarc.xml` runs
   `macho_objc_arc_arm64` (clang `-fobjc-arc -O2`) both ways: default,
   `-[Holder total:]` is `v1 = objc_msgSend(arg1,sel_count); v2 = objc_msgSend(arg1,sel_inner); return objc_msgSend(v2,sel_count) + v1;`
