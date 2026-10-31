@@ -38,13 +38,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_340() {
-    assert_eq!(kuna_num_settables(), 340);
-    assert_eq!(SETTABLE_TABLE.len(), 340);
+fn settable_count_is_341() {
+    assert_eq!(kuna_num_settables(), 341);
+    assert_eq!(SETTABLE_TABLE.len(), 341);
 }
 
 #[test]
-fn tier_counts_are_120_core_130_transform_90_analysis() {
+fn tier_counts_are_120_core_130_transform_91_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_120_core_130_transform_90_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (120, 130, 90));
+    assert_eq!((core, transform, analysis), (120, 130, 91));
 }
 
 #[test]
@@ -569,6 +569,9 @@ fn option_values_live_value_present_for_154() {
         // `read symbols` (the commit either creates a Function per entry or parks
         // the starts), so it has no codegen live reader. Default-off.
         "lazyfuncs",
+        // (kuna) Apple kernelcache unwrapping + MH_FILESET entry choice -- a
+        // LOAD-time gate read from `KUNA_KERNELCACHE`. Default auto.
+        "kernelcache",
     ];
     let mut with_live = 0;
     for i in 0..kuna_num_settables() {
@@ -1112,7 +1115,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
         // +1 for `goreg`; its P1 row sits beside `goabi`.
     // +1 for `gobool`; its P4 row sits beside `sourcelang`.
     // +1 for `swiftdemangle`; its P1 row sits beside `sourcelang`.
-    assert_eq!(json.matches("},\n").count(), 339);
+    // +1 for `kernelcache`; its P1 row sits beside `macho-arm64e`.
+    assert_eq!(json.matches("},\n").count(), 340);
 }
 
 #[test]
