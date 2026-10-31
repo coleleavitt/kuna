@@ -35,9 +35,9 @@ fn decompile(addr: &str, options: &[(&str, &str)]) -> String {
 
 #[test]
 fn hidden_pads_are_noted_in_the_header() {
-    let main = decompile("0x12d0", &[]);
+    let main = decompile("0x12d0", &[("itaniumeh", "off")]);
     assert!(main.contains("/* eh: 1 call site unwinds to C++ landing pads (catch int); not shown */"), "got:\n{main}");
-    let work = decompile("0x1410", &[]);
+    let work = decompile("0x1410", &[("itaniumeh", "off")]);
     assert!(work.contains("/* eh: 3 call sites unwind to C++ landing pads (3 cleanup); not shown */"), "got:\n{work}");
 }
 

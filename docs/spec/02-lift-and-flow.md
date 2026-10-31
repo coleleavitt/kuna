@@ -502,7 +502,7 @@ itself
 (`decompiler/crates/kuna-decomp/src/p4_calls/kuna_calleeprotostack.rs
 (resolve_declared_extra_pop)`), so a
 `__thiscall` or `__stdcall` import pops what its declaration says instead of
-what the push run in front of it suggests. (kuna `relronoreturn`, default off)
+what the push run in front of it suggests. (kuna `relronoreturn`, default on)
 A third CALLIND can be made direct there: one whose target is the word read from
 a relocated read-only slot (an `R_*_RELATIVE` `.got` word inside the image's
 `dynreloc_const` ranges), when that word holds the entry of a function flagged
@@ -3088,7 +3088,7 @@ decode-table corrections with no option. Pinned by
 
 ## 2.15 Itanium exception edges
 
-**(kuna) `option itaniumeh on|off`, default off,
+**(kuna) `option itaniumeh on|off`, default on,
 `decompiler/crates/kuna-decomp/src/p2_lift/kuna_itaniumeh.rs`, fed by
 `decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_itaniumeh.rs
 (ItaniumEhPass)`.** An Itanium landing pad is reached only by the unwinder, so

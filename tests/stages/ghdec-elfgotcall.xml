@@ -52,6 +52,8 @@ c3
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elf_got_noreturn_x86_64</com>
   <com>option peimportcall off</com>
   <com>option fdeflowbound off</com>
+  <com>option relronoreturn off</com>
+  <com>option importdata off</com>
   <com>option listing on</com>
   <com>read symbols</com>
   <com>load function check</com>

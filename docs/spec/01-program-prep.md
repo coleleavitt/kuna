@@ -1665,7 +1665,7 @@ funcsym stream:
   untouched. The Objective-C reference slots live in `__DATA`, outside this
   warrant; their constancy comes from the metadata instead (§1.4, `objc`).
 - **ELF GOT data imports** (kuna, `elfgotimports`, committed under `importdata`,
-  default off; `decompiler/crates/kuna-analysis/src/loader/kuna_elfgotimports.rs`):
+  default on; `decompiler/crates/kuna-analysis/src/loader/kuna_elfgotimports.rs`):
   the complement of the walk above. A `GLOB_DAT` slot whose symbol is *undefined*
   is skipped there because its value lives in another object, and the PLT/import
   naming covers a *call* to it. A `-fPIC` *data* read is not a call: it loads the

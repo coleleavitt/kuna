@@ -3851,7 +3851,7 @@ impl Architecture {
         self.struct_headless = crate::kuna_structheadless::StructHeadlessMode::Off; // (kuna) structheadless default `off`: a closed function's parameter read at two or more constant offsets, none of them zero, is declared `struct_N *` with filler over the bytes before its first access; `option structheadless closed` turns it on
         self.decode_halt = true; // (kuna) DIV-151 default-on: a `CPUI_RETURN` kuna planted because it could NOT decode the bytes renders as upstream `PrintC::opReturn`'s `halt_baddata()`/`halt_unimplemented()`/`halt_missing()` pseudo-call rather than a bare `return;`, and carries the upstream truncation + header warnings. Reachable only through the three decode-failure halt types, which no datatest function produces, so it is byte-identical there (0/675); `option decodehalt off` restores the silent `return;`
         self.fastfail_noreturn = true; // (kuna) DIV-119 default-on: REMOVES CODE. Ends the flow at a Windows `int 0x29` (`__fastfail`), whose SLEIGH lifting is a call with no matching push and so gains 8 bytes of stack pointer from the cspec's `extrapop` at every site. Windows-cspec-gated and shape-gated on `swi(0x29:1)`, so it is structurally inert on the datatest corpus and byte-identical there (0/675); restore the unbalanced fall-through with `option fastfailnoreturn off`
-        self.relro_noreturn = false; // (kuna) option relronoreturn: default off, a speed trade (see its catalog row)
+        self.relro_noreturn = true; // (kuna) option relronoreturn: default on, a speed trade (see its catalog row)
         self.msvc_ftol = true; // (kuna) DIV-74 default-on: x86-32-only, and inert unless the binary imports an `__ftol`/`__ftol2`/`__ftol2_sse` symbol. Byte-identical (0/675) — no corpus function carries one of those names. Restore the un-fixed `__ftol()` rendering with `option msvcftol off`
         self.arith_helpers = true; // (kuna) default-on: x86-32 and ARM32 only, inert unless the binary names a helper; 0/675 datatests name one
         self.objc_arc = true; // (kuna) default-on: inert unless the image names an ObjC ARC runtime entry point (0/675 datatests carry one); `option objcarc off` shows the calls again
@@ -4056,7 +4056,7 @@ impl Architecture {
         self.reg_locals = true; // (kuna) option reglocals default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; measured +205 type_match-perfect / 0 lost, 2,207 improved / 10 worse over 10,748 scored functions of the 444 decbench slices
         self.byte_honest = true; // (kuna) default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; measured +10 type_match-perfect / 121 improved / 0 worse over 5,298 scored decbench functions
         self.voidtailreturn = false; // (kuna) option voidtailreturn; default-OFF until its corpus bidirectional sweep is recorded in a DIV row
-        self.import_data = false; // (kuna) option importdata; default-off
+        self.import_data = true; // (kuna) option importdata; default-on
         self.goto_next = true; // (kuna) option gotonext default-on: upstream BlockGoto::gotoPrints; see docs/spec/08-structuring.md
         self.cast_implied = true; // (kuna) option castimplied default-on: leaves out only a value-preserving integer conversion C performs itself (argument to a type-locked parameter, assignment to a local or parameter declared that spelling, return, or under another conversion); 1/675 datatest assertion moved (Union #26, the intended form, pinned to upstream by a per-test opt-out), 10 stage assertions moved to the new form, speed within budget; docs/features/castimplied/default-on-evaluation.md
         self.cast_sign = true; // (kuna) option castsign default-on: a frame local or pointer index only ever compared signed, never an operand of + - * <<, and never met by a top-bit constant in == != & | ^, is declared signed; 0/675 datatest assertions and 0 stage assertions moved, test-cli unchanged, the 444-slice typesweep identical, casts 38,703 -> 38,602 on the census corpus, 41 functions fewer and 0 more; docs/features/castsign/default-on-evaluation.md
@@ -4082,7 +4082,7 @@ impl Architecture {
         self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
-        self.itanium_eh = false;
+        self.itanium_eh = true;
         self.itanium_eh_catch_only = false;
         self.vex_zero_upper = true;
         self.vector_abi = true;

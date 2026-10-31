@@ -36,6 +36,7 @@ c0035fd6
 <script>
   <com>clear architecture</com>
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elf_gotdata_x86_64.so</com>
+  <com>option importdata off</com>
   <com>read symbols</com>
   <com>load addr 0x1580</com>
   <com>decompile</com>
@@ -55,6 +56,7 @@ c0035fd6
   <com>print C</com>
   <com>clear architecture</com>
   <com>load file decompiler/crates/kuna-analysis/tests/fixtures/elf_gotdata_aarch64.so</com>
+  <com>option importdata off</com>
   <com>read symbols</com>
   <com>load addr 0x104e4</com>
   <com>decompile</com>
