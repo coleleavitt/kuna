@@ -3400,7 +3400,37 @@ arguments rather than in `swiftself`, so a call to one keeps a `swiftself`
 argument only when the caller set the register for that call: a value that
 reaches the call through an `INDIRECT`, or past another call on the dominator
 path from its definition (or from the entry, for the caller's own input), is
-scored no-use in `ActionActiveParam` (`stale_self`).
+scored no-use in `ActionActiveParam` (`stale_self`). A call to a C function
+does not count (`may_take_self`): one under a non-Swift model whose callee
+has a C name (`swift_retain`, `objc_msgSend`, a `@_cdecl` export, not an
+engine `sub_`/`FUN_` placeholder) preserves the register and reads none of
+it, so a value set before it is still set for the call that follows. A Swift
+function, an unnamed callee or an indirect target may read it.
+
+A method passes its own `self` on without touching the register: `settle`
+calls `fee(for:)` and its own getter with x20 / r13 exactly as it received
+them. That value is the function's input, and an input in a register the
+model preserves across calls reads, to the realistic-ancestor walk, as no
+argument at all, so every such call dropped it. A `swiftself` trial whose
+value is the caller's own input, at a call under a Swift model in a function
+decompiled under one, is scored active at a direct call (`passes_own_self`),
+through copies too (a `self` saved in another callee-saved register and moved
+back is still the caller's own), after `stale_self` has had its say for a
+callee that may not take `self`. A call that then passes nothing but that
+`self` is, for the callee-body and sibling rules (`calleearitybody`,
+`calleearity`), still a call that recovered nothing, so the arguments they
+would have found for it are found after the `self`. An
+indirect call takes `__swiftcall` too when its block loads the target from
+memory — a vtable slot, a witness-table entry, a closure's function
+(`indirect_call`); a trap's target or a coroutine continuation returned by the
+previous call is not a load and keeps the C model. Whether such a call passes
+`swiftself` is decided by its target alone (`indirect_self`): the register is
+an argument exactly when the target is loaded through the isa of the value
+the register holds (`obj->isa[k](obj, …)`, a method dispatched on that
+object, copies seen through), and no argument otherwise. The compiler also
+reloads the callee-saved register for its own reasons before a call that
+does not read it — a value witness's `destroy`, called with the value and
+its metadata in the argument registers — and that value is no `self` there.
 
 ### (kuna) `msvcbyval` — an MSVC by-value class sized at the call
 
