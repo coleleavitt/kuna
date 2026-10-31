@@ -88,7 +88,7 @@ pub fn image_size(path: &Path, name: Option<&str>) -> Option<Result<u64, String>
     let name = name.map(|n| n.split('+').next().unwrap_or(n).trim());
     Some(DyldCache::open(path).and_then(|cache| {
         let image = cache.image_layout(cache.select(name)?)?;
-        Ok(image.segments.iter().filter(|s| s.name != "__LINKEDIT").map(|s| s.filesize).sum())
+        Ok(image.segments.iter().filter(|s| s.name != "__LINKEDIT").fold(0u64, |total, s| total.saturating_add(s.filesize)))
     }))
 }
 
@@ -96,10 +96,16 @@ pub fn image_size(path: &Path, name: Option<&str>) -> Option<Result<u64, String>
 struct CacheFile {
     file: File,
     name: String,
+    len: u64,
 }
 
 impl CacheFile {
+    /// Reads past the end of the file are refused before the buffer is sized,
+    /// so a header count cannot ask for more memory than the file holds.
     fn read_at(&self, offset: u64, len: usize) -> Result<Vec<u8>, String> {
+        if offset.checked_add(len as u64).is_none_or(|end| end > self.len) {
+            return Err(format!("{}: {len} bytes at {offset:#x} run past the end of the file", self.name));
+        }
         let mut buf = vec![0u8; len];
         let mut f = &self.file;
         f.seek(SeekFrom::Start(offset))
@@ -124,7 +130,7 @@ pub struct Mapping {
 
 impl Mapping {
     fn contains(&self, va: u64, len: u64) -> bool {
-        va >= self.address && va.saturating_add(len) <= self.address + self.size
+        va >= self.address && va.saturating_add(len) <= self.address.saturating_add(self.size)
     }
 }
 
@@ -276,7 +282,8 @@ impl DyldCache {
     pub fn open(path: &Path) -> Result<DyldCache, String> {
         let open = |p: &Path| -> Result<CacheFile, String> {
             let file = File::open(p).map_err(|e| format!("{}: {e}", p.display()))?;
-            Ok(CacheFile { file, name: p.display().to_string() })
+            let len = file.metadata().map_err(|e| format!("{}: {e}", p.display()))?.len();
+            Ok(CacheFile { file, name: p.display().to_string(), len })
         };
         let main = open(path)?;
         let h = Header::read(&main)?;
@@ -383,7 +390,8 @@ impl DyldCache {
         let wide = symbol_uuid.is_some();
         let entry_size = if wide { 16 } else { 12 };
         let count = u32_at(&info, 20) as usize;
-        let table = files[file].read_at(sh_offset + u32_at(&info, 16) as u64, count * entry_size)?;
+        let table_at = sh_offset.checked_add(u32_at(&info, 16) as u64).ok_or("local symbol table offset overflows")?;
+        let table = files[file].read_at(table_at, count * entry_size)?;
         let entries = table
             .chunks_exact(entry_size)
             .map(|e| {
@@ -396,8 +404,8 @@ impl DyldCache {
             .collect();
         Ok(Some(LocalSymbols {
             file,
-            nlist_offset: sh_offset + u32_at(&info, 0) as u64,
-            strings_offset: sh_offset + u32_at(&info, 8) as u64,
+            nlist_offset: sh_offset.checked_add(u32_at(&info, 0) as u64).ok_or("local symbol offset overflows")?,
+            strings_offset: sh_offset.checked_add(u32_at(&info, 8) as u64).ok_or("local symbol offset overflows")?,
             strings_size: u32_at(&info, 12) as u64,
             entries,
             keyed_by_vm_offset: wide,
@@ -457,7 +465,8 @@ impl DyldCache {
         let m = self
             .mapping_of(va, len as u64)
             .ok_or_else(|| format!("address range {va:#x}+{len:#x} is not mapped by the cache"))?;
-        self.files[m.file].read_at(m.file_offset + (va - m.address), len)
+        let at = m.file_offset.checked_add(va - m.address).ok_or("mapping file offset overflows")?;
+        self.files[m.file].read_at(at, len)
     }
 
     /// The bytes at `[va, va + len)` with the slide info of their mapping applied
@@ -473,7 +482,10 @@ impl DyldCache {
         };
         let page = info.page_size as u64;
         let lo = m.address + (va - m.address) / page * page;
-        let hi = (m.address + (va + len as u64 - m.address).div_ceil(page) * page).min(m.address + m.size);
+        let hi = m
+            .address
+            .saturating_add((va + len as u64 - m.address).div_ceil(page).saturating_mul(page))
+            .min(m.address.saturating_add(m.size));
         let mut pages = self.read_va(lo, (hi - lo) as usize)?;
         info.apply(&mut pages, ((lo - m.address) / page) as usize);
         let start = (va - lo) as usize;
@@ -503,7 +515,7 @@ impl DyldCache {
         };
         let address = self.images[index].address;
         let key = if locals.keyed_by_vm_offset {
-            address - self.base
+            address.checked_sub(self.base).ok_or("image address lies below the cache base")?
         } else {
             match self.mapping_of(address, 1) {
                 Some(m) => m.file_offset + (address - m.address),
@@ -515,9 +527,13 @@ impl DyldCache {
         };
         let file = &self.files[locals.file];
         let size = if self.wide { 16 } else { 12 };
-        let raw = file.read_at(locals.nlist_offset + start as u64 * size as u64, count as usize * size)?;
+        let nlist_at = locals.nlist_offset.checked_add(start as u64 * size as u64).ok_or("local symbol offset overflows")?;
+        let raw = file.read_at(nlist_at, count as usize * size)?;
         let pool = StringPool::read(
-            &|off, len| file.read_at(locals.strings_offset + off, len),
+            &|off, len| {
+                let at = locals.strings_offset.checked_add(off).ok_or("local symbol string offset overflows")?;
+                file.read_at(at, len)
+            },
             size,
             locals.strings_size,
             &raw,
@@ -579,6 +595,9 @@ const NAME_TAIL: u64 = 4096;
 /// Two names closer than this are read in one span.
 const GROUP_GAP: u64 = 16 * 1024;
 
+/// How far past a name the reader searches for its terminating NUL.
+const NAME_SEARCH_LIMIT: u64 = 64 * 1024;
+
 /// The pieces of a large string area that a set of offsets name. Cache images
 /// share one symbol-string pool of tens of megabytes with their names
 /// scattered through it, and image paths lie inside the images themselves, so
@@ -619,7 +638,7 @@ impl StringPool {
             }
             let mut end = (last + NAME_TAIL).min(size);
             let mut bytes = read(lo, (end - lo) as usize)?;
-            while end < size && !bytes[(last - lo) as usize..].contains(&0) {
+            while end < size && end - last < NAME_SEARCH_LIMIT && !bytes[(last - lo) as usize..].contains(&0) {
                 let more = (end + NAME_TAIL).min(size);
                 bytes.extend(read(end, (more - end) as usize)?);
                 end = more;

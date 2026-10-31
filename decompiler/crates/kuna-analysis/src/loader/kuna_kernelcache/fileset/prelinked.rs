@@ -136,6 +136,7 @@ fn thread_starts(bytes: &mut [u8], segs: &[Seg], base: u64, off: usize, size: us
     let Some(header) = rd_u32(bytes, off) else { return 0 };
     let unit = if header & 1 == 1 { 8 } else { 4 };
     let mut written = 0;
+    let mut budget = bytes.len();
     for i in 1..size / 4 {
         let Some(start) = rd_u32(bytes, off + 4 * i) else { break };
         if start == u32::MAX {
@@ -143,6 +144,10 @@ fn thread_starts(bytes: &mut [u8], segs: &[Seg], base: u64, off: usize, size: us
         }
         let mut va = base.wrapping_add(start as u64);
         for _ in 0..bytes.len() / unit as usize {
+            if budget == 0 {
+                return written;
+            }
+            budget -= 1;
             let Some(at) = va_to_off(segs, va) else { break };
             let Some(v) = rd_u64(bytes, at) else { break };
             if v & (1 << 62) == 0 {
@@ -178,7 +183,7 @@ pub(super) fn entries(bytes: &mut [u8], info: &[KextInfo]) -> (Vec<FilesetEntry>
     let mut headers: Vec<(String, usize)> = Vec::new();
     if let Some((_, size, off)) = kmod_start {
         let kmod_info = section(bytes, 0, b"__PRELINK_INFO", b"__kmod_info");
-        for i in 0..size as usize / 8 {
+        for i in 0..(size as usize / 8).min(bytes.len() / 8) {
             let Some(at) = rd_u64(bytes, off + 8 * i).and_then(|va| va_to_off(&outer, va)) else { continue };
             let id = info
                 .iter()
@@ -283,8 +288,8 @@ fn absolutize(bytes: &mut [u8], outer: &[Seg], at: usize) -> bool {
 /// Remove the segment commands of the header at `at` that `drop` selects, and
 /// move its symbols to the surviving section ordinals: a symbol whose section
 /// went away becomes absolute (`N_ABS`) at its address.
-fn drop_segments(bytes: &mut [u8], at: usize, drop_thread: bool, drop: impl Fn(&Seg) -> bool) {
-    let Some(cmds) = load_commands(bytes, at) else { return };
+fn drop_segments(bytes: &mut [u8], at: usize, drop_thread: bool, drop: impl Fn(&Seg) -> bool) -> Result<(), String> {
+    let Some(cmds) = load_commands(bytes, at) else { return Err("malformed load commands".into()) };
     let all = segs(bytes, at);
     let mut kept_cmds: Vec<u8> = Vec::new();
     let mut ncmds = 0u32;
@@ -312,13 +317,14 @@ fn drop_segments(bytes: &mut [u8], at: usize, drop_thread: bool, drop: impl Fn(&
     }
     let old_len = rd_u32(bytes, at + 20).unwrap_or(0) as usize;
     let start = at + HEADER_LEN;
+    let region_end = start.checked_add(old_len).filter(|&e| e <= bytes.len()).ok_or("load commands run past the file")?;
     bytes[start..start + kept_cmds.len()].copy_from_slice(&kept_cmds);
-    bytes[start + kept_cmds.len()..start + old_len].fill(0);
+    bytes[start + kept_cmds.len()..region_end].fill(0);
     bytes[at + 16..at + 20].copy_from_slice(&ncmds.to_le_bytes());
     bytes[at + 20..at + 24].copy_from_slice(&(kept_cmds.len() as u32).to_le_bytes());
 
     let Some(&(_, st)) = load_commands(bytes, at).unwrap_or_default().iter().find(|&&(c, _)| c == LC_SYMTAB) else {
-        return;
+        return Ok(());
     };
     let symoff = rd_u32(bytes, st + 8).unwrap_or(0) as usize;
     let nsyms = (rd_u32(bytes, st + 12).unwrap_or(0) as usize).min(bytes.len().saturating_sub(symoff) / NLIST_LEN);
@@ -336,6 +342,7 @@ fn drop_segments(bytes: &mut [u8], at: usize, drop_thread: bool, drop: impl Fn(&
             o => bytes[n + 5] = o,
         }
     }
+    Ok(())
 }
 
 /// The image for `chosen` (indexes into `all`, the kernel at 0). The kernel of
@@ -349,7 +356,7 @@ pub(super) fn cut(mut bytes: Vec<u8>, all: &[FilesetEntry], merged: bool, chosen
         if chosen.contains(&0) {
             return Ok(bytes);
         }
-        drop_segments(&mut bytes, 0, true, |s| prelink(s) || s.code || s.filesize == 0 && s.name != b"__LINKEDIT");
+        drop_segments(&mut bytes, 0, true, |s| prelink(s) || s.code || s.filesize == 0 && s.name != b"__LINKEDIT")?;
         let mut entries = all.to_vec();
         entries[0].filetype = MH_KEXT_BUNDLE;
         let with_kernel: Vec<usize> = std::iter::once(0).chain(chosen.iter().copied()).collect();
@@ -360,7 +367,7 @@ pub(super) fn cut(mut bytes: Vec<u8>, all: &[FilesetEntry], merged: bool, chosen
         bind_to_kernel(&mut bytes, all[i].fileoff as usize, &kernel);
     }
     if chosen.contains(&0) {
-        drop_segments(&mut bytes, 0, false, prelink);
+        drop_segments(&mut bytes, 0, false, prelink)?;
         if chosen.len() == 1 {
             return Ok(bytes);
         }
@@ -444,6 +451,9 @@ fn bind_to_kernel(bytes: &mut Vec<u8>, at: usize, kernel: &KernelSymbols) {
             else {
                 continue;
             };
+            if size > bytes.len() as u64 {
+                continue;
+            }
             let name = name16(&bytes[p..p + 16]);
             let kind = match (flags & 0xff, name.as_slice()) {
                 (0, b"__got" | b"__auth_got" | b"__nl_symbol_ptr") => S_NON_LAZY_SYMBOL_POINTERS,
@@ -454,7 +464,7 @@ fn bind_to_kernel(bytes: &mut Vec<u8>, at: usize, kernel: &KernelSymbols) {
             let slots: Vec<Option<u64>> = match kind {
                 S_NON_LAZY_SYMBOL_POINTERS | S_LAZY_SYMBOL_POINTERS => {
                     retype.push((p, kind, 0));
-                    (0..size / 8).map(|j| read_ptr(addr + 8 * j)).collect()
+                    (0..size / 8).map(|j| addr.checked_add(8 * j).and_then(read_ptr)).collect()
                 }
                 S_SYMBOL_STUBS => {
                     let stub = match rd_u32(bytes, p + 72).unwrap_or(0) {
@@ -463,11 +473,16 @@ fn bind_to_kernel(bytes: &mut Vec<u8>, at: usize, kernel: &KernelSymbols) {
                         n => n,
                     };
                     retype.push((p, kind | (flags & !0xff), stub));
-                    (0..size / stub as u64).map(|j| stub_slot(bytes, &own, addr + stub as u64 * j).and_then(read_ptr)).collect()
+                    (0..size / stub as u64)
+                        .map(|j| addr.checked_add(stub as u64 * j).and_then(|va| stub_slot(bytes, &own, va)).and_then(read_ptr))
+                        .collect()
                 }
                 _ => {
                     if s.code {
-                        for w in (0..size / 4).filter_map(|j| va_to_off(&own, addr + 4 * j).and_then(|o| rd_u32(bytes, o)).map(|ins| (j, ins))) {
+                        for w in (0..size / 4).filter_map(|j| {
+                            let va = addr.checked_add(4 * j)?;
+                            va_to_off(&own, va).and_then(|o| rd_u32(bytes, o)).map(|ins| (j, ins))
+                        }) {
                             let (j, ins) = w;
                             if ins & 0xfc00_0000 == 0x9400_0000 {
                                 let delta = ((((ins & 0x03ff_ffff) << 6) as i32) >> 4) as i64;
@@ -516,7 +531,7 @@ fn bind_to_kernel(bytes: &mut Vec<u8>, at: usize, kernel: &KernelSymbols) {
 /// loads.
 fn stub_slot(bytes: &[u8], own: &[Seg], va: u64) -> Option<u64> {
     let adrp = rd_u32(bytes, va_to_off(own, va)?)?;
-    let ldr = rd_u32(bytes, va_to_off(own, va + 4)?)?;
+    let ldr = rd_u32(bytes, va_to_off(own, va.checked_add(4)?)?)?;
     if adrp & 0x9f00_0000 != 0x9000_0000 || ldr & 0xffc0_0000 != 0xf940_0000 {
         return None;
     }
@@ -590,5 +605,69 @@ mod tests {
         assert!(imports.iter().any(|i| i.addr == BASE + 0x9100 && i.name == b"kernel_add"));
         let sym = file.symbols().find(|s| s.name() == Ok("_kernel_add")).unwrap();
         assert_eq!(sym.address(), BASE + 0x2000);
+    }
+
+    /// A thousand starts that each walk the same hundred-slot chain: the walk
+    /// is budgeted by the file, so the rebase writes stay within it.
+    #[test]
+    fn thread_start_walks_share_one_budget() {
+        let n = 1000;
+        let mut bytes = vec![0u8; 0x4000];
+        let segs = [Seg { cmd: 0, name: b"__TEXT".to_vec(), vmaddr: 0, fileoff: 0, filesize: 0x4000, code: false }];
+        for i in 0..99 {
+            bytes[0x200 + 8 * i..0x208 + 8 * i].copy_from_slice(&(1u64 << 51).to_le_bytes());
+        }
+        bytes[0x100..0x104].copy_from_slice(&1u32.to_le_bytes());
+        for i in 1..=n {
+            bytes[0x100 + 4 * i..0x104 + 4 * i].copy_from_slice(&0x200u32.to_le_bytes());
+        }
+        let written = thread_starts(&mut bytes, &segs, 0, 0x100, 4 * (n + 1));
+        assert!(written <= bytes.len(), "{written} writes: the walks were not budgeted");
+    }
+
+    #[test]
+    fn drop_segments_refuses_load_commands_past_the_file() {
+        let mut bytes = vec![0u8; 0x40];
+        bytes[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
+        bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&0x1000u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&0x1bu32.to_le_bytes());
+        bytes[36..40].copy_from_slice(&8u32.to_le_bytes());
+        assert!(drop_segments(&mut bytes, 0, false, |_| false).is_err());
+    }
+
+    /// A `__got` section whose declared size exceeds the file: its slots are
+    /// skipped, not collected into a vector sized from the header.
+    #[test]
+    fn bind_to_kernel_skips_a_section_larger_than_the_file() {
+        let mut bytes = vec![0u8; 288];
+        bytes[0..4].copy_from_slice(&MH_MAGIC_64.to_le_bytes());
+        bytes[12..16].copy_from_slice(&MH_KEXT_BUNDLE.to_le_bytes());
+        bytes[16..20].copy_from_slice(&3u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&256u32.to_le_bytes());
+        let seg = 32;
+        bytes[seg..seg + 4].copy_from_slice(&0x19u32.to_le_bytes());
+        bytes[seg + 4..seg + 8].copy_from_slice(&152u32.to_le_bytes());
+        bytes[seg + 8..seg + 14].copy_from_slice(b"__DATA");
+        bytes[seg + 24..seg + 32].copy_from_slice(&0x1000u64.to_le_bytes());
+        bytes[seg + 32..seg + 40].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[seg + 48..seg + 56].copy_from_slice(&0x100u64.to_le_bytes());
+        bytes[seg + 64..seg + 68].copy_from_slice(&1u32.to_le_bytes());
+        let sect = seg + 72;
+        bytes[sect..sect + 5].copy_from_slice(b"__got");
+        bytes[sect + 16..sect + 22].copy_from_slice(b"__DATA");
+        bytes[sect + 32..sect + 40].copy_from_slice(&0x1000u64.to_le_bytes());
+        bytes[sect + 40..sect + 48].copy_from_slice(&0xFFFF_FFFF_FFFF_FFF8u64.to_le_bytes());
+        bytes[184..188].copy_from_slice(&0x2u32.to_le_bytes());
+        bytes[188..192].copy_from_slice(&24u32.to_le_bytes());
+        bytes[208..212].copy_from_slice(&0xbu32.to_le_bytes());
+        bytes[212..216].copy_from_slice(&80u32.to_le_bytes());
+        let kernel = KernelSymbols {
+            by_addr: std::collections::BTreeMap::from([(0x2000u64, [0u8; NLIST_LEN])]),
+            stroff: 0,
+            strsize: 0,
+        };
+        bind_to_kernel(&mut bytes, 0, &kernel);
+        assert_eq!(bytes.len(), 288);
     }
 }

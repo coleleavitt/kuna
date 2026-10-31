@@ -134,3 +134,47 @@ fn objc_selector_base_from_the_header_and_from_libobjc() {
     let plain = DyldCache::open(&fixture()).unwrap();
     assert_eq!(plain.objc_selector_base(), None, "a cache without ObjC names no base");
 }
+
+/// A header count can ask for more bytes than the file holds: the read is
+/// refused before any buffer is sized from it.
+#[test]
+fn reads_past_the_end_of_a_cache_file_are_refused() {
+    let file = File::open(fixture()).unwrap();
+    let len = file.metadata().unwrap().len();
+    let cache_file = CacheFile { file, name: "fixture".into(), len };
+    assert!(cache_file.read_at(0, usize::MAX / 2).is_err());
+    assert!(cache_file.read_at(len - 4, 8).is_err());
+    assert_eq!(cache_file.read_at(0, 4).unwrap().len(), 4);
+}
+
+#[test]
+fn mapping_bounds_do_not_overflow_at_the_top_of_the_address_space() {
+    let m = Mapping {
+        address: u64::MAX - 16,
+        size: 0x100,
+        file_offset: 0,
+        file: 0,
+        slide_offset: 0,
+        slide_size: 0,
+        flags: 0,
+        init_prot: 0,
+    };
+    assert!(m.contains(u64::MAX - 8, 4));
+}
+
+/// Names with no terminating NUL are searched for only a bounded distance, so
+/// a run of them cannot make each span read on to the end of the pool.
+#[test]
+fn string_pool_search_for_a_nul_is_bounded() {
+    let size = 1u64 << 20;
+    let offsets: Vec<u64> = (1..=40u64).map(|i| i * 20_000).collect();
+    let reads = std::cell::RefCell::new(Vec::new());
+    let read = |_off: u64, len: usize| -> Result<Vec<u8>, String> {
+        reads.borrow_mut().push(len);
+        Ok(vec![b'A'; len])
+    };
+    StringPool::read_at(&read, size, offsets.iter().copied()).unwrap();
+    let total: usize = reads.borrow().iter().sum();
+    let per_name = (NAME_TAIL + NAME_SEARCH_LIMIT + NAME_TAIL) as usize;
+    assert!(total <= offsets.len() * per_name, "{total} bytes read for {} names", offsets.len());
+}

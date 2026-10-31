@@ -321,3 +321,37 @@ fn only_a_collection_kext_reads_bound_imports() {
     standalone[27] &= 0x7f;
     assert!(!bound(&standalone));
 }
+
+fn macho_header(filetype: u32, ncmds: u32, sizeofcmds: u32) -> Vec<u8> {
+    let mut h = Vec::new();
+    for word in [0xfeed_facfu32, 0x0100_000c, 0, filetype, ncmds, sizeofcmds, 0, 0] {
+        h.extend(word.to_le_bytes());
+    }
+    h
+}
+
+/// A fileset with no entries names nothing to load: an error, not an index panic.
+#[test]
+fn empty_fileset_is_an_error_not_a_panic() {
+    let bytes = macho_header(12, 0, 0);
+    assert!(peel(bytes, &KernelcacheChoice::Entry("all".into())).is_err());
+}
+
+/// A load command too short for the fields read from it is refused by the
+/// fileset walk, so no segment read runs past its command.
+#[test]
+fn short_segment_command_is_refused() {
+    let mut bytes = macho_header(12, 2, 40);
+    bytes.extend(0x8000_0035u32.to_le_bytes());
+    bytes.extend(32u32.to_le_bytes());
+    bytes.extend(0u64.to_le_bytes());
+    bytes.extend(0x100u64.to_le_bytes());
+    bytes.extend(24u32.to_le_bytes());
+    bytes.extend(0u32.to_le_bytes());
+    bytes.extend(b"kern\0\0\0\0");
+    bytes.extend(0x19u32.to_le_bytes());
+    bytes.extend(8u32.to_le_bytes());
+    bytes.resize(0x200, 0);
+    bytes[0x100 + 12..0x100 + 16].copy_from_slice(&2u32.to_le_bytes());
+    assert!(peel(bytes, &KernelcacheChoice::Entry("all".into())).is_err());
+}

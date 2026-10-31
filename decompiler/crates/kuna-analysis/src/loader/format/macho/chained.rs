@@ -158,6 +158,9 @@ pub struct ChainedFixups {
     /// `slot_vma → signing context` for every authenticated arm64e entry,
     /// rebase or bind.
     auth: HashMap<u64, AuthContext>,
+    /// Chain hops walked so far, across every chain of the image. A valid
+    /// chain visits each slot once, so the file's length bounds the total.
+    hops: usize,
 }
 
 /// How dyld signs an authenticated chained pointer at load: the key, whether
@@ -472,7 +475,7 @@ fn walk_fixups(
 
     // dyld_chained_starts_in_image { uint32 seg_count; uint32 seg_info_offset[]; }
     let Some(seg_count) = rd_u32(blob, sio) else { return };
-    for i in 0..seg_count as usize {
+    for i in 0..(seg_count as usize).min(blob.len() / 4) {
         let Some(seg_info_off) = rd_u32(blob, sio + 4 + 4 * i) else { continue };
         if seg_info_off == 0 {
             // 0 = this segment has no fixups.
@@ -521,9 +524,9 @@ fn walk_segment(
         if page_start == PTR_START_NONE {
             continue;
         }
-        let page_va = imagebase + segment_offset + (pi as u64) * (page_size as u64);
+        let page_va = imagebase.wrapping_add(segment_offset).wrapping_add(pi as u64 * page_size as u64);
         if page_start & PTR_START_MULTI == 0 {
-            walk_chain(file, segs, page_va + page_start as u64, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
+            walk_chain(file, segs, page_va.wrapping_add(page_start as u64), stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
             continue;
         }
         // Several chains on one page: the low bits index the overflow list
@@ -532,7 +535,7 @@ fn walk_segment(
         for _ in 0..0x8000u32 {
             let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
             let offset = (start & !PTR_START_LAST) as u64;
-            walk_chain(file, segs, page_va + offset, stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
+            walk_chain(file, segs, page_va.wrapping_add(offset), stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
             if start & PTR_START_LAST != 0 {
                 break;
             }
@@ -620,6 +623,10 @@ fn walk_chain(
     let mut va = first_va;
     let narrow = matches!(format.id, ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE);
     for _ in 0..max_hops {
+        if out.hops >= file.len() {
+            return;
+        }
+        out.hops += 1;
         let Some(fo) = va_to_fileoff(segs, va) else { return };
         let raw = if narrow { rd_u32(file, fo as usize).map(u64::from) } else { rd_u64(file, fo as usize) };
         let Some(raw) = raw else { return };
@@ -765,7 +772,7 @@ fn decode_segmented(raw: u64, segs: &[SegInfo]) -> (u64, Option<u64>) {
     let next = (raw >> 51) & 0xFFF;
     let offset = raw & 0x0FFF_FFFF;
     let index = ((raw >> 28) & 0xF) as usize;
-    (next, segs.get(index).map(|s| s.vmaddr + offset))
+    (next, segs.get(index).map(|s| s.vmaddr.wrapping_add(offset)))
 }
 
 /// The import ordinal and inline addend of a **bind** word, or `None` for a
@@ -804,8 +811,9 @@ fn kernel_cache_rebase(raw: u64, pointer_format: u16) -> Option<(u64, u8, u64)> 
 /// arithmetic). `None` for a VMA outside every mapped segment.
 fn va_to_fileoff(segs: &[SegInfo], va: u64) -> Option<u64> {
     for s in segs {
-        if va >= s.vmaddr && va < s.vmaddr + s.filesize {
-            return Some(s.fileoff + (va - s.vmaddr));
+        let Some(end) = s.vmaddr.checked_add(s.filesize) else { continue };
+        if va >= s.vmaddr && va < end {
+            return s.fileoff.checked_add(va - s.vmaddr);
         }
     }
     None
@@ -1192,5 +1200,53 @@ mod tests {
         // public entry, which returns empty for any non-Mach-O File. Here we only
         // assert the FileKind arm: a non-Mach-O FileKind yields empty.
         assert!(matches!(FileKind::parse(bytes.as_slice()), Ok(FileKind::Elf64) | Err(_)));
+    }
+
+    #[test]
+    fn va_lookup_does_not_overflow_at_the_top_of_the_address_space() {
+        let segs = [SegInfo { vmaddr: u64::MAX - 8, fileoff: 0, filesize: 64 }];
+        assert_eq!(va_to_fileoff(&segs, u64::MAX - 4), None);
+    }
+
+    #[test]
+    fn segmented_targets_wrap_instead_of_overflowing() {
+        let segs = [
+            SegInfo { vmaddr: 0x1000, fileoff: 0, filesize: 0x100 },
+            SegInfo { vmaddr: u64::MAX, fileoff: 0x100, filesize: 0x100 },
+        ];
+        assert_eq!(decode_segmented((1 << 28) | 0x20, &segs), (0, Some(0x1f)));
+    }
+
+    #[test]
+    fn page_addresses_wrap_for_an_out_of_range_segment_offset() {
+        let segs = [SegInfo { vmaddr: 0x1_0000_0000, fileoff: 0, filesize: 0x1000 }];
+        let mut blob = Vec::new();
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&0x1000u16.to_le_bytes());
+        blob.extend_from_slice(&ptr_format::PTR_64.to_le_bytes());
+        blob.extend_from_slice(&u64::MAX.to_le_bytes());
+        blob.extend_from_slice(&0u32.to_le_bytes());
+        blob.extend_from_slice(&1u16.to_le_bytes());
+        blob.extend_from_slice(&0x10u16.to_le_bytes());
+        let mut out = ChainedFixups::default();
+        walk_segment(&blob, 0, &segs, 0x1_0000_0000, &[0u8; 0x1000], &[], &mut out);
+    }
+
+    /// A thousand walks of the same chain: the hops are budgeted by the file,
+    /// so repeated chains cannot multiply the work.
+    #[test]
+    fn chain_hops_are_bounded_by_the_file_across_chains() {
+        let imagebase = 0x1_0000_0000u64;
+        let segs = [SegInfo { vmaddr: imagebase, fileoff: 0, filesize: 128 }];
+        let mut file = vec![0u8; 128];
+        for slot in 0..15 {
+            file[8 * slot..8 * slot + 8].copy_from_slice(&((2u64 << 51) | 0x8000).to_le_bytes());
+        }
+        let format = Format { id: ptr_format::PTR_64, imagebase, max_valid: 0 };
+        let mut out = ChainedFixups::default();
+        for _ in 0..1000 {
+            walk_chain(&file, &segs, imagebase, 4, format, &[], &mut out, PAGE_CHAIN_HOPS);
+        }
+        assert!(out.hops <= file.len());
     }
 }

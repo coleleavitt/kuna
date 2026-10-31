@@ -85,25 +85,46 @@ struct Segment {
     filesize: u64,
 }
 
-/// `(cmd, offset)` of each load command of the 64-bit header at `at`.
+/// `(cmd, offset)` of each load command of the 64-bit header at `at`. A command
+/// must lie inside the file and be large enough for the fields read from it.
 fn load_commands(bytes: &[u8], at: usize) -> Option<Vec<(u32, usize)>> {
     if rd_u32(bytes, at)? != MH_MAGIC_64 {
         return None;
     }
     let ncmds = rd_u32(bytes, at + 16)? as usize;
-    let end = at.checked_add(HEADER_LEN)?.checked_add(rd_u32(bytes, at + 20)? as usize)?;
+    let end = at.checked_add(HEADER_LEN)?.checked_add(rd_u32(bytes, at + 20)? as usize)?.min(bytes.len());
     let mut out = Vec::with_capacity(ncmds.min(4096));
     let mut p = at + HEADER_LEN;
     for _ in 0..ncmds {
         let cmd = rd_u32(bytes, p)?;
         let size = rd_u32(bytes, p + 4)? as usize;
-        if size < 8 || p.checked_add(size)? > end {
+        if p.checked_add(size)? > end || !command_fits(bytes, cmd, p, size) {
             return None;
         }
         out.push((cmd, p));
         p += size;
     }
     Some(out)
+}
+
+const SEGMENT_CMD_LEN: usize = 72;
+const SECTION_LEN: usize = 80;
+const LC_FUNCTION_STARTS_CMD: u32 = 0x26;
+
+/// Whether the command at `p` of `size` bytes holds the fields its kind is read
+/// for, and for a segment, every section its header declares.
+fn command_fits(bytes: &[u8], cmd: u32, p: usize, size: usize) -> bool {
+    match cmd {
+        LC_SEGMENT_64 => {
+            size >= SEGMENT_CMD_LEN
+                && rd_u32(bytes, p + 64).is_some_and(|n| SEGMENT_CMD_LEN + n as usize * SECTION_LEN <= size)
+        }
+        LC_SYMTAB => size >= 24,
+        LC_DYSYMTAB => size >= 80,
+        LC_FILESET_ENTRY => size >= 32,
+        LC_FUNCTION_STARTS_CMD | 0x1d | 0x1e | 0x29 | 0x2b | 0x2e | 0x33 | 0x34 => size >= 16,
+        _ => size >= 8,
+    }
 }
 
 fn segments(bytes: &[u8], at: usize) -> Option<Vec<Segment>> {
@@ -144,6 +165,14 @@ pub(super) fn entries(bytes: &[u8]) -> Option<Vec<FilesetEntry>> {
 
 /// The entries `choice` names: `all`, a comma-separated list, or one entry.
 fn select_many(all: &[FilesetEntry], choice: &KernelcacheChoice) -> Result<Vec<usize>, String> {
+    let chosen = select_entries(all, choice)?;
+    if chosen.is_empty() {
+        return Err("the MH_FILESET names no entry to load".into());
+    }
+    Ok(chosen)
+}
+
+fn select_entries(all: &[FilesetEntry], choice: &KernelcacheChoice) -> Result<Vec<usize>, String> {
     let position = |e: &FilesetEntry| all.iter().position(|a| a.fileoff == e.fileoff).unwrap_or(0);
     match choice {
         KernelcacheChoice::Entry(name) if name == "all" => Ok((0..all.len()).collect()),
