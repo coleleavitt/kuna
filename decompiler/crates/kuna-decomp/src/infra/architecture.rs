@@ -4320,7 +4320,7 @@ impl Architecture {
         self.analysis_iokitclasses = true; // (kuna) IOKit class recovery, XNU images only
         self.analysis_xnutables = true; // (kuna) XNU data tables, XNU images only
         self.analysis_osclassinfo = true; // (kuna) DriverKit class records
-        self.analysis_cfstrings = false; // Mach-O __cfstring constant-string recovery default-off (Mach-O-only pass)
+        self.analysis_cfstrings = true; // Mach-O __cfstring constant-string recovery default-on (Mach-O-only pass)
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
         self.analysis_swiftruntime = true; // Swift runtime prototypes default-on (Swift-detected images only)
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)

@@ -4854,7 +4854,7 @@ every other binary's pass list is byte-identical to before the pass existed):
   `swift.HeapObject *` would hide the first stored property behind
   `obj[1].isa`. The stage test `tests/stages/kuna-swiftruntime.xml` runs the
   stripped `swift_types_elf` off and on.
-- **Core Foundation constant strings** (`cfstrings`, Mach-O-only, default-off;
+- **Core Foundation constant strings** (`cfstrings`, Mach-O-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/cfstring/mod.rs`): a `CFSTR("x")`
   compiles to a four-word `CFString` struct in `__cfstring` (`isa`, `flags`, a
   `char *` into `__cstring`/`__ustring`, and a character `length`). Code references

@@ -11,10 +11,10 @@
 //!
 //! ## The two-state proof (the `verify_objc` posture)
 //!
-//! - **`--option cfstrings off`** (default): each getter returns the bare
+//! - **`--option cfstrings off`**: each getter returns the bare
 //!   `__cfstring` entry address — the CFString struct the printer cannot follow on
 //!   its own.
-//! - **`--option cfstrings on`**: each returns its literal — the entry's char
+//! - **`--option cfstrings on`** (default): each returns its literal — the entry's char
 //!   pointer resolved, the string seeded into the `StringManager`, the entry typed
 //!   `char[N]` over its own 32 bytes only, so a long string never hides the next
 //!   entry.
@@ -76,9 +76,11 @@ fn run(mode: Mode, vma: u64) -> String {
     let mut prog = bootstrap_from_object(bin.to_str().unwrap(), "", &spec_roots)
         .expect("bootstrap fixture with built processor specs");
 
-    if let Mode::On = mode {
-        prog.arch_mut().set_kuna_option("cfstrings", "on").expect("cfstrings flips on");
-    }
+    let value = match mode {
+        Mode::Off => "off",
+        Mode::On => "on",
+    };
+    prog.arch_mut().set_kuna_option("cfstrings", value).expect("cfstrings flips");
     prog.commit_pending_analysis().expect("analysis commit succeeds");
 
     let name = name_at(&prog, vma);
