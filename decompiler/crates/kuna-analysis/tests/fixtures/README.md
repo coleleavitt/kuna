@@ -1279,6 +1279,14 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
 and `(self->super).wheels`; with `--option swiftdemangle off` every one of those
 types spells `_TtC4main3Car` / `_TtC4main6Engine`.
 
+`macho_swift_classnames_fieldmd_arm64` is the same source built with
+`-DFIELDMD` (same recipe), which adds a 16-byte `__swift5_fieldmd` section with
+no record for these classes, so the image reads as Swift. It checks that the
+ObjC ivar list still builds a Swift class's struct when the Swift pass does not
+run (`option sourcelang c`). SHA-256
+`90cf3be2472839c78dc89df3305a665940a43deb01859e3fc41391c9bbeface3`; IMP
+`-[main.Car loadPerSeat:]`@`0x100000748`.
+
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 
 `swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture

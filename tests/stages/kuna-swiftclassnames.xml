@@ -28,6 +28,13 @@
     Pass 1 (`option swiftdemangle off`, set before the `load file` it governs)
     is the runtime spelling everywhere; pass 2 (default) shows `main.Car *self`,
     `main.Engine *` and `self->engine`.
+
+    `macho_swift_classnames_fieldmd_arm64` adds a `__swift5_fieldmd` section
+    with no record for these classes. Pass 3 (default) runs the Swift pass on
+    it, which owns a Swift class's layout and has none to give, so the record
+    stays declared only. Pass 4 (`option sourcelang c`, set before the
+    `load file`) runs no Swift pass, so the ivar list builds the struct under
+    the demangled name.
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 c0035fd6
@@ -51,12 +58,29 @@ c0035fd6
   <com>load addr 0x1000006f8</com>
   <com>decompile</com>
   <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_swift_classnames_fieldmd_arm64</com>
+  <com>option objc on</com>
+  <com>read symbols</com>
+  <com>load addr 0x100000748</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option sourcelang c</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_swift_classnames_fieldmd_arm64</com>
+  <com>option objc on</com>
+  <com>read symbols</com>
+  <com>load addr 0x100000748</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option sourcelang auto</com>
   <com>quit</com>
 </script>
 <stringmatch name="swiftdemangle off: self and the struct keep the runtime class name" min="1" max="1">-\[_TtC4main3Car loadPerSeat:\]\(_TtC4main3Car \*self</stringmatch>
 <stringmatch name="swiftdemangle off: the quoted-class ivar pointer keeps the runtime class name" min="1" max="1">_TtC4main6Engine \*v2;</stringmatch>
-<stringmatch name="swiftdemangle default: self is typed with the demangled class struct" min="1" max="1">-\[main\.Car loadPerSeat:\]\(main\.Car \*self</stringmatch>
-<stringmatch name="swiftdemangle default: the quoted-class ivar pointer names the demangled class" min="1" max="1">main\.Engine \*v2;</stringmatch>
-<stringmatch name="both passes: the ivars fold through the struct (inherited, pointer, own)" min="2" max="2">v1 = \(self->super\)\.wheels;</stringmatch>
-<stringmatch name="both passes: the engine pointer reads as a field" min="2" max="2">v2 = self->engine;</stringmatch>
+<stringmatch name="swiftdemangle default: self is typed with the demangled class struct" min="3" max="3">-\[main\.Car loadPerSeat:\]\(main\.Car \*self</stringmatch>
+<stringmatch name="swiftdemangle default: the quoted-class ivar pointer names the demangled class" min="2" max="2">main\.Engine \*v2;</stringmatch>
+<stringmatch name="every pass with a layout: the ivars fold through the struct (inherited, pointer, own)" min="3" max="3">v1 = \(self->super\)\.wheels;</stringmatch>
+<stringmatch name="every pass with a layout: the engine pointer reads as a field" min="3" max="3">v2 = self->engine;</stringmatch>
+<stringmatch name="Swift image: the layout is left to the Swift pass, which has none for the class" min="1" max="1">v2 = \(\(unsigned long \*\)self\)\[1\];</stringmatch>
 </decompilertest>
