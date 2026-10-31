@@ -2153,11 +2153,19 @@ impl Datatype {
         let pa = identity(a);
         let pb = identity(b);
         if pa == pb {
-            0
-        } else if pa < pb {
-            -1
-        } else {
-            1
+            return 0;
+        }
+        // (kuna) Heap addresses vary from run to run and the tree order is the
+        // order the .h declares types in, so distinct types order by id, then
+        // (an unnamed type has id 0) by their own dependency order, and only
+        // then by address.
+        let by_shape = || match a.compare_dependency(b) {
+            Ok(c) if c != 0 => c.cmp(&0),
+            _ => std::cmp::Ordering::Equal,
+        };
+        match a.id.cmp(&b.id).then_with(by_shape).then(pa.cmp(&pb)) {
+            std::cmp::Ordering::Less => -1,
+            _ => 1,
         }
     }
 
