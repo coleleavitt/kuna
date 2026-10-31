@@ -1666,3 +1666,66 @@ self->count; }` and the accessor as `swift.type_metadata *
 typefix.Point.type_metadata_accessor(long request) { return
 &typefix.Point.type_metadata; }`; with `swifttypes off` the getter takes no
 parameter and reads `*(long *)(v2 + 0x60)`.
+### `swift_call_elf` / `swift_call_syms_elf` — Swift methods, witnesses and a throwing call (`swiftcall`)
+
+`swift_call_elf` (x86-64 ELF, 16 KB, stripped) and `swift_call_syms_elf` (the
+same link with its symbols, 29 KB) are the Swift calling-convention fixtures
+(`tests/stages/kuna-swiftcall.xml`, `kuna-cli/tests/swift_call_cli.rs`). Their
+source `swift_call_elf.swift` declares a class method of two arguments
+(`Account.deposit(_:fee:)`), a throwing one (`Account.withdraw(_:)`), a final
+method that calls another on its own `self` (`Account.settle(_:)` calling
+`fee(for:)`), a mutating struct method (`Counter.advance(by:times:)`, `self` in
+r13) and a non-mutating one (`Counter.peek(_:)`, `self` exploded into its
+trailing arguments), and a protocol whose witnesses a struct and a class
+provide; `run` calls them and wraps the throwing call in `try?`. Built with the
+swiftly 6.3 toolchain:
+
+```bash
+swiftc -O -module-name callfix swift_call_elf.swift -o swift_call_syms_elf
+llvm-strip --strip-all -o swift_call_elf swift_call_syms_elf
+```
+
+SHA-256: `swift_call_elf` `57e8f77a34efb04af8d06f766b9cff43346e23a98d94fa84703ea365b68c8a96`,
+`swift_call_syms_elf` `9ac69a8fb9dd7edb96c0e80e021de8d8da20ce74aee3eb7b97e2365d13f6d06c`.
+
+**Pinned VMAs** (the symbol table of `swift_call_syms_elf`):
+`$s7callfix7AccountC7deposit_3feeS2i_SitF` (vtable slot 7)@`0x3830`,
+`$s7callfix7AccountC8withdrawyS2iKF` (slot 8, throws)@`0x3870`,
+`$s7callfix7AccountC6settleyS2iF`@`0x35e0`, `$s7callfix7AccountC3fee3forS2i_tF`@`0x38f0`,
+`$s7callfix7CounterV7advance2by5timesySi_SitF`@`0x3660`,
+`$s7callfix7CounterV4peekyS2iF`@`0x3680`, the `bump` witnesses
+`$s7callfix7CounterVAA8PingableA2aDP4bumpyySiFTW`@`0x2ff0` and
+`$s7callfix7AccountCAA8PingableA2aDP4bumpyySiFTW`@`0x3060`, and
+`$s7callfix3runySiAA7AccountC_AA7CounterVzSitF`@`0x3490`, which sets r13 for
+the virtual `deposit` call at `0x34c5`, zeroes r12 (`xor %r12d,%r12d`) before
+the throwing virtual call at `0x34de` and tests it after. With `swiftmetadata
+on` (`swiftcall` is on by default) the class method decompiles as
+`callfix.Account.vtable#7.method(callfix.Account *self,long a1,long a2)` and
+passes `self` to the virtual calls it makes on itself, the struct witness
+writes `self->step`, the class witness takes `callfix.Account **self`, and
+`run` passes `a0` to both virtual calls and keeps `if (v5) {
+swift_release(v5); v3 = -1; }`; with symbols, `advance` takes `callfix.Counter
+*self` and `run` passes it `a1`, `peek` gains no `self`, and `settle` hands its
+own `self` to both `fee(for:)` calls. With `swiftcall off` the methods read
+`self` from an unnamed r13, the calls pass none, and `run` returns the throwing
+call's result unchecked.
+
+### `swift_call_helper_elf` — a mutating struct call after a runtime helper (`swiftcall`)
+
+`swift_call_helper_elf` (x86-64 ELF, 17 KB, with symbols) is the fixture for the
+`swiftself` value a runtime helper call preserves (`tests/stages/kuna-swiftcall.xml`).
+Its source `swift_call_helper_elf.swift` calls the mutating
+`Counter.bump()` after `swift_beginAccess`, which runs between the caller
+setting r13 and the call, straight-line in `once` and in a loop in `loop`:
+
+```bash
+swiftc -O -module-name helperfix swift_call_helper_elf.swift -o swift_call_helper_elf
+```
+
+SHA-256: `75ac6939c3c6bf428c1ea95c799eb03b2cb781dbf36fc8c1affcda1550692aea`.
+
+**Pinned VMAs:** `$s9helperfix4onceySiAA7CounterVz_AA3BoxCtF`@`0x2440`,
+`$s9helperfix4loopySiAA7CounterVz_AA3BoxCSitF`@`0x2480`,
+`$s9helperfix7CounterV4bumpyyF`@`0x2640`. With `swiftmetadata on` both calls
+decompile as `helperfix.Counter.bump()(a0)`; with `swiftcall off` they pass
+nothing.
