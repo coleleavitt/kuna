@@ -510,15 +510,17 @@ fn option_heading(st: &KunaSettable) -> String {
     format!(
         "`{}` -- {}, default `{}`{}",
         st.option,
-        st.values.replace('|', " | "),
+        st.values.replace('|', " | ").replace('<', "&lt;").replace('>', "&gt;"),
         st.shipped,
         if st.destructive { " (destructive opt-in)" } else { "" },
     )
 }
 
 /// GitHub's anchor for a heading: the rendered text (code backticks and
-/// raw `<...>` spans gone) lowercased, punctuation dropped, spaces to hyphens.
+/// raw `<...>` spans gone, `&lt;`/`&gt;` the brackets they print) lowercased,
+/// punctuation dropped, spaces to hyphens.
 fn github_anchor(markdown_heading: &str) -> String {
+    let markdown_heading = markdown_heading.replace("&lt;", "").replace("&gt;", "");
     let mut text = String::new();
     let mut in_tag = false;
     for ch in markdown_heading.chars() {

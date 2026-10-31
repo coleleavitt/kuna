@@ -315,18 +315,18 @@ Three tiers:
 | goto plus label into the shared body of a guard cascade whose arms reconverge | [`condfold`](#condfold----off--on--wide-default-on) |
 | nested if where angr emits one compound short-circuit condition | [`condfold`](#condfold----off--on--wide-default-on) |
 | second condition block assigns one value or calls something before its test and the fold is declined | [`condfold`](#condfold----off--on--wide-default-on) |
-| a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch----off--3--4---default-off) |
-| loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch----off--3--4---default-off) |
-| nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch----off--3--4---default-off) |
-| a deep if/else tree on one variable with an equality test at every leaf | [`treeswitch`](#treeswitch----off--2--3---default-off) |
-| gcc -O0 compare tree for a dense switch of 17 or more cases printed as nested ifs | [`treeswitch`](#treeswitch----off--2--3---default-off) |
-| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight----off---default-off) |
-| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight----off---default-off) |
-| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight----off---default-off) |
-| a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
-| if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
-| a while header carries several comma-separated assignments | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
-| want a cap on how many statements a short-circuit operand may print | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
+| a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch----off--3--4--n-default-off) |
+| loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch----off--3--4--n-default-off) |
+| nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch----off--3--4--n-default-off) |
+| a deep if/else tree on one variable with an equality test at every leaf | [`treeswitch`](#treeswitch----off--2--3--n-default-off) |
+| gcc -O0 compare tree for a dense switch of 17 or more cases printed as nested ifs | [`treeswitch`](#treeswitch----off--2--3--n-default-off) |
+| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight----off--n-default-off) |
+| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight----off--n-default-off) |
+| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight----off--n-default-off) |
+| a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts----off--0--1--2--3--n-default-3) |
+| if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts----off--0--1--2--3--n-default-3) |
+| a while header carries several comma-separated assignments | [`condstmts`](#condstmts----off--0--1--2--3--n-default-3) |
+| want a cap on how many statements a short-circuit operand may print | [`condstmts`](#condstmts----off--0--1--2--3--n-default-3) |
 | goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue----on--off-default-on) |
 | a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue----on--off-default-on) |
 | continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue----on--off-default-on) |
@@ -392,17 +392,17 @@ Three tiers:
 | v = sub_x(stdin), v == -1 stays two statements: the undeclared callee's eax output is narrower than the rax it returns, and the spill's int declaration is that narrowing | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
 | v = f(g) stays two statements on i386/ARM32: an undeclared callee may return a long long in edx:eax / r0:r1 | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
 | v = f(g); x = a && !v stays two statements: folded into the right of &&, the call would be skipped when a decides | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
-| too many single-use temporaries: v7 = v3 + 8 declared and read once | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
-| a value read three times is written out three times instead of being declared | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
-| want to ablate the implied-expression threshold without rebuilding | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
-| expressions are too deeply nested to read and every sub-term should get a name | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
-| a two-term expression is declared as a temporary instead of being inlined at its two uses | [`termdup`](#termdup----2--3--4---default-2) |
-| want to ablate the term-duplication threshold without rebuilding | [`termdup`](#termdup----2--3--4---default-2) |
-| raising impliedrefs did not inline an expression because the expression itself is too wide | [`termdup`](#termdup----2--3--4---default-2) |
-| switch with more than 1024 cases prints as a computed call (jump-as-call) | [`jumptablemax`](#jumptablemax----1024---default-1024) |
-| state-machine function with a giant jump table decompiles to a stub | [`jumptablemax`](#jumptablemax----1024---default-1024) |
-| functions --summary lists a switch over jumptablemax | [`jumptablemax`](#jumptablemax----1024---default-1024) |
-| xrefs miss references made from switch cases past the first 1024 | [`jumptablemax`](#jumptablemax----1024---default-1024) |
+| too many single-use temporaries: v7 = v3 + 8 declared and read once | [`impliedrefs`](#impliedrefs----2--3--4--n-default-2) |
+| a value read three times is written out three times instead of being declared | [`impliedrefs`](#impliedrefs----2--3--4--n-default-2) |
+| want to ablate the implied-expression threshold without rebuilding | [`impliedrefs`](#impliedrefs----2--3--4--n-default-2) |
+| expressions are too deeply nested to read and every sub-term should get a name | [`impliedrefs`](#impliedrefs----2--3--4--n-default-2) |
+| a two-term expression is declared as a temporary instead of being inlined at its two uses | [`termdup`](#termdup----2--3--4--n-default-2) |
+| want to ablate the term-duplication threshold without rebuilding | [`termdup`](#termdup----2--3--4--n-default-2) |
+| raising impliedrefs did not inline an expression because the expression itself is too wide | [`termdup`](#termdup----2--3--4--n-default-2) |
+| switch with more than 1024 cases prints as a computed call (jump-as-call) | [`jumptablemax`](#jumptablemax----1024--n-default-1024) |
+| state-machine function with a giant jump table decompiles to a stub | [`jumptablemax`](#jumptablemax----1024--n-default-1024) |
+| functions --summary lists a switch over jumptablemax | [`jumptablemax`](#jumptablemax----1024--n-default-1024) |
+| xrefs miss references made from switch cases past the first 1024 | [`jumptablemax`](#jumptablemax----1024--n-default-1024) |
 | stack-protector canary compare against fs:0x28 and a __stack_chk_fail branch cluttering the epilogue | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
 | shared-return goto forced by the canary check block | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
 | flip off to keep the real canary instructions for auditing the protector | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
@@ -584,9 +584,9 @@ Three tiers:
 | a declared local is never written and never read anywhere in the function | [`indirectonly`](#indirectonly----on--off-default-off) |
 | a `vN = slot;` ... `slot = vN;` round-trip copy pair around a loop that only reads the slot | [`indirectonly`](#indirectonly----on--off-default-off) |
 | a call result assigned to a temporary that is immediately assigned to a stack slot | [`indirectonly`](#indirectonly----on--off-default-off) |
-| an inlined callee body is spliced into the caller and should read as a call | [`outline`](#outline----off----default-off-destructive-opt-in) |
-| want to pull a chosen region out of a function into a named pseudofunction | [`outline`](#outline----off----default-off-destructive-opt-in) |
-| acting on an almostregion inline-candidate report by hand or with an llm | [`outline`](#outline----off----default-off-destructive-opt-in) |
+| an inlined callee body is spliced into the caller and should read as a call | [`outline`](#outline----off--fnhead-exit-default-off-destructive-opt-in) |
+| want to pull a chosen region out of a function into a named pseudofunction | [`outline`](#outline----off--fnhead-exit-default-off-destructive-opt-in) |
+| acting on an almostregion inline-candidate report by hand or with an llm | [`outline`](#outline----off--fnhead-exit-default-off-destructive-opt-in) |
 | an unprototyped call loses a local output pointer | [`stackaddrargtrial`](#stackaddrargtrial----on--off-default-off) |
 | a post-call word or halfword output folds to its initializer | [`stackaddrargtrial`](#stackaddrargtrial----on--off-default-off) |
 | a helper's stack output array is shorter than the helper writes | [`callarrayextent`](#callarrayextent----on--off-default-off-destructive-opt-in) |
@@ -819,10 +819,10 @@ Three tiers:
 | a symbol name renders with a U+FFFD replacement character | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
 | kuna decompile <name> cannot address a function that kuna functions printed | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
 | the exported .c does not compile because a function name contains */ or // | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
-| kuna functions or decompile-all uses hundreds of megabytes of rss on a small binary | [`symbolnamebound`](#symbolnamebound------off-default-256) |
-| kuna stalls for tens of seconds or is oom-killed loading a binary whose symbol table is a few hundred kilobytes | [`symbolnamebound`](#symbolnamebound------off-default-256) |
-| a stripped copy of a binary loads instantly while the unstripped copy hangs | [`symbolnamebound`](#symbolnamebound------off-default-256) |
-| memory grows roughly 1.5 kb per :: in a symbol name | [`symbolnamebound`](#symbolnamebound------off-default-256) |
+| kuna functions or decompile-all uses hundreds of megabytes of rss on a small binary | [`symbolnamebound`](#symbolnamebound----n--off-default-256) |
+| kuna stalls for tens of seconds or is oom-killed loading a binary whose symbol table is a few hundred kilobytes | [`symbolnamebound`](#symbolnamebound----n--off-default-256) |
+| a stripped copy of a binary loads instantly while the unstripped copy hangs | [`symbolnamebound`](#symbolnamebound----n--off-default-256) |
+| memory grows roughly 1.5 kb per :: in a symbol name | [`symbolnamebound`](#symbolnamebound----n--off-default-256) |
 | a floating-point expression in an msvc .obj is written entirely in dat_<addr> operands | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
 | an msvc object's fp constant reads as dat_<addr> although its symbol name spells the value | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
 | one operand of an fp expression is a literal and the neighbouring one is still dat_<addr> | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
@@ -1022,9 +1022,9 @@ Three tiers:
 | swift function names unreadable in kuna functions output | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
 | swift type metadata symbols show raw manglings instead of named paths | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
 | objc method labels show _TtC runtime class names | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
-| a dyld_shared_cache file is rejected as an unrecognized input format | [`dyldimage`](#dyldimage----none---default-none) |
-| cannot decompile an ios or macos system library because it only exists inside the dyld shared cache | [`dyldimage`](#dyldimage----none---default-none) |
-| dyld shared cache holds N images; choose one with --image | [`dyldimage`](#dyldimage----none---default-none) |
+| a dyld_shared_cache file is rejected as an unrecognized input format | [`dyldimage`](#dyldimage----none--install-name-default-none) |
+| cannot decompile an ios or macos system library because it only exists inside the dyld shared cache | [`dyldimage`](#dyldimage----none--install-name-default-none) |
+| dyld shared cache holds N images; choose one with --image | [`dyldimage`](#dyldimage----none--install-name-default-none) |
 | calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
 | a cache image's __got loads name nothing | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
 | cross-library calls of an ios framework have no names | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
@@ -1044,10 +1044,10 @@ Three tiers:
 | a message send renders as sub_<addr>(obj) through an __objc_stubs entry | [`objc`](#objc----on--off-default-off) |
 | objc_msgSend selector argument renders as dat_<addr> | [`objc`](#objc----on--off-default-off) |
 | a category method renders as sub_<addr> instead of -[Class(Category) sel] | [`objc`](#objc----on--off-default-off) |
-| objc_msgSend$setFoo:() renders with no argument although the caller sets one | [`objcsdk`](#objcsdk------off-default-off) |
-| objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0 | [`objcsdk`](#objcsdk------off-default-off) |
-| objc_msgSend$setFrame: passes one word where a CGRect was built | [`objcsdk`](#objcsdk------off-default-off) |
-| a framework method's stub returns undefined16 or unsigned long instead of its declared type | [`objcsdk`](#objcsdk------off-default-off) |
+| objc_msgSend$setFoo:() renders with no argument although the caller sets one | [`objcsdk`](#objcsdk----directory--off-default-off) |
+| objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0 | [`objcsdk`](#objcsdk----directory--off-default-off) |
+| objc_msgSend$setFrame: passes one word where a CGRect was built | [`objcsdk`](#objcsdk----directory--off-default-off) |
+| a framework method's stub returns undefined16 or unsigned long instead of its declared type | [`objcsdk`](#objcsdk----directory--off-default-off) |
 | swift binary functions render as sub_<addr> although swift5 metadata sections are present | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
 | type metadata accessors unnamed in a stripped swift mach-o | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
 | protocol witnesses and class methods of a stripped swift app have no names | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
@@ -1084,12 +1084,12 @@ Three tiers:
 | a COFF .obj lists only its first function (the rest collide at address 0) | [`relocobjects`](#relocobjects----on--off-default-on) |
 | arm64e mach-o decoded with the generic v8A spec so pointer-auth ops are unmodeled | [`macho-arm64e`](#macho-arm64e----on--off-default-off) |
 | pac instructions in an apple-silicon binary not modeled by the loaded spec | [`macho-arm64e`](#macho-arm64e----on--off-default-off) |
-| an iOS kernelcache (IMG4/IM4P) is rejected as an unrecognized input format | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
-| kuna functions on a decompressed MH_FILESET kernelcache finds no functions | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
-| a kext cannot be selected out of a kernel collection | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
-| pointers in a kernelcache read as packed chained-fixup words instead of addresses | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
-| an ios 12-14 kernelcache or an sptm/txm image reads its pointers as packed __thread_starts / __chain_starts words | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
-| a kext of an older prelinked kernelcache cannot be selected | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| an iOS kernelcache (IMG4/IM4P) is rejected as an unrecognized input format | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
+| kuna functions on a decompressed MH_FILESET kernelcache finds no functions | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
+| a kext cannot be selected out of a kernel collection | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
+| pointers in a kernelcache read as packed chained-fixup words instead of addresses | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
+| an ios 12-14 kernelcache or an sptm/txm image reads its pointers as packed __thread_starts / __chain_starts words | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
+| a kext of an older prelinked kernelcache cannot be selected | [`kernelcache`](#kernelcache----auto--off--all--bundle-idbundle-id-default-auto) |
 | a pe function stops early with the funcboundflow fall-through-reached-the-next-function-entry warning | [`pdatachained`](#pdatachained----on--off-default-on) |
 | kuna decompile of an msvc function emits `} while ;` or an empty if body where ghidra emits the whole function | [`pdatachained`](#pdatachained----on--off-default-on) |
 | kuna functions reports an msvc function far smaller than its .pdata extent | [`pdatachained`](#pdatachained----on--off-default-on) |
@@ -2415,7 +2415,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P8/goto-quality · angr · structure-recovery · angr-tr-build-spec-list
 - **Example:** `option condfold wide`
 
-### `linearswitch` -- off | 3 | 4 | <n>, default `off`
+### `linearswitch` -- off | 3 | 4 | &lt;n&gt;, default `off`
 
 - **Symptoms:** a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable; loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one; nested != tests on one variable with shared tails where the source has a switch.
 - **What it does:** Let `loweredswitch` re-roll a linear chain of equality tests on one variable into a switch. Detection requires a binary-search split (`saw_range`) because a linear chain reads as a hand-written if/else-if; a compiler also lowers a switch of three or four cases that way, and an if/else-if chain on one variable reads as a switch too. With `linearswitch N` a chain with no range node is recorded when it has at least N cases, every case body is entered only from the chain and dominated by the chain head (a chain the compiler copied into two paths keeps its ifs), and the labels print the same signed or unsigned (an extension on the path decides, else no case value may have the sign bit set). Every other check of the cascade recovery, the single shared default sink and `loweredswitchexact`'s routing replay included, still applies.
@@ -2423,7 +2423,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-linearswitch
 - **Example:** `option linearswitch 3`
 
-### `treeswitch` -- off | 2 | 3 | <n>, default `off`
+### `treeswitch` -- off | 2 | 3 | &lt;n&gt;, default `off`
 
 - **Symptoms:** a deep if/else tree on one variable with an equality test at every leaf; gcc -O0 compare tree for a dense switch of 17 or more cases printed as nested ifs.
 - **What it does:** Let `loweredswitch` re-roll a binary-search compare tree on one variable into a switch from N cases instead of 3 to 16. A compiler at -O0 lowers a switch to a tree of `==` and `<` tests with no jump table. Detection already finds the tree, but the default rules reject a tree of fewer than 3 cases and one of more than 16. With `treeswitch N` the floor is N and the cap is 64, for a tree that has a range node only. Linear equality chains keep the `linearswitch` rules, and every other check of the cascade recovery still applies, the single shared default sink included.
@@ -2431,7 +2431,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-treeswitch
 - **Example:** `option treeswitch 2`
 
-### `implweight` -- off | <n>, default `off`
+### `implweight` -- off | &lt;n&gt;, default `off`
 
 - **Symptoms:** a tiny expression such as a0 + 1 read three times gets its own temporary; many one-use-looking temporaries for small expressions read in several places; want small shared expressions printed inline and large ones kept in a variable.
 - **What it does:** Let an expression read by more than `max_implied_ref` ops still print inline when its terms times its readers is at most N. ActionMarkExplicit takes such a varnode as a multi-reader candidate (max_implied_ref raised to N) and process_multiplier caps its terms at min(max_term_duplication, N / readers), so a small expression read three times prints at each use and a large one keeps its temporary.
@@ -2439,7 +2439,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P6/variable-merging · kuna · presentation-default · kuna-implweight
 - **Example:** `option implweight 8`
 
-### `condstmts` -- off | 0 | 1 | 2 | 3 | <n>, default `3`
+### `condstmts` -- off | 0 | 1 | 2 | 3 | &lt;n&gt;, default `3`
 
 - **Symptoms:** a condition holds a long comma chain of assignments before its test; if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line; a while header carries several comma-separated assignments; want a cap on how many statements a short-circuit operand may print.
 - **What it does:** The most statements a basic block may print in front of its test when it is folded into a condition operand -- the right side of a short-circuit `&&`/`||`, or the header of a `while (...)`, where the statements print as a C comma expression. ruleBlockOr and ruleBlockWhileDo only fold a block BlockBasic::isComplex calls simple, but that verdict is a calc_explicit approximation taken when the function is structured inside the main loop, before variables are merged; values that later become explicit (a load kept in a callee-saved register across a call, a copy into a merged variable) then print as extra comma elements, so a block of four byte loads feeding one compare renders as `(a0[6] == 10 && (v1 = *a2, v2 = a2[1], v3 = a2[2], v4 = a2[3], sub_4012f9(a0) == ...))`. With a cap N, the final ActionBlockStructure measures every block in a comma-printed position with the printer's own skip rules (condfold's printed_shape: not-printed ops, markers, implied outputs and the bare BRANCH are free; the terminal CBRANCH is the condition) and records each one printing more than N statements before its test; the decompile drive then analyzes that function again with those block starts treated as complex from the first structuring on, so the fold is declined and the statements print on their own lines inside the enclosing `if` (a loop head takes the `while (true) { ...; if (c) break; }` form). It also bounds condfold: its printed-width budget becomes min(condfold budget, N+1). Default 3 (the cap only removes folds, never adds one): 0/675 datatest assertions change, and over 3,293 functions in six x86-64 binaries (a small ELF server, grep, sort, libselinux, ssh-sk-helper, ssh-pkcs11-helper) it changes two functions -- the server's keypad check and one grep matcher whose two 4-statement operands become two gotos -- at +1.0% wall time on grep and none elsewhere. Only those functions are analyzed twice; `off` is byte-identical to the uncapped output.
@@ -2599,7 +2599,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P6/explicit-marking · angr · presentation-default · kuna-foldcallretphi
 - **Example:** `option foldcallretphi off`
 
-### `impliedrefs` -- 2 | 3 | 4 | <n>, default `2`
+### `impliedrefs` -- 2 | 3 | 4 | &lt;n&gt;, default `2`
 
 - **Symptoms:** too many single-use temporaries: v7 = v3 + 8 declared and read once; a value read three times is written out three times instead of being declared; want to ablate the implied-expression threshold without rebuilding; expressions are too deeply nested to read and every sub-term should get a name.
 - **What it does:** How many times a computed value may be read and still be inlined at each use instead of being declared as its own local. ActionMarkExplicit::baseExplicit counts a Varnode's descendants and forces the value explicit once the count exceeds this bound, so the bound is exactly the line between `v3 = a + b;` used three times and `a + b` written out three times. It shipped as a hard-coded 2 whose own upstream comment reads `2 is best, in specific cases a higher number might be good`, with no way to reach it from a command. Raising it trades declarations for expression size: measured on coreutils fmt -O2 (decompile-all, 151 functions), the emitted C declares 369 locals at the shipped 2, 366 at 3 and 363 at 4, and in the other direction 384 at 1 and 630 at 0, where nothing stays implied and every computation gets its own statement. The bound is a program-wide tunable, not private to the explicit-marking pass: BlockBasic::isComplex (the `ruleBlockOr` OR-clause absorb test) and `condfold`'s printed-width test read the same field, so raising it also lets a slightly larger block fold into a condition.
@@ -2607,7 +2607,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P6/explicit-marking · ghidra-upstream · opt-in-tool · kuna-impliedrefs
 - **Example:** `option impliedrefs 4`
 
-### `termdup` -- 2 | 3 | 4 | <n>, default `2`
+### `termdup` -- 2 | 3 | 4 | &lt;n&gt;, default `2`
 
 - **Symptoms:** a two-term expression is declared as a temporary instead of being inlined at its two uses; want to ablate the term-duplication threshold without rebuilding; raising impliedrefs did not inline an expression because the expression itself is too wide.
 - **What it does:** How many terminal terms one implied expression may duplicate at each use before the value is declared instead. A value that survived the `impliedrefs` descendant test with more than one reader is walked by ActionMarkExplicit::processMultiplier, which counts the leaf terms (the explicit variables and constants, spacebase excluded) the expression would re-print at every use and forces the value explicit once that count exceeds this bound. It shipped as a hard-coded 2 whose own upstream comment reads `2 and 3 (4) are reasonable`, with no way to reach it from a command. It is the second, independent half of the same decision: `impliedrefs` bounds how MANY places an expression is copied to, `termdup` bounds how BIG the copied expression may be. Measured on coreutils fmt -O2 (decompile-all, 151 functions), the emitted C declares 369 locals at the shipped 2, 366 at 3, 363 at 4 and 362 at 6, and in the other direction 380 at 1 and 385 at 0.
@@ -2615,7 +2615,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P6/explicit-marking · ghidra-upstream · opt-in-tool · kuna-impliedrefs
 - **Example:** `option termdup 3`
 
-### `jumptablemax` -- 1024 | <n>, default `1024`
+### `jumptablemax` -- 1024 | &lt;n&gt;, default `1024`
 
 - **Symptoms:** switch with more than 1024 cases prints as a computed call (jump-as-call); state-machine function with a giant jump table decompiles to a stub; functions --summary lists a switch over jumptablemax; xrefs miss references made from switch cases past the first 1024.
 - **What it does:** The most entries one jump table may have. Jump-table recovery refuses a switch whose range check admits more cases than this (the dispatch then prints as a computed call, `// jump-as-call`), and the analysis tier's reference walk reads at most this many entries of a table, so the case bodies past it are not decoded, attributed or counted. It is upstream's `OptionJumpTableMax` (default 1024), catalogued so it can be found and so one value bounds both tiers: `kuna functions --summary --json` reports every switch whose range check exceeds it under `summary.limits`.
@@ -3007,7 +3007,7 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P6/merge-aggressiveness · ghidra · presentation-default · kuna-indirectonly
 - **Example:** `option indirectonly on`
 
-### `outline` -- off | <fn>:<head>-<exit>[;...], default `off` (destructive opt-in)
+### `outline` -- off | &lt;fn&gt;:&lt;head&gt;-&lt;exit&gt;[;...], default `off` (destructive opt-in)
 
 - **Symptoms:** an inlined callee body is spliced into the caller and should read as a call; want to pull a chosen region out of a function into a named pseudofunction; acting on an almostregion inline-candidate report by hand or with an llm.
 - **What it does:** Stage 2 of inline identification: excise a SUPPLIED single-entry region and emit a call to a synthesized pseudofunction in its place. Where almostregion finds candidate inlined regions, this acts on one - and the choice does not have to come from almostregion, so a human reading the code or an LLM agent reading almostregion's report can drive the transform directly. The value names the owning function entry as well as the region, because an option value is global to the run and every function is decompiled under it. The region is a block SET re-derived from the CFG with the same single-entry predicate almostregion uses; the value only names the head and the exit, and is re-verified against the live bblocks every time rather than trusted. Runs in the pre-SSA window immediately before heritage, so the edge surgery needs no MULTIEQUAL patching and ActionFuncLink still materializes the call's argument and return varnodes. v1 declines - leaving the function untouched - unless the head/exit really bound a single-entry region, exactly one edge enters the head from outside it, at most one value is live out, and the region contains no call and no STORE. Liveness is computed over the region's continuation (blocks reachable from the exit) with sub-register aliases merged, because an x86 32-bit write zero-extends and would otherwise count one register twice.
@@ -3206,7 +3206,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `unwindstarts` -- on | off, default `off`
 
 - **Symptoms:** a stripped mach-o yields almost no functions although __text is large; an ios app function list is only __mh_execute_header, main, exports and import stubs; LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body; functions the unwinder describes in __unwind_info missing from the inventory.
-- **What it does:** Extend Mach-O function discovery with the function starts the linker recorded in __TEXT,__unwind_info. The second-level pages (regular and compressed) list in ascending order the start offset of every function the unwinder can describe - one per .cfi_startproc the compiler emitted - relative to the image base. The section lives in the mapped __TEXT segment, so it survives the strip that removes LC_FUNCTION_STARTS from __LINKEDIT. On an image that still carries LC_FUNCTION_STARTS every unwind start is already a function-starts entry (the linker folds runs of adjacent same-encoding functions into one entry, so the set is a strict subset) and this oracle adds nothing. Its value is the stripped App-Store app: with LC_FUNCTION_STARTS gone, the symbol stream, LC_MAIN, exports and __mod_init_func seed only a handful of starts and the arm64 gap walk cannot reach the body, so the inventory collapses to the entry and the import stubs - measured on a decrypted 249 MB arm64 Instagram.app with no LC_FUNCTION_STARTS, kuna discovered 23 of the 204,800 real __text functions __unwind_info records. With this on, those 204,800 starts are recovered. Only the function starts are read; the compact encodings (frame size, saved registers, frameless stack size) are ignored because kuna S5/S7 frame analysis recovers the stack frame from the code. Output-changing (adds entries), so default-OFF: a default run is byte-identical to before.
+- **What it does:** Extend Mach-O function discovery with the function starts the linker recorded in __TEXT,__unwind_info. The second-level pages (regular and compressed) list in ascending order, relative to the image base, the start offset of each entry the unwinder looks up - a function start, though the linker folds a run of adjacent functions sharing one compact encoding into the entry of its first, so a folded run yields one start. The section lives in the mapped __TEXT segment, so it survives the strip that removes LC_FUNCTION_STARTS from __LINKEDIT. On an image that still carries LC_FUNCTION_STARTS every unwind start is already a function-starts entry (the linker folds runs of adjacent same-encoding functions into one entry, so the set is a strict subset) and this oracle adds nothing. Its value is the stripped App-Store app: with LC_FUNCTION_STARTS gone, the symbol stream, LC_MAIN, exports and __mod_init_func seed only a handful of starts and the arm64 gap walk cannot reach the body, so the inventory collapses to the entry and the import stubs - measured on a decrypted 249 MB arm64 Instagram.app with no LC_FUNCTION_STARTS, kuna discovered 23 of the 204,800 real __text functions __unwind_info records. With this on, those 204,800 starts are recovered. Only the function starts are read; the compact encodings (frame size, saved registers, frameless stack size) are ignored because kuna S5/S7 frame analysis recovers the stack frame from the code. Output-changing (adds entries), so default-OFF: a default run is byte-identical to before.
 - **When to flip:** Off (default) keeps Mach-O function starts from LC_FUNCTION_STARTS, LC_MAIN, exports and __mod_init_func. Flip on for a Mach-O whose LC_FUNCTION_STARTS was stripped (a common App-Store app) and whose function list is almost empty - the tell-tale is an inventory of a few named entries and many __stubs/__got slots over a large __text that holds real code. Inert on any image that still carries LC_FUNCTION_STARTS, where the unwind starts are already a subset of what is discovered.
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-unwindstarts
 - **Example:** `--option unwindstarts on`
@@ -3483,7 +3483,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/environment-binding · kuna · correctness-fix · kuna-symbolnamechars
 - **Example:** `option symbolnamechars ident`
 
-### `symbolnamebound` -- <n> | off, default `256`
+### `symbolnamebound` -- &lt;n&gt; | off, default `256`
 
 - **Symptoms:** kuna functions or decompile-all uses hundreds of megabytes of rss on a small binary; kuna stalls for tens of seconds or is oom-killed loading a binary whose symbol table is a few hundred kilobytes; a stripped copy of a binary loads instantly while the unstripped copy hangs; memory grows roughly 1.5 kb per :: in a symbol name.
 - **What it does:** Cap how many Scopes one qualified symbol name may nest, so an attacker-controlled name cannot exhaust the process. Database::find_create_scope_from_symbol_name splits a loader symbol name on every :: and nests one Scope per component with no bound on the count, the per-component length or the total; a Scope costs ~1.5 KB resident (RangeList, three BTreeMaps, two Strings and a maptable sized to the address-space count), and the interning key includes the parent, so a repeated component name still allocates a fresh Scope at every level. That makes a name a ~498x input-to-RSS amplifier: measured on kuna functions, a .symtab carrying one function named ('a::' * N) + 'z' costs 52,932 KB at N=0, 79,288 KB at N=20,000 and 345,132 KB at N=200,000, i.e. 291,724 KB for 600,001 bytes of .strtab. decompile-all is worse -- quadratic in depth -- so 60 KB of .strtab already buys a 20-second stall. The value is the scope-component ceiling; a name over it keeps the first n-1 components and folds the rest into one synthetic component carrying a deterministic FNV-1a 64 hash of the exact dropped bytes, so distinct names stay distinct and the base name is never rewritten. Per-component (1024 B) and total scope-path (4096 B) length ceilings ride along; the base name is exempt from both, so a long FLAT name such as a Go generic instantiation is untouched. off restores the historical unbounded behavior. SCOPE OF THE FIX: this caps what ONE name costs, not what a symbol TABLE costs -- the amplifier is per-Scope, and 3,000 distinct 64-component names (1.9 MB of ELF) still cost 343 MB with the gate on, because none exceeds the ceiling. It closes the reported primitive and the quadratic decompile-all blowup that rode on it; a cap on the total Scope population is a larger, separate change. Loader-tier: read via the kuna_symbolnamebound env var (the symbol install runs inside load file, upstream of every option command).
@@ -3947,7 +3947,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/environment-binding · kuna · analysis-enablement · kuna-multilang-swiftdemangle
 - **Example:** `option swiftdemangle off`
 
-### `dyldimage` -- none | <install-name>, default `none`
+### `dyldimage` -- none | &lt;install-name&gt;, default `none`
 
 - **Symptoms:** a dyld_shared_cache file is rejected as an unrecognized input format; cannot decompile an ios or macos system library because it only exists inside the dyld shared cache; dyld shared cache holds N images; choose one with --image.
 - **What it does:** Choose which image of a dyld shared cache to load. A cache (dyld_shared_cache_arm64e and its sub-caches .01, .27.dylddata, .44.dyldlinkedit, ... and .symbols beside it) holds every system library of an iOS or macOS release; kuna rebuilds the chosen image as a standalone thin Mach-O before anything parses it, so the loader, the analysis passes and every surface see an ordinary Mach-O. The rebuild keeps each segment at its cache address, applies the cache's slide info (v2, v3 with arm64e auth pointers, v5) at slide zero so every rebased pointer reads as its unslid target, and gives the image a private __LINKEDIT with its own symbol table, the local symbols the cache moved to its .symbols file in place of the <redacted> placeholders, the renumbered indirect-symbol table, and copies of the export trie, function starts and data-in-code. The name matches a full install name (/usr/lib/libobjc.A.dylib), else a unique basename (libobjc.A.dylib, CoreFoundation), else a unique basename without its last extension (libobjc.A). `none` (default) loads the image of a one-image cache and refuses a larger one with the image count. `A+B+...` adds companion images to the same program: their segments, their symbols (as locals) and the names of their own calls are merged into A's rebuild, so code in B that A calls can be decompiled in the same run. The image is rebuilt inside `load file`, so the choice travels as the KUNA_DYLD_IMAGE environment variable; the CLI's global `--image NAME` sets it for every subcommand, and the console sets it with `option dyldimage NAME` before `load file`, accepted before any image is loaded. `kuna unpack <cache> --list` lists the images and `kuna unpack <cache> --image NAME` writes the rebuilt Mach-O.
@@ -4003,7 +4003,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-objc
 - **Example:** `option objc on`
 
-### `objcsdk` -- <directory> | off, default `off`
+### `objcsdk` -- &lt;directory&gt; | off, default `off`
 
 - **Symptoms:** objc_msgSend$setFoo:() renders with no argument although the caller sets one; objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0; objc_msgSend$setFrame: passes one word where a CGRect was built; a framework method's stub returns undefined16 or unsigned long instead of its declared type.
 - **What it does:** Read Objective-C method signatures from SDK headers for the selectors an image only sends. A selector stub `objc_msgSend$setAlpha:` gets a prototype only when something in the image declares the selector (a class, category or protocol of its own), so a send to a framework method kept the untyped call-site inference and lost its arguments (`objc_msgSend$setHidden:();`). The declarations exist in the SDK the app was built against, and Apple's headers are never shipped with kuna, so this names a directory to read at load: an SDK root (`.../iPhoneOS.sdk`) contributes the `Headers/` of every framework the image links (LC_LOAD_DYLIB), any other directory every `.h` under it. The reader takes the declaration subset of the grammar — `@interface`/`@protocol`/category bodies, `- (ret)sel:(T)a ...;` methods, `@property (attrs) T name;` with `getter=`/`setter=`/`readonly` honoured, `typedef`s so NSInteger, CGFloat, NS_ENUM names and NSString-backed typed enums resolve — and turns each into the type encoding the runtime metadata would carry (`v@:d`), which rides the existing selector-to-prototype path: scalars and pointers pinned to their x/d registers, an HFA struct such as CGRect spread over d0..d3 as `arg_x, arg_y, arg_width, arg_height`, NSRange over two x registers, a larger struct (CGAffineTransform) the pointer the caller passes, a struct return the flat struct the model places in d0..d3. A type the reader cannot encode (an unknown struct, a function pointer) makes the selector unusable rather than guessed; one selector declared two ways across classes is dropped (a differing class-pointer argument is not a disagreement). The image's own declarations always win over the headers. Load-time, env-bridged (KUNA_OBJCSDK): set it before the `load file` it should apply to; nothing derived from the headers is written anywhere.
@@ -4099,7 +4099,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-multiformat-macho-arm64e
 - **Example:** `--option macho-arm64e on`
 
-### `kernelcache` -- auto | off | all | <bundle-id>[,<bundle-id>...], default `auto`
+### `kernelcache` -- auto | off | all | &lt;bundle-id&gt;[,&lt;bundle-id&gt;...], default `auto`
 
 - **Symptoms:** an iOS kernelcache (IMG4/IM4P) is rejected as an unrecognized input format; kuna functions on a decompressed MH_FILESET kernelcache finds no functions; a kext cannot be selected out of a kernel collection; pointers in a kernelcache read as packed chained-fixup words instead of addresses; an ios 12-14 kernelcache or an sptm/txm image reads its pointers as packed __thread_starts / __chain_starts words; a kext of an older prelinked kernelcache cannot be selected.
 - **What it does:** Load an Apple kernelcache straight from its firmware container. An IMG4 or bare IM4P file is parsed as DER, its payload is decoded (LZFSE bvx2/bvxn/bvx- blocks or a complzss LZSS container, checked against the declared size and Adler-32), and an encrypted payload (one carrying a KBAG) is refused with a message instead of being misread. The decoded image is usually an MH_FILESET kernel collection: one Mach-O header per LC_FILESET_ENTRY (the kernel and every kext) sharing one file and one LC_DYLD_CHAINED_FIXUPS table. kuna applies every rebase of that table to its pointer slot (DYLD_CHAINED_PTR_64_KERNEL_CACHE, ARM64E_KERNEL and X86_64_KERNEL_CACHE, pointer-authentication bits stripped) and then loads ONE entry as a thin Mach-O: `auto` takes the kernel (the MH_EXECUTE entry), a bundle id takes that entry, matched exactly or by a unique dotted suffix (`IOSurface` finds com.apple.iokit.IOSurface). Loader-tier: read through the KUNA_KERNELCACHE env var, because the image is chosen inside load file. Several entries load as ONE image when the value is a comma-separated list or `all`: their segment commands are concatenated at their collection addresses, and one symbol table (every entry's symbols renumbered into one local / external / undefined order, section ordinals moved to the merged section list), one indirect-symbol table (each stub and pointer section's reserved1 moved with it) and one LC_FUNCTION_STARTS are rebuilt behind the collection, with the rebuilt header in front of it. The collection's __BRANCH_STUBS / __BRANCH_GOTS segments, where a release kext's cross-entry branches land, are mapped with whatever entries are chosen. A pre-fileset (prelinked, iOS <= 14) kernelcache, and any static image with __TEXT,__thread_starts or __TEXT,__chain_starts (SPTM, TXM), has its threaded or chained pointers rebased into the bytes first; its kexts (whole Mach-Os in __PRELINK_TEXT up to iOS 11, merged into the kernel and found through __PRELINK_INFO,__kmod_start from iOS 12) are listed and chosen the same way, a stripped iOS 11 kext getting the kernel symbols its __got slots and stubs reach as bound imports.

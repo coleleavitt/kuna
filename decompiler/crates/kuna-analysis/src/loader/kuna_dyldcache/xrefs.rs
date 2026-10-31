@@ -72,7 +72,9 @@ pub fn decode(blob: &[u8]) -> Vec<Xref> {
     let Some(count) = blob.get(..4).map(|b| u32_at(b, 0) as usize) else {
         return Vec::new();
     };
-    let names_at = 4 + count.saturating_mul(16);
+    let Some(names_at) = count.checked_mul(16).and_then(|n| n.checked_add(4)) else {
+        return Vec::new();
+    };
     let Some(names) = blob.get(names_at..) else {
         return Vec::new();
     };

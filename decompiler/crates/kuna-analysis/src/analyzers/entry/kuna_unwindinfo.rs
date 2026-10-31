@@ -2,9 +2,10 @@
 //!
 //! The linker folds each object file's `__compact_unwind` entries into one
 //! `__TEXT,__unwind_info` section: a two-level lookup whose leaf (second-level)
-//! pages list, in ascending order, the start offset of every function the
-//! unwinder can describe. Those offsets are function starts by construction —
-//! one per `.cfi_startproc` the compiler emitted — and the section lives in the
+//! pages list, in ascending order, the start offset of each entry the unwinder
+//! looks up. Those offsets are function starts by construction, though not one
+//! per function: the linker folds a run of adjacent functions sharing one
+//! compact encoding into the entry of its first — and the section lives in the
 //! mapped `__TEXT` segment, so it survives the `strip` that removes
 //! `LC_FUNCTION_STARTS` from `__LINKEDIT`.
 //!
@@ -14,7 +15,7 @@
 //! value is the stripped App-Store app whose `LC_FUNCTION_STARTS` is gone: there
 //! the symbol stream, `LC_MAIN`, exports and `__mod_init_func` seed only a
 //! handful of starts and the arm64 gap walk cannot reach the body, while
-//! `__unwind_info` still names every function. Output-changing (it adds entries)
+//! `__unwind_info` still names the start of every run. Output-changing (it adds entries)
 //! and inert when `LC_FUNCTION_STARTS` is present, so it is default-OFF.
 //!
 //! Only the function **starts** are read. The compact encodings (frame size,
