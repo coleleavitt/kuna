@@ -7,7 +7,7 @@ use std::rc::Rc;
 
 use kuna_decomp::dtype::{type_metatype, Datatype, TypeFactory, TypeField};
 use kuna_decomp::fspec::PrototypePieces;
-use kuna_decomp::kuna_kalloctype::TYPED_ALLOCATORS;
+use kuna_decomp::kuna_kalloctype::{KallocView, TYPED_ALLOCATORS};
 use object::read::{Object, ObjectSection};
 
 use super::{in_ranges, is_xnu_image, macho_flags, Recovered};
@@ -45,7 +45,7 @@ impl AnalysisPass for XnuTablesPass {
         }
         let img = MachoImage::with_fixups(ctx.file, resolve_chained_fixups(ctx.file, ctx.bytes));
         let rec = super::recover(ctx.file, &img);
-        kalloc_views(ctx.file, &img, &rec, ctx.arch.types(), &mut out);
+        kalloc_views(ctx.file, &img, &rec, &mut out);
         allocator_prototypes(ctx, &rec, &mut out);
         dispatch_tables(ctx.file, &img, &rec, ctx.arch.types(), &mut out);
         pointer_slots(ctx.file, ctx.bytes, &img, &rec, &mut out);
@@ -77,22 +77,20 @@ fn unique(seen: &mut HashMap<String, usize>, name: String) -> String {
     if *n == 1 { name } else { format!("{name}_{n}") }
 }
 
-/// `__kalloc_type` holds `kalloc_type_view` records (0x40 bytes, the view name
-/// at +0x10, the signature at +0x20 and the size at +0x2c); `__kalloc_var`
-/// holds `kalloc_type_var_view` records (0x50 bytes, the name at +0x10). Each
-/// becomes a sized data object, under its symbol or else named after its type
-/// (`kalloc_type_view_<T>`), and a fixed-size view also the struct its
-/// signature describes ([`allocated_struct`]), which the engine gives the
-/// result of a typed allocator call that passes the view.
-pub(super) fn kalloc_views(
-    file: &object::File,
-    img: &MachoImage,
-    rec: &Recovered,
-    types: &dyn TypeFactory,
-    out: &mut AnalysisOutput,
-) {
+/// `__kalloc_type` holds `kalloc_type_view` records (0x40 bytes: the view name
+/// at +0x10, the signature at +0x20, the size at +0x2c); `__kalloc_var` holds
+/// `kalloc_type_var_view` records (0x50 bytes: `kt_size_hdr` at +0x2,
+/// `kt_size_type` at +0x4, the name at +0x10, `kt_sig_hdr` at +0x38 and
+/// `kt_sig_type` at +0x40). Each becomes a sized data object, under its
+/// symbol or else named after its type (`kalloc_type_view_<T>`), and the
+/// engine learns what it allocates ([`KallocView`]): for a fixed view the
+/// struct `<T>`; for a var view with a header the header struct `<T>` (the
+/// elements follow it), without one the element (`<T>`, or an array of
+/// pointers for `site.T *`). Names are fixed here, in section order, so a
+/// struct of another size under a taken name is `<T>_<size>` on every surface.
+pub(super) fn kalloc_views(file: &object::File, img: &MachoImage, rec: &Recovered, out: &mut AnalysisOutput) {
     let mut seen = HashMap::new();
-    let mut structs: HashMap<(String, u32), Option<Rc<Datatype>>> = HashMap::new();
+    let mut sizes: HashMap<String, u32> = HashMap::new();
     for sec in file.sections() {
         let (stride, suffix) = match sec.name() {
             Ok("__kalloc_type") => (KALLOC_TYPE_VIEW, "kalloc_type_view"),
@@ -101,81 +99,35 @@ pub(super) fn kalloc_views(
         };
         for k in 0..sec.size() / stride {
             let view = sec.address() + k * stride;
-            let Some(t) = img.read_ptr(view + 0x10).and_then(|p| img.read_cstr(p)).and_then(|s| view_type(&s)) else {
-                continue;
-            };
+            let Some(site) = img.read_ptr(view + 0x10).and_then(|p| img.read_cstr(p)) else { continue };
+            let Some(t) = view_type(&site) else { continue };
             let name = match rec.names.get(&view) {
                 Some(symbol) => symbol.clone(),
                 None => unique(&mut seen, format!("{suffix}_{t}")),
             };
             out.data_objects.push(DataObjectFact { addr: view, name, size: stride as u32 });
-            if stride != KALLOC_TYPE_VIEW {
-                continue;
-            }
-            let (Some(size), Some(signature)) = (img.read_u32(view + 0x2c), img.read_ptr(view + 0x20).and_then(|p| img.read_cstr(p)))
-            else {
-                continue;
+            let sig = |at: u64| img.read_ptr(view + at).and_then(|p| if p == 0 { Some(String::new()) } else { img.read_cstr(p) });
+            let shape = if stride == KALLOC_TYPE_VIEW {
+                img.read_u32(view + 0x2c).zip(sig(0x20)).map(|(size, s)| (size, s, false))
+            } else {
+                let hdr = img.read_u32(view).map(|w| w >> 16);
+                let elem = img.read_u32(view + 4);
+                match (hdr, elem) {
+                    (Some(h), _) if h != 0 => sig(0x38).map(|s| (h, s, false)),
+                    (Some(_), Some(e)) => sig(0x40).map(|s| (e, s, site.trim_end().ends_with('*'))),
+                    _ => None,
+                }
             };
-            let is_class = rec.classes.iter().any(|c| c.name == t);
-            let st = structs
-                .entry((t.clone(), size))
-                .or_insert_with(|| allocated_struct(types, &t, &signature, size, is_class))
-                .clone();
-            if let Some(st) = st {
-                out.kalloc_types.push((view, st));
+            let Some((size, signature, pointers)) = shape else { continue };
+            if size == 0 {
+                continue;
             }
+            let first = *sizes.entry(t.clone()).or_insert(size);
+            let name = if first == size { t.clone() } else { format!("{t}_{size}") };
+            let is_class = rec.classes.iter().any(|c| c.name == t);
+            out.kalloc_types.push((view, KallocView { name, signature, size, is_class, pointers }));
         }
     }
-}
-
-/// The struct a view allocates, from its `kt_signature`: one 8-byte granule
-/// per character (`1` a pointer, `8` a signed pointer, `2` data, `4` either,
-/// `0` padding; a data-only view has an empty signature). Named `<T>`, or
-/// `<T>_<size>` when a struct of another size already holds that name; a
-/// libkern class's first pointer is its `vtable`.
-fn allocated_struct(types: &dyn TypeFactory, t: &str, signature: &str, size: u32, is_class: bool) -> Option<Rc<Datatype>> {
-    if size == 0 || size > 0x1000_0000 {
-        return None;
-    }
-    let size = size as i32;
-    let same_shape = |existing: &Rc<Datatype>| {
-        existing.get_metatype() == type_metatype::TYPE_STRUCT && !existing.is_incomplete() && existing.get_size() == size
-    };
-    let mut name = t.to_string();
-    if let Some(existing) = types.find_by_name(&name).ok()? {
-        if same_shape(&existing) {
-            return Some(existing);
-        }
-        name = format!("{t}_{size}");
-        if let Some(existing) = types.find_by_name(&name).ok()? {
-            return same_shape(&existing).then_some(existing);
-        }
-    }
-    let ptr = types.get_type_pointer(8, types.get_type_void().ok()?, 1).ok()?;
-    let word = types.get_base(8, type_metatype::TYPE_UNKNOWN).ok()?;
-    let byte = types.get_base(1, type_metatype::TYPE_UNKNOWN).ok()?;
-    let mut fields = Vec::new();
-    let mut granules = signature.chars();
-    let mut off = 0i32;
-    while off < size {
-        let kind = granules.next().unwrap_or('2');
-        let len = (size - off).min(8);
-        if kind == '0' {
-            off += len;
-            continue;
-        }
-        let ty = match kind {
-            '1' | '8' if len == 8 => Rc::clone(&ptr),
-            _ if len == 8 => Rc::clone(&word),
-            _ => types.get_type_array(len, Rc::clone(&byte)).ok()?,
-        };
-        let field = if off == 0 && is_class && kind == '1' { "vtable".to_string() } else { format!("field_0x{off:x}") };
-        fields.push(TypeField::new(fields.len() as i32, off, field, ty));
-        off += len;
-    }
-    let align = if size % 8 == 0 { 8 } else if size % 4 == 0 { 4 } else { 1 };
-    let shell = types.get_type_struct(&name).ok()?;
-    types.set_fields_struct_raw(&shell, fields, Vec::new(), size, align, 0).ok()
 }
 
 /// Prototypes for the typed allocators, parked by name and at every address
@@ -366,9 +318,10 @@ pub(super) fn dispatch_tables(
 }
 
 /// `__got`, `__auth_got` and `__auth_ptr` slots the indirect-symbol table does
-/// not name: `<target>_ptr` for a slot whose rebased pointer reaches a named
-/// function or object of this image.
-fn pointer_slots(file: &object::File, bytes: &[u8], img: &MachoImage, rec: &Recovered, out: &mut AnalysisOutput) {
+/// not name: `<target>_ptr` for a slot whose rebased pointer reaches a function
+/// or object of this image named by its symbols or by the class recovery.
+pub(super) fn pointer_slots(file: &object::File, bytes: &[u8], img: &MachoImage, rec: &Recovered, out: &mut AnalysisOutput) {
+    let known = rec.known_names();
     let named: std::collections::HashSet<u64> = crate::loader::macho_stubs::resolve_macho_import_slots(file, bytes)
         .into_iter()
         .flat_map(|(lo, hi)| (lo..hi).step_by(8))
@@ -382,7 +335,7 @@ fn pointer_slots(file: &object::File, bytes: &[u8], img: &MachoImage, rec: &Reco
             if named.contains(&slot) || rec.names.contains_key(&slot) {
                 continue;
             }
-            let Some(target) = img.read_ptr(slot).and_then(|t| rec.names.get(&t)) else { continue };
+            let Some(target) = img.read_ptr(slot).and_then(|t| known.get(&t)) else { continue };
             out.data_objects.push(DataObjectFact { addr: slot, name: format!("{target}_ptr"), size: 8 });
         }
     }
