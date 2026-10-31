@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3920,
-    3920
+    3923,
+    3923
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -168,6 +168,9 @@
     "data:BRANCHFLIP-ARMSWAP #4: branchflip off is the un-flipped reference, both siblings nested",
     "data:BRANCHFLIP-ARMSWAP #5: no else-if collapse of a statement-carrying arm",
     "data:BRANCHFLIP-ARMSWAP #6: no sibling if escapes to the outer statement indent",
+    "data:BRKNORETURN #1: off: the trap is a call that falls back to jump-as-call",
+    "data:BRKNORETURN #2: on: the trap is marked no-return",
+    "data:BRKNORETURN #3: the tail call survives in both passes",
     "data:Bit reinterpret arm #1: storage transfers use a union",
     "data:Bit reinterpret arm #2: numeric integer conversion stays a cast",
     "data:Bit reinterpret arm #3: numeric float truncation stays a cast",
@@ -1102,7 +1105,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 448 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 449 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1112,7 +1115,7 @@
     "data:KUNA-CATALOG #4: v850indirectbranch is the other opt-in (off, destructive global)",
     "data:KUNA-CATALOG #5: each settable carries symptom-keyed use_when guidance for the operator",
     "data:KUNA-CATALOG #6: angr-derived features carry source_decompiler provenance (loweredswitch, namestyle, stackguard, branchflip, foldcallret, dedupvardecls, relocobjects, i386_pie_plt, noreturn_propagate, loopbreak_recovery, gotoreduce, crossjumprevert, taildup, dedupitetail, returndup, iteregion, iteexpr, switchguardbound, switchsharedcase, switchmultipred, unrolledguard, tailcalljump, regionstructure, regionlooprefine, regionedgeorder, ifelseflatten, noreturn_extern, noreturn_externmatch, earlyreturn, switchreturn, condfold, securitycheck, structsynth, protoorder, calleevote)",
-    "data:KUNA-CATALOG #7: change_kind structure-recovery tags the switch/array/loader/loop/tail-call reconstructors (loweredswitch, switchselector, constselectjump, arraystride, relocobjects, noreturn_propagate, loopbreak_recovery, gotoreduce, crossjumprevert, taildup, dedupitetail, returndup, iteregion, iteexpr, tailcalljump, regionstructure, regionlooprefine, regionedgeorder, ifelseflatten, earlyreturn, switchreturn, condfold, iteboolean, paramcopyhoist, itecondlist, guardarm, loopcondhoist, orchain, endptrbound, loweredswitchheads, structsynth, structmerge, structheadless, devectorize, gomorestack, gowritebarrier, ptrauthtrap, jumpassist, whilecontinue, arm64evcall, outlinedinline, switchtrim, linearswitch, gotosink, treeswitch)",
+    "data:KUNA-CATALOG #7: change_kind structure-recovery tags the switch/array/loader/loop/tail-call reconstructors (loweredswitch, switchselector, constselectjump, arraystride, relocobjects, noreturn_propagate, loopbreak_recovery, gotoreduce, crossjumprevert, taildup, dedupitetail, returndup, iteregion, iteexpr, tailcalljump, regionstructure, regionlooprefine, regionedgeorder, ifelseflatten, earlyreturn, switchreturn, condfold, iteboolean, paramcopyhoist, itecondlist, guardarm, loopcondhoist, orchain, endptrbound, loweredswitchheads, structsynth, structmerge, structheadless, devectorize, gomorestack, gowritebarrier, ptrauthtrap, callothernoreturn, jumpassist, whilecontinue, arm64evcall, outlinedinline, switchtrim, linearswitch, gotosink, treeswitch)",
     "data:KUNA-CATALOG #8: the opt-in-tool change_kind counts explicitly opted transformations (returnpair counted twice; +switchguardbound, +switchsharedcase, +switchmultipred, +unrolledguard, +branchflip, +outline, +spillargtrial, +securitycheck, +msvcstackguard, +nulterminator, +stackaddrargtrial, +jumptablemax, +globalarrayanchor, +stackviews, +callmechanisms, +relronoreturn)",
     "data:KUNA-CATALOG #9: every settable carries a machine-readable change_kind so an LLM can judge default-on eligibility",
     "data:KUNA-CONDCALL #1: the instruction after a blgt is not a function",

@@ -150,8 +150,8 @@ Three tiers:
 | a re-rolled switch dispatches on a function parameter and the compiler's if/else-if chain would read better | [`switchselector`](#switchselector----on--off-default-off) |
 | a callback or window/dialog procedure's message dispatch reads better as the chain the compiler emitted | [`switchselector`](#switchselector----on--off-default-off) |
 | option loweredswitch off gives the rendering you want, but you want it for one cascade and not for the whole binary | [`switchselector`](#switchselector----on--off-default-off) |
-| decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return | [`relronoreturn`](#relronoreturn----on--off-default-off) |
-| a function restarts once for every no-return callee reached through a .got slot | [`relronoreturn`](#relronoreturn----on--off-default-off) |
+| decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return | [`relronoreturn`](#relronoreturn----on--off-default-on) |
+| a function restarts once for every no-return callee reached through a .got slot | [`relronoreturn`](#relronoreturn----on--off-default-on) |
 | stack locals render as offsets off a char * instead of named locals | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
 | explicit stores of a call's own return address, like *(unsigned long long *)&v66[-8] = 0x140003e16 | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
 | Win32/API call arguments come out as *(unsigned long long *)&v66[0x50] stack blobs instead of values | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
@@ -555,6 +555,9 @@ Three tiers:
 | (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
 | a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
 |  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+| (*SoftwareBreakpoint(0xc471,..))() // jump-as-call after a brk | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
+| a brk trap printed as a call to an unknown function | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
+| Treating indirect jump as call warning on a brk trap | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
 | a __chkstk_darwin() or ___chkstk_darwin() call in an apple function | [`chkstkdarwin`](#chkstkdarwin----on--off-default-on-destructive-opt-in) |
 | a value kept in a caller-saved register across the stack probe prints as an undefined local | [`chkstkdarwin`](#chkstkdarwin----on--off-default-on-destructive-opt-in) |
 | an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense | [`outlinedinline`](#outlinedinline----on--off-default-on) |
@@ -655,11 +658,11 @@ Three tiers:
 | c++ catch/cleanup landing pads missing from a stripped binary's function list | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
 | exception-handler code never discovered as entries | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
 | gcc_except_table call-site targets left unexplored | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
-| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
-| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
-| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
-| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
-| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh----on--catch--off-default-on) |
+| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh----on--catch--off-default-on) |
+| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh----on--catch--off-default-on) |
+| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh----on--catch--off-default-on) |
+| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh----on--catch--off-default-on) |
 | a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc----on--off-default-on) |
 | panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc----on--off-default-on) |
 | rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc----on--off-default-on) |
@@ -1058,8 +1061,8 @@ Three tiers:
 | swift_retain / swift_release / swift_allocObject calls show recovered arguments and untyped returns | [`swiftruntime`](#swiftruntime----on--off-default-on) |
 | swift_getGenericMetadata's result is used as a raw word instead of .metadata | [`swiftruntime`](#swiftruntime----on--off-default-on) |
 | swift runtime calls in a stripped swift binary carry no signature | [`swiftruntime`](#swiftruntime----on--off-default-on) |
-| core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings----on--off-default-off) |
-| a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings----on--off-default-off) |
+| core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings----on--off-default-on) |
+| a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings----on--off-default-on) |
 | a stripped kext shows sub_<addr> for every IOKit method | [`iokitclasses`](#iokitclasses----on--off-default-on) |
 | gMetaClass objects render as dat_<addr> | [`iokitclasses`](#iokitclasses----on--off-default-on) |
 | methods reachable only through a vtable are missing from kuna functions | [`iokitclasses`](#iokitclasses----on--off-default-on) |
@@ -1501,10 +1504,10 @@ Three tiers:
 | a void function ends with a redundant return; the source does not have | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
 | GED counts one extra exit node against an otherwise perfect function | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
 | the last statement of a void function is a bare return | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
-| a data import read through __got renders *dat_<slot> | [`importdata`](#importdata----on--off-default-off) |
-| __stack_chk_guard shows as a dereferenced dat_ address | [`importdata`](#importdata----on--off-default-off) |
-| imported globals are anonymous even though their GOT slot is named | [`importdata`](#importdata----on--off-default-off) |
-| an ELF shared object reads stdout or environ as *dat_<slot> or *stdout_ptr | [`importdata`](#importdata----on--off-default-off) |
+| a data import read through __got renders *dat_<slot> | [`importdata`](#importdata----on--off-default-on) |
+| __stack_chk_guard shows as a dereferenced dat_ address | [`importdata`](#importdata----on--off-default-on) |
+| imported globals are anonymous even though their GOT slot is named | [`importdata`](#importdata----on--off-default-on) |
+| an ELF shared object reads stdout or environ as *dat_<slot> or *stdout_ptr | [`importdata`](#importdata----on--off-default-on) |
 | a libc argument is cast to the very type the parameter declares, memchr(v10,(int)v4,n) | [`castimplied`](#castimplied----on--off-default-on) |
 | a widening cast assigned to a variable already declared that type, v2 = (long)v1; with long v2 | [`castimplied`](#castimplied----on--off-default-on) |
 | return (unsigned long)v1; from a function declared unsigned long | [`castimplied`](#castimplied----on--off-default-on) |
@@ -1988,11 +1991,11 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-loweredswitch-parameter-selector
 - **Example:** `option switchselector on`
 
-### `relronoreturn` -- on | off, default `off`
+### `relronoreturn` -- on | off, default `on`
 
 - **Symptoms:** decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return; a function restarts once for every no-return callee reached through a .got slot.
 - **What it does:** Make a call through a relocated read-only slot direct while the flow is followed, when the function the slot holds never returns. A PIE built without a PLT (rustc's default, gcc/clang `-fno-plt`) calls its own functions as `call *slot(%rip)` through a `.got` word an `R_*_RELATIVE` relocation fills; `ActionDeindirect` folds the RELRO word and binds the call, and when the callee is no-return upstream restarts the whole function so the re-followed flow plants the halt. A Rust panic helper sits behind most bounds and overflow checks, so with the Rust no-return paths in place nearly every such function decompiles twice. On: when the CALLIND reads a word inside a relocated read-only range (`dynreloc_const`) whose value is the entry of a function flagged no-return, the call is made direct and halted during flow, and no restart happens. Only no-return callees are taken, so every other call keeps the upstream path. The output is not byte-identical to the restart path: the restart also hands the second pass every other call the first pass bound and every lesson it recorded, which this skips.
-- **When to flip:** Off by default: the restart it avoids also improves the rendering. MEASURED on a 1.1 MB Rust PIE (bcp, 1343 functions): decompile-all user time 528 s -> 342 s, but 468 functions change and gotos rise 8,318 -> 8,650 (lines 149,240 -> 153,329); clap Validator::validate 49 s -> 24 s. Turn ON for latency-sensitive whole-binary runs over large no-PLT PIEs, especially Rust; leave off for the best structure. Inert on images without relocated read-only slots (every datatest, 0/675) and on calls whose slot holds a function that returns.
+- **When to flip:** On by default: the restart it avoids also improves the rendering. MEASURED on a 1.1 MB Rust PIE (bcp, 1343 functions): decompile-all user time 528 s -> 342 s, but 468 functions change and gotos rise 8,318 -> 8,650 (lines 149,240 -> 153,329); clap Validator::validate 49 s -> 24 s. Turn OFF for the best structure on large no-PLT PIEs, especially Rust; keep it on for latency-sensitive whole-binary runs. Inert on images without relocated read-only slots (every datatest, 0/675) and on calls whose slot holds a function that returns.
 - **Where / provenance:** P2/flow-classification · kuna · opt-in-tool · kuna-relro-noreturn-restart
 - **Example:** `option relronoreturn on`
 
@@ -2932,6 +2935,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-apple-ptrauthtrap
 - **Example:** `option ptrauthtrap off`
 
+### `callothernoreturn` -- on | off, default `on` (destructive opt-in)
+
+- **Symptoms:** (*SoftwareBreakpoint(0xc471,..))() // jump-as-call after a brk; a brk trap printed as a call to an unknown function; Treating indirect jump as call warning on a brk trap.
+- **What it does:** End the flow at an indirect jump whose target a CALLOTHER forms. An AArch64 brk lifts to `pc = SoftwareBreakpoint(imm, next); goto [pc];`: its trap is an indirect jump the flow cannot resolve. Without this option the jump falls back to an ordinary call (`(*SoftwareBreakpoint(0xc471,..))(...) // jump-as-call`), with no no-return mark on the callee. On: the jump is a fail_callother (the C++ FlowInfo::truncateIndirectJump mode the flow never reached), so the call becomes a no-return call with its artificial halt, and the flow ends at the trap. Off restores the plain call fallback.
+- **When to flip:** On by default: a brk trap ends its path as a no-return call. Off keeps the jump-as-call form to audit where a trap sits.
+- **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-brk-noreturn
+- **Example:** `option callothernoreturn off`
+
 ### `chkstkdarwin` -- on | off, default `on` (destructive opt-in)
 
 - **Symptoms:** a __chkstk_darwin() or ___chkstk_darwin() call in an apple function; a value kept in a caller-saved register across the stack probe prints as an undefined local.
@@ -3160,11 +3171,11 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/code-data-partition · kuna · analysis-enablement · kuna-analysis-ehframe-lsda
 - **Example:** `--option eh_frame_full on`
 
-### `itaniumeh` -- on | catch | off, default `off`
+### `itaniumeh` -- on | catch | off, default `on`
 
 - **Symptoms:** catch block missing from a c++ function; destructor calls on the exception path are missing; __cxa_begin_catch never appears in the pseudocode; _Unwind_Resume never appears although the binary calls it; a c++ function with try/catch shows only the normal return.
 - **What it does:** Show Itanium C++ catch and cleanup code as try/catch. Each landing pad gets one exceptional edge, from the first call that unwinds to it; the printer renders the edge as `try { <calls and normal path> } catch (T &) { <pad> }` (`catch (...)` when the pad has several clauses, which stay as `eh_selector() == N` tests listed in the pad comment), and later calls unwinding to the same pad print inside the same try. `catch` gives edges only to pads with a catch clause (cleanup pads stay hidden): +0.5% instructions on a 252 KB g++ binary, so the aggressive preset uses it; `on` costs +25%. The edge is `if (eh_unwinding()) goto pad;` right after the call. At the landing pad the exception pointer register is defined by `eh_exception()` and, when the pad has a catch clause, the selector register by `eh_selector()`, so `__cxa_begin_catch(eh_exception())` and the `eh_selector() == N` tests read as written. A comment at each pad lists its clauses by selector value (`catch (std::runtime_error) when selector == 1; catch (...) when selector == 2`, or `cleanup`), with catch types named from their typeinfo symbols. Without it the pads are unreachable and catch bodies, destructor calls and `_Unwind_Resume` vanish from the pseudocode. ELF only (x86, x86-64, AArch64, ARM).
-- **When to flip:** Off (default) shows only the normal path, as upstream Ghidra and IDA do for Itanium code. Turn it on to see what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows.
+- **When to flip:** On (default) shows what a C++ (or Rust) function does when a call throws: its catch clauses, cleanups and rethrows. Off shows only the normal path, as upstream Ghidra and IDA do for Itanium code.
 - **Where / provenance:** P2/flow-classification · kuna · new-analysis · ida95-44
 - **Example:** `--option itaniumeh on`
 
@@ -4032,11 +4043,11 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftruntime
 - **Example:** `option swiftruntime off`
 
-### `cfstrings` -- on | off, default `off`
+### `cfstrings` -- on | off, default `on`
 
 - **Symptoms:** core-foundation / objc string constants render as dat_<addr> instead of their text; a CFSTR(...) argument shows an address in a mach-o.
-- **What it does:** Run the Mach-O Core Foundation constant-string recovery pass: when the binary is a Mach-O, read each __cfstring entry (the four-word CFString struct isa/flags/data-pointer/length), resolve its data pointer through the LC_DYLD_CHAINED_FIXUPS overlay on an arm64(e) image (a raw word on a classic LC_DYLD_INFO image), read the string (8-bit when the flags unicode bit 0x10 is clear, UTF-16 decoded to UTF-8 when set), and render a reference to the entry as the string literal. The commit seam types each entry a char[N] typelocked symbol and pre-seeds the StringManager at the entry address with the resolved bytes, so a CFSTR argument renders the literal instead of dat_<addr> -- the same route that renders a __cstring literal, carried across the CFString struct indirection the printer cannot follow on its own. The entry structs are marked read-only (a CFString constant is immutable), which the constant-string route requires on the historical writable __DATA,__cfstring layout (__DATA_CONST is already read-only). Registered ONLY for a Mach-O binary, so it is a structural no-op on every non-Mach-O target. DISABLED by default (output-changing: renders data as literals + adds char[N] symbols; real-binary-path only, so every parity gate is byte-identical).
-- **When to flip:** Off (default; a __cfstring reference renders dat_<addr> and there is zero behavior change). Flip on for a Mach-O (Core Foundation / Objective-C / Swift) binary to render its CFString constants -- a call that passed dat_<addr> renders its text such as "Setup New Coffee Kiosk".
+- **What it does:** Run the Mach-O Core Foundation constant-string recovery pass: when the binary is a Mach-O, read each __cfstring entry (the four-word CFString struct isa/flags/data-pointer/length), resolve its data pointer through the LC_DYLD_CHAINED_FIXUPS overlay on an arm64(e) image (a raw word on a classic LC_DYLD_INFO image), read the string (8-bit when the flags unicode bit 0x10 is clear, UTF-16 decoded to UTF-8 when set), and render a reference to the entry as the string literal. The commit seam types each entry a char[N] typelocked symbol and pre-seeds the StringManager at the entry address with the resolved bytes, so a CFSTR argument renders the literal instead of dat_<addr> -- the same route that renders a __cstring literal, carried across the CFString struct indirection the printer cannot follow on its own. The entry structs are marked read-only (a CFString constant is immutable), which the constant-string route requires on the historical writable __DATA,__cfstring layout (__DATA_CONST is already read-only). Registered ONLY for a Mach-O binary, so it is a structural no-op on every non-Mach-O target. ENABLED by default (output-changing: renders data as literals + adds char[N] symbols; real-binary-path only, so every parity gate is byte-identical).
+- **When to flip:** On (default). Off leaves a __cfstring reference as dat_<addr>, with zero behavior change. Keep on for a Mach-O (Core Foundation / Objective-C / Swift) binary to render its CFString constants -- a call that passed dat_<addr> renders its text such as "Setup New Coffee Kiosk".
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-cfstrings
 - **Example:** `option cfstrings on`
 
@@ -4908,11 +4919,11 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **Where / provenance:** P9/brace-form · kuna · presentation-default · kuna-voidtailreturn
 - **Example:** `option voidtailreturn on`
 
-### `importdata` -- on | off, default `off`
+### `importdata` -- on | off, default `on`
 
 - **Symptoms:** a data import read through __got renders *dat_<slot>; __stack_chk_guard shows as a dereferenced dat_ address; imported globals are anonymous even though their GOT slot is named; an ELF shared object reads stdout or environ as *dat_<slot> or *stdout_ptr.
 - **What it does:** Render a data read through a loader-marked import slot as the import itself. A data import (Mach-O __got / __auth_got, a dyld-cache coalesced GOT slot, a PE IAT entry) is reached through a slot the dynamic loader fills with the import's address: `ldr x8,[slot]; ldr w8,[x8]`. The slot is already named for the import and painted `externref` (peimportcall), which is what lets ActionDeindirect resolve a CALL through it to the import; a DATA read is not a call, so it printed as a dereference of the anonymous slot, `*dat_<slot>`. On: a LOAD whose pointer is such a slot renders as the import (`imported_counter`, `__stack_chk_guard`), resolved exactly as ActionDeindirect resolves a call through the same slot (query_function on the externref persist address). Calls are unaffected (deindirect consumes them first), and a read through anything that is not an externref import slot is untouched. Needs the slot painted externref: on PE/Mach-O that is peimportcall, and on ELF the elfgotimports pass, committed under this same gate, which names each GLOB_DAT GOT slot of an undefined symbol (x86-64, AArch64, i386, ARM) for its import and paints it externref. On ELF that painting also lets ActionDeindirect bind a call through such a slot (`(*dat_e9f30)()` becomes `__cxa_finalize()`), the binding peimportcall gives PE and Mach-O. A GLOB_DAT slot of a symbol the image defines is never painted: dynrelocs already folds it to the object (`exported_value`, `&exported_value`).
-- **When to flip:** Off (default; a data read through an import slot renders *dat_<slot>). Flip on to name data imports read through a GOT/IAT slot -- the stack-protector guard, XPC type objects, global counters -- e.g. `if (*dat_1041cc6c8 == ...)` becomes `if (__stack_chk_guard == ...)`, and on an ELF shared object `return *dat_3fe8;` becomes `return imported_counter;` and `*stdout_ptr` becomes `stdout`.
+- **When to flip:** On (default). Off renders a data read through an import slot as *dat_<slot>. Name data imports read through a GOT/IAT slot -- the stack-protector guard, XPC type objects, global counters -- e.g. `if (*dat_1041cc6c8 == ...)` becomes `if (__stack_chk_guard == ...)`, and on an ELF shared object `return *dat_3fe8;` becomes `return imported_counter;` and `*stdout_ptr` becomes `stdout`.
 - **Where / provenance:** P9/naming-policy · kuna · presentation-default · kuna-importdata
 - **Example:** `option importdata on`
 
