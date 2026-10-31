@@ -41,11 +41,15 @@ use crate::pass::{AnalysisCtx, AnalysisOutput, AnalysisPass, CFStringFact, Phase
 const SEC_CFSTRING: &str = "__cfstring";
 
 /// CFString `flags` bit that marks UTF-16 (2-byte) char storage; clear is 8-bit.
-const CFSTRING_UNICODE: u64 = 0x10;
+const CFSTRING_UNICODE: u32 = 0x10;
 
 /// Upper bound on one constant string's byte length, so a corrupt `length` field
 /// cannot drive an unbounded read/allocation.
 const MAX_CFSTRING_BYTES: u64 = 1 << 16;
+
+/// Upper bound on the bytes read for all entries together, so many entries
+/// sharing one long string cannot multiply it.
+const MAX_CFSTRING_TOTAL_BYTES: u64 = 1 << 26;
 
 /// The `__cfstring` constant-string recovery pass.
 pub struct CFStringPass;
@@ -70,13 +74,13 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
     if file.format() != object::BinaryFormat::MachO {
         return out;
     }
+    let Some(sec) = file.section_by_name(SEC_CFSTRING) else {
+        return out;
+    };
     // The chained-fixup overlay resolves each entry's `data` pointer on an
     // arm64(e) image; empty (raw reads) on a classic LC_DYLD_INFO image.
     let fixups = resolve_chained_fixups(file, bytes);
     let img = MachoImage::with_fixups(file, fixups);
-    let Some(sec) = file.section_by_name(SEC_CFSTRING) else {
-        return out;
-    };
     let base = sec.address();
     // A header can declare a size far past the file; no entry lies outside it.
     let size = sec.size().min(bytes.len() as u64);
@@ -88,14 +92,16 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
     }
 
     let mut off: u64 = 0;
+    let mut total: u64 = 0;
     while off.saturating_add(stride) <= size {
         let entry = base.wrapping_add(off);
         off += stride;
-        // `flags` and `length` are scalars (never a fixup), so `read_ptr`'s overlay
-        // misses and returns the raw word; `data` is a rebase/auth-rebase the
-        // overlay resolves on a chained image and a raw pointer on a classic one.
+        // `flags` is the 32-bit info word at the start of the second slot and
+        // `length` a scalar (never a fixup), so `read_ptr`'s overlay misses and
+        // returns the raw word; `data` is a rebase/auth-rebase the overlay
+        // resolves on a chained image and a raw pointer on a classic one.
         let (Some(flags), Some(data), Some(length)) = (
-            img.read_ptr(entry.wrapping_add(ps)),
+            img.read_u32(entry.wrapping_add(ps)),
             img.read_ptr(entry.wrapping_add(ps.wrapping_mul(2))),
             img.read_ptr(entry.wrapping_add(ps.wrapping_mul(3))),
         ) else {
@@ -110,6 +116,10 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
         };
         if byte_len == 0 || byte_len > MAX_CFSTRING_BYTES {
             continue;
+        }
+        total += byte_len;
+        if total > MAX_CFSTRING_TOTAL_BYTES {
+            break;
         }
         let Some(raw) = img.read(data, byte_len as usize) else {
             continue;
@@ -127,6 +137,11 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
                 Err(_) => continue,
             }
         };
+        // The printer ends a literal at its first NUL, so one holding a NUL
+        // would render cut short.
+        if text.contains(&0) {
+            continue;
+        }
         out.cfstrings.push(CFStringFact { addr: entry, bytes: text, size: stride as u32 });
         // A CFString constant is immutable; marking the struct read-only lets the
         // printer's constant-string route fire even on the historical writable
@@ -197,6 +212,14 @@ mod tests {
         let started = std::time::Instant::now();
         let _ = texts(&bytes);
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// The chained-fixup image: each `data` pointer is a chained rebase, the
+    /// UTF-16 entry decodes, and the entry holding a NUL is skipped.
+    #[test]
+    fn reads_a_chained_image_with_a_utf16_entry() {
+        let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_cfstring_chained_arm64")).unwrap();
+        assert_eq!(texts(&bytes), ["chained hello", "café \u{2192} ok"]);
     }
 
     #[test]

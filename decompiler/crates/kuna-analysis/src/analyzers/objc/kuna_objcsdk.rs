@@ -9,8 +9,8 @@
 //! with kuna, so this reads them at load from a directory the user names
 //! (`--option objcsdk <SDK root or header dir>`, `KUNA_OBJCSDK`): an SDK root
 //! contributes the `Headers/` of every framework the image links
-//! (`LC_LOAD_DYLIB`), any other directory every `.h` under it. Nothing derived
-//! from the headers is written anywhere.
+//! (`LC_LOAD_DYLIB`), any other directory every `.h` up to eight directories
+//! below it. Nothing derived from the headers is written anywhere.
 //!
 //! The grammar read is the declaration subset: `@interface` / `@protocol`
 //! (categories included) bodies, `- (ret)sel:(T)a …;` methods and `@property
@@ -22,7 +22,8 @@
 //! this reader cannot encode (an unknown struct, a function pointer) makes the
 //! selector unusable rather than guessed, and one selector declared with two
 //! different shapes across classes is dropped; a class-pointer argument keeps
-//! its class (`@"UIView"`) but classes do not count as a disagreement.
+//! its class (`@"UIView"`) but classes do not count as a disagreement: two
+//! declarations naming different classes keep the selector with neither.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -339,7 +340,8 @@ fn scan_declarations(text: &str, types: &Types, out: &mut HashMap<String, Option
     }
 }
 
-/// Agreement is judged with class names erased; the first full spelling is kept.
+/// Agreement is judged with class names erased; the first full spelling is
+/// kept until a declaration names different classes, which erases them.
 fn record(out: &mut HashMap<String, Option<String>>, sel: String, enc: Option<String>) {
     let Some(enc) = enc else {
         out.insert(sel, None);
@@ -349,7 +351,11 @@ fn record(out: &mut HashMap<String, Option<String>>, sel: String, enc: Option<St
         None => {
             out.insert(sel, Some(enc));
         }
-        Some(Some(have)) if erase_classes(have) == erase_classes(&enc) => {}
+        Some(Some(have)) if *have == enc => {}
+        Some(Some(have)) if erase_classes(have) == erase_classes(&enc) => {
+            let erased = erase_classes(have);
+            out.insert(sel, Some(erased));
+        }
         Some(_) => {
             out.insert(sel, None);
         }
@@ -683,7 +689,10 @@ mod tests {
         let mut out = HashMap::new();
         record(&mut out, "setView:".into(), Some("v@:@\"UIView\"".into()));
         record(&mut out, "setView:".into(), Some("v@:@\"NSView\"".into()));
-        assert_eq!(out["setView:"].as_deref(), Some("v@:@\"UIView\""));
+        assert_eq!(out["setView:"].as_deref(), Some("v@:@"), "two classes named: neither is kept");
+        record(&mut out, "setFrame:".into(), Some("v@:@\"UIView\"".into()));
+        record(&mut out, "setFrame:".into(), Some("v@:@\"UIView\"".into()));
+        assert_eq!(out["setFrame:"].as_deref(), Some("v@:@\"UIView\""));
         record(&mut out, "setView:".into(), Some("v@:q".into()));
         assert_eq!(out["setView:"], None);
     }

@@ -255,7 +255,8 @@ impl<'a> TypeCtx<'a> {
     /// `Class`, `objc_selector*` for `SEL`, `Foo*` for `@"Foo"`, a Swift class
     /// under its shown name): the struct of that name when one exists, else a declared record so a pointer built
     /// before the class's layout lands (`kuna_objcivars`) reads the completion
-    /// afterwards; a plain `void*` if the record cannot be created.
+    /// afterwards; a plain `void*` if the record cannot be created (the name
+    /// already belongs to a type that is not a struct).
     pub(super) fn opaque_ptr(&self, struct_name: &str) -> Option<Rc<Datatype>> {
         if let Some(t) = self.opaque.borrow().get(struct_name) {
             return Some(Rc::clone(t));
@@ -604,6 +605,16 @@ mod tests {
         assert_eq!(t.get_ptr_to().unwrap().get_name(), "NSString");
         let t = decode_ivar_type("@\"<Greeter>\"", &tctx).unwrap();
         assert_eq!(t.get_ptr_to().unwrap().get_name(), "objc_object");
+    }
+
+    /// A class name another kind of type already holds is not that class:
+    /// `@"Foo"` beside an enum `Foo` is a `void *`, never a pointer to the enum.
+    #[test]
+    fn a_same_named_non_struct_is_not_the_class() {
+        let f = factory();
+        f.get_type_enum("Foo").unwrap();
+        let t = decode_ivar_type("@\"Foo\"", &TypeCtx::new(&f, 8, 1)).unwrap();
+        assert_eq!(t.get_ptr_to().unwrap().get_metatype(), type_metatype::TYPE_VOID);
     }
 
     /// A block (`@?`) is one pointer, and pointer nesting is bounded.

@@ -28,8 +28,8 @@ fn github_anchor_matches_rendered_heading_text() {
             "returnpair----pair--single-default-pair-destructive-opt-in",
         ),
         (
-            "`fooopt` -- off | 0 | 1 | <n>, default `2`",
-            "fooopt----off--0--1---default-2",
+            "`fooopt` -- off | 0 | 1 | `<n>`, default `2`",
+            "fooopt----off--0--1--n-default-2",
         ),
     ];
     for (heading, anchor) in cases {

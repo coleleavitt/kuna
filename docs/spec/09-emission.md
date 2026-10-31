@@ -2171,15 +2171,16 @@ the dynamic loader fills with the import's address (`ldr x8,[slot]; ldr w8,[x8]`
 The loader already names that slot for the import and paints it `externref`, which
 is how `ActionDeindirect` turns a *call* through it into a direct call to the
 import. A *data* read is not a call, so it printed as a dereference of the
-anonymous slot, `*dat_<slot>`. With the option on, `PrintC::op_load`
+anonymous slot, `*dat_<slot>`. With the option on, `PrintC::op_load_ir`
 (`decompiler/crates/kuna-decomp/src/p9_emit/printc.rs (import_slot_name)`) renders
 a LOAD whose pointer is such a slot as the import itself — `*slot` where the slot
 holds `&imported_counter` is `imported_counter` — resolving it exactly as
 `ActionDeindirect` resolves a call through the same slot (`query_function` on the
 externref persist address, after a plain COPY chain). Calls never reach this path,
 since deindirection consumes them first, and a read through anything that is not an
-externref import slot keeps `*dat_<addr>`. It depends on the slot being painted:
-PE and Mach-O slots by `peimportcall`, ELF `GLOB_DAT` GOT slots by `elfgotimports`
+externref import slot prints as it did without the option. It depends on the slot
+being painted: PE Import-Directory slots and the typed Mach-O lazy/non-lazy
+symbol-pointer slots by `peimportcall`, ELF `GLOB_DAT` GOT slots by `elfgotimports`
 (chapter [01](01-program-prep.md)), which is committed under this same gate, so it
 is a no-op when neither paints. A pointer that reaches the LOAD through a phi rather
 than a COPY chain is left as the dereference.

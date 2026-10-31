@@ -6,8 +6,10 @@
 //! three `__builtin_CFString` constants in `__DATA_CONST,__cfstring` (8-bit,
 //! `flags` 0x7c8) and a getter returning each one's address. The second string is
 //! longer than a 32-byte entry; the third entry sits right behind it. The char
-//! pointers are classic `LC_DYLD_INFO` pointers into `__TEXT,__cstring`. The build
-//! recipe + the pinned VMAs are in `tests/fixtures/README.md`.
+//! pointers are classic `LC_DYLD_INFO` pointers into `__TEXT,__cstring`.
+//! `macho_cfstring_chained_arm64` covers chained rebases, a UTF-16 entry, a
+//! CFString call argument and an entry holding a NUL. The build recipes + the
+//! pinned VMAs are in `tests/fixtures/README.md`.
 //!
 //! ## The two-state proof (the `verify_objc` posture)
 //!
@@ -65,12 +67,12 @@ fn name_at(prog: &ConsoleProgram, vma: u64) -> String {
     }
 }
 
-/// Bootstrap the fixture, (optionally) enable `cfstrings`, commit, then decompile
-/// `_get_greeting` and return its rendered C.
-fn run(mode: Mode, vma: u64) -> String {
+/// Bootstrap `fixture`, (optionally) enable `cfstrings`, commit, then decompile
+/// the function at `vma` and return its rendered C.
+fn run(fixture: &str, mode: Mode, vma: u64) -> String {
     let root = repo_root();
     let spec_roots = vec![root.join("specs").to_str().unwrap().to_string()];
-    let bin = fixtures().join("macho_cfstring");
+    let bin = fixtures().join(fixture);
     assert!(bin.exists(), "missing fixture {bin:?}");
 
     let mut prog = bootstrap_from_object(bin.to_str().unwrap(), "", &spec_roots)
@@ -90,7 +92,7 @@ fn run(mode: Mode, vma: u64) -> String {
     let fd = {
         let arch = prog.arch_mut();
         build_and_follow_flow(arch, &name, addr, kuna_console::engine::UNBOUNDED_SIZE)
-            .expect("the _get_greeting funcdata builds")
+            .expect("the funcdata builds")
     };
 
     let cmds: Vec<String> = ["decompile".into(), "print C".into()].to_vec();
@@ -115,8 +117,8 @@ fn run(mode: Mode, vma: u64) -> String {
 #[test]
 fn cfstring_renders_as_literal_only_when_on() {
     for (vma, entry, text) in ENTRIES {
-        let off = run(Mode::Off, vma);
-        let on = run(Mode::On, vma);
+        let off = run("macho_cfstring", Mode::Off, vma);
+        let on = run("macho_cfstring", Mode::On, vma);
         assert!(
             off.contains(&format!("return {entry};")),
             "cfstrings off must render the bare __cfstring entry address {entry}:\n{off}"
@@ -128,4 +130,20 @@ fn cfstring_renders_as_literal_only_when_on() {
         );
         assert!(on.contains("char *"), "cfstrings on types the constant a char pointer:\n{on}");
     }
+}
+
+/// `macho_cfstring_chained_arm64`: the `data` pointers are chained rebases, one
+/// entry is UTF-16, one CFString is a call argument, and the entry holding a
+/// NUL keeps its address rather than a literal the printer would cut short.
+#[test]
+fn chained_utf16_and_call_argument_cfstrings() {
+    const FIXTURE: &str = "macho_cfstring_chained_arm64";
+    let on = |vma| run(FIXTURE, Mode::On, vma);
+    assert!(on(0x100000508).contains("return \"chained hello\";"));
+    assert!(on(0x100000514).contains("return \"café \u{2192} ok\";"));
+    let nul = on(0x100000520);
+    assert!(nul.contains("return 0x100004048;") && !nul.contains("before"), "{nul}");
+    let call = on(0x10000052c);
+    assert!(call.contains("consume(\"chained hello\")"), "{call}");
+    assert!(run(FIXTURE, Mode::Off, 0x10000052c).contains("consume(0x100004008)"));
 }
