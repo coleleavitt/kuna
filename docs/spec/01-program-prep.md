@@ -4897,14 +4897,24 @@ every other binary's pass list is byte-identical to before the pass existed):
   allocates: its `kt_signature` (+0x20) spells the type one character per
   8-byte granule (`1` a pointer, `8` a signed pointer, `2` data, `4` either,
   `0` padding; a data-only type has an empty signature) and `kt_size` (+0x2c)
-  is `sizeof` the type. The pass builds a struct `<T>` of that size from it
-  (`tables.rs (allocated_struct)`): a `void *` field per pointer granule, an
+  is `sizeof` the type. A variable-size view describes a header followed by
+  elements: `kt_size_hdr` (+0x2) and `kt_sig_hdr` (+0x38) the header,
+  `kt_size_type` (+0x4) and `kt_sig_type` (+0x40) one element. Its allocation
+  is the header struct `<T>` when there is a header, else the element (an
+  array of `void *` when the site names a pointer type, `site.T *`). The
+  struct `<T>` of that size is laid out from the signature
+  (`decompiler/crates/kuna-decomp/src/p5_types/kuna_kalloctype.rs (view_struct)`): a `void *` field per pointer granule, an
   `undefined8` per data granule, a trailing `undefined1[n]` where the size is
   not a multiple of eight, each named `field_0x<off>` except the first pointer
   of a class `iokitclasses` recovered, which is its `vtable`; a name another
   size already holds becomes `<T>_<size>` (template instances, `ExpansionData`),
-  and a same-size struct of the name is reused. The view-to-struct map is
-  handed to the engine (`Architecture::kuna_kalloc_types`), where
+  and a same-size struct of the name is reused. The names are decided by the
+  pass, in section order, so every surface agrees on them; the struct itself
+  is interned the first time a decompiled call needs it, so the project `.h`
+  declares only the view structs some exported function allocates (two
+  kernel functions exported: 534 structs and 575 KB of `.h` before, 2 and
+  2.4 KB after). The view-to-layout map is handed to the engine
+  (`Architecture::kuna_kalloc_types`), where
   `TypeOpCall::getOutputLocal`
   (`decompiler/crates/kuna-decomp/src/p5_types/kuna_kalloctype.rs (allocated_type)`)
   answers for a call to one of the allocators whose view argument folds to a
@@ -4924,10 +4934,13 @@ every other binary's pass list is byte-identical to before the pass existed):
   vtable holds a method that computes the table's address (`a64::constants`),
   else the class of the table's named handlers. A `__got` / `__auth_got` /
   `__auth_ptr` slot the indirect-symbol table does not name, whose rebased
-  pointer reaches a named function or object of this image, is named
-  `<target>_ptr`. On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
+  pointer reaches a function or object of this image named by a symbol or by
+  `iokitclasses`, is named `<target>_ptr` (123 slots when the whole iOS 16.4.1
+  collection is loaded as one image; none on the stripped iOS 12.4 and 14.8
+  caches, whose slots point at functions nothing names). On the iOS 16.4.1 collection there are 6,953 `kalloc_type`
   views (4,140 distinct structs; the kernel's 1,088 views build 533), 1,687 var
-  views and 56 dispatch tables (901 records); in IOSurface,
+  views (in IOSurface, 5 allocations newly typed from them, such as
+  `IOSurfacePlaneInfo *`) and 56 dispatch tables (901 records); in IOSurface,
   `OSObject_typed_operator_new(0xfffffff007cffc68,0x38)` becomes
   `OSObject_typed_operator_new(IOSurfaceSharedEventListener_ktv,0x38)` and its
   result an `IOSurfaceSharedEventListener *`; 48 of the kext's 1,806 functions

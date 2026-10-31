@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3895,
-    3895
+    3900,
+    3900
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2206,6 +2206,11 @@
     "data:X87DEPTH #3: on, keep still returns the product",
     "data:X87DEPTHWARN #1: on, the call to h is flagged",
     "data:X87DEPTHWARN #2: on, f is flagged",
+    "data:XNUTABLES #10: off leaves a variable-size allocation an untyped word",
+    "data:XNUTABLES #11: on names the var view and types its allocation by the header",
+    "data:XNUTABLES #12: on types the variable-size allocation from the header signature",
+    "data:XNUTABLES #13: off leaves an unindexed __got slot a bare address",
+    "data:XNUTABLES #14: on names the __got slot after the function it holds",
     "data:XNUTABLES #1: off leaves the kalloc_type view a bare address",
     "data:XNUTABLES #2: off leaves the dispatched handler unnamed",
     "data:XNUTABLES #3: on names the view after its type",

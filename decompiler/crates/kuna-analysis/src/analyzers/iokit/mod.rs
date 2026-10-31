@@ -399,6 +399,18 @@ impl Recovered {
         metas.windows(2).map(|w| w[1] - w[0]).filter(|&d| d > 0).min().map_or(8, |d| d.min(0x100) as u32)
     }
 
+    /// Every name this image's symbols or the recovery give an address.
+    pub(super) fn known_names(&self) -> HashMap<u64, String> {
+        let mut out = self.names.clone();
+        for (addr, name) in self.function_names() {
+            out.entry(addr).or_insert(name);
+        }
+        for c in &self.classes {
+            out.entry(c.meta).or_insert_with(|| format!("{}::gMetaClass", c.name));
+        }
+        out
+    }
+
     fn emit(&self, out: &mut AnalysisOutput) {
         let meta_size = self.meta_size();
         let mut data = |addr: u64, name: String, size: u32| {

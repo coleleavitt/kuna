@@ -535,10 +535,10 @@ pub struct AnalysisOutput {
     /// address, every selector string's address — for the engine to type and
     /// resolve message sends by receiver. Produced only by the `objc` pass.
     pub objc_classes: Option<kuna_decomp::kuna_objcrettype::ObjcClassTable>,
-    /// (kuna `xnutables`) `(view address, allocated struct)` for every
-    /// `kalloc_type_view` whose signature built a struct; the engine types a
-    /// typed allocator's result by the view it is passed.
-    pub kalloc_types: Vec<(u64, std::rc::Rc<kuna_decomp::dtype::Datatype>)>,
+    /// (kuna `xnutables`) `(view address, what it allocates)` for every
+    /// `kalloc_type_view` / `kalloc_type_var_view`; the engine types a typed
+    /// allocator's result by the view it is passed.
+    pub kalloc_types: Vec<(u64, kuna_decomp::kuna_kalloctype::KallocView)>,
     /// (kuna) Address ranges holding an **external reference** — an import slot
     /// whose contents the dynamic loader fills in with the address of a function
     /// living in another image (a PE IAT entry or a typed Mach-O lazy/non-lazy

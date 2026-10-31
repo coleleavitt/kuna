@@ -109,16 +109,20 @@ fn names_kalloc_views_and_dispatch_tables() {
     types.setup_sizes(Some(8), 8, 4);
     types.cache_core_types().unwrap();
     let mut out = AnalysisOutput::default();
-    tables::kalloc_views(&file, &img, &rec, &types, &mut out);
+    tables::kalloc_views(&file, &img, &rec, &mut out);
     tables::dispatch_tables(&file, &img, &rec, &types, &mut out);
     let data: Vec<(u64, &str, u32)> = out.data_objects.iter().map(|d| (d.addr, d.name.as_str(), d.size)).collect();
-    assert_eq!(data, [(B + 0x5200, "kalloc_type_view_Derived", 0x40)]);
+    assert_eq!(data, [(B + 0x5200, "kalloc_type_view_Derived", 0x40), (B + 0x52a0, "kalloc_type_var_view_Packet", 0x50)]);
     let names: Vec<&str> = out.fid_names.iter().map(|f| f.name.as_str()).collect();
     assert_eq!(names, ["Derived::externalMethod_0", "Derived::externalMethod_1", "Derived::externalMethod_2", "Derived::externalMethod_3"]);
 
-    let (view, derived) = &out.kalloc_types[0];
+    let (view, recipe) = &out.kalloc_types[0];
     assert_eq!(*view, B + 0x5200);
+    assert!(kuna_decomp::dtype::TypeFactory::find_by_name(&types, "Derived").unwrap().is_none(), "no struct is interned before a call needs it");
+    let derived = kuna_decomp::kuna_kalloctype::view_struct(&types, recipe).unwrap();
     assert_eq!((derived.get_name(), derived.get_size()), ("Derived", 0x30));
+    let (view, packet) = &out.kalloc_types[1];
+    assert_eq!((*view, packet.name.as_str(), packet.size, packet.signature.as_str(), packet.pointers), (B + 0x52a0, "Packet", 0x10, "12", false));
     use kuna_decomp::dtype::type_metatype::{TYPE_PTR, TYPE_UNKNOWN};
     let fields: Vec<(String, i32, kuna_decomp::dtype::type_metatype)> = (0..6)
         .map(|i| derived.get_field(i).unwrap())
@@ -165,4 +169,39 @@ fn reads_driverkit_class_records() {
             new: b + 0x1000,
         }]
     );
+}
+
+/// `__got` slot names and kalloc views on a real kernelcache (manual run:
+/// `KUNA_KC=<kernelcache> KUNA_KC_ENTRY=<id> cargo test ... -- --ignored --nocapture`).
+#[test]
+#[ignore]
+fn real_kernelcache_tables() {
+    let path = std::env::var("KUNA_KC").unwrap();
+    let entry = std::env::var("KUNA_KC_ENTRY").unwrap_or_else(|_| "auto".into());
+    let choice = kuna_decomp::kuna_kernelcache::KernelcacheChoice::parse(&entry).unwrap();
+    let bytes = crate::loader::kuna_kernelcache::peel(std::fs::read(path).unwrap(), &choice).unwrap().bytes;
+    let file = object::File::parse(&*bytes).unwrap();
+    let img = MachoImage::with_fixups(&file, resolve_chained_fixups(&file, &bytes));
+    let rec = recover(&file, &img);
+    let mut out = AnalysisOutput::default();
+    tables::pointer_slots(&file, &bytes, &img, &rec, &mut out);
+    let got: usize = object::read::Object::sections(&file)
+        .filter(|s| matches!(object::read::ObjectSection::name(s), Ok("__got" | "__auth_got" | "__auth_ptr")))
+        .map(|s| object::read::ObjectSection::size(&s) as usize / 8)
+        .sum();
+    let known = rec.known_names();
+    let mut sample = Vec::new();
+    for s in object::read::Object::sections(&file).filter(|s| matches!(object::read::ObjectSection::name(s), Ok("__got" | "__auth_got" | "__auth_ptr"))) {
+        let a = object::read::ObjectSection::address(&s);
+        for k in 0..object::read::ObjectSection::size(&s) / 8 {
+            if sample.len() < 6 {
+                let t = img.read_ptr(a + 8 * k);
+                sample.push(format!("{:#x}->{:x?} known {} ", a + 8 * k, t, t.is_some_and(|t| known.contains_key(&t))));
+            }
+        }
+    }
+    eprintln!("sample {sample:?}; known {} names; imports named {}", known.len(),
+        crate::loader::macho_stubs::resolve_macho_import_slots(&file, &bytes).len());
+    eprintln!("{entry}: {} of {got} pointer slots named, e.g. {:?}", out.data_objects.len(),
+        out.data_objects.iter().take(4).map(|d| d.name.clone()).collect::<Vec<_>>());
 }
