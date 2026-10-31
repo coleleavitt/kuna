@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3714,
-    3714
+    3722,
+    3722
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3617,6 +3617,14 @@
     "data:unwindstarts on: the recovered body keeps its 320-byte buffer",
     "data:unwindstarts on: the second unwind-only start joins the inventory (default pass: absent)",
     "data:unwindstarts on: the third unwind-only start joins the inventory (default pass: absent)",
+    "data:vaarg off: the double offset test prints in pop_dbl",
+    "data:vaarg off: the double offset test prints in pop_dbl @dup2",
+    "data:vaarg off: the register save area offset test prints in both pop_long and pop_int",
+    "data:vaarg off: the register save area offset test prints in both pop_long and pop_int @dup2",
+    "data:vaarg on: no raw register save area read remains",
+    "data:vaarg on: no raw register save area read remains @dup2",
+    "data:vaarg on: one va_arg read per function",
+    "data:vaarg on: one va_arg read per function @dup2",
     "data:value-first interning preserves pointer contract",
     "data:value-first interning preserves value contract",
     "data:varargstackargs #1: option off drops the stack-passed variadic argument (bug reproduced)",

@@ -8220,5 +8220,31 @@ and the `al` test, and an unlocked prototype is marked variadic. Lua 5.4
 x86-64 (DWARF): 6 functions, 489 lines to 230; ld.so: 8 functions (2 callers
 of `_dl_debug_printf` now return `void`, as the source does); stripped Lua:
 4 functions whose 14-parameter signatures become `(a0, a1, ...)`, e.g.
-`void sub_1019210(struct_33 *a0,unsigned long a1,...)`. The reading side
-(`va_arg`'s `gp_offset < 48` diamond) is not recovered.
+`void sub_1019210(struct_33 *a0,unsigned long a1,...)`. 
+**va_arg** (`vaarg`, default on; kuna;
+`decompiler/crates/kuna-decomp/src/p4_calls/kuna_vaarg.rs (ActionVaArg)`, run
+in the returnsplit group after `vastart`): the reading side of the same ABI. A
+`va_arg(ap, T)` on a `va_list` that the function reaches through a pointer
+compiles to a diamond. The block loads `gp_offset` at `ap+0` (or `fp_offset` at
+`ap+4` for a double) and branches on it against 48 (or 176). The register arm
+loads the value at `reg_save_area + offset` (`ap+16`) and stores the offset
+plus 8 (or 16). The overflow arm loads `overflow_arg_area` at `ap+8`, stores it
+plus the slot size, and reads the value through that pointer. The action
+matches that shape on the memory form: every access is a LOAD or STORE at a
+constant offset from one pointer, the branch sends the in-register offsets to
+one arm and the rest to the other, and the value loads of the two arms do the
+same thing with the value (or the join reads it through a merged address). When
+it matches, the branch block gets one CALLOTHER `va_arg(ap, T)` ahead of the
+branch, the offset store and the overflow store go, the loads of the two arms
+collapse to the one value, and the printer writes `va_arg(ap,T)`. `T` is the
+type of the call's output. An untyped output prints by size: `int` or `long`,
+or `double` when the class input says SSE. A `va_list` that is an array prints
+`*ap`.
+
+The matcher needs `ap` in memory at the point it runs. A `va_list` local to a
+function is promoted to registers by heritage before the action sees it, so the
+diamond is not matched there (`va_arg(ap, T)` on a local `va_list` at `-O2` and
+`-O0` stays as the expanded form). Two `va_arg` reads in one function
+(gcc `-O2`) leave both expanded. A double read prints with a union cast around the
+call, because the output keeps its integer type. Stage tests:
+`tests/stages/kuna-vaarg-gcc.xml` and `kuna-vaarg-clang.xml`.

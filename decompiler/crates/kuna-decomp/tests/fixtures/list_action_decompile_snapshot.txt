@@ -230,89 +230,90 @@
 0225                       lowerswitchdetect
 0226                       stripstackguard
 0227                       vastart
-0228                       stripmsvcstackguard
-0229                       removesecuritycheck
-0230                       devectorize
-0231                       strlenscan
-0232                       bitscanloop
-0233                       repstring
-0234                       copyrun
-0235                       returnsplit
-0236                       returndup
-0237                       earlyreturn
-0238                       switchreturn
-0239                       unjustparams
-0240                       starttypes
-0241                       activereturn
+0228                       vaarg
+0229                       stripmsvcstackguard
+0230                       removesecuritycheck
+0231                       devectorize
+0232                       strlenscan
+0233                       bitscanloop
+0234                       repstring
+0235                       copyrun
+0236                       returnsplit
+0237                       returndup
+0238                       earlyreturn
+0239                       switchreturn
+0240                       unjustparams
+0241                       starttypes
+0242                       activereturn
 
-0242                  mapped_local_sync
-0243                  startcleanup
-0244 repeat           cleanup
-0245              multnegone
-0246              addunsigned
-0247              2comp2sub
-0248              dumptyhumplate
-0249              subright
-0250              floatsigncleanup
-0251              expandload
-0252              ptrsubcharconstant
-0253              extensionpush
-0254              piecestructure
-0255              splitcopy
-0256              splitload
-0257              splitstore
-0258              stringcopy
-0259              stringstore
-0260              memsetcopy
-0261              rodatastringcopy
-0262              fatstr
-0263              swiftstr
-0264              bitfield_store
-0265              bitfield_out
-0266              bitfield_load
-0267              bitfield_in
-0268              pull_absorb
-0269              insert_absorb
+0243                  mapped_local_sync
+0244                  startcleanup
+0245 repeat           cleanup
+0246              multnegone
+0247              addunsigned
+0248              2comp2sub
+0249              dumptyhumplate
+0250              subright
+0251              floatsigncleanup
+0252              expandload
+0253              ptrsubcharconstant
+0254              extensionpush
+0255              piecestructure
+0256              splitcopy
+0257              splitload
+0258              splitstore
+0259              stringcopy
+0260              stringstore
+0261              memsetcopy
+0262              rodatastringcopy
+0263              fatstr
+0264              swiftstr
+0265              bitfield_store
+0266              bitfield_out
+0267              bitfield_load
+0268              bitfield_in
+0269              pull_absorb
+0270              insert_absorb
 
-0270                  prefercomplement
-0271                  structuretransform
-0272        !         armfloatargs
-0273        !         assignhigh
-0274        !         mergerequired
-0275        !         markexplicit
-0276        !         markimplied
-0277        !         mergemultientry
-0278        !         mergecopy
-0279        !         dominantcopy
-0280        !         dynamicsymbols
-0281        !         markindirectonly
-0282        !         mergeadjacent
-0283        !         mergetype
-0284        !         hideshadow
-0285        !         copymarker
-0286                  typevote
-0287                  latedonothing
-0288                  blockstructure
-0289                  prefercomplement
-0290                  structuretransform
-0291                  branchflip
-0292                  presentcompareform
-0293        !         outputprototype
-0294        !         inputprototype
-0295        !         mapglobals
-0296        !         dynamicsymbols
-0297        !         namevars
-0298                  calltargettype
-0299        !         setcasts
-0300                  finalstructure
-0301                  postinc
-0302                  gotoreduce
-0303                  taildup
-0304                  ifelseflatten
-0305                  crossjumprevert
-0306                  dedupitetail
-0307                  iteregion
-0308                  iteboolean
-0309                  paramcopyhoist
-0310        !         prototypewarnings
-0311                  stop
+0271                  prefercomplement
+0272                  structuretransform
+0273        !         armfloatargs
+0274        !         assignhigh
+0275        !         mergerequired
+0276        !         markexplicit
+0277        !         markimplied
+0278        !         mergemultientry
+0279        !         mergecopy
+0280        !         dominantcopy
+0281        !         dynamicsymbols
+0282        !         markindirectonly
+0283        !         mergeadjacent
+0284        !         mergetype
+0285        !         hideshadow
+0286        !         copymarker
+0287                  typevote
+0288                  latedonothing
+0289                  blockstructure
+0290                  prefercomplement
+0291                  structuretransform
+0292                  branchflip
+0293                  presentcompareform
+0294        !         outputprototype
+0295        !         inputprototype
+0296        !         mapglobals
+0297        !         dynamicsymbols
+0298        !         namevars
+0299                  calltargettype
+0300        !         setcasts
+0301                  finalstructure
+0302                  postinc
+0303                  gotoreduce
+0304                  taildup
+0305                  ifelseflatten
+0306                  crossjumprevert
+0307                  dedupitetail
+0308                  iteregion
+0309                  iteboolean
+0310                  paramcopyhoist
+0311        !         prototypewarnings
+0312                  stop

@@ -157,6 +157,8 @@ pub const BUILTIN_STRCPY: uint4 = 0x10000012;
 pub const BUILTIN_ALLOCA: uint4 = 0x10000013;
 /// (kuna) Built-in id for `va_start` (`vastart`).
 pub const BUILTIN_VASTART: uint4 = 0x10000014;
+/// (kuna) Built-in id for `va_arg` (`vaarg`).
+pub const BUILTIN_VAARG: uint4 = 0x10000015;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1044,6 +1046,7 @@ impl UserOpManage {
             }
             BUILTIN_BITREV => UserPcodeOp::new_unspecialized(b"bitreverse", BUILTIN_BITREV as int4),
             BUILTIN_VASTART => UserPcodeOp::new_unspecialized(b"va_start", BUILTIN_VASTART as int4),
+            BUILTIN_VAARG => UserPcodeOp::new_unspecialized(b"va_arg", BUILTIN_VAARG as int4),
             BUILTIN_ALLOCA => {
                 let ptr_size = types.get_size_of_pointer();
                 let word_size = types.get_default_data_space_word_size();

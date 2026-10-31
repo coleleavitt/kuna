@@ -672,6 +672,8 @@ pub struct Architecture {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) A run-time stack move prints as `alloca(n)`.
     pub dyn_alloca: bool,
+    /// (kuna `vaarg`) The x86-64 va_arg expansion as va_arg(ap, T).
+    pub va_arg: bool,
     /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
     pub index_rescale: bool,
     /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
@@ -3241,6 +3243,7 @@ impl Architecture {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            va_arg: false,
             index_rescale: false,
             loop_rotate: false,
             post_increment: false,
@@ -3746,6 +3749,7 @@ impl Architecture {
         self.bit_idioms = true;
         self.helper_roles = true;
         self.dyn_alloca = true;
+        self.va_arg = true;
         self.index_rescale = true;
         self.loop_rotate = true;
         self.post_increment = true;
@@ -4748,6 +4752,7 @@ impl Architecture {
         ctx.bit_idioms = self.bit_idioms;
         ctx.helper_roles = self.helper_roles;
         ctx.dyn_alloca = self.dyn_alloca;
+        ctx.va_arg = self.va_arg;
         ctx.index_rescale = self.index_rescale;
         ctx.loop_rotate = self.loop_rotate;
         ctx.post_increment = self.post_increment && self.print.out_lang() == crate::kuna_lang::OutLang::C;
@@ -5872,7 +5877,7 @@ impl Architecture {
         use crate::userop::{
             BUILTIN_MEMCPY, BUILTIN_MEMSET, BUILTIN_STRINGDATA, BUILTIN_STRLEN, BUILTIN_STRNCPY,
             BUILTIN_SYSCALL_ERROR, BUILTIN_VOLATILE_READ, BUILTIN_VOLATILE_WRITE,
-            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ABS, BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ, BUILTIN_STRCPY, BUILTIN_ALLOCA, BUILTIN_VASTART,
+            BUILTIN_WCSNCPY, BUILTIN_BSWAP, BUILTIN_ROTL, BUILTIN_ABS, BUILTIN_LABS, BUILTIN_BITREV, BUILTIN_CTZ, BUILTIN_STRCPY, BUILTIN_ALLOCA, BUILTIN_VASTART, BUILTIN_VAARG,
         };
         // Split the &mut userops borrow from the &self type-factory read by
         // building a small adapter over the (already-populated) factory.
@@ -5923,6 +5928,7 @@ impl Architecture {
             userops.register_builtin(BUILTIN_STRCPY, &adapter)?;
             userops.register_builtin(BUILTIN_ALLOCA, &adapter)?;
             userops.register_builtin(BUILTIN_VASTART, &adapter)?;
+            userops.register_builtin(BUILTIN_VAARG, &adapter)?;
             Ok(())
         })();
         self.userops = userops;

@@ -185,6 +185,8 @@ Three tiers:
 | a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale) |
 | a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
 | a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
+| va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses | [`vaarg`](#vaarg) |
+| a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads | [`vaarg`](#vaarg) |
 | a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
 | if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate) |
 | a while loop prints as an if around a do-while | [`looprotate`](#looprotate) |
@@ -1987,6 +1989,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see the register save area spills and the four va_list field stores.
 - **Where / provenance:** P4/prototype-source · kuna · presentation-default · kuna-vastart
 - **Example:** `--option vastart off`
+
+### `vaarg` -- on | off, default `on`
+
+- **Symptoms:** va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses; a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads.
+- **What it does:** Print the x86-64 SysV va_arg expansion as va_arg(ap, T). A call to va_arg(ap, T) on a va_list in memory compiles to a diamond: an offset check branches; the register arm forms an address from reg_save_area + offset and steps the offset; the memory arm loads overflow_arg_area and steps the pointer; the join reads the value through the merged address. kuna printed both arms as loads and stores. With this on, the diamond becomes effects of a va_arg(ap, T) CALLOTHER, both arms collapse to a single read, and the value prints with its recovered type.
+- **When to flip:** On (default). Flip off to see the register-save and overflow-pointer steps and the merged address load.
+- **Where / provenance:** P4/prototype-source · kuna · presentation-default · kuna-vaarg
+- **Example:** `--option vaarg off`
 
 ### `postinc` -- on | off, default `on`
 

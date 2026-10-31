@@ -6673,6 +6673,34 @@ impl PrintC {
         }
     }
 
+    /// (kuna `vaarg`) `va_arg(ap,T)`, `T` the type of the call's output; a
+    /// pointer to a `va_list` (an array type) prints `*ap`.
+    fn push_va_arg(&mut self, fd: &Funcdata, arch: &Architecture, op: OpId) -> bool {
+        let (Some(ap), Some(out)) = (fd.obank().get(op).and_then(|o| o.get_in(1)), fd.obank().get(op).and_then(|o| o.get_out())) else {
+            return false;
+        };
+        let Some(ty) = fd.vbank().get(out).map(|v| std::rc::Rc::clone(v.get_type())) else { return false };
+        let sse = fd.obank().get(op).and_then(|o| o.get_in(2)).and_then(|v| fd.vbank().get(v)).is_some_and(|v| v.get_offset() == 1);
+        use crate::dtype::type_metatype::{TYPE_PARTIALUNION, TYPE_UNKNOWN};
+        let untyped = matches!(ty.get_metatype(), TYPE_UNKNOWN | TYPE_PARTIALUNION);
+        let (front, back) = match (untyped, ty.get_size(), sse) {
+            (true, 8, true) => ("double".to_string(), String::new()),
+            (true, 8, false) => ("long".to_string(), String::new()),
+            (true, 4, false) => ("int".to_string(), String::new()),
+            _ => type_name_for_decl(&ty, self.rt_ctx),
+        };
+        self.push_op(&tokens::FUNCTION_CALL, Some(op_key(op)));
+        self.push_atom(&Atom::with_op("va_arg".to_string(), TagType::OpToken, crate::printlanguage::SyntaxHighlight::funcname_color, op_key(op)));
+        self.push_op(&tokens::COMMA, Some(op_key(op)));
+        let to_array = fd.vbank().get(ap).and_then(|v| v.get_type().get_ptr_to()).is_some_and(|t| t.get_metatype() == crate::dtype::type_metatype::TYPE_ARRAY);
+        if to_array {
+            self.push_op(&tokens::DEREFERENCE, Some(op_key(op)));
+        }
+        self.push_vn_ir(fd, arch, ap, op);
+        self.push_atom(&Atom::syntax(format!("{front}{back}"), TagType::TypeToken, crate::printlanguage::SyntaxHighlight::type_color));
+        true
+    }
+
     /// C++ `PrintC::opCallother` (printc.cc:693): render a CALLOTHER (user
     /// p-code op).  The op's in0 constant indexes a `UserPcodeOp` whose
     /// `getDisplay()` selects the form:
@@ -6695,6 +6723,9 @@ impl PrintC {
             .map(|u| u.get_display())
             .unwrap_or(0);
         let nin = fd.obank().get(op).map(|o| o.num_input()).unwrap_or(0);
+        if in0_off == crate::userop::BUILTIN_VAARG as u64 && nin == 3 && self.push_va_arg(fd, arch, op) {
+            return;
+        }
         if display == 0 {
             // Functional syntax: for CALLOTHER the operator name resolves to the
             // userop's name (the base getOperatorName), or the generic
