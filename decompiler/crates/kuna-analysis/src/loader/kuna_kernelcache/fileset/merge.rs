@@ -96,14 +96,14 @@ fn function_starts(bytes: &[u8], cmds: &[(u32, usize)]) -> Vec<u64> {
     let mut out = Vec::new();
     let (mut addr, mut i) = (base, 0);
     while i < data.len() {
-        let (mut delta, mut shift) = (0u64, 0);
+        let (mut delta, mut shift) = (0u64, 0u32);
         while i < data.len() {
             let b = data[i];
             i += 1;
             if shift < 64 {
                 delta |= ((b & 0x7f) as u64) << shift;
             }
-            shift += 7;
+            shift = shift.saturating_add(7);
             if b & 0x80 == 0 {
                 break;
             }
@@ -225,7 +225,7 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
     }
     for p in branch_segments(&bytes) {
         let size = rd_u32(&bytes, p + 4).unwrap_or(0) as usize;
-        segs.push(bytes[p..p + size].to_vec());
+        segs.push(bytes.get(p..p + size).ok_or("truncated branch segment")?.to_vec());
     }
     let (nl, ne, nu) = (nlocal.len() / NLIST_LEN, nextdef.len() / NLIST_LEN, nundef.len() / NLIST_LEN);
     let indirect: Vec<u32> = indirect
@@ -261,6 +261,7 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
         + 80
         + if starts_blob.is_empty() { 0 } else { 16 };
     let shift = (HEADER_LEN + sizeofcmds).div_ceil(PAGE) * PAGE;
+    let shift32 = u32::try_from(shift).map_err(|_| "the merged image does not fit 32-bit file offsets")?;
 
     let tail_start = shift + bytes.len();
     let symoff = tail_start.div_ceil(8) * 8;
@@ -268,7 +269,7 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
     let startsoff = indirectoff + indirect.len() * 4;
 
     let mut out = Vec::with_capacity(startsoff + starts_blob.len());
-    let first = &all[chosen[0]];
+    let first = &all[*chosen.first().ok_or("no entries to merge")?];
     let at = first.fileoff as usize;
     let filetype = if has_kernel { MH_EXECUTE } else { MH_KEXT_BUNDLE };
     out.extend_from_slice(&bytes[at..at + 12]);
@@ -278,13 +279,14 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
     out.extend_from_slice(&rd_u32(&bytes, at + 24).unwrap_or(0).to_le_bytes());
     out.extend_from_slice(&0u32.to_le_bytes());
     for mut seg in segs {
-        let fileoff = rd_u64(&seg, 40).unwrap_or(0) + shift as u64;
+        let fileoff = rd_u64(&seg, 40).unwrap_or(0).checked_add(shift as u64).ok_or("segment offset overflows")?;
         seg[40..48].copy_from_slice(&fileoff.to_le_bytes());
         let nsects = rd_u32(&seg, 64).unwrap_or(0) as usize;
         for k in 0..nsects {
             let s = SEGMENT_LEN + k * SECTION_LEN;
             if let Some(off) = rd_u32(&seg, s + 48).filter(|&o| o != 0) {
-                seg[s + 48..s + 52].copy_from_slice(&(off + shift as u32).to_le_bytes());
+                let moved = off.checked_add(shift32).ok_or("section offset overflows the merged image")?;
+                seg[s + 48..s + 52].copy_from_slice(&moved.to_le_bytes());
             }
         }
         out.extend_from_slice(&seg);
@@ -294,7 +296,8 @@ pub(super) fn merge(bytes: Vec<u8>, all: &[FilesetEntry], chosen: &[usize]) -> R
     }
     let (stroff, strsize) = strtab.unwrap_or((0, 0));
     let w = |out: &mut Vec<u8>, vals: &[u32]| vals.iter().for_each(|v| out.extend_from_slice(&v.to_le_bytes()));
-    w(&mut out, &[LC_SYMTAB, 24, symoff as u32, (nl + ne + nu) as u32, stroff + shift as u32, strsize]);
+    let stroff = stroff.checked_add(shift32).ok_or("string table offset overflows the merged image")?;
+    w(&mut out, &[LC_SYMTAB, 24, symoff as u32, (nl + ne + nu) as u32, stroff, strsize]);
     w(
         &mut out,
         &[

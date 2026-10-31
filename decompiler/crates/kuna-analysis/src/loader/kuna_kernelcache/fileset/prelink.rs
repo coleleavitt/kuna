@@ -3,6 +3,7 @@
 //! address and the `IOClass` names of its `IOKitPersonalities`.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::{load_commands, rd_u32, rd_u64, LC_SEGMENT_64};
 
@@ -19,8 +20,8 @@ pub(super) struct KextInfo {
 
 #[derive(Debug, Clone)]
 enum Value {
-    Dict(Vec<(String, Value)>),
-    Array(Vec<Value>),
+    Dict(Rc<Vec<(String, Value)>>),
+    Array(Rc<Vec<Value>>),
     Str(String),
     Int(u64),
     Other,
@@ -103,7 +104,7 @@ impl<'a> Parser<'a> {
                     let key = if t == "key" { self.text_until("</key>")? } else { return None };
                     items.push((key, self.value(depth + 1)?));
                 }
-                Value::Dict(items)
+                Value::Dict(Rc::new(items))
             }
             "array" if !empty => {
                 let mut items = Vec::new();
@@ -114,7 +115,7 @@ impl<'a> Parser<'a> {
                     }
                     items.push(self.value_from(t, depth + 1)?);
                 }
-                Value::Array(items)
+                Value::Array(Rc::new(items))
             }
             "string" if !empty => Value::Str(self.text_until("</string>")?),
             "integer" if !empty => {
@@ -130,8 +131,8 @@ impl<'a> Parser<'a> {
                 self.text_until("</data>")?;
                 Value::Other
             }
-            "dict" => Value::Dict(Vec::new()),
-            "array" => Value::Array(Vec::new()),
+            "dict" => Value::Dict(Rc::default()),
+            "array" => Value::Array(Rc::default()),
             "string" => Value::Str(String::new()),
             _ => Value::Other,
         };
@@ -251,5 +252,22 @@ mod tests {
         assert_eq!(items[1].get("CFBundleVersion").and_then(Value::str), Some("1.0"));
         let ps = items[0].get("IOKitPersonalities").unwrap();
         assert_eq!(ps.get("p2").and_then(|d| d.get("IOClass")).and_then(Value::str), Some("AService"));
+    }
+
+    /// Each level holds ten references to the level below: copying the shared
+    /// values would grow to 10^39 nodes, sharing them keeps the parse linear.
+    #[test]
+    fn idref_expansion_shares_values_instead_of_copying_them() {
+        let mut xml = String::from(r#"<dict ID="v0"><key>k</key><string>x</string></dict>"#);
+        for level in 1..40 {
+            let refs: String = (0..10).map(|_| format!(r#"<array IDREF="v{}"/>"#, level - 1)).collect();
+            xml += &format!(r#"<array ID="v{level}">{refs}</array>"#);
+        }
+        xml += r#"<array IDREF="v39"/>"#;
+        let text = format!("<array>{xml}</array>");
+        let mut p = Parser { text: &text, pos: 0, ids: HashMap::new() };
+        let tag = p.tag().unwrap();
+        let Some(Value::Array(items)) = p.value_from(tag, 0) else { panic!() };
+        assert_eq!(items.len(), 41);
     }
 }
