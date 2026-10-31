@@ -14,1665 +14,1665 @@ Three tiers:
 
 | If the output shows... | Try |
 |---|---|
-| the signature says FILE * or struct_0 * and nothing says what the fields are | [`structdefs`](#structdefs) |
-| a field access like f->_flags with no layout anywhere in the output | [`structdefs`](#structdefs) |
-| you have to run decompile-project just to read the .h for one function's struct | [`structdefs`](#structdefs) |
-| a synthesized struct_N appears in a parameter type with no definition | [`structdefs`](#structdefs) |
-| a byte swap prints as four masked shifts ORed together | [`bitidioms`](#bitidioms) |
-| a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms) |
-| bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms) |
-| hash or crc code full of paired shifts | [`bitidioms`](#bitidioms) |
-| memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s) | [`helperroles`](#helperroles) |
-| an inlined strcpy shows as a strlen call followed by a memcpy | [`helperroles`](#helperroles) |
-| a variable-length array prints as &(&Stack[-8])[-n] | [`dynalloca`](#dynalloca) |
-| sub rsp, rax decompiles to stack pointer arithmetic instead of alloca | [`dynalloca`](#dynalloca) |
-| a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob) |
-| `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob) |
-| a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob) |
-| the high half of a 64x64 product is read out of a blob instead of off the multiply | [`mulblob`](#mulblob) |
-| a loop summing an array prints as eight lane accumulators added into one total after the loop | [`devectorize`](#devectorize) |
-| a vectorised reduction is followed by a second copy of the loop over the remainder | [`devectorize`](#devectorize) |
-| an array sum is guarded by if (8 <= length) with a stride-eight do-while behind it | [`devectorize`](#devectorize) |
-| a line like v8 + v12 + v6 + v10 + v7 + v11 + v5 + v9 follows a loop | [`devectorize`](#devectorize) |
-| an inner test that an outer test already decides is printed | [`rangefold`](#rangefold) |
-| if (x < 10) { if (x > 20) ... } keeps the dead branch | [`rangefold`](#rangefold) |
-| x & 0xff kept on a value an earlier range check bounds below 256 | [`rangefold`](#rangefold) |
-| a range check repeated inside the branch of the same check | [`rangefold`](#rangefold) |
-| v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4 | [`pow2select`](#pow2select) |
-| a signed remainder by a power of two prints as a select between x & m and -(-x & m) | [`pow2select`](#pow2select) |
-| (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4 | [`pow2select`](#pow2select) |
-| a < b or a == b printed as two tests where a <= b would do | [`cmpmerge`](#cmpmerge) |
-| a0 != a1 && !(a0 < a1) on floats | [`cmpmerge`](#cmpmerge) |
-| two branches in a row test the same value against neighbouring constants and jump to one place | [`cmpmerge`](#cmpmerge) |
-| x == 3 or 3 < x printed as two tests | [`cmpmerge`](#cmpmerge) |
-| the same arithmetic expression on the same values is computed twice into two temporaries | [`latecse`](#latecse) |
-| v1 = a + b * 4; ... v2 = a + b * 4; where one would do | [`latecse`](#latecse) |
-| duplicated address arithmetic in both arms of an if | [`latecse`](#latecse) |
-| if (c) x = a; else x = b; return f(x); where the source called f on each path | [`unmergecall`](#unmergecall) |
-| the compiler shared one call block between two paths and the arguments became a merged variable | [`unmergecall`](#unmergecall) |
-| a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan) |
-| if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan) |
-| ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan) |
-| repnz scasb in the disassembly where IDA prints strlen | [`strlenscan`](#strlenscan) |
-| a while loop that copies one element per iteration and steps two pointers and a count | [`repstring`](#repstring) |
-| rep movsq / rep stosd from -Os code printed as a loop instead of memcpy/memset | [`repstring`](#repstring) |
-| a struct copy prints as a 16-iteration word loop | [`repstring`](#repstring) |
-| a struct copy prints as eight paired assignments through a register | [`copyrun`](#copyrun) |
-| *a0 = *a1; a0[1] = v1; ... for a fixed-size memcpy | [`copyrun`](#copyrun) |
-| SSE xmm0 lanes shuttle a buffer one word at a time | [`copyrun`](#copyrun) |
-| stack string initialisation renders as an array-typed cast such as (char[8])s_addr._0_8_ | [`rodatastring`](#rodatastring) |
-| partial-symbol slice assignments like buf._0_9_ = s_addr._16_9_ instead of the string | [`rodatastring`](#rodatastring) |
-| a recognized rodata literal never appears in the function that copies it onto the stack | [`rodatastring`](#rodatastring) |
-| builtin_strncpy call where the individual slice assignments are wanted (flip off) | [`rodatastring`](#rodatastring) |
-| long run of per-element constant stores instead of a single memset | [`memsetrecover`](#memsetrecover) |
-| unrolled or SIMD zeroing rendered as dozens of assignments | [`memsetrecover`](#memsetrecover) |
-| builtin_memset call where the individual element stores are wanted (flip off) | [`memsetrecover`](#memsetrecover) |
-| spurious CONCAT44 return value in a void or single-register function | [`returnpair`](#returnpair) |
-| two return registers joined into one double-width return (e.g. sparc o0/o1) | [`returnpair`](#returnpair) |
-| return type twice the natural width built from a register concat | [`returnpair`](#returnpair) |
-| v850 jmp [reg] rendered as an indirect call instead of a recovered switch | [`v850indirectbranch`](#v850indirectbranch) |
-| jump table on v850 never recovered because the dispatch decodes as a computed call | [`v850indirectbranch`](#v850indirectbranch) |
-| __ftol() / __ftol2() called with no arguments | [`msvcftol`](#msvcftol) |
-| the float computation feeding a float-to-int conversion is missing from an MSVC x86-32 binary | [`msvcftol`](#msvcftol) |
-| a __thiscall method lost its `this` pointer and reads its fields off a stack argument instead | [`msvcftol`](#msvcftol) |
-| __udivdi3 / __divdi3 / __umoddi3 / __moddi3 called with four 32-bit words instead of a / b | [`arithhelpers`](#arithhelpers) |
-| __aeabi_uldivmod() / __aeabi_idiv() / __aeabi_lmul() called with missing or reordered arguments on ARM | [`arithhelpers`](#arithhelpers) |
-| __alldiv / __allrem called and the caller returns void on an MSVC x86-32 image | [`arithhelpers`](#arithhelpers) |
-| a 64-bit division on a 32-bit target prints as a helper call | [`arithhelpers`](#arithhelpers) |
-| an Objective-C method is mostly objc_retain/objc_release lines | [`objcarc`](#objcarc) |
-| objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long | [`objcarc`](#objcarc) |
-| objc_storeStrong(&self->field, x) where an assignment is meant | [`objcarc`](#objcarc) |
-| [[Foo alloc] init] typed objc_object * or unsigned long | [`objcrettype`](#objcrettype) |
-| every message sent to a freshly allocated object carries a cast | [`objcrettype`](#objcrettype) |
-| an init… call's result loses the receiver's class | [`objcrettype`](#objcrettype) |
-| objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image | [`objcresolve`](#objcresolve) |
-| objc_msgSend$count(v2) on a receiver whose class is known | [`objcresolve`](#objcresolve) |
-| the call graph of an ObjC image stops at objc_msgSend | [`objcresolve`](#objcresolve) |
-| an `if (isCurrentModePrivileged())` block wraps every interrupt-mask or special-register access in Cortex-M firmware | [`cortexmpriv`](#cortexmpriv) |
-| `isCurrentModePrivileged()` appears in the emitted C at all | [`cortexmpriv`](#cortexmpriv) |
-| a Cortex-M function has more basic blocks and branches than its source | [`cortexmpriv`](#cortexmpriv) |
-| `getBasePriority()`/`isIRQinterruptsEnabled()`/`getCurrentExceptionNumber()` are each read under their own conditional | [`cortexmpriv`](#cortexmpriv) |
-| leaf function ends in a (*dat_...)(...) computed call with a 'Treating indirect jump as call' warning | [`tailcalljump`](#tailcalljump) |
-| jmp to a plt stub inlined into the caller instead of a named tail call | [`tailcalljump`](#tailcalljump) |
-| plt thunk body absorbed where func(...) is expected | [`tailcalljump`](#tailcalljump) |
-| a veneer renders as switch(0x...) with one case holding another function's body, or halt_missing() with a 'flows out of bounds' warning | [`tailcalljump`](#tailcalljump) |
-| a function decompiled by address continues into an unrelated function's body | [`tailcallframe`](#tailcallframe) |
-| an event/listener callback emits a second routine's UI strings and callees | [`tailcallframe`](#tailcallframe) |
-| the same callee is emitted twice in one function, once as a named call and once inlined | [`tailcallframe`](#tailcallframe) |
-| an unconditional jmp after add rsp,N; pop reg is followed instead of ending the function | [`tailcallframe`](#tailcallframe) |
-| kuna emits thousands of lines for a function the disassembly shows is a few hundred bytes | [`tailcallframe`](#tailcallframe) |
-| a recovered tail call whose target is an internal block of the same function | [`tailcallsaved`](#tailcallsaved) |
-| `tailcallframe: recovered tail call` on a `jmp` that follows `call f; add esp,N` | [`tailcallsaved`](#tailcallsaved) |
-| the tail of a cdecl function is emitted as a separate callee instead of inline | [`tailcallsaved`](#tailcallsaved) |
-| a function decompiled by address stops at an if/else join and calls sub_<join address> | [`tailcallsaved`](#tailcallsaved) |
-| a store to a nonsense global (dat_<huge hex>) appears right after a call | [`calltrampoline`](#calltrampoline) |
-| the callee of a call starts with lea esp,[esp+4] / add esp,4 / pop reg and ends in a jmp back into the caller | [`calltrampoline`](#calltrampoline) |
-| the body after a call is decoded one byte out of phase with the disassembly | [`calltrampoline`](#calltrampoline) |
-| a protected PE emits garbage arithmetic on undefined registers after each call fragment | [`calltrampoline`](#calltrampoline) |
-| port-input operations (`in(...)`) appear in a function that does no I/O | [`callpopret`](#callpopret) |
-| the body after a call is ASCII decoded as instructions | [`callpopret`](#callpopret) |
-| a one-line pointer helper decompiles to dozens of statements over undefined registers | [`callpopret`](#callpopret) |
-| the callee of a call is `pop reg; ret` or `add esp,4; ret` and the bytes after the call are a string table | [`callpopret`](#callpopret) |
-| a function entry containing push continuation; push target; ret decompiles to only return | [`entryretdispatch`](#entryretdispatch) |
-| only the first helper in a stack-built RET dispatcher appears after one manual flow override | [`entryretdispatch`](#entryretdispatch) |
-| multiple flow <address> call assertions are required to recover one entry routine | [`entryretdispatch`](#entryretdispatch) |
-| a packer or crackme dispatch chain is truncated at its first ret | [`entryretdispatch`](#entryretdispatch) |
-| a push immediate followed by ret disappears from emitted C | [`pushimmediateret`](#pushimmediateret) |
-| an unpacker call remains but the original-entry transfer after it is missing | [`pushimmediateret`](#pushimmediateret) |
-| a manual flow branch assertion on a RET restores an indirect transfer to a constant address | [`pushimmediateret`](#pushimmediateret) |
-| a packed entry stub ends at ret even though it pushed a destination first | [`pushimmediateret`](#pushimmediateret) |
-| mapped return lost after another path leaves the image | [`mappedflowboundary`](#mappedflowboundary) |
-| decompile exits with Unable to load bytes at a segment edge | [`mappedflowboundary`](#mappedflowboundary) |
-| JSON code is null although a mapped branch returns | [`mappedflowboundary`](#mappedflowboundary) |
-| zero-padded instructions decoded beyond mapped memory | [`mappedflowboundary`](#mappedflowboundary) |
-| a function's tail is really the body of the NEXT function | [`funcboundflow`](#funcboundflow) |
-| dead/garbage code after a call to a die()/fatal()/throw wrapper that never returns | [`funcboundflow`](#funcboundflow) |
-| two adjacent functions merged into one, the second also decompiled on its own | [`funcboundflow`](#funcboundflow) |
-| uninitialized reads in the tail after an unrecognized no-return call | [`funcboundflow`](#funcboundflow) |
-| a call to a sub_<hex> address that is not in the binary | [`overlapbranch`](#overlapbranch) |
-| writes through pointers that are never assigned right after a short conditional jump | [`overlapbranch`](#overlapbranch) |
-| a bogus dat_<hex> global incremented once and never read | [`overlapbranch`](#overlapbranch) |
-| a comparison whose operands are unreadable CONCAT/subpiece salad in hand-written or obfuscated code | [`overlapbranch`](#overlapbranch) |
-| core::ptr::drop_in_place(...) calls all over a decompiled rust function | [`cleanupcode`](#cleanupcode) |
-| drop glue and deallocation calls that are nowhere in the rust source | [`cleanupcode`](#cleanupcode) |
-| Drop::drop / __rust_dealloc / RawVecInner::deallocate noise at every scope exit | [`cleanupcode`](#cleanupcode) |
-| rust output is twice as long as the source because of automatic resource management | [`cleanupcode`](#cleanupcode) |
-| flip off to see when a rust value is actually dropped or freed | [`cleanupcode`](#cleanupcode) |
-| a syscall renders as (*(void *)swi(0x80))() - a call through a pointer nothing assigns | [`linuxsyscall`](#linuxsyscall) |
-| the mov $N,%eax before an int 0x80 has vanished from the output | [`linuxsyscall`](#linuxsyscall) |
-| an int 0x80 site shows no arguments even though the disassembly loads ebx/ecx/edx | [`linuxsyscall`](#linuxsyscall) |
-| 32-bit linux _start or shellcode where every system call is an unnamed indirect call | [`linuxsyscall`](#linuxsyscall) |
-| esp-relative locals shift by four bytes after an int 0x80 | [`linuxsyscall`](#linuxsyscall) |
-| several near-identical if/else blocks in a row, each comparing two adjacent stack slots and either calling a helper with the same object or storing one character through a 16-byte-threshold pointer select | [`msvcstrappend`](#msvcstrappend) |
-| an msvc c++ function whose string-building code shows a `0x10 <= v` buffer select before every character store | [`msvcstrappend`](#msvcstrappend) |
-| a loop body that is a whole capacity check plus a grow call to append one byte to a std::string | [`msvcstrappend`](#msvcstrappend) |
-| counting inlined std::string appends from the c output gives the wrong number | [`msvcstrappend`](#msvcstrappend) |
-| a re-rolled switch dispatches on a function parameter and the compiler's if/else-if chain would read better | [`switchselector`](#switchselector) |
-| a callback or window/dialog procedure's message dispatch reads better as the chain the compiler emitted | [`switchselector`](#switchselector) |
-| option loweredswitch off gives the rendering you want, but you want it for one cascade and not for the whole binary | [`switchselector`](#switchselector) |
-| decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return | [`relronoreturn`](#relronoreturn) |
-| a function restarts once for every no-return callee reached through a .got slot | [`relronoreturn`](#relronoreturn) |
-| stack locals render as offsets off a char * instead of named locals | [`fastfailnoreturn`](#fastfailnoreturn) |
-| explicit stores of a call's own return address, like *(unsigned long long *)&v66[-8] = 0x140003e16 | [`fastfailnoreturn`](#fastfailnoreturn) |
-| Win32/API call arguments come out as *(unsigned long long *)&v66[0x50] stack blobs instead of values | [`fastfailnoreturn`](#fastfailnoreturn) |
-| (*(void *)swi(0x29))(5); is followed by a stack-pointer bump such as v62 = &v61[8] | [`fastfailnoreturn`](#fastfailnoreturn) |
-| an MSVC C++ function emits hundreds of lines and a hundred-plus anonymous variables | [`fastfailnoreturn`](#fastfailnoreturn) |
-| an int3 pad renders as (*(void *)swi(3))() - a call through a pointer nothing assigns | [`int3pad`](#int3pad) |
-| a function returns the result of a call through swi(3) | [`int3pad`](#int3pad) |
-| nothing in the C says control ran into a run of 0xcc padding bytes | [`int3pad`](#int3pad) |
-| an anti-debug binary's clean-run path ends in an indirect call that only the disassembly explains | [`int3pad`](#int3pad) |
-| an x86-64 syscall renders as syscall() with empty parens, with the number and every argument erased | [`x64syscall`](#x64syscall) |
-| a syscall wrapper returns its own first parameter, the syscall number, instead of the syscall's result | [`x64syscall`](#x64syscall) |
-| the register writes feeding a SYSCALL are all missing from the C while kuna disassemble shows them | [`x64syscall`](#x64syscall) |
-| a SYSCALL's result is never assigned to anything | [`x64syscall`](#x64syscall) |
-| a function containing svc/ecall/syscall/sc returns its arguments as a register pair (CONCAT44 or undefined16) | [`syscallregs`](#syscallregs) |
-| a MIPS syscall wrapper returns the syscall number it loaded into v0 | [`syscallregs`](#syscallregs) |
-| software_interrupt(0), CallSupervisor(0), ecall() or syscall() shows no arguments while the disassembly loads registers before it | [`syscallregs`](#syscallregs) |
-| a test of a system call's result tests the argument the function set up instead | [`syscallregs`](#syscallregs) |
-| a syscall wrapper returns its own first parameter | [`syscallregs`](#syscallregs) |
-| the same wrapper is right in a linked Linux program but wrong in its .o or a static musl build | [`syscallregs`](#syscallregs) |
-| a MIPS syscall wrapper grows a fourth parameter a3 it tests after the syscall | [`syscallregs`](#syscallregs) |
-| a PowerPC syscall wrapper tests an uninitialized cr0 after sc | [`syscallregs`](#syscallregs) |
-| a MIPS syscall wrapper that passes its parameters straight to the kernel shows none of them | [`syscallregs`](#syscallregs) |
-| garbage code after a call to __stack_chk_fail or abort in a relocatable .o | [`noreturn_extern`](#noreturn_extern) |
-| function balloons by swallowing the next function after an extern no-return call | [`noreturn_extern`](#noreturn_extern) |
-| dead fall-through after exit or assert-fail in an object file | [`noreturn_extern`](#noreturn_extern) |
-| switch reports 'Could not recover jumptable ... Too many branches' and renders as a computed call | [`switchmodbound`](#switchmodbound) |
-| indirect jump bounded only by a modulo or and-mask on its index never becomes a switch | [`switchmodbound`](#switchmodbound) |
-| indirect jump renders as a computed (code *)() call whose destinations are already constants in the emitted C | [`constselectjump`](#constselectjump) |
-| 'Treating indirect jump as call' on a CMOV/predicated dispatch | [`constselectjump`](#constselectjump) |
-| the body behind a conditional indirect branch is never decoded | [`constselectjump`](#constselectjump) |
-| a Dalvik sparse-switch prints as switchAssist(...) followed by a computed call | [`jumpassist`](#jumpassist) |
-| 'jump-as-call' on a switchAssist or lookupswitch user-op | [`jumpassist`](#jumpassist) |
-| 'Too many branches' jumptable failure where a cbranch range guard bounds the index | [`switchguardbound`](#switchguardbound) |
-| computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound) |
-| a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ... | [`switchguardmerge`](#switchguardmerge) |
-| a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge) |
-| a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote) |
-| a cast back to a variable's own declared type at each read | [`typevote`](#typevote) |
-| *(int *)((long)p + v1) where v1 only takes multiples of 4 | [`indexrescale`](#indexrescale) |
-| a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale) |
-| a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
-| a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
-| va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses | [`vaarg`](#vaarg) |
-| a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads | [`vaarg`](#vaarg) |
-| a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
-| if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate) |
-| a while loop prints as an if around a do-while | [`looprotate`](#looprotate) |
-| getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase) |
-| pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase) |
-| 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase) |
-| image-base-relative switch whose bound guard is duplicated across multiple predecessors renders as a computed call | [`switchmultipred`](#switchmultipred) |
-| 'Too many branches' where the dispatch block has several guarded incoming paths | [`switchmultipred`](#switchmultipred) |
-| msvc memmove small-count tail dispatch truncated to an indirect call | [`switchmultipred`](#switchmultipred) |
-| a switch with an unreachable default renders as a computed jump-as-call through a table | [`switchtrim`](#switchtrim) |
-| `*(code **)(a0 * 8 + table)` called instead of a switch | [`switchtrim`](#switchtrim) |
-| Too many branches on a table indexed with no range check | [`switchtrim`](#switchtrim) |
-| one switch recovered but sibling interleaved jump tables degrade to computed calls | [`unrolledguard`](#unrolledguard) |
-| 'Could not find op at target address' during recovery of an msvc optimized memcpy dispatch | [`unrolledguard`](#unrolledguard) |
-| duff's-device tail dispatch rendered as 'Treating indirect jump as call' | [`unrolledguard`](#unrolledguard) |
-| decompiling one function with several switch statements takes far longer than its size suggests | [`jtsharepartial`](#jtsharepartial) |
-| per-function latency scales with the NUMBER of jump tables rather than their size | [`jtsharepartial`](#jtsharepartial) |
-| profile shows the reduced jumptable action set running once per switch | [`jtsharepartial`](#jtsharepartial) |
-| dozens of garbage *v = *v + c; lines after a __stack_chk_fail call in a .o | [`noreturn_externmatch`](#noreturn_externmatch) |
-| inter-function alignment padding decoded as add [rax],al style instructions | [`noreturn_externmatch`](#noreturn_externmatch) |
-| flow runs past an undefined-extern abort or exit call in a relocatable object | [`noreturn_externmatch`](#noreturn_externmatch) |
-| *(unsigned long *)&v28[-8] = 0xbc79; before every call after an alloca | [`callpush`](#callpush) |
-| a constant code address stored through a char * that aliases the stack pointer | [`callpush`](#callpush) |
-| the return address of the next call printed as a statement | [`callpush`](#callpush) |
-| a stack char buffer is declared one element short, e.g. [63] where the source has [64] | [`nulterminator`](#nulterminator) |
-| the NUL terminator after strncpy renders as an assignment to a separate char local | [`nulterminator`](#nulterminator) |
-| a stack char local is assigned 0 and never read, right after the end of an array | [`nulterminator`](#nulterminator) |
-| the buffer's last element is missing from the array and declared as its own variable | [`nulterminator`](#nulterminator) |
-| a pointer loop over a stack buffer ends at the address of an unrelated local (`while (v3 != v2)`) | [`endptrbound`](#endptrbound) |
-| a loop's `while (p != vN)` names a local declared at the stack offset just past the buffer the loop reads | [`endptrbound`](#endptrbound) |
-| a stack buffer walked bytewise is declared as a scalar of the neighbour's width (`unsigned int v1;` for eight bytes) | [`endptrbound`](#endptrbound) |
-| the walking pointer is typed after the neighbouring local instead of the bytes it reads | [`endptrbound`](#endptrbound) |
-| a local char buffer is declared 8 bytes longer than the length passed to fgets/snprintf/read with it, e.g. char v3 [8200] beside fgets(v3,0x2000,fp) | [`arraysize`](#arraysize) |
-| a stack array's size is a multiple of 16 plus 8 and it ends where the stack-protector canary slot starts | [`arraysize`](#arraysize) |
-| a buffer passed to __snprintf_chk(buf, n, 1, 0x100, ...) is declared longer than the 0x100 object size the call carries | [`arraysize`](#arraysize) |
-| an out-parameter local is passed as (int *)&v2 to waitpid or wait | [`castobject`](#castobject) |
-| a stack local is declared unsigned int where the callee that fills it declares int * | [`castobject`](#castobject) |
-| return (int)v1 >> 8 & 0xff; over an unsigned int status filled by waitpid | [`castobject`](#castobject) |
-| a reused local frame slot loses an observable native store | [`localstackviews`](#localstackviews) |
-| a saved pointer names an unrelated object after stack storage reuse | [`localstackviews`](#localstackviews) |
-| a reused stack slot is assigned a value of an incompatible type | [`stackviews`](#stackviews) |
-| two object views of one frame address become unrelated local variables | [`stackviews`](#stackviews) |
-| spurious uninitialized local (xStack_N) returned after storing through a pointer to a local | [`stackalias`](#stackalias) |
-| store through a take-address-of-local pointer dropped as dead so the later read is garbage | [`stackalias`](#stackalias) |
-| bogus (*pcVar1)() indirect call after calling a struct-returning function on sparc | [`sparcstructret`](#sparcstructret) |
-| function tail dropped after a sparc call followed by unimp | [`sparcstructret`](#sparcstructret) |
-| switch rendered as nested if/else-if compare tree over one variable | [`loweredswitch`](#loweredswitch) |
-| binary-search cascade of constant compares where source had a switch | [`loweredswitch`](#loweredswitch) |
-| flip off to keep the compiler's lowered compare-tree rendering | [`loweredswitch`](#loweredswitch) |
-| a switch inlined into a larger function renders as an if/else or goto ladder into a shared join while the same switch in its own function re-rolls | [`loweredswitchheads`](#loweredswitchheads) |
-| every arm of a compare ladder assigns one variable and jumps to the same label | [`loweredswitchheads`](#loweredswitchheads) |
-| option loweredswitch off and on give byte-identical output on a binary-search compare tree preceded by another test of the same variable | [`loweredswitchheads`](#loweredswitchheads) |
-| values below an x87 call are read from the wrong register-stack positions after consecutive calls | [`callmechanisms`](#callmechanisms) |
-| a store the compiler spec says a callee always makes is missing after the call | [`callmechanisms`](#callmechanisms) |
-| a custom compiler spec's uponentry or uponreturn p-code has no effect on the output | [`callmechanisms`](#callmechanisms) |
-| a 32-bit PowerPC -O0 variadic call drops a trailing double that an earlier argument is computed from | [`varargsharedfloat`](#varargsharedfloat) |
-| `sumi(2, x * 2, x)` prints as `sumi(2,x + x)` on PowerPC | [`varargsharedfloat`](#varargsharedfloat) |
-| a uint8_t parameter prints as unsigned int and is only ever used as a1 & 0xff or (char)a1 | [`narrowargs`](#narrowargs) |
-| an int parameter prints as unsigned long on x86-64 and is used as (unsigned int)a0 | [`narrowargs`](#narrowargs) |
-| a caller passes v + 5 to a callee whose parameter is a byte and another caller passes v - 8 & 0xff | [`narrowargs`](#narrowargs) |
-| a uint8_t loop counter prints as unsigned int v with v = v + 1 & 0xff | [`regnarrow`](#regnarrow) |
-| a byte loaded with ldrb is declared unsigned int and used as an index | [`regnarrow`](#regnarrow) |
-| an int local prints as unsigned long on x86-64 though every value is a zero-extended 32-bit result | [`regnarrow`](#regnarrow) |
-| a signed char loaded with ldrsb is declared int | [`regsigned`](#regsigned) |
-| a short counter prints as int with (int)(short) casts at every use | [`regsigned`](#regsigned) |
-| an int local prints as long on x86-64 though every value is a movsxd | [`regsigned`](#regsigned) |
-| a FILE * or char * the caller holds becomes long at the callee's parameter | [`protoorder`](#protoorder) |
-| a function that only hands a string on to a recursive function (quotearg_buffer_restyled, a tree walk, a pair of functions calling each other) keeps an integer parameter | [`protoorder`](#protoorder) |
-| an argument is typed at one call site of a callee and not at another | [`protoorder`](#protoorder) |
-| decompiling one function alone gives it a prototype the whole-binary output does not use at its call sites | [`protoorder`](#protoorder) |
-| the same sub_ address is called with one argument at one site and three at another in the same function | [`protoorder`](#protoorder) |
-| a callee's parameter is void * or long while every call to it passes a struct_N * or a string | [`calleevote`](#calleevote) |
-| a one-field getter reads *(unsigned long *)((long)a0 + 0x10) and its caller's own parameter is a synthesized record | [`calleevote`](#calleevote) |
-| the same record is struct_N * in the caller and void * in the function it passes it to | [`calleevote`](#calleevote) |
-| a wrapper that only compares or forwards a pointer keeps an integer parameter | [`calleevote`](#calleevote) |
-| a parameter is long or unsigned long while every call to it passes a struct_N *, a void * or a string | [`callerptr`](#callerptr) |
-| unsigned long sub_8514(void *a0,unsigned long a1) for a hash_insert whose callers pass two different records | [`callerptr`](#callerptr) |
-| a list or table insert keeps an integer item parameter although its callers pass malloc results | [`callerptr`](#callerptr) |
-| a wrapper that only forwards a pointer to a function pointer keeps an integer parameter | [`callerptr`](#callerptr) |
-| a qsort comparator's parameters print as unsigned long * or int * where the program declares const void * | [`callbacktype`](#callbacktype) |
-| a signal handler renders void sub_1100(void) and its ground truth takes the signal number | [`callbacktype`](#callbacktype) |
-| a pthread start routine takes a pointer-width integer instead of void * | [`callbacktype`](#callbacktype) |
-| a function reached only through a function pointer keeps whatever its own body recovered, with no prototype anywhere | [`callbacktype`](#callbacktype) |
-| a call to a function the same listing declares char * prints (char *)sub_43ee(a0) | [`callrettype`](#callrettype) |
-| v7 = (char *)sub_e8ca(4,(char *)sub_43ee(a0)); | [`callrettype`](#callrettype) |
-| a caller converts a call's result to the type the callee is declared to return | [`callrettype`](#callrettype) |
-| (FILE *)f(a0) under FILE * f(int a0) | [`callrettype`](#callrettype) |
-| a function declared unsigned char sub_x(...) whose callers hold the result in an unsigned int | [`narrowret`](#narrowret) |
-| v1 = sub_8017ac6(a0); with unsigned int v1 beside unsigned char sub_8017ac6 | [`narrowret`](#narrowret) |
-| a bool-returning callee's result kept in an int and only tested | [`narrowret`](#narrowret) |
-| an x86-64 unsigned-int-returning callee's result held in an unsigned long | [`narrowret`](#narrowret) |
-| call rendered with fewer arguments than the disassembly passes when the missing argument register is spilled to the frame before the call | [`spillargtrial`](#spillargtrial) |
-| floating-point argument dropped at the FIRST of several calls that reuse the same value | [`spillargtrial`](#spillargtrial) |
-| a spurious 4-byte stack local appears where a call argument should be | [`spillargtrial`](#spillargtrial) |
-| clang -O2 packed-double code calls atan2 with one argument instead of two | [`spillargtrial`](#spillargtrial) |
-| argument register stored to a caller-frame slot and reloaded after the call is not recognized as an argument | [`spillargtrial`](#spillargtrial) |
-| goto placement follows the sailr region walk instead of ghidra's collapse order (flip off to force CollapseStructure) | [`regionstructure`](#regionstructure) |
-| uncompilable c where a loop body folded into a while condition | [`regionstructure`](#regionstructure) |
-| structuring differs from upstream ghidra on the same function | [`regionstructure`](#regionstructure) |
-| guard clause with a fatal no-return call comes out inverted and the whole body is nested inside the if | [`guardarm`](#guardarm) |
-| the function's only return sits inside an if-arm and the body ends on a no-return call | [`guardarm`](#guardarm) |
-| kuna negates a guard condition that ida and ghidra leave alone | [`guardarm`](#guardarm) |
-| a leading validation guard is emitted at the tail of the function | [`guardarm`](#guardarm) |
-| loop emitted as while( true ) with the head test as a guarded exit on the first statement | [`loopcondhoist`](#loopcondhoist) |
-| a for/while header condition is left inside the loop body | [`loopcondhoist`](#loopcondhoist) |
-| kuna writes while(true) where ida writes while (cond) | [`loopcondhoist`](#loopcondhoist) |
-| a loop's early-exit return is the loop's first statement instead of its condition | [`loopcondhoist`](#loopcondhoist) |
-| one source loop emitted as multiple nested infinite loops | [`loopcontinue`](#loopcontinue) |
-| early continues emitted as retry loops | [`loopcontinue`](#loopcontinue) |
-| accept and fork retries obscure a server's main loop | [`loopcontinue`](#loopcontinue) |
-| goto-heavy multi-exit loop where angr recovers a clean while/for with break/continue | [`regionlooprefine`](#regionlooprefine) |
-| irreducible or multi-latch loop falls back to raw gotos instead of folding | [`regionlooprefine`](#regionlooprefine) |
-| secondary loop exits rendered as gotos rather than break statements | [`regionlooprefine`](#regionlooprefine) |
-| more gotos than angr on a function forced to virtualize several edges | [`regionedgeorder`](#regionedgeorder) |
-| goto cut at an awkward edge where a dominance/post-dominator ordering exposes more structure | [`regionedgeorder`](#regionedgeorder) |
-| crossing goto from the else arm back into the then arm's shared clause | [`condfold`](#condfold) |
-| goto plus label into the shared body of a guard cascade whose arms reconverge | [`condfold`](#condfold) |
-| nested if where angr emits one compound short-circuit condition | [`condfold`](#condfold) |
-| second condition block assigns one value or calls something before its test and the fold is declined | [`condfold`](#condfold) |
-| a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch) |
-| loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch) |
-| nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch) |
-| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight) |
-| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight) |
-| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight) |
-| a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts) |
-| if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts) |
-| a while header carries several comma-separated assignments | [`condstmts`](#condstmts) |
-| want a cap on how many statements a short-circuit operand may print | [`condstmts`](#condstmts) |
-| goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue) |
-| a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue) |
-| continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue) |
-| if (c) goto label_N; ... label_N: where an if around the skipped statements would do | [`gotosink`](#gotosink) |
-| label_N: ... if (c) goto label_N; where a do-while would do | [`gotosink`](#gotosink) |
-| label_N: ... goto label_N; at the end of a statement run instead of a loop | [`gotosink`](#gotosink) |
-| goto to a label that only returns | [`gotoreduce`](#gotoreduce) |
-| label_N: return; shared tail after an if | [`gotoreduce`](#gotoreduce) |
-| more gotos than angr for the same function | [`gotoreduce`](#gotoreduce) |
-| else block kept although the matching if branch always returns or aborts | [`ifelseflatten`](#ifelseflatten) |
-| guard-clause body indented one level deeper than the source | [`ifelseflatten`](#ifelseflatten) |
-| redundant else after an early-return arm | [`ifelseflatten`](#ifelseflatten) |
-| goto into the middle of a sibling branch's arm (compiler cross-jumping) | [`crossjumprevert`](#crossjumprevert) |
-| shared non-return tail reached by goto from an else-if chain | [`crossjumprevert`](#crossjumprevert) |
-| label planted inside an else block targeted from another branch | [`crossjumprevert`](#crossjumprevert) |
-| the same run of dat_<addr> = ... statements is emitted two or three times in one function | [`retsplitglobal`](#retsplitglobal) |
-| a long global-filling epilogue is duplicated once per path that reaches the return | [`retsplitglobal`](#retsplitglobal) |
-| option returndup off does not stop a shared epilogue from being cloned | [`retsplitglobal`](#retsplitglobal) |
-| 46% of a function's text is three copies of one exit block | [`retsplitglobal`](#retsplitglobal) |
-| goto to a shared free(p); return; style epilogue | [`taildup`](#taildup) |
-| cleanup-call return tail reached via label instead of duplicated inline | [`taildup`](#taildup) |
-| flip off when many error checks share one cleanup block (the goto out; idiom) | [`taildup`](#taildup) |
-| both arms of an if/else begin or end with the same duplicated statements | [`dedupitetail`](#dedupitetail) |
-| shared cleanup or help call repeated verbatim in the two branches | [`dedupitetail`](#dedupitetail) |
-| compiler-duplicated tail emitted twice instead of hoisted out of the if | [`dedupitetail`](#dedupitetail) |
-| if (c) v = A; else v = B; assignment diamond where a ternary v = c ? A : B is expected | [`iteregion`](#iteregion) |
-| format/flag builder full of two-arm constant assignments to the same variable | [`iteregion`](#iteregion) |
-| flip off when the source likely wrote an explicit if/else | [`iteregion`](#iteregion) |
-| if (c) v = <expr1>; else v = <expr2>; where a ternary v = c ? expr1 : expr2 is expected | [`iteexpr`](#iteexpr) |
-| kuna emits far fewer ?: ternaries than angr/ida on format/flag/size code | [`iteexpr`](#iteexpr) |
-| computed-arm assignment diamond (v = *p / v = b + k) not folded to a ternary | [`iteexpr`](#iteexpr) |
-| if (a && b) v = 1; else v = 0; where the source has a single boolean assignment v = a && b | [`iteboolean`](#iteboolean) |
-| -O0 boolean materialization printed as an explicit 0/1 constant diamond | [`iteboolean`](#iteboolean) |
-| extra CFG blocks/edges vs Hex-Rays around a short-circuit boolean assignment | [`iteboolean`](#iteboolean) |
-| only every other ternary in a chain of identical ?: assignments is recovered | [`itecondlist`](#itecondlist) |
-| a re-rolled v = c ? A : B; is immediately followed by an identical un-re-rolled if (c) v = A; else v = B; | [`itecondlist`](#itecondlist) |
-| iteboolean re-rolls 1 of 3 identical short-circuit boolean assignments | [`itecondlist`](#itecondlist) |
-| a diamond folds in isolation but declines when a structured if precedes it | [`itecondlist`](#itecondlist) |
-| giant short-circuit if with comma-expression side effects merging several source early-return guards | [`returndup`](#returndup) |
-| one trailing return shared by many guard paths where the source used per-guard early returns | [`returndup`](#returndup) |
-| merged guard condition containing v = f(...) assignments inline | [`returndup`](#returndup) |
-| a source boolean return renders as a cascade of if (c) return 0; / if (c) return 1; guards | [`orchain`](#orchain) |
-| option returndup off collapses the whole function to one short-circuit expression | [`orchain`](#orchain) |
-| a source guard testing several conditions with and/or becomes that many identical constant-return guards | [`orchain`](#orchain) |
-| the return-dupe slug on a function whose source wrote one short-circuit condition | [`orchain`](#orchain) |
-| if (!c) return 0; f(); return 0; where the source has if (c) f(); return 0; | [`rettriangle`](#rettriangle) |
-| a duplicated constant return right after a one-statement body | [`rettriangle`](#rettriangle) |
-| // return-dupe on a function whose only split is a short if before its return | [`rettriangle`](#rettriangle) |
-| inverted diamond: if (guard) { entire body } else { v = 0; } return v; | [`earlyreturn`](#earlyreturn) |
-| leading argument-validity check wraps the whole body instead of an early return | [`earlyreturn`](#earlyreturn) |
-| function opens with if (p != 0) { everything } where source wrote if (!p) return 0; | [`earlyreturn`](#earlyreturn) |
-| wide switch where every case assigns a constant and breaks to one shared return | [`switchreturn`](#switchreturn) |
-| switch (x) { case A: v = K; break; ... } return v; instead of per-case return K | [`switchreturn`](#switchreturn) |
-| 17-plus-case const dispatch keeps a merged return variable | [`switchreturn`](#switchreturn) |
-| call result spilled to a temp used exactly once: v5 = f(); if (v5 < 0) | [`foldcallret`](#foldcallret) |
-| single-use call return not inlined into its use site | [`foldcallret`](#foldcallret) |
-| flip off to force every call output into a named temporary (ghidra style) | [`foldcallret`](#foldcallret) |
-| single-use call result still gets its own local although the call and the use are adjacent | [`foldcallretphi`](#foldcallretphi) |
-| call takes a global (stdin/stdout/errno) as an argument and its result will not fold | [`foldcallretphi`](#foldcallretphi) |
-| foldcallret on but v3 = f(glob); use(v3) is still two statements | [`foldcallretphi`](#foldcallretphi) |
-| flip off to put every call result that reads a global back in its own local | [`foldcallretphi`](#foldcallretphi) |
-| a --assert type vN / name vN directive written before the flip now names a different local | [`foldcallretphi`](#foldcallretphi) |
-| v = sub_x(stdin), v == -1 stays two statements: the undeclared callee's eax output is narrower than the rax it returns, and the spill's int declaration is that narrowing | [`foldcallretphi`](#foldcallretphi) |
-| v = f(g) stays two statements on i386/ARM32: an undeclared callee may return a long long in edx:eax / r0:r1 | [`foldcallretphi`](#foldcallretphi) |
-| v = f(g); x = a && !v stays two statements: folded into the right of &&, the call would be skipped when a decides | [`foldcallretphi`](#foldcallretphi) |
-| too many single-use temporaries: v7 = v3 + 8 declared and read once | [`impliedrefs`](#impliedrefs) |
-| a value read three times is written out three times instead of being declared | [`impliedrefs`](#impliedrefs) |
-| want to ablate the implied-expression threshold without rebuilding | [`impliedrefs`](#impliedrefs) |
-| expressions are too deeply nested to read and every sub-term should get a name | [`impliedrefs`](#impliedrefs) |
-| a two-term expression is declared as a temporary instead of being inlined at its two uses | [`termdup`](#termdup) |
-| want to ablate the term-duplication threshold without rebuilding | [`termdup`](#termdup) |
-| raising impliedrefs did not inline an expression because the expression itself is too wide | [`termdup`](#termdup) |
-| switch with more than 1024 cases prints as a computed call (jump-as-call) | [`jumptablemax`](#jumptablemax) |
-| state-machine function with a giant jump table decompiles to a stub | [`jumptablemax`](#jumptablemax) |
-| functions --summary lists a switch over jumptablemax | [`jumptablemax`](#jumptablemax) |
-| xrefs miss references made from switch cases past the first 1024 | [`jumptablemax`](#jumptablemax) |
-| stack-protector canary compare against fs:0x28 and a __stack_chk_fail branch cluttering the epilogue | [`stackguard`](#stackguard) |
-| shared-return goto forced by the canary check block | [`stackguard`](#stackguard) |
-| flip off to keep the real canary instructions for auditing the protector | [`stackguard`](#stackguard) |
-| aarch64 functions keep the stack canary compare and __stack_chk_fail branch | [`canaryglobal`](#canaryglobal) |
-| an arm or powerpc function ends in a goto to a canary check | [`canaryglobal`](#canaryglobal) |
-| stackguard strips x86-64 canaries but not aarch64 ones | [`canaryglobal`](#canaryglobal) |
-| a Windows PE function opens with `v8 = dat_140074040 ^ (unsigned long long)v1;` and ends with a one-argument call taking `v8 ^ (unsigned long long)v1` | [`msvcstackguard`](#msvcstackguard) |
-| an unnamed one-argument callee (`__security_check_cookie`) called just before every return | [`msvcstackguard`](#msvcstackguard) |
-| `--option stackguard on` and `off` give byte-identical output on a Windows binary | [`msvcstackguard`](#msvcstackguard) |
-| an otherwise unused 8-byte stack slot declared in every function of an MSVC binary | [`msvcstackguard`](#msvcstackguard) |
-| Rust output littered with `panic_bounds_check()` / `slice_error_fail()` / `panic_const_div_by_zero()` calls | [`securitycheck`](#securitycheck) |
-| every slice index guarded by an `if` whose arm only panics | [`securitycheck`](#securitycheck) |
-| Rust function CFG roughly twice the size of the source control flow | [`securitycheck`](#securitycheck) |
-| flip off to keep the real bounds-check instructions for auditing | [`securitycheck`](#securitycheck) |
-| if (x == 0) guard with the common path in the else arm | [`branchflip`](#branchflip) |
-| negated condition where angr renders the positive complement first | [`branchflip`](#branchflip) |
-| if/else polarity inverted versus the source's reading order | [`branchflip`](#branchflip) |
-| an arm function returns or assigns dat_<addr> where the disassembly shows a .word literal | [`litpoolconst`](#litpoolconst) |
-| a pc-relative literal-pool constant renders as an opaque global instead of its value | [`litpoolconst`](#litpoolconst) |
-| option readonly on exposes a constant the default output hides | [`litpoolconst`](#litpoolconst) |
-| a value loaded from inside the function's own extent has no readable definition | [`litpoolconst`](#litpoolconst) |
-| loop exit rendered as goto label_N; plus a synthesized label instead of break; | [`loopbreak_recovery`](#loopbreak_recovery) |
-| switch-case exit gotos where break; is expected | [`loopbreak_recovery`](#loopbreak_recovery) |
-| error paths leave a loop by goto to its successor label | [`loopbreak_recovery`](#loopbreak_recovery) |
-| an -O2 counter is declared unsigned int but every comparison on it is written (int)v | [`signedness`](#signedness) |
-| unsigned long locals whose only uses are signed compares | [`signedness`](#signedness) |
-| the declared signedness contradicts the casts in the body | [`signedness`](#signedness) |
-| want C-conventional signed declarations for values no operation settles | [`signedness`](#signedness) |
-| want the declaration type inference produced, without any rounding | [`signedness`](#signedness) |
-| a stack local is declared unsigned long and every comparison on it is written (long)v | [`castsign`](#castsign) |
-| if (0 <= (long)v15) with unsigned long v15; // stack - 0x60 | [`castsign`](#castsign) |
-| the declared signedness of a frame local contradicts the casts in the body | [`castsign`](#castsign) |
-| a conditional arm is cast to the type the conditional already has, v = c ? (int)*(char *)p : 0; | [`castternary`](#castternary) |
-| every arm of a ?: over bytes carries an (int) cast | [`castternary`](#castternary) |
-| (unsigned long)v1 on one arm of a ?: whose other arm is already unsigned long | [`castternary`](#castternary) |
-| an int widened to long beside a long operand, ((long *)a0)[1] + (long)a1 | [`castwiden`](#castwiden) |
-| a widened index times a literal, (long)i * 8 + 0x2b200 | [`castwiden`](#castwiden) |
-| v = (unsigned long)i; into a variable already declared unsigned long | [`castwiden`](#castwiden) |
-| a store of (long)i through a long pointer | [`castwiden`](#castwiden) |
-| memchr(p,c,(long)n) for an int n | [`castwiden`](#castwiden) |
-| a truncation assigned to a variable already declared that type, v1 = (unsigned int)a0; with unsigned int v1 | [`castnarrow`](#castnarrow) |
-| return (int)x; from a function declared int | [`castnarrow`](#castnarrow) |
-| a long passed to a declared int parameter as toupper((int)a0) | [`castnarrow`](#castnarrow) |
-| a byte store through a char pointer written *a1 = (char)a0; | [`castnarrow`](#castnarrow) |
-| kuna prints a narrowing cast IDA leaves to C's assignment conversion | [`castnarrow`](#castnarrow) |
-| a local is declared with three or more levels of pointer indirection | [`ptrdepthcap`](#ptrdepthcap) |
-| unsigned long long ***** or char ***** appears in the output | [`ptrdepthcap`](#ptrdepthcap) |
-| C++ std::string / ostringstream locals get absurd pointer types | [`ptrdepthcap`](#ptrdepthcap) |
-| the type of a stack object grows one pointer level per decompilation pass | [`ptrdepthcap`](#ptrdepthcap) |
-| an indirect call through a table entry prints (**(void **)p)(), which does not compile | [`calltargettype`](#calltargettype) |
-| a local holding a function pointer is declared void * and called as (*v1)(a1,7) | [`calltargettype`](#calltargettype) |
-| a parameter, global or struct field holding a function pointer is declared void * and its call does not compile | [`calltargettype`](#calltargettype) |
-| a DWARF function-pointer parameter or field prints void * | [`calltargettype`](#calltargettype) |
-| called object is not a function or function pointer when the output is compiled | [`calltargettype`](#calltargettype) |
-| a local is declared void with no pointer star and then assigned or added | [`codescalar`](#codescalar) |
-| a call result is cast (void) and stored | [`codescalar`](#codescalar) |
-| void v4; // al followed by (char)v4 arithmetic | [`codescalar`](#codescalar) |
-| a byte loaded or stored through a function pointer has no scalar type | [`codescalar`](#codescalar) |
-| a parameter is declared long or unsigned long and is only ever dereferenced | [`ptrfromuse`](#ptrfromuse) |
-| every use of an argument is *(T *)(a0 + k) but the argument is not a pointer | [`ptrfromuse`](#ptrfromuse) |
-| one function takes T *a0 and its sibling takes long a0 for the same kind of argument | [`ptrfromuse`](#ptrfromuse) |
-| an argument dereferenced at offset 0 gets a pointer type but one dereferenced at +8 does not | [`ptrfromuse`](#ptrfromuse) |
-| a string parameter is declared unsigned long and every call site passes it to strlen or printf | [`charptr`](#charptr) |
-| a buffer indexed one byte at a time is declared void * | [`charptr`](#charptr) |
-| two functions take the same string and one says char * and the other unsigned long | [`charptr`](#charptr) |
-| a -O0 parameter is an integer although the callee's prototype declares char * | [`charptr`](#charptr) |
-| void * sub_e680(uint1 *a0) for a function that passes its argument to strlen | [`charptr`](#charptr) |
-| a buffer indexed one byte at a time prints as *(char *)((long)v6 + (long)v8) | [`elemptr`](#elemptr) |
-| a parameter only ever indexed is declared long | [`elemptr`](#elemptr) |
-| malloc's result is declared void * and every store through it casts | [`elemptr`](#elemptr) |
-| a table in .data read with a computed index prints as *(unsigned char *)((long)v1 + 0x4020) | [`elemptr`](#elemptr) |
-| argv-like parameters are declared long and each element is cast to char * | [`elemptr`](#elemptr) |
-| a local commented // gs_offset or // fs_offset is read through constant offsets | [`pebnames`](#pebnames) |
-| an anti-debug check reads *(char *)(*(long long *)(v1 + 0x60) + 2) | [`pebnames`](#pebnames) |
-| PEB fields such as BeingDebugged or NtGlobalFlag render as magic offsets | [`pebnames`](#pebnames) |
-| a thread-local or stack-limit read renders as *(long long *)(v1 + 0x58) or (v1 + 0x10) | [`pebnames`](#pebnames) |
-| a parameter is declared `unsigned long *` or `void *` and read at two or more fixed offsets | [`structsynth`](#structsynth) |
-| a local assigned from `xmalloc` or another call is written as `*(char *)((long)v1 + 0x14) = 0x6e` | [`structsynth`](#structsynth) |
-| the body is a wall of `*(int *)(p + 0x18)` casts over one pointer | [`structsynth`](#structsynth) |
-| `*(unsigned int *)&a0[1]` appears where a record field is meant | [`structsynth`](#structsynth) |
-| two functions read the same object and neither names its fields | [`structsynth`](#structsynth) |
-| a local loaded from a `struct_N` field is read as `*(int *)((long)v1 + 0xc)` | [`structsynth`](#structsynth) |
-| a synthesized struct's link fields are `long *` or `unsigned long` where the nodes they point at are the same record | [`structsynth`](#structsynth) |
-| one object has two or more struct_N names whose fields agree as far as both go | [`structmerge`](#structmerge) |
-| a synthesized record declares fewer fields than the program's own accesses show | [`structmerge`](#structmerge) |
-| two functions take a pointer to the same thing and their parameter types differ | [`structmerge`](#structmerge) |
-| the exported header defines struct_2 and struct_7 with the same first members | [`structmerge`](#structmerge) |
-| a parameter is declared `void *` and every read of it is `((T *)a0)[K]` or `*(T *)((long)a0 + K)` with no read at offset 0 | [`structheadless`](#structheadless) |
-| a function reads a record's later members and the listing shows a cast per access | [`structheadless`](#structheadless) |
-| `statx_to_stat` or a `fileinfo` accessor renders as casts of an untyped pointer | [`structheadless`](#structheadless) |
-| a record reader keeps `void *` while a sibling that reads the first member gets `struct_N *` | [`structheadless`](#structheadless) |
-| a synthesized record declares long field_0x0 and every read of it is (char *)a0->field_0x0 | [`fieldtype`](#fieldtype) |
-| free((void *)a0->field_0xb0) on a struct_N field | [`fieldtype`](#fieldtype) |
-| a function-pointer field prints as (*(void *)a0->field_0x40)(...) | [`fieldtype`](#fieldtype) |
-| a record's buffer field is used in pointer arithmetic that prints as (char *)(a0->field_0x8 + a0->field_0x0) | [`fieldtype`](#fieldtype) |
-| dead code kept after calls to exit/abort/panic when off | [`noreturn_known`](#noreturn_known) |
-| call to a known no-return libc function still shows a fall-through path | [`noreturn_known`](#noreturn_known) |
-| unreachable epilogue after std::terminate or a rust panic call | [`noreturn_known`](#noreturn_known) |
-| windows api calls render as (*dat_411324)() with no name | [`peimportcall`](#peimportcall) |
-| a Mach-O objc_msgSend import renders as (*dat_100004038)() through __got | [`peimportcall`](#peimportcall) |
-| an ELF -fno-plt call to abort or exit renders as (*dat_3fb0)() and flow runs into the next function | [`peimportcall`](#peimportcall) |
-| a PE function runs past ExitProcess or ExitThread and absorbs the next function's body | [`peimportcall`](#peimportcall) |
-| no Win32 API names anywhere in a decompiled PE | [`peimportcall`](#peimportcall) |
-| an arm64e call renders as (*dat_<addr>)(...) through an __auth_ptr slot | [`authptrcall`](#authptrcall) |
-| ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall) |
-| an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method | [`arm64evcall`](#arm64evcall) |
-| c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls | [`arm64evcall`](#arm64evcall) |
-| swift class method calls on arm64e are anonymous slot calls | [`arm64evcall`](#arm64evcall) |
-| kuna xrefs --to a virtual method finds no callers | [`arm64evcall`](#arm64evcall) |
-| obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b | [`mba`](#mba) |
-| xor and and terms combined with additions and multiplications by 2 | [`mba`](#mba) |
-| ollvm or tigress instruction substitution in the output | [`mba`](#mba) |
-| products of and/or terms such as (x & y) * (x  | [`mba`](#mba) |
-|  y) that hide a plain multiplication | [`mba`](#mba) |
-| heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc) |
-| dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc) |
-| caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc) |
-| live code after a call disappears and the callee is annotated // no-return | [`noreturn_discstrict`](#noreturn_discstrict) |
-| a plainly-returning function is reported no-return | [`noreturn_discstrict`](#noreturn_discstrict) |
-| caller collapses to void f(); // no-return where it should return a value | [`noreturn_discstrict`](#noreturn_discstrict) |
-| dead code removed after a call on an architecture with decoder gaps (Thumb/MIPS16/PPC VLE) | [`noreturn_discstrict`](#noreturn_discstrict) |
-| unreachable code after a call to an exit/fatal wrapper | [`noreturn_propagate`](#noreturn_propagate) |
-| function truncated after calling a cold wrapper | [`noreturn_propagate`](#noreturn_propagate) |
-| spurious while(true) around a call that never returns | [`noreturn_propagate`](#noreturn_propagate) |
-| stripped binary's unnamed exit wrapper swallows the functions after it | [`noreturn_propagate`](#noreturn_propagate) |
-| caller keeps decoding the cold path after error(2, ...) into the next function | [`noreturn_error`](#noreturn_error) |
-| function balloons past a wrapper that tail-calls error with nonzero status | [`noreturn_error`](#noreturn_error) |
-| dead fall-through after a gnu error(nonzero, ...) call | [`noreturn_error`](#noreturn_error) |
-| wrapper with a mid-body fatal call still treated as returning | [`noreturn_reach`](#noreturn_reach) |
-| unreachable write()/return tail keeps a fatal wrapper looking like it returns | [`noreturn_reach`](#noreturn_reach) |
-| switch whose every arm ends in a no-return call not concluded no-return | [`noreturn_reach`](#noreturn_reach) |
-| caller decodes garbage past an sshpkt_fatal-style wrapper | [`noreturn_reach`](#noreturn_reach) |
-| rust or go string argument renders as a raw rodata address beside its length instead of the literal text | [`fatstr`](#fatstr) |
-| takes_str(&DAT_00102000, 15) where the 15 bytes at that address are plainly the string | [`fatstr`](#fatstr) |
-| string literals recovered on C binaries but never on rust or go ones | [`fatstr`](#fatstr) |
-| swift string literal shows as two 64-bit constants (0xe500000000000000 and 0x6570616873) instead of its text | [`swiftstr`](#swiftstr) |
-| 0x8000000100xxxxxx object word and 0xd000000000000028 count stored beside each other | [`swiftstr`](#swiftstr) |
-| string literals recovered on C binaries but never on swift ones | [`swiftstr`](#swiftstr) |
-| every function of a Go binary opens with if (condition) { runtime_morestack_noctxt(); } inside a loop to the entry | [`gomorestack`](#gomorestack) |
-| go function parameters recovered as phi-fed locals or missing because the entry is a loop head | [`gomorestack`](#gomorestack) |
-| do-while wrapping an entire go function body with a morestack call in its latch | [`gomorestack`](#gomorestack) |
-| every pointer store in a go function wrapped in if (writeBarrier flag) with a gcWriteBarrier call | [`gowritebarrier`](#gowritebarrier) |
-| stores through an undefined local after a gcWriteBarrier call because the thunk's buffer register is not modeled | [`gowritebarrier`](#gowritebarrier) |
-| go output doubled in size by GC bookkeeping diamonds | [`gowritebarrier`](#gowritebarrier) |
-| if ((v ^ v << 1) >> 0x3e & 1) before a tail call in an arm64e function | [`ptrauthtrap`](#ptrauthtrap) |
-| (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap) |
-| a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap) |
-|  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap) |
-| a __chkstk_darwin() or ___chkstk_darwin() call in an apple function | [`chkstkdarwin`](#chkstkdarwin) |
-| a value kept in a caller-saved register across the stack probe prints as an undefined local | [`chkstkdarwin`](#chkstkdarwin) |
-| an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense | [`outlinedinline`](#outlinedinline) |
-| a function body is a string of OUTLINED_FUNCTION calls | [`outlinedinline`](#outlinedinline) |
-| go function returning bool prints v = CONCAT71((undefined7)(v >> 8), a == b) instead of returning the comparison | [`gobool`](#gobool) |
-| return value masked with 0xffffffff around a boolean | [`gobool`](#gobool) |
-| undefined7 casts feeding a concatenation at every boolean return | [`gobool`](#gobool) |
-| objc_msgSend renders its selector as dat_<addr> or selRef_<sel> instead of the selector | [`objcrefconst`](#objcrefconst) |
-| objc_msgSendSuper2 shows the super struct filled from a data global instead of the class | [`objcrefconst`](#objcrefconst) |
-| a class-method receiver renders as dat_<addr> instead of _OBJC_CLASS_$_<Class> | [`objcrefconst`](#objcrefconst) |
-| an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar | [`objcivars`](#objcivars) |
-| self is objc_object * in every -[Class sel] although the class declares ivars | [`objcivars`](#objcivars) |
-| objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar | [`objcivars`](#objcivars) |
-| the same value is assigned to one variable twice in a row with nothing in between | [`hideshadow`](#hideshadow) |
-| a comma-expression condition repeats an assignment: (v3 = a2, v4 = a0, v4 = a0, ...) | [`hideshadow`](#hideshadow) |
-| a repeated vN = dat_XXXX; around a conditional goto | [`hideshadow`](#hideshadow) |
-| kuna prints a copy assignment that stock Ghidra does not | [`hideshadow`](#hideshadow) |
-| parameter copy-shadow assignment (v6 = a1;) emitted below an earlier guard instead of at the top of the function | [`paramcopyhoist`](#paramcopyhoist) |
-| kuna places some parameter spill copies in the entry block and others after a guard in the same function | [`paramcopyhoist`](#paramcopyhoist) |
-| extra CFG nodes versus the source around a cascade of if (p && !*p) p = NULL; parameter guards | [`paramcopyhoist`](#paramcopyhoist) |
-| vN = aM; for an unmodified incoming parameter appearing in the middle of a guard cascade | [`paramcopyhoist`](#paramcopyhoist) |
-| a value stored into a stack slot is printed into a register local and the slot is never assigned | [`indirectonly`](#indirectonly) |
-| a struct filled on the frame is passed by address to a call although the emitted C never wrote it | [`indirectonly`](#indirectonly) |
-| a declared local is never written and never read anywhere in the function | [`indirectonly`](#indirectonly) |
-| a `vN = slot;` ... `slot = vN;` round-trip copy pair around a loop that only reads the slot | [`indirectonly`](#indirectonly) |
-| a call result assigned to a temporary that is immediately assigned to a stack slot | [`indirectonly`](#indirectonly) |
-| an inlined callee body is spliced into the caller and should read as a call | [`outline`](#outline) |
-| want to pull a chosen region out of a function into a named pseudofunction | [`outline`](#outline) |
-| acting on an almostregion inline-candidate report by hand or with an llm | [`outline`](#outline) |
-| an unprototyped call loses a local output pointer | [`stackaddrargtrial`](#stackaddrargtrial) |
-| a post-call word or halfword output folds to its initializer | [`stackaddrargtrial`](#stackaddrargtrial) |
-| a helper's stack output array is shorter than the helper writes | [`callarrayextent`](#callarrayextent) |
-| a post-call stack read is emitted as an independent uninitialized scalar | [`callarrayextent`](#callarrayextent) |
-| a stack array passed to a helper loses aliases with neighboring frame slots | [`callarrayextent`](#callarrayextent) |
-| a local passed by address to a callee is declared unsigned long and read as v1._4_2_ or v1._6_1_ | [`stackstruct`](#stackstruct) |
-| byte and short fields of a local header print as partial accesses | [`stackstruct`](#stackstruct) |
-| a struct the source zero-initializes or memsets prints as several unrelated stack scalars | [`stackstruct`](#stackstruct) |
-| memcpy copies 0x40 bytes into a local declared char v13[12] | [`stackstruct`](#stackstruct) |
-| negative index displacement hides a declared global array | [`globalarrayanchor`](#globalarrayanchor) |
-| indexed stores use an address immediately before an array | [`globalarrayanchor`](#globalarrayanchor) |
-| numerical integer conversion is stored in a float local | [`fputruncviews`](#fputruncviews) |
-| short call argument uses inverse floating storage unions | [`fputruncviews`](#fputruncviews) |
-| one floating register carries both integers and genuine floating values | [`fputruncviews`](#fputruncviews) |
-| rule pools spend most of their time re-testing ops nothing changed | [`dirtypool`](#dirtypool) |
-| a large function's simplification repeats full sweeps for a handful of rewrites | [`dirtypool`](#dirtypool) |
-| a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel) |
-| a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel) |
-| invoke-range calls lose their arguments | [`dexmodel`](#dexmodel) |
-| a DEX method's catch blocks are missing from the output | [`javatry`](#javatry) |
-| code after a call that can throw runs on as if nothing could be thrown | [`javatry`](#javatry) |
-| throwException(x); return; instead of throw x; | [`javatry`](#javatry) |
-| puts/printf arguments untyped so string literals render as bare constants or dat_ addresses | [`libproto`](#libproto) |
-| imports carry no signatures and call arguments stay untyped | [`libproto`](#libproto) |
-| a caller's parameter is unsigned long where it is only ever passed to a libc function that takes a char */int | [`libcsigs`](#libcsigs) |
-| a libc call renders its string argument as a bare 0x... constant instead of a literal | [`libcsigs`](#libcsigs) |
-| a wrapper around a libc function loses its return value or return type | [`libcsigs`](#libcsigs) |
-| __printf_chk / __fprintf_chk arguments are shifted by the fortify flag | [`libcsigs`](#libcsigs) |
-| an exit or __stack_chk_fail call shows phantom arguments | [`libcsigs`](#libcsigs) |
-| a function that only ever passes its argument to a libc stdio call still declares it long or unsigned long | [`libctypes`](#libctypes) |
-| a fopen or fdopen result is a void * that nothing can name | [`libctypes`](#libctypes) |
-| a stat or lstat call fills an untyped void * buffer | [`libctypes`](#libctypes) |
-| getopt_long takes a bare (void *)0x... long-option table | [`libctypes`](#libctypes) |
-| readdir returns a void * whose fields are casts and offsets | [`libctypes`](#libctypes) |
-| a stream parameter is void * where the ground truth is FILE * | [`libctypes`](#libctypes) |
-| a FILE * or stat * renders its members as field_0x8 / field_0x30 instead of _IO_read_ptr / st_size | [`libctypes`](#libctypes) |
-| a value loaded out of a named libc struct keeps the cast's type instead of the field's | [`libctypes`](#libctypes) |
-| stdin/stdout/stderr render as an untyped word and their fields as raw offsets ((long)stdout + 0x28) | [`libctypes`](#libctypes) |
-| a shared object's stream slot has no name at all (*(long *)(*dat_3fe0 + 0x28)) | [`libctypes`](#libctypes) |
-| two functions in one binary disagree about what stdout is, one calling it FILE * and the other a long | [`libctypes`](#libctypes) |
-| a Windows API call renders with an empty argument list | [`win32sigs`](#win32sigs) |
-| LoadLibraryExW() or CreateFileW() has no arguments but the pushes are visible above it | [`win32sigs`](#win32sigs) |
-| a PE function declares dozens of stack locals that only ever hold outgoing call arguments | [`win32sigs`](#win32sigs) |
-| CALL fall-through addresses are assigned to stack variables | [`win32sigs`](#win32sigs) |
-| a Win32 call's wide string argument renders as a bare 0x... constant | [`win32sigs`](#win32sigs) |
-| calleearity and varargstackargs both on and a Windows API call is still argumentless | [`win32sigs`](#win32sigs) |
-| a SPARC32 caller stores the low word of a 64-bit quotient from a local nothing assigns | [`libgccsigs`](#libgccsigs) |
-| __divdi3 is called with four 32-bit arguments and only %o0 is read back | [`libgccsigs`](#libgccsigs) |
-| *p = v1; after a __divdi3 call where v1 is never written | [`libgccsigs`](#libgccsigs) |
-| a call to a function I named with --define-function still renders with no arguments | [`declaredlibcproto`](#declaredlibcproto) |
-| the argument stores are emitted as raw stack writes on the lines above an argumentless call | [`declaredlibcproto`](#declaredlibcproto) |
-| naming a callee changes the spelling of the call and nothing else | [`declaredlibcproto`](#declaredlibcproto) |
-| calleearity and varargstackargs both on and a stripped statically linked libc call is still argumentless | [`declaredlibcproto`](#declaredlibcproto) |
-| a declared ptrace/read/write/open call loses every argument | [`declaredlibcproto`](#declaredlibcproto) |
-| string constants render as raw addresses or unnamed data instead of quoted char[N] literals | [`strings`](#strings) |
-| no data symbols at ascii runs in rodata | [`strings`](#strings) |
-| four-character commands such as quit, show, bind, or fork render as hexadecimal addresses | [`strings`](#strings) |
-| a wide Windows API argument renders as a one-character string literal | [`widestrings`](#widestrings) |
-| LoadLibraryW("n") or FindWindowW("O",0) in the emitted C | [`widestrings`](#widestrings) |
-| kuna strings --encoding utf16 reports a literal the decompiled C truncates to its first character | [`widestrings`](#widestrings) |
-| a UTF-16 string address carries no data symbol while the ascii ones do | [`widestrings`](#widestrings) |
-| an anti-debugging check names no DLL or window class | [`widestrings`](#widestrings) |
-| a wchar_t or char32_t string literal argument renders as an address such as &dat_2004 | [`widestrings32`](#widestrings32) |
-| a wide literal renders as its first character in a narrow string | [`widestrings32`](#widestrings32) |
-| L"..." appears only where a libc wide-string prototype types the argument | [`widestrings32`](#widestrings32) |
-| a wide default such as s = L"(NULL)" renders as s = &dat_2038 | [`widestrings32`](#widestrings32) |
-| a stripped binary yields almost no functions (symbol stream only) | [`entry_disc`](#entry_disc) |
-| functions discovered via e_entry/init_array/.eh_frame/prologues missing from the list | [`entry_disc`](#entry_disc) |
-| c++ catch/cleanup landing pads missing from a stripped binary's function list | [`eh_frame_full`](#eh_frame_full) |
-| exception-handler code never discovered as entries | [`eh_frame_full`](#eh_frame_full) |
-| gcc_except_table call-site targets left unexplored | [`eh_frame_full`](#eh_frame_full) |
-| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh) |
-| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh) |
-| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh) |
-| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh) |
-| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh) |
-| a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc) |
-| panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc) |
-| rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc) |
-| a rust string literal prints glued to the next literal | [`strcodelen`](#strcodelen) |
-| a &str pointer alone shows several literals run together | [`strcodelen`](#strcodelen) |
-| rust string symbol names concatenate two messages | [`strcodelen`](#strcodelen) |
-| a go runtime.newobject call passes a bare address | [`gortti`](#gortti) |
-| go interface conversion stores an unnamed itab address | [`gortti`](#gortti) |
-| stripped go binary shows hex constants where type descriptors are used | [`gortti`](#gortti) |
-| a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts) |
-| an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts) |
-| LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts) |
-| functions the unwinder describes in __unwind_info missing from the inventory | [`unwindstarts`](#unwindstarts) |
-| a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame | [`machoehframe`](#machoehframe) |
-| functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory | [`machoehframe`](#machoehframe) |
-| functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry) |
-| a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry) |
-| gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry) |
-| many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold) |
-| a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold) |
-| a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold) |
-| a tail jump to an undeclared import drops an argument the function passes through | [`importvote`](#importvote) |
-| a forwarder to a library function prints void and no return | [`importvote`](#importvote) |
-| return helper() with fewer arguments than the other calls to helper pass | [`importvote`](#importvote) |
-| a c++ function's cleanups and catch bodies are missing with no hint | [`ehnote`](#ehnote) |
-| nothing says which calls can throw | [`ehnote`](#ehnote) |
-| a rust drop-glue landing pad disappears silently | [`ehnote`](#ehnote) |
-| spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior) |
-| a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior) |
-| function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior) |
-| a function entry lands in the middle of an instruction | [`fdeinterior`](#fdeinterior) |
-| extra entries between two real functions in a binary built with exceptions | [`fdeinterior`](#fdeinterior) |
-| a pe function entry inside another function's known address range | [`pdatainterior`](#pdatainterior) |
-| an unaligned sub_<addr> that starts in the middle of an instruction | [`pdatainterior`](#pdatainterior) |
-| decompiled output stops early with a funcboundflow truncation warning | [`pdatainterior`](#pdatainterior) |
-| function count inflated by gap-walk starts on an obfuscated pe | [`pdatainterior`](#pdatainterior) |
-| a large .pdata-described function decompiles as a fragment | [`pdatainterior`](#pdatainterior) |
-| a sub_<addr> inside a function the pdb names | [`pdbinterior`](#pdbinterior) |
-| a pdb-named leaf function decompiles with a funcboundflow truncation warning | [`pdbinterior`](#pdbinterior) |
-| a switch case missing from a function whose .pdb is present | [`pdbinterior`](#pdbinterior) |
-| function count inflated by gap-walk starts inside crt leaves of an msvc binary | [`pdbinterior`](#pdbinterior) |
-| an entry in the middle of an instruction inside a pdb procedure | [`pdbinterior`](#pdbinterior) |
-| a function entry at an address outside every section of the image | [`unmappedentry`](#unmappedentry) |
-| kuna functions lists a size-0 sub_<addr> far above or below the image | [`unmappedentry`](#unmappedentry) |
-| decompiling a discovered function returns no body at all | [`unmappedentry`](#unmappedentry) |
-| the function inventory of an anti-disassembly binary contains an address that is not mapped | [`unmappedentry`](#unmappedentry) |
-| a call target from junk bytes behind an always-taken branch becomes a function | [`unmappedentry`](#unmappedentry) |
-| kuna functions lists only the 5-byte jmp thunks of an msvc incremental-link image | [`thunkentry`](#thunkentry) |
-| a thunk's size covers many real functions | [`thunkentry`](#thunkentry) |
-| decompile-all prints each body under the name of its thunk | [`thunkentry`](#thunkentry) |
-| function behind a jmp rel32 thunk is never a function start | [`thunkentry`](#thunkentry) |
-| fast mode finds no function bodies at all on an msvc debug build | [`thunkentry`](#thunkentry) |
-| a function called only through a pointer is missing from kuna functions | [`addrtakenentry`](#addrtakenentry) |
-| kuna xrefs reports a data reference to an address kuna functions does not list | [`addrtakenentry`](#addrtakenentry) |
-| a registration stub's size covers the handler after it | [`addrtakenentry`](#addrtakenentry) |
-| decompile --addr at a lea target prints a body no listed function has | [`addrtakenentry`](#addrtakenentry) |
-| relocated handler pointers before the first .pdata record are not functions | [`addrtakenentry`](#addrtakenentry) |
-| a frame-less leaf with no .pdata record is folded into the function before it | [`addrtakenentry`](#addrtakenentry) |
-| every function in a ppc64 binary is listed twice, as an 8-byte named husk plus an anonymous body | [`ppclocalentry`](#ppclocalentry) |
-| kuna decompile of a named ppc64 function returns an empty body with a funcboundflow truncation warning | [`ppclocalentry`](#ppclocalentry) |
-| kuna functions reports size 8 for a ppc64 function that is plainly longer | [`ppclocalentry`](#ppclocalentry) |
-| a ppc64le function body is only reachable under a generated sub_<hex> name | [`ppclocalentry`](#ppclocalentry) |
-| a function entry sits 8 bytes into another function on PowerPC | [`ppclocalentry`](#ppclocalentry) |
-| an A32 function after a Thumb helper decompiles as halt_missing in a stripped ARM binary | [`flowmode`](#flowmode) |
-| flow reaches unmapped memory two bytes into an A32 instruction | [`flowmode`](#flowmode) |
-| --isa arm decompiles an ARM function correctly that the default run turns into garbage | [`flowmode`](#flowmode) |
-| a function reached with bl after a blx call decodes in the wrong instruction set | [`flowmode`](#flowmode) |
-| --option listing off fixes the decompilation of an ARM function | [`flowmode`](#flowmode) |
-| kuna strings reports xrefs_count 0 and an empty functions list for every string in a 32-bit binary | [`picbase`](#picbase) |
-| a string the disassembly plainly forms the address of has no cross-references | [`picbase`](#picbase) |
-| kuna xrefs --to a .rodata address finds nothing in a position-independent i386 executable | [`picbase`](#picbase) |
-| no function is reported as the owner of a prompt the program prints | [`picbase`](#picbase) |
-| globals reached as [ebx+disp] have no readers or writers in the xref index | [`picbase`](#picbase) |
-| main or the entry function is declared void(void) but is called with arguments | [`entrymainproto`](#entrymainproto) |
-| a stripped PE's entry function takes no parameters while its caller passes three | [`entrymainproto`](#entrymainproto) |
-| argc and argv are invisible in the decompiled main of a stripped windows binary | [`entrymainproto`](#entrymainproto) |
-| the CRT startup calls sub_<addr>(a,b,c) and sub_<addr> declares (void) | [`entrymainproto`](#entrymainproto) |
-| command-line handling in main cannot be followed because the arguments have no names | [`entrymainproto`](#entrymainproto) |
-| kuna functions on a macOS binary lists no main at all | [`machomain`](#machomain) |
-| the entry of a stripped Mach-O is reported only as sub_<addr> | [`machomain`](#machomain) |
-| a Mach-O program routine decompiles as unsigned long sub_<addr>(void) | [`machomain`](#machomain) |
-| argc and argv are invisible in the decompiled main of a stripped mach-o binary | [`machomain`](#machomain) |
-| there is no way to tell which of a stripped Mach-O's functions the program starts in | [`machomain`](#machomain) |
-| kuna functions on a windows binary lists no main at all | [`pemain`](#pemain) |
-| the entry of a stripped PE is reported only as the CRT startup sub_<addr> | [`pemain`](#pemain) |
-| there is no way to tell which of a stripped PE's functions the program starts in | [`pemain`](#pemain) |
-| functions --summary gives the entry as mainCRTStartup and never names main | [`pemain`](#pemain) |
-| WinMain of a stripped GUI exe is reported only as sub_<addr> | [`pemain`](#pemain) |
-| kuna strings reports xrefs_count 0 and functions [] for every literal in a stripped ARM binary | [`armlibcmain`](#armlibcmain) |
-| kuna functions on an ARM ELF lists no main and one entry covering most of .text | [`armlibcmain`](#armlibcmain) |
-| a prompt an ARM binary plainly prints has no owning function | [`armlibcmain`](#armlibcmain) |
-| kuna xrefs --to a .rodata address finds nothing in a non-PIE ARM executable | [`armlibcmain`](#armlibcmain) |
-| most of a stripped ARM binary's .text is never decoded although it is inside a discovered function's extent | [`armlibcmain`](#armlibcmain) |
-| an unstripped ELF's main decompiles with anonymous a0/a1 parameters and an unsigned return | [`elfmain`](#elfmain) |
-| argv[1] in main reads as a struct field or a cast of a1 | [`elfmain`](#elfmain) |
-| kuna functions on a stripped Linux binary lists no main at all | [`elfmain`](#elfmain) |
-| the entry of a stripped ELF is reported only as sub_<addr> | [`elfmain`](#elfmain) |
-| a stripped ELF program routine decompiles as unsigned long sub_<addr>(int a0,char **a1) | [`elfmain`](#elfmain) |
-| argc and argv are invisible in the decompiled main of a stripped elf binary | [`elfmain`](#elfmain) |
-| main returns unsigned long instead of int in a stripped ELF | [`elfmain`](#elfmain) |
-| there is no way to tell which of a stripped ELF's functions the program starts in | [`elfmain`](#elfmain) |
-| functions after nop padding missing in a stripped binary | [`funcstart_patterns`](#funcstart_patterns) |
-| a push rbx; mov rbx,rdi prologue never discovered as a function start | [`funcstart_patterns`](#funcstart_patterns) |
-| code-bearing gaps between discovered functions left undefined | [`funcstart_patterns`](#funcstart_patterns) |
-| a stripped a32 firmware omits disconnected functions | [`armframes`](#armframes) |
-| stripped arm xref queries omit calls from disconnected stack frames | [`armframes`](#armframes) |
-| an arm caller is assigned to an interior prologue | [`armframes`](#armframes) |
-| arm interworking frame discovery leaves stale call references | [`armframes`](#armframes) |
-| stripped cortex-m firmware yields only a handful of functions | [`cortexmvectors`](#cortexmvectors) |
-| arm firmware body decodes as a32 garbage instead of thumb | [`cortexmvectors`](#cortexmvectors) |
-| nmi/hardfault/systick exception handlers never discovered as entries | [`cortexmvectors`](#cortexmvectors) |
-| isr_vector table present but no vector-derived function starts | [`cortexmvectors`](#cortexmvectors) |
-| a small arm callback or isr handler produces no decompiled output at all | [`ptrentry`](#ptrentry) |
-| kuna emits one function then the next with un-decompiled code in between | [`ptrentry`](#ptrentry) |
-| bare bx lr exception handlers never discovered as entries | [`ptrentry`](#ptrentry) |
-| vtable or fops-struct callbacks missing from a stripped arm binary | [`ptrentry`](#ptrentry) |
-| driver op-struct function pointers left undiscovered | [`ptrentry`](#ptrentry) |
-| a stripped arm function list carries sub_<addr> entries two bytes below the real function | [`poolentry`](#poolentry) |
-| the same arm function appears twice at addresses two bytes apart | [`poolentry`](#poolentry) |
-| a decompiled arm function returns a constant or drops its first parameter because of a dead leading movs | [`poolentry`](#poolentry) |
-| kuna reports far more functions than the binary has on bare-metal arm | [`poolentry`](#poolentry) |
-| an arm function entry lands one halfword before the real prologue | [`poolentry`](#poolentry) |
-| a32 u-boot recall is far below the cortex-m images | [`poolentry`](#poolentry) |
-| thumb code misdecoded as arm garbage instructions | [`arm_markers`](#arm_markers) |
-| $t/$a mapping symbols ignored so the wrong decode mode applies | [`arm_markers`](#arm_markers) |
-| an a32 function after a thumb function decodes as thumb garbage | [`armfuncmode`](#armfuncmode) |
-| function flow reaches unmapped memory in an a32 function of an image without mapping symbols | [`armfuncmode`](#armfuncmode) |
-| a thumb function's mode leaks into the even-addressed function after it | [`armfuncmode`](#armfuncmode) |
-| an A32 function after a Thumb helper decompiles as halt_missing in a stripped ARM binary | [`armwalkmode`](#armwalkmode) |
-| flow reaches unmapped memory two bytes into an A32 instruction | [`armwalkmode`](#armwalkmode) |
-| a function reached with bl after a blx call decodes in the wrong instruction set | [`armwalkmode`](#armwalkmode) |
-| --option listing off fixes the decompilation of an ARM function | [`armwalkmode`](#armwalkmode) |
-| --isa arm decompiles an ARM function correctly that the default run turns into garbage | [`armwalkmode`](#armwalkmode) |
-| unresolved *(gp + offset) loads on mips | [`mips_gp`](#mips_gp) |
-| got/.sdata references never fold to real addresses in a pic mips binary | [`mips_gp`](#mips_gp) |
-| i386 pie libc calls render as sub_<addr> instead of exit/dcgettext | [`i386_pie_plt`](#i386_pie_plt) |
-| spurious do{}while(true) or goto loop after an unnamed exit stub in a 32-bit pie binary | [`i386_pie_plt`](#i386_pie_plt) |
-| kuna functions on a .o or .obj lists phantom sub_<addr> entries below 0x400000 beside the real ones | [`relocrebase`](#relocrebase) |
-| functions and decompile-all disagree on how many functions a relocatable object has | [`relocrebase`](#relocrebase) |
-| a -g .o names one function at address 0 and leaves the rest sub_<addr> | [`relocrebase`](#relocrebase) |
-| string literals and dwarf-named globals in a .o never attach to the loaded image | [`relocrebase`](#relocrebase) |
-| a stripped distribution binary prints sub_<addr> for every function although its debug package is installed | [`debuglink`](#debuglink) |
-| a Fedora/RHEL binary keeps function names in .gnu_debugdata but kuna shows none | [`debuglink`](#debuglink) |
-| a call in a pie binary renders as (*dat_<addr>)(...) with no name although the callee is a named function in the same image | [`dynrelocs`](#dynrelocs) |
-| a got slot reads back as 0 in the decompiled output | [`dynrelocs`](#dynrelocs) |
-| reading a relocated function-pointer table in a pie binary yields all zeroes | [`dynrelocs`](#dynrelocs) |
-| could not build an architecture for <binary>: Non-global scope has empty name | [`symbolnamerepair`](#symbolnamerepair) |
-| an unstripped C++ binary fails to load entirely while a stripped copy of it loads fine | [`symbolnamerepair`](#symbolnamerepair) |
-| kuna functions, decompile-all and decompile-project all fail on the same binary with the same scope error | [`symbolnamerepair`](#symbolnamerepair) |
-| a binary loads in ghidra or ida but kuna refuses it at load with a symbol-scope error | [`symbolnamerepair`](#symbolnamerepair) |
-| a function name in the emitted c contains a newline and splits the declaration across two lines | [`symbolnamechars`](#symbolnamechars) |
-| the // Function: header comment ends early and the address becomes code | [`symbolnamechars`](#symbolnamechars) |
-| decompile-project emits two functions with the same name and the .h has a duplicate prototype | [`symbolnamechars`](#symbolnamechars) |
-| a symbol name renders with a U+FFFD replacement character | [`symbolnamechars`](#symbolnamechars) |
-| kuna decompile <name> cannot address a function that kuna functions printed | [`symbolnamechars`](#symbolnamechars) |
-| the exported .c does not compile because a function name contains */ or // | [`symbolnamechars`](#symbolnamechars) |
-| kuna functions or decompile-all uses hundreds of megabytes of rss on a small binary | [`symbolnamebound`](#symbolnamebound) |
-| kuna stalls for tens of seconds or is oom-killed loading a binary whose symbol table is a few hundred kilobytes | [`symbolnamebound`](#symbolnamebound) |
-| a stripped copy of a binary loads instantly while the unstripped copy hangs | [`symbolnamebound`](#symbolnamebound) |
-| memory grows roughly 1.5 kb per :: in a symbol name | [`symbolnamebound`](#symbolnamebound) |
-| a floating-point expression in an msvc .obj is written entirely in dat_<addr> operands | [`msvcfpconst`](#msvcfpconst) |
-| an msvc object's fp constant reads as dat_<addr> although its symbol name spells the value | [`msvcfpconst`](#msvcfpconst) |
-| one operand of an fp expression is a literal and the neighbouring one is still dat_<addr> | [`msvcfpconst`](#msvcfpconst) |
-| a __real@ symbol in a .obj has no bytes behind it and any read of it fails | [`msvcfpconst`](#msvcfpconst) |
-| a glibc math/mem/str wrapper tail-jumps to `(*dat_...)(...)` with the callee dropped | [`ifuncfpret`](#ifuncfpret) |
-| an x86-64 IFUNC .plt.sec stub is not a discovered function | [`ifuncfpret`](#ifuncfpret) |
-| xmm0 read uninitialized after calling a void-typed ifunc-dispatching wrapper | [`ifuncfpret`](#ifuncfpret) |
-| mips16/micromips function body misdecoded as mips32 garbage | [`mips_isa`](#mips_isa) |
-| odd-address mips functions decode in the wrong isa mode | [`mips_isa`](#mips_isa) |
-| a -g binary still shows default names and inferred types | [`dwarf`](#dwarf) |
-| dwarf function/global names and typed signatures ignored | [`dwarf`](#dwarf) |
-| libc globals render as dat_<addr> where every other decompiler prints stderr/stdout/optind | [`datasyms`](#datasyms) |
-| fprintf stream argument shows a raw dat_ address so error paths are indistinguishable from output paths | [`datasyms`](#datasyms) |
-| a stripped binary's copy-relocated externs unnamed | [`datasyms`](#datasyms) |
-| an unstripped dwarf-less binary's own statics render dat_<addr> | [`datasyms`](#datasyms) |
-| decompile-project exports reference undeclared dat_<addr> identifiers where a stdio global belongs | [`datasyms`](#datasyms) |
-| no /* file:line */ source-location comments in the output | [`dwarf_lines`](#dwarf_lines) |
-| want each instruction annotated with its dwarf source line | [`dwarf_lines`](#dwarf_lines) |
-| c++ member functions decompile with a0/a1 parameters despite -g debug info | [`cppproto`](#cppproto) |
-| Foo *this renders as void * | [`cppproto`](#cppproto) |
-| a namespaced or templated function loses its dwarf prototype | [`cppproto`](#cppproto) |
-| one unmappable parameter type discards the whole dwarf signature | [`cppproto`](#cppproto) |
-| a clang -O2 static function's dwarf prototype names a parameter the body never reads | [`dwarfnocall`](#dwarfnocall) |
-| a parameter renders under the name of the one before it | [`dwarfnocall`](#dwarfnocall) |
-| callers of an optimized static function pass an undefined extra argument | [`dwarfnocall`](#dwarfnocall) |
-| a constant argument folded away by the compiler still appears in the prototype | [`dwarfnocall`](#dwarfnocall) |
-| a dwarf-typed local or parameter renders void * despite -g debug info | [`typedepth`](#typedepth) |
-| const char ** or char *const [] loses its element type | [`typedepth`](#typedepth) |
-| a typedef'd struct pointer degrades to void * | [`typedepth`](#typedepth) |
-| a global array of string pointers is marked one byte wide | [`typedepth`](#typedepth) |
-| deep pointer chains (char ***) truncate to void ** | [`typedepth`](#typedepth) |
-| a struct passed by value degrades to an integer parameter despite -g debug info | [`dwarfstructs`](#dwarfstructs) |
-| a small struct return grows a phantom rethidden parameter that the body does arithmetic on | [`dwarfstructs`](#dwarfstructs) |
-| struct fields render as casts and offsets instead of p->field | [`dwarfstructs`](#dwarfstructs) |
-| a bitfield member renders as a shift-and-mask of the whole word | [`dwarfstructs`](#dwarfstructs) |
-| a union parameter loses its member names | [`dwarfstructs`](#dwarfstructs) |
-| a dwarf-recovered struct or union has size 0 | [`dwarfstructs`](#dwarfstructs) |
-| a rust enum return grows a phantom rethidden parameter despite -g debug info | [`dwarfvariants`](#dwarfvariants) |
-| a dwarf-recovered rust enum has a byte size but no fields | [`dwarfvariants`](#dwarfvariants) |
-| Result or Option renders as an opaque container with byte offsets | [`dwarfvariants`](#dwarfvariants) |
-| a tagged-union discriminant renders as an unnamed integer at offset 0 | [`dwarfvariants`](#dwarfvariants) |
-| a variant payload renders as a cast-and-offset instead of a named field | [`dwarfvariants`](#dwarfvariants) |
-| a rust enum's discriminant and payload have no names even though the binary was built with full debug info | [`dwarfvariants`](#dwarfvariants) |
-| a rust match on Result or Option renders its discriminant tests against bare integers | [`variantnames`](#variantnames) |
-| if ((*e).tag == 1) where the binary carries full debug info | [`variantnames`](#variantnames) |
-| a recovered rust enum's tag field is a plain integer type though DWARF names every variant | [`variantnames`](#variantnames) |
-| switch cases over a rust enum discriminant print numbers instead of variant names | [`variantnames`](#variantnames) |
-| c++ member functions on a stripped binary decompile with a0/a1 parameters | [`cppsig`](#cppsig) |
-| this renders as int8 * or unsigned long instead of the class type | [`cppsig`](#cppsig) |
-| a mangled symbol names the function but not its parameter types | [`cppsig`](#cppsig) |
-| no signature recovery on a stripped c++ shared library | [`cppsig`](#cppsig) |
-| a __thiscall c++ import call loses its this argument | [`msvcsig`](#msvcsig) |
-| an msvc-mangled import is named but its call has no arguments | [`msvcsig`](#msvcsig) |
-| a call to a c++ import that returns a class loses its hidden return pointer | [`msvcsig`](#msvcsig) |
-| arguments of one call are given to an earlier msvc c++ import call | [`msvcsig`](#msvcsig) |
-| a __cdecl c++ import is treated as popping its own arguments | [`msvcsig`](#msvcsig) |
-| mcount/__fentry__ profiling calls clutter every -pg function prologue | [`callfixup`](#callfixup) |
-| cspec call-fixup targets rendered as plain calls instead of dissolved | [`callfixup`](#callfixup) |
-| absolute function-pointer table in rodata never recognized | [`addrtable`](#addrtable) |
-| indirect calls through an unrecovered address table in a stripped target | [`addrtable`](#addrtable) |
-| an immediate operand pointing at a rodata string renders as a bare number | [`operand_refs`](#operand_refs) |
-| string argument of a no-prototype call not typed as char[N] | [`operand_refs`](#operand_refs) |
-| printf/scanf variadic arguments render untyped at the call site | [`formatstring`](#formatstring) |
-| %d and %s arguments carry generic types instead of int/char * | [`formatstring`](#formatstring) |
-| error/warn/syslog format arguments carry generic types | [`formatstring`](#formatstring) |
-| a program's own printf-like logger is called without its double argument | [`formatcallees`](#formatcallees) |
-| a call to an unnamed function with a literal format string has a phantom trailing argument | [`formatcallees`](#formatcallees) |
-| %d arguments to a custom logger carry (unsigned long)(unsigned int) casts | [`formatcallees`](#formatcallees) |
-| a scanf-like wrapper's destinations are typed as integers | [`formatcallees`](#formatcallees) |
-| noreturn discovery inert on a stripped binary | [`listing`](#listing) |
-| analysis passes that need whole-image xrefs do nothing | [`listing`](#listing) |
-| no program-wide instruction/xref/function model for consumer passes | [`listing`](#listing) |
-| fast decompile-project emits only import veneers and the binary entry | [`fast_funcdisc`](#fast_funcdisc) |
-| internal direct callees have no project bodies | [`fast_funcdisc`](#fast_funcdisc) |
-| function reachable through a callback or vtable pointer is absent while explicit --addr decompiles it | [`fast_funcdisc`](#fast_funcdisc) |
-| kuna functions on a --raw-image reports one function whose size is the whole file | [`rawdiscover`](#rawdiscover) |
-| decompile-all on a raw image emits a single enormous body | [`rawdiscover`](#rawdiscover) |
-| a firmware image decompiles only at addresses passed by hand | [`rawdiscover`](#rawdiscover) |
-| kuna strings or functions on a TE image finds no strings and no functions beyond the entry | [`objectview`](#objectview) |
-| a raw firmware image decompiles with every string as a bare address | [`objectview`](#objectview) |
-| prologue-only functions in a raw image are never discovered | [`objectview`](#objectview) |
-| stripped static-linked library function stays sub_<addr> although its fingerprint is known | [`fid`](#fid) |
-| no .fid database renames applied in a stripped binary | [`fid`](#fid) |
-| a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt) |
-| kuna cannot use ida flirt signatures | [`flirt`](#flirt) |
-| memcpy and printf in a static binary have no names | [`flirt`](#flirt) |
-| flirt leaves printf-style wrappers unnamed because several modules match | [`flirtsites`](#flirtsites) |
-| flirt names a short i386 wrapper after the wrong library function | [`flirtsites`](#flirtsites) |
-| flirt misses an ifunc resolver whose reference is a lea of a function address | [`flirtsites`](#flirtsites) |
-| a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto) |
-| a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto) |
-| code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto) |
-| fid leaves a function unnamed because two library functions share its hash | [`fidcallees`](#fidcallees) |
-| fid renames a small stub to the wrong library function | [`fidcallees`](#fidcallees) |
-| fid names a function whose calls go to differently named functions | [`fidcallees`](#fidcallees) |
-| msvc c++ class names missing and vftables left as unnamed data | [`rtti`](#rtti) |
-| no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes | [`rtti`](#rtti) |
-| gcc/clang c++ class names missing and vtables left as unnamed DAT_ data | [`itaniumrtti`](#itaniumrtti) |
-| no Class::vtable or typeinfo labels in a stripped elf with polymorphic classes | [`itaniumrtti`](#itaniumrtti) |
-| virtual dispatch slot resolves to sub_<addr> with no class | [`itaniumrtti`](#itaniumrtti) |
-| function reachable only through a rodata function-pointer table never discovered | [`aif`](#aif) |
-| undefined gap between functions that clearly holds code | [`aif`](#aif) |
-| call *reg targets missing from the function list | [`aif`](#aif) |
-| a stripped binary reports far more functions than it has | [`aifstrict`](#aifstrict) |
-| a discovered function starts in the middle of another functions body | [`aifstrict`](#aifstrict) |
-| a sub_ entry lands on an ordinary call or mov instruction rather than a prologue | [`aifstrict`](#aifstrict) |
-| two overlapping functions decompile the same instructions twice | [`aifstrict`](#aifstrict) |
-| aif adds thousands of entries a reference decompiler does not agree are functions | [`aifstrict`](#aifstrict) |
-| an arm function entry lands one halfword before the real prologue | [`aifstrict`](#aifstrict) |
-| a sub_ entry lands on a routine that calls nothing and only falls off the end of a hole | [`aifcorroborate`](#aifcorroborate) |
-| aif accepts a function on nothing but four other functions sharing its first two instructions | [`aifcorroborate`](#aifcorroborate) |
-| a stripped function list is full of leaf routines that are not functions | [`aifcorroborate`](#aifcorroborate) |
-| a discovered function starts in the middle of another functions body | [`aifbracket`](#aifbracket) |
-| a sub_ entry lands on a switch case or tail block that jumps back into the function around it | [`aifbracket`](#aifbracket) |
-| funcboundflow truncates a function at a sub_ entry that is not a function | [`aifbracket`](#aifbracket) |
-| aif adds entries a reference decompiler does not agree are functions | [`aifbracket`](#aifbracket) |
-| a sub_ entry starts on the nop padding in front of a function | [`aifnoppad`](#aifnoppad) |
-| a stripped function list has a short sub_ of nothing but nops before each thunk | [`aifnoppad`](#aifnoppad) |
-| a discovered function starts a few bytes early on the padding before it | [`aifnoppad`](#aifnoppad) |
-| aif adds entries on zero fill between arm sections | [`aifnoppad`](#aifnoppad) |
-| a sub_ entry lands on a switch case of a thumb function | [`thumbswitch`](#thumbswitch) |
-| a stripped cortex-m function list has sub_ entries in the middle of a switch | [`thumbswitch`](#thumbswitch) |
-| kuna functions reports a tbb or tbh function far smaller than its symbol | [`thumbswitch`](#thumbswitch) |
-| a function called only from a switch case is missing from a stripped firmware image | [`thumbswitch`](#thumbswitch) |
-| aif adds entries inside cortex-m switch statements | [`thumbswitch`](#thumbswitch) |
-| aif lists return-terminated i386 switch cases as functions | [`x86listingswitch`](#x86listingswitch) |
-| a direct callee reached only through an i386 switch case is missing from discovery | [`x86listingswitch`](#x86listingswitch) |
-| the discovery Listing stops at an absolute-pointer jump table | [`x86listingswitch`](#x86listingswitch) |
-| independent reference queries see case bodies absent from the initial instruction partition | [`x86listingswitch`](#x86listingswitch) |
-| kuna xrefs reports 0 references to a function called only from a switch case | [`switchreach`](#switchreach) |
-| a function called from a switch case body has no caller in decompile-graph | [`switchreach`](#switchreach) |
-| calleevote refuses a function because its recorded calls differ from the call graph | [`switchreach`](#switchreach) |
-| protoorder decompiles a caller before the callees its switch cases call | [`switchreach`](#switchreach) |
-| every call inside a switch is missing from a gcc -O0 binary | [`switchreach`](#switchreach) |
-| a recursive interpreter function loses its pointer parameter types in a whole-binary run | [`switchreach`](#switchreach) |
-| kuna xrefs reports 0 references to a function called only from an aarch64 switch case | [`compacttable`](#compacttable) |
-| an aarch64 switch's case bodies are missing from decompile-graph | [`compacttable`](#compacttable) |
-| calleevote refuses an aarch64 function because its recorded calls differ from the call graph | [`compacttable`](#compacttable) |
-| j_printf gets no printf prototype | [`nameladder`](#nameladder) |
-| __imp_exit is not marked no-return | [`nameladder`](#nameladder) |
-| a flirt-named memcpy_0 has no memcpy prototype | [`nameladder`](#nameladder) |
-| a mach-o or coff name with a leading underscore misses its libc prototype | [`nameladder`](#nameladder) |
-| a char array literal appears at an address inside a function's code | [`codestrings`](#codestrings) |
-| instruction bytes print as a four-character string literal | [`codestrings`](#codestrings) |
-| a function pointer argument renders as a short garbage string | [`codestrings`](#codestrings) |
-| a libc function's FILE * parameter becomes void * because a later source declared it | [`protomerge`](#protomerge) |
-| a demangled C++ class pointer parameter is replaced by unsigned long | [`protomerge`](#protomerge) |
-| a dwarf prototype erases a parameter name the library table gave | [`protomerge`](#protomerge) |
-| a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide) |
-| a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide) |
-| a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide) |
-| a real arm function is missing from a stripped inventory while the entry just before it is a pool word | [`aifpoolslide`](#aifpoolslide) |
-| aif adds entries on literal pools | [`aifpoolslide`](#aifpoolslide) |
-| routine reached only by a tail B produces no decompiled output at all | [`tailcallentry`](#tailcallentry) |
-| a shared ISR handler is swallowed by the two-instruction stub that branches to it | [`tailcallentry`](#tailcallentry) |
-| function entry missing where the previous function ends in an unconditional branch | [`tailcallentry`](#tailcallentry) |
-| kuna emits one oversized function where the ground truth has two | [`tailcallentry`](#tailcallentry) |
-| fid misses a library function whose body is split by the compiler | [`funcchunks`](#funcchunks) |
-| a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks) |
-| a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks) |
-| a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks) |
-| a symbol-table array prints as *(short *)&g[i * 2] | [`globalwidth`](#globalwidth) |
-| a global array with a symbol but no debug info decompiles as byte offsets | [`globalwidth`](#globalwidth) |
-| element accesses to a named global table need casts | [`globalwidth`](#globalwidth) |
-| a sub_ entry starts on a table the code loads from | [`aifdataveto`](#aifdataveto) |
-| aif adds a function at an address the program writes to | [`aifdataveto`](#aifdataveto) |
-| a stripped function list contains data the code reads | [`aifdataveto`](#aifdataveto) |
-| function discovery on an i386 binary full of push imm callbacks is slow | [`incrementalwalk`](#incrementalwalk) |
-| each callback round re-decodes the whole program | [`incrementalwalk`](#incrementalwalk) |
-| a function reached only through a table of function pointers is missing | [`calltable`](#calltable) |
-| kuna xrefs shows no caller for a function called through ops[i](x) | [`calltable`](#calltable) |
-| a switch case that opens with push rbp is listed as a function | [`calltable`](#calltable) |
-| a dispatcher's table of tail calls is printed as a switch | [`calltable`](#calltable) |
-| a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall) |
-| a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall) |
-| tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall) |
-| a uefi te entry function decompiles as garbage a32 although its entry address is odd | [`entrythumbflow`](#entrythumbflow) |
-| a callee reached by bl from a thumb entry decodes as a32 | [`entrythumbflow`](#entrythumbflow) |
-| a32 code in the same section as a thumb entry decodes as thumb | [`entrythumbflow`](#entrythumbflow) |
-| loading a te reports the thumb context walk stopped | [`entrythumbflow`](#entrythumbflow) |
-| stripped go binary renders sub_<addr> instead of main.main and runtime.* names | [`gopclntab`](#gopclntab) |
-| go package function names missing | [`gopclntab`](#gopclntab) |
-| go binary decompiles with anonymous synthesized struct types where the program declared named ones | [`gotypes`](#gotypes) |
-| a type surface lists no main.* or package types on a stripped go binary | [`gotypes`](#gotypes) |
-| go string and slice headers carry no facet records for downstream passes | [`gotypes`](#gotypes) |
-| stripped go binary renders code after a runtime.panicshift or runtime.gopanic call as if the helper returned | [`gonoreturn`](#gonoreturn) |
-| a go panic arm falls through into the next block and the output interleaves panic and normal paths | [`gonoreturn`](#gonoreturn) |
-| a go function keeps its morestack entry loop because the grow arm follows a panic call kuna treats as returning | [`gonoreturn`](#gonoreturn) |
-| go functions declare a local commented r14 or x28 that is read but never assigned | [`goreg`](#goreg) |
-| stackguard reads render as *(long *)(v3 + 0x10) instead of g->stackguard0 | [`goreg`](#goreg) |
-| go runtime internals full of unexplained register arithmetic | [`goreg`](#goreg) |
-| go function parameters missing or void while the body reads rax/rbx locals that are never assigned | [`goabi`](#goabi) |
-| a go function returning two values loses the second and the statements computing it | [`goabi`](#goabi) |
-| go output full of unassigned register-commented locals | [`goabi`](#goabi) |
-| multi-return go call sites read registers the call never defines | [`goabi`](#goabi) |
-| swift binary symbol names render as $s4main5PointV mangled soup | [`swiftdemangle`](#swiftdemangle) |
-| swift function names unreadable in kuna functions output | [`swiftdemangle`](#swiftdemangle) |
-| swift type metadata symbols show raw manglings instead of named paths | [`swiftdemangle`](#swiftdemangle) |
-| objc method labels show _TtC runtime class names | [`swiftdemangle`](#swiftdemangle) |
-| a dyld_shared_cache file is rejected as an unrecognized input format | [`dyldimage`](#dyldimage) |
-| cannot decompile an ios or macos system library because it only exists inside the dyld shared cache | [`dyldimage`](#dyldimage) |
-| dyld shared cache holds N images; choose one with --image | [`dyldimage`](#dyldimage) |
-| calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island | [`dyldcrossrefs`](#dyldcrossrefs) |
-| a cache image's __got loads name nothing | [`dyldcrossrefs`](#dyldcrossrefs) |
-| cross-library calls of an ios framework have no names | [`dyldcrossrefs`](#dyldcrossrefs) |
-| a call through a mach-o function pointer bound to an import renders (*dat_<addr>)() | [`machobinds`](#machobinds) |
-| a mach-o data pointer bound to an external symbol reads as *dat_<addr> | [`machobinds`](#machobinds) |
-| arm64e __auth_ptr or vtable slots bound to imports have no names | [`machobinds`](#machobinds) |
-| a stripped mach-o dylib's exported functions are unnamed although its export trie lists them | [`exporttrie`](#exporttrie) |
-| a dyld cache call is named after the implementation (_platform_memmove) instead of the imported name (memmove) | [`exporttrie`](#exporttrie) |
-| re-exported symbols resolve to the wrong name | [`exporttrie`](#exporttrie) |
-| rust binary renders with c output and no rust abi handling because a stripped image lost its language signals | [`sourcelang`](#sourcelang) |
-| a c binary is detected as another language and language-gated rules misfire | [`sourcelang`](#sourcelang) |
-| go runtime passes do not run on a go binary whose buildinfo section was stripped | [`sourcelang`](#sourcelang) |
-| kuna decompile on a large c++ .so needs ~750 MB for one function | [`lazyfuncs`](#lazyfuncs) |
-| read symbols dominates a single-function run on an entry-dense image | [`lazyfuncs`](#lazyfuncs) |
-| objective-c methods render as sub_<addr> instead of -[Class sel] | [`objc`](#objc) |
-| __objc_ metadata present but classes and selectors unnamed in a mach-o | [`objc`](#objc) |
-| a message send renders as sub_<addr>(obj) through an __objc_stubs entry | [`objc`](#objc) |
-| objc_msgSend selector argument renders as dat_<addr> | [`objc`](#objc) |
-| a category method renders as sub_<addr> instead of -[Class(Category) sel] | [`objc`](#objc) |
-| objc_msgSend$setFoo:() renders with no argument although the caller sets one | [`objcsdk`](#objcsdk) |
-| objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0 | [`objcsdk`](#objcsdk) |
-| objc_msgSend$setFrame: passes one word where a CGRect was built | [`objcsdk`](#objcsdk) |
-| a framework method's stub returns undefined16 or unsigned long instead of its declared type | [`objcsdk`](#objcsdk) |
-| swift binary functions render as sub_<addr> although swift5 metadata sections are present | [`swiftmetadata`](#swiftmetadata) |
-| type metadata accessors unnamed in a stripped swift mach-o | [`swiftmetadata`](#swiftmetadata) |
-| protocol witnesses and class methods of a stripped swift app have no names | [`swiftmetadata`](#swiftmetadata) |
-| swift struct and class fields render as raw offsets off self | [`swifttypes`](#swifttypes) |
-| swift getters named by swiftmetadata take no self parameter | [`swifttypes`](#swifttypes) |
-| type metadata accessors return undefined16 | [`swifttypes`](#swifttypes) |
-| swift methods named by swiftmetadata read self from an unnamed x20 or r13 | [`swiftcall`](#swiftcall) |
-| calls to swift methods drop the self they pass | [`swiftcall`](#swiftcall) |
-| a try? error path or a do/catch after a throwing call folds away | [`swiftcall`](#swiftcall) |
-| swift struct mutating methods write through an untyped register | [`swiftcall`](#swiftcall) |
-| swift_retain / swift_release / swift_allocObject calls show recovered arguments and untyped returns | [`swiftruntime`](#swiftruntime) |
-| swift_getGenericMetadata's result is used as a raw word instead of .metadata | [`swiftruntime`](#swiftruntime) |
-| swift runtime calls in a stripped swift binary carry no signature | [`swiftruntime`](#swiftruntime) |
-| core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings) |
-| a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings) |
-| a stripped kext shows sub_<addr> for every IOKit method | [`iokitclasses`](#iokitclasses) |
-| gMetaClass objects render as dat_<addr> | [`iokitclasses`](#iokitclasses) |
-| methods reachable only through a vtable are missing from kuna functions | [`iokitclasses`](#iokitclasses) |
-| a kext's vtables are unnamed data | [`iokitclasses`](#iokitclasses) |
-| a user client's external methods are sub_<addr> with no selector numbers | [`xnutables`](#xnutables) |
-| an IOExternalMethodDispatch table renders as dat_<addr> | [`xnutables`](#xnutables) |
-| a kalloc_type_impl call passes dat_<addr> instead of a named view | [`xnutables`](#xnutables) |
-| a typed allocation returns a long that is cast at every store | [`xnutables`](#xnutables) |
-| a got slot in a stripped kext has no name | [`xnutables`](#xnutables) |
-| a DriverKit dext's metaclass globals render as dat_<addr> | [`osclassinfo`](#osclassinfo) |
-| a dext's class New functions are sub_<addr> | [`osclassinfo`](#osclassinfo) |
-| __osclassinfo records are unnamed data | [`osclassinfo`](#osclassinfo) |
-| stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
-| pdb symbol names not applied to a pe | [`pdb`](#pdb) |
-| a .pdb beside the exe is ignored | [`pdb`](#pdb) |
-| windows function names need kuna_pdb_path to be set by hand | [`pdb`](#pdb) |
-| a .o relocatable object fails with 'Unable to load N bytes at ...' | [`relocobjects`](#relocobjects) |
-| ET_REL object maps zero bytes so nothing decompiles | [`relocobjects`](#relocobjects) |
-| a COFF .obj lists only its first function (the rest collide at address 0) | [`relocobjects`](#relocobjects) |
-| arm64e mach-o decoded with the generic v8A spec so pointer-auth ops are unmodeled | [`macho-arm64e`](#macho-arm64e) |
-| pac instructions in an apple-silicon binary not modeled by the loaded spec | [`macho-arm64e`](#macho-arm64e) |
-| an iOS kernelcache (IMG4/IM4P) is rejected as an unrecognized input format | [`kernelcache`](#kernelcache) |
-| kuna functions on a decompressed MH_FILESET kernelcache finds no functions | [`kernelcache`](#kernelcache) |
-| a kext cannot be selected out of a kernel collection | [`kernelcache`](#kernelcache) |
-| pointers in a kernelcache read as packed chained-fixup words instead of addresses | [`kernelcache`](#kernelcache) |
-| an ios 12-14 kernelcache or an sptm/txm image reads its pointers as packed __thread_starts / __chain_starts words | [`kernelcache`](#kernelcache) |
-| a kext of an older prelinked kernelcache cannot be selected | [`kernelcache`](#kernelcache) |
-| a pe function stops early with the funcboundflow fall-through-reached-the-next-function-entry warning | [`pdatachained`](#pdatachained) |
-| kuna decompile of an msvc function emits `} while ;` or an empty if body where ghidra emits the whole function | [`pdatachained`](#pdatachained) |
-| kuna functions reports an msvc function far smaller than its .pdata extent | [`pdatachained`](#pdatachained) |
-| a sub_<addr> in a pe starts at a movaps or mov [rsp+N],reg register-save run instead of a prologue | [`pdatachained`](#pdatachained) |
-| the second half of an msvc function is only reachable under a generated sub_<hex> name | [`pdatachained`](#pdatachained) |
-| a pe function entry starts one byte into a jmp qword ptr [import] instruction | [`rexthunk`](#rexthunk) |
-| kuna functions lists a sub_<addr> named after an import in the middle of another function | [`rexthunk`](#rexthunk) |
-| a one-line sub_<addr> wrapper around an import appears right after a function that tail-calls the same import | [`rexthunk`](#rexthunk) |
-| kuna functions reports a pe function's size as ending one byte into its own last jump | [`rexthunk`](#rexthunk) |
-| a pe call renders as OLEAUT32_Ordinal_<n> or WS2_32_Ordinal_<n> instead of the api name | [`peordinal`](#peordinal) |
-| kuna functions lists <dll>_Ordinal_<n> imports | [`peordinal`](#peordinal) |
-| a BSTR or VARIANT api call has no prototype because its import is ordinal-only | [`peordinal`](#peordinal) |
-| a winsock program shows socket, connect and recv as ordinal placeholders | [`peordinal`](#peordinal) |
-| an EFI driver entry point takes two undefined8 parameters | [`uefi`](#uefi) |
-| a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...) | [`uefi`](#uefi) |
-| a protocol GUID in .data is an unnamed 16-byte blob | [`uefi`](#uefi) |
-| a DXE core's static boot-services table is raw words | [`uefi`](#uefi) |
-| a global holding a service table is an untyped dat_ word in every function but the one that stores it | [`storetype`](#storetype) |
-| a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool | [`storetype`](#storetype) |
-| the same global prints typed in one function and untyped in the next | [`storetype`](#storetype) |
-| a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes) |
-| a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes) |
-| a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes) |
-| an -O2 variable kept in a register is an anonymous vN although DWARF names it | [`dwarfscopes`](#dwarfscopes) |
-| an inlined function's locals have no names | [`dwarfscopes`](#dwarfscopes) |
-| a regparm function reads registers it never names and its callers pass stack values | [`dwarfscopes`](#dwarfscopes) |
-| a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes) |
-| a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes) |
-| a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes) |
-| a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset | [`tlsnames`](#tlsnames) |
-| thread-local variables of an executable have no names although .symtab has STT_TLS symbols | [`tlsnames`](#tlsnames) |
-| the TLS block is not modelled | [`tlsnames`](#tlsnames) |
-| comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform) |
-| need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform) |
-| &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation) |
-| indexed array form where base + offset arithmetic is desired for diffing | [`arraynotation`](#arraynotation) |
-| if (x != 0) where idiomatic C reads if (x) | [`truthycond`](#truthycond) |
-| if (p == NULL) where if (!p) is wanted | [`truthycond`](#truthycond) |
-| explicit zero comparison in conditions unwanted | [`truthycond`](#truthycond) |
-| truthy condition rendering needs to match upstream ghidra for diffing | [`truthycond`](#truthycond) |
-| if (x) { stmt; } where braceless if (x) stmt; is wanted | [`braceelide`](#braceelide) |
-| single-statement if body keeps braces | [`braceelide`](#braceelide) |
-| braced one-liner bodies unwanted | [`braceelide`](#braceelide) |
-| brace style needs to match upstream ghidra for diffing | [`braceelide`](#braceelide) |
-| a 16-byte movaps/movdqa transfer emits as v1[0] = v2[0] | [`arraycoverwidth`](#arraycoverwidth) |
-| a vector zero store emits as arr[0] = 0 | [`arraycoverwidth`](#arraycoverwidth) |
-| an array-typed local is assigned at element zero for a whole-array copy | [`arraycoverwidth`](#arraycoverwidth) |
-| the same variable shows both v1._0_4_ and v1[0] for accesses of different width | [`arraycoverwidth`](#arraycoverwidth) |
-| declared char v[16] but every whole-bank access reads as one byte | [`arraycoverwidth`](#arraycoverwidth) |
-| the emitted C contains a member named like `._4_2_` or `._0_8_` | [`partialaccess`](#partialaccess) |
-| a variable is read as `v1._6_1_` and the text does not compile | [`partialaccess`](#partialaccess) |
-| a 16-byte register pair returns as `v1._0_16_` | [`partialaccess`](#partialaccess) |
-| a libc record such as `stat` is read as `v3._24_4_` | [`partialaccess`](#partialaccess) |
-| mapped unsigned char array uses invalid ._offset_size_ members | [`bytearrayc`](#bytearrayc) |
-| wide byte-array accesses need compilable C | [`bytearrayc`](#bytearrayc) |
-| unaligned mapped integer transfer needs an alias-safe C representation | [`bytearrayc`](#bytearrayc) |
-| a pointer variable is initialised to an empty string literal and then indexed past its terminator | [`emptystrconst`](#emptystrconst) |
-| a data address visible in the disassembly appears nowhere in the emitted C | [`emptystrconst`](#emptystrconst) |
-| a blob or table pointer renders as = "" instead of its address | [`emptystrconst`](#emptystrconst) |
-| two locals are both assigned "" and then walked as buffers | [`emptystrconst`](#emptystrconst) |
-| a call argument is a raw address behind a cast, like sub_e4ca((struct_2 *)0x2b080) | [`globalref`](#globalref) |
-| (unsigned long *)0x21180 or (void *)0x2b460 where IDA prints qword_21180 or &unk_2B460 | [`globalref`](#globalref) |
-| getopt_long's option table prints as (option *)0x2a0c0 | [`globalref`](#globalref) |
-| a loop runs from (int *)0x1a664 to (int *)0x1a690 | [`globalref`](#globalref) |
-| the same global is dat_2b080 in one statement and (struct_2 *)0x2b080 in the next | [`globalref`](#globalref) |
-| a constant address you want to keep as an address (flip off) | [`globalref`](#globalref) |
-| full-line WARNING banner comments clutter the output | [`warnstyle`](#warnstyle) |
-| warning text wanted inline at the end of the statement it describes | [`warnstyle`](#warnstyle) |
-| terse warning slugs unwanted; full upstream warning text needed | [`warnstyle`](#warnstyle) |
-| warning style needs to match upstream ghidra for diffing | [`warnstyle`](#warnstyle) |
-| thumb function pointer renders as symbolic &fn[1] where the raw odd-address constant is wanted | [`thumbfuncptr`](#thumbfuncptr) |
-| callback constant on arm resolves to a function symbol plus one instead of a bare hex literal | [`thumbfuncptr`](#thumbfuncptr) |
-| a bare constant equal to a function entry renders as the named function pointer | [`inferfuncentry`](#inferfuncentry) |
-| hex literal at a single-bit image base unexpectedly named as a function (flip off for the raw constant) | [`inferfuncentry`](#inferfuncentry) |
-| want the raw (b<<k) s>> k sign-extension shift idiom visible instead of the folded comparison | [`booleanmask`](#booleanmask) |
-| flag-as-high-bit lowering (8051 style) hidden by the cleaned boolean compare | [`booleanmask`](#booleanmask) |
-| byte arithmetic retains -2*x + (x << 1) instead of cancelling modulo 256 | [`cancelbytearithmetic`](#cancelbytearithmetic) |
-| a string initializer is split by one computed byte even though its coefficients sum to zero | [`cancelbytearithmetic`](#cancelbytearithmetic) |
-| an exact low-byte multiply/left-shift cancellation remains unsimplified | [`cancelbytearithmetic`](#cancelbytearithmetic) |
-| a vectorised loop declares 9- to 15-byte char array locals that exist nowhere in the source | [`wideslice`](#wideslice) |
-| lane sums are written as SUB133, SUB137 or ZEXT513 expressions over a wide temporary | [`wideslice`](#wideslice) |
-| an XMM value rebuilt from byte lanes prints as a stack of _N_M_ partial assignments | [`wideslice`](#wideslice) |
-| a call argument is rebuilt from a 12-byte packed-double temporary instead of read from its register | [`wideslice`](#wideslice) |
-| a wall of SUB161( lane temporaries read off one pshufb( result | [`simdlane`](#simdlane) |
-| dozens of char vN; declarations each assigned once from a consecutive SIMD byte lane | [`simdlane`](#simdlane) |
-| a vectorised byte loop needs SSE lanes simulated by hand to see that every lane holds the same broadcast byte | [`simdlane`](#simdlane) |
-| a constant-mask pshufb result is never folded even though the mask is an immediate zero | [`simdlane`](#simdlane) |
-| a zeroed struct or buffer renders as reads from (0 + 4), (0 + 8), (0 + 0xc) | [`constspaceload`](#constspaceload) |
-| a SIMD immediate becomes a near-null memory read instead of a constant | [`constspaceload`](#constspaceload) |
-| address expressions print as an unfolded 0 + k instead of the constant k | [`constspaceload`](#constspaceload) |
-| only the word at offset 0 of a vector initialization is correct | [`constspaceload`](#constspaceload) |
-| want the raw S/OV overflow-flag arithmetic visible instead of the folded signed compare | [`ovlesssimplify`](#ovlesssimplify) |
-| v850-style explicit flag compare collapsed to a clean signed less-than | [`ovlesssimplify`](#ovlesssimplify) |
-| want the raw CONCAT11(CARRY1(...)) intrinsics visible instead of one wide add | [`addcarrychain`](#addcarrychain) |
-| 8-bit adc carry-chain pair (6502 style) folded into a single 16-bit addition | [`addcarrychain`](#addcarrychain) |
-| invalidInstructionException() after a call in a stripped rust or clang binary | [`trapaftercall`](#trapaftercall) |
-| a panic helper call is not marked no-return | [`trapaftercall`](#trapaftercall) |
-| ud2 after a call is printed as a jump-as-call | [`trapaftercall`](#trapaftercall) |
-| a function-pointer call renders as a call of __llvm_retpoline_r11 | [`retpolinethunk`](#retpolinethunk) |
-| a call of a stripped retpoline thunk sub_<addr> loses the called pointer | [`retpolinethunk`](#retpolinethunk) |
-| the pointer loaded into r11 before a call is never used | [`retpolinethunk`](#retpolinethunk) |
-| a function that runs into undecodable, encrypted or packed bytes ends with a plain return; and no warning | [`decodehalt`](#decodehalt) |
-| a self-decrypting stub decompiles to case 0x<hex>: return; with error null in --json | [`decodehalt`](#decodehalt) |
-| nothing in the emitted C says the decompiled body is incomplete | [`decodehalt`](#decodehalt) |
-| a branch that leaves a --define-function extent renders as an ordinary return | [`decodehalt`](#decodehalt) |
-| kuna disassemble reports .byte at an address the decompiled C returns from | [`decodehalt`](#decodehalt) |
-| PowerPC64 isel becomes halt_baddata with no target-selection advice | [`decodehalt`](#decodehalt) |
-| boolean shifted into the sign bit tested with a less-than-zero compare | [`flagcompare`](#flagcompare) |
-| N==V signed-overflow branch idiom rendered as raw flag arithmetic | [`flagcompare`](#flagcompare) |
-| want the explicit condition-flag math visible (flip off) | [`flagcompare`](#flagcompare) |
-| Java output prints v = new(T); followed by v.<init>(args); | [`javanew`](#javanew) |
-| a constructor call prints as a method named <init> | [`javanew`](#javanew) |
-| a constructor prints as void <init>(...) calling this.<init>(...) | [`javanew`](#javanew) |
-| &pxVar[-0x1000] page-probe noise in a large-frame function | [`stackprobeloop`](#stackprobeloop) |
-| calls rendered argument-less because the stack pointer never resolved to a constant offset | [`stackprobeloop`](#stackprobeloop) |
-| gcc stack-clash probe loop leaves the frame layout unrecovered | [`stackprobeloop`](#stackprobeloop) |
-| a win32 api renders with only the arguments pushed after an intervening call | [`calleeprotostack`](#calleeprotostack) |
-| GetLastError() or another argument-less import eats the pushes staged for the call after it | [`calleeprotostack`](#calleeprotostack) |
-| a buffer whose address is passed to an api is read back as an incoming parameter instead of the local | [`calleeprotostack`](#calleeprotostack) |
-| an import with a known signature still has its cleanup guessed from the caller's push run | [`calleeprotostack`](#calleeprotostack) |
-| a void i386 function returns an uninitialised long double | [`x87depth`](#x87depth) |
-| a function that discards a float call result returns st0 | [`x87depth`](#x87depth) |
-| `long double v1; // st0  | [`x87depth`](#x87depth) |
-|  st1` is returned but never assigned | [`x87depth`](#x87depth) |
-| a caller's x87 push makes a void callee return a float | [`x87depth`](#x87depth) |
-| a variadic function has fourteen parameters a0..a13 | [`varargsave`](#varargsave) |
-| if (al) guards stores of xmm registers in a printf wrapper | [`varargsave`](#varargsave) |
-| va_list fields are assigned 8 and 0x30 by hand | [`varargsave`](#varargsave) |
-| __builtin_dwarf_cfa() appears in a variadic function | [`varargsave`](#varargsave) |
-| the format argument of a logging function is the ninth parameter | [`varargsave`](#varargsave) |
-| a variable-length array renders as negative indexing off a stack symbol | [`alloca`](#alloca) |
-| alloca renders as stack pointer arithmetic | [`alloca`](#alloca) |
-| a while loop assigns a stack word to itself (stack-clash probe) | [`alloca`](#alloca) |
-| use(&(&Stack...)[v1]) where the source passes a VLA | [`alloca`](#alloca) |
-| the size of a dynamic allocation appears rounded to 16 in the C | [`alloca`](#alloca) |
-| a call to an msvc c++ import that takes a class by value keeps only its hidden return pointer | [`msvcbyval`](#msvcbyval) |
-| the arguments after a by-value class render as stores before the call | [`msvcbyval`](#msvcbyval) |
-| a copy constructor or a by-value return fills a local the caller never passes on | [`msvcbyval`](#msvcbyval) |
-| an x86 function gains an ecx parameter from a push ecx that only reserves a by-value slot | [`msvcbyval`](#msvcbyval) |
-| an x86 windows pe passes `&Stackffffffe0` to an api and reads a DIFFERENT variable afterwards | [`calleepop`](#calleepop) |
-| a buffer filled by ReadFile/RegQueryValueEx is checksummed as a constant zero | [`calleepop`](#calleepop) |
-| declaring a prototype for one callee turns another function's locals into raw `&Stack` references | [`calleepop`](#calleepop) |
-| stack locals in an msvc x86 pe sit at offsets that drift further from the truth after every call | [`calleepop`](#calleepop) |
-| after an msvc c++ call that takes a class by value every later call in the function loses its stack arguments | [`calleepopslot`](#calleepopslot) |
-| return addresses print as constants stored to stack locals in an x86 windows pe | [`calleepopslot`](#calleepopslot) |
-| a pushed argument becomes an assignment to a local before the call | [`calleepopslot`](#calleepopslot) |
-| a __thiscall import that pops a by-value class argument is called with no arguments | [`calleepopslot`](#calleepopslot) |
-| a mingw i386 function drops an incoming stack argument after a win32 api call | [`calleepopframe`](#calleepopframe) |
-| a handle an api returned through a pointer is passed on as a different local | [`calleepopframe`](#calleepopframe) |
-| an api call is passed an uninitialized local where the caller forwarded its own argument | [`calleepopframe`](#calleepopframe) |
-| an msvc /GS binary drops the stack-passed arguments of every call in a function | [`cookiescramble`](#cookiescramble) |
-| a variadic call renders with only its register arguments after the format string | [`cookiescramble`](#cookiescramble) |
-| a value stored to [rsp+0x20] right before a call never reaches the call | [`cookiescramble`](#cookiescramble) |
-| an argument-producing store survives as a dead assignment to a stack local | [`cookiescramble`](#cookiescramble) |
-| a stack array is declared with 4 elements while a loop subscripts it further | [`arrayextent`](#arrayextent) |
-| the elements after the fourth of a local array are separate scalars that are assigned and never read | [`arrayextent`](#arrayextent) |
-| a recompiled function reads past a local array under AddressSanitizer | [`arrayextent`](#arrayextent) |
-| a masked or clamped index (`v[n & 7]`, `min(n, 5)`) subscripts a smaller declared array | [`arrayextent`](#arrayextent) |
-| decompilation aborts with 'Unable to find unique hash for varnode' | [`dynamichashmax`](#dynamichashmax) |
-| dense unrolled simd/neon loop (aarch64, go) fails to decompile at symbol mapping | [`dynamichashmax`](#dynamichashmax) |
-| loop walks an array with a raw offset accumulator (iVar += 0x414) instead of an index | [`arraystride`](#arraystride) |
-| strided induction offset never re-expressed as counter*stride array indexing | [`arraystride`](#arraystride) |
-| malformed do/while whose body holds an out-of-place constant assignment | [`condexeplace`](#condexeplace) |
-| spurious = 0 copy materialized inside a loop block | [`condexeplace`](#condexeplace) |
-| function aborts with 'Cannot properly adjust input varnodes' | [`inputvarnodeadjust`](#inputvarnodeadjust) |
-| overlapping stack parameters (mc68k link/unlk) kill the whole decompilation | [`inputvarnodeadjust`](#inputvarnodeadjust) |
-| a parameter the disassembly plainly passes is missing from the recovered signature | [`retinputhalf`](#retinputhalf) |
-| a two-register struct return comes back as one register when the second half is just an argument | [`retinputhalf`](#retinputhalf) |
-| two near-identical functions recover different arities, one dropping an argument | [`retinputhalf`](#retinputhalf) |
-| the returned pair survives when the half is arithmetic but not when it is a plain copy of a parameter | [`retinputhalf`](#retinputhalf) |
-| an argument kept in a callee-saved register across a call and moved back into its own register is dropped from the return and the signature | [`retinputhalf`](#retinputhalf) |
-| a 32-bit function returning its argument as the low word of a 64-bit value prints void, or returns the high word alone | [`retinputhalf`](#retinputhalf) |
-| an int function prints as unsigned long long returning CONCAT44 of a constant and its real result | [`retsysreg`](#retsysreg) |
-| the high word of a returned pair is the operand of a vmsr fpscr, msr cpsr_c, msr basepri or mtc0 | [`retsysreg`](#retsysreg) |
-| a FreeRTOS-style ulPortRaiseBASEPRI returns CONCAT44(0x50,v1) | [`retsysreg`](#retsysreg) |
-| a function that sets a system register through r1 and returns a computed r0 prints unsigned long long | [`retsysreg`](#retsysreg) |
-| a variadic tail call prints extra trailing arguments after push %rax ... pop %rcx | [`reloadarg`](#reloadarg) |
-| printf or a varargs callee gains a variable declared // rax  | [`reloadarg`](#reloadarg) |
-|  rcx  | [`reloadarg`](#reloadarg) |
-|  stack - 0x8 as its last argument | [`reloadarg`](#reloadarg) |
-| an rdx variable with no assignment is passed between the real arguments and a popped register | [`reloadarg`](#reloadarg) |
-| a function gains a phantom parameter that is only passed on to a variadic call | [`reloadarg`](#reloadarg) |
-| a function grows one more argument than the disassembly passes, used only as the high half of the return | [`retpushedhalf`](#retpushedhalf) |
-| an alignment push/pop around the body turns a pointer return into undefined16 | [`retpushedhalf`](#retpushedhalf) |
-| the recovered signature ends in an extra argument whose only appearance is `v._8_8_ = aN;` | [`retpushedhalf`](#retpushedhalf) |
-| a prologue PUSH of an argument register and an epilogue POP into a different register invent a 128-bit return | [`retpushedhalf`](#retpushedhalf) |
-| a function whose every path writes the return register renders as void f(void) { return; } | [`condexeret`](#condexeret) |
-| a return value set under a condition disappears when the next branch tests the same condition | [`condexeret`](#condexeret) |
-| declaring the prototype brings the return value back while the recovered one is void | [`condexeret`](#condexeret) |
-| a conditional-execution core (META SUBLS/BLS) loses return 0 / return 1 paths | [`condexeret`](#condexeret) |
-| an ARM function that returns a constant through bxeq lr and otherwise tail-calls prints void | [`condexeretuse`](#condexeretuse) |
-| a return value set by a conditional mov just before a conditional return disappears | [`condexeretuse`](#condexeretuse) |
-| declaring the prototype brings the return value back while the recovered one is void | [`condexeretuse`](#condexeretuse) |
-| a Rust Result or Option producer recovers as bool and the payload register is missing from the return | [`rustabi`](#rustabi) |
-| a local commented with a register name is declared and read but never assigned anywhere in the function | [`rustabi`](#rustabi) |
-| a call to a Rust function that returns Result renders with no output at all | [`rustabi`](#rustabi) |
-| a discriminant guard tests a variable whose companion payload variable has no definition | [`rustabi`](#rustabi) |
-| two-register return recovered as one register when the first half holds a setCC flag | [`rustabi`](#rustabi) |
-| an unsigned char switch has a negative case label | [`loweredswitchlabels`](#loweredswitchlabels) |
-| an unsigned selector's high-bit case is printed as a negative number | [`loweredswitchlabels`](#loweredswitchlabels) |
-| a lowered switch's case labels disagree with the signedness of its range comparisons | [`loweredswitchlabels`](#loweredswitchlabels) |
-| a re-rolled switch dispatches on a variable assigned just before it that the cascade never compared | [`loweredswitchvalue`](#loweredswitchvalue) |
-| switch(v) where v was loaded as a call argument or holds an unrelated call result | [`loweredswitchvalue`](#loweredswitchvalue) |
-| a switch over a parameter renders over a local while option loweredswitch off shows the chain comparing the parameter | [`loweredswitchvalue`](#loweredswitchvalue) |
-| a re-rolled switch dispatches on a constant such as switch(6) | [`loweredswitchvalue`](#loweredswitchvalue) |
-| a parameter the compare tree tests disappears from the prototype when the switch re-rolls | [`loweredswitchvalue`](#loweredswitchvalue) |
-| two case values that share a body in the compare tree show only one case label and the other value takes the default | [`loweredswitchexact`](#loweredswitchexact) |
-| a re-rolled switch's default arm runs code the compare tree only reaches for one specific value | [`loweredswitchexact`](#loweredswitchexact) |
-| an assignment on one arm of a compare tree disappears when the tree re-rolls into a switch | [`loweredswitchexact`](#loweredswitchexact) |
-| a case body jumps to a join that reads a variable no case arm assigns | [`loweredswitchexact`](#loweredswitchexact) |
-| an x86 Windows function renders as (void) though it takes arguments | [`evalcurrentproto`](#evalcurrentproto) |
-| a local carrying a // ecx or // edx storage comment is read before it is ever written | [`evalcurrentproto`](#evalcurrentproto) |
-| __fastcall/__thiscall arguments missing from the signature | [`evalcurrentproto`](#evalcurrentproto) |
-| calls pass fewer arguments than the callee reads | [`evalcurrentproto`](#evalcurrentproto) |
-| call rendered with exactly six arguments on x86-64 | [`callsitestackargs`](#callsitestackargs) |
-| call rendered with an empty argument list on i386 | [`callsitestackargs`](#callsitestackargs) |
-| a for loop whose exit variable is written through a pointer argument disappears | [`callsitestackargs`](#callsitestackargs) |
-| ternary guards feeding a logging call are dead-code eliminated | [`callsitestackargs`](#callsitestackargs) |
-| outgoing-argument stack slots render as locals commented stack - 0xNN | [`callsitestackargs`](#callsitestackargs) |
-| a variable declared at stack + 0x18 is passed to a call as &Stack0000000000000018 | [`protoranges`](#protoranges) |
-| a store to a Win64 home slot and the call reading it name two different variables | [`protoranges`](#protoranges) |
-| a MIPS function keeps an argument it only spills to its register backup area | [`protoranges`](#protoranges) |
-| scanf rendered with only its format string and no destination pointer | [`varargstackargs`](#varargstackargs) |
-| printf with a %s conversion and no corresponding argument | [`varargstackargs`](#varargstackargs) |
-| a variadic call on arm64 keeps only the arguments that fit in registers before the first empty one | [`varargstackargs`](#varargstackargs) |
-| a stack local is compared or printed but never assigned after a scanf call | [`varargstackargs`](#varargstackargs) |
-| Apple arm64 variadic arguments missing from the call | [`varargstackargs`](#varargstackargs) |
-| a variadic integer argument disappears after the same value is stored through a pointer | [`varargforward`](#varargforward) |
-| a variadic call passes CONCAT44 of a never-assigned variable and a declared int parameter | [`varargforward`](#varargforward) |
-| a wrapper that forwards its own parameter to printf or open drops it | [`varargforward`](#varargforward) |
-| a variadic call on AArch64 loses the double the caller received in d0 | [`varargforward`](#varargforward) |
-| `g(k); return vr(k);` where g returns a double the source passes on | [`varargforward`](#varargforward) |
-| a declared parameter appears in no statement of a function that tail-calls a variadic function | [`varargforward`](#varargforward) |
-| the same sub_ address is called with an argument at one site and with an empty argument list at another | [`calleearity`](#calleearity) |
-| an allocator wrapper call loses its size argument | [`calleearity`](#calleearity) |
-| a call whose argument register is compared and branched on just before the call renders with no arguments | [`calleearity`](#calleearity) |
-| MSVC operator new[] overflow guard leaves the allocation size unused | [`calleearity`](#calleearity) |
-| the same sub_ address is called with an argument at one site and with an empty argument list at another and `calleearity` does not fix it | [`calleearityfwd`](#calleearityfwd) |
-| the FIRST call to a callee in a function is the one that lost its argument | [`calleearityfwd`](#calleearityfwd) |
-| an MSVC aligned allocation wrapper renders alloc(a0 + 0x27) on one branch and alloc() on the other | [`calleearityfwd`](#calleearityfwd) |
-| a call loses the argument its callee-save prologue copied into another register | [`calleearityfwd`](#calleearityfwd) |
-| the same callee renders with five arguments at some call sites and three at others in one function | [`calleearitylive`](#calleearitylive) |
-| a call loses its last two arguments although a mov writes each argument register right before the CALL | [`calleearitylive`](#calleearitylive) |
-| calleearity and calleearityfwd both leave a short argument list alone | [`calleearitylive`](#calleearitylive) |
-| the trailing parameters of a helper are invisible at half its call sites | [`calleearitylive`](#calleearitylive) |
-| an argument register that is also compared and branched on drops that argument and every one after it | [`calleearitylive`](#calleearitylive) |
-| a stripped printf-like helper prints the same format twice but one call loses values stored to state immediately beforehand | [`calleearitylive`](#calleearitylive) |
-| a callee that is called only once renders with an empty argument list | [`calleearitybody`](#calleearitybody) |
-| f() is called where the same output declares f(char *) | [`calleearitybody`](#calleearitybody) |
-| calleearity, calleearityfwd and calleearitylive all leave an empty argument list alone | [`calleearitybody`](#calleearitybody) |
-| a thread entry point or one-shot payload loses the context pointer the caller passes it | [`calleearitybody`](#calleearitybody) |
-| the argument register is compared or branched on just before the CALL and the argument disappears | [`calleearitybody`](#calleearitybody) |
-| a call renders with no arguments although the disassembly loads every argument register before it | [`calleearitycut`](#calleearitycut) |
-| calleearitybody leaves an empty argument list alone on a callee whose prologue calls another function | [`calleearitycut`](#calleearitycut) |
-| the caller passes its own incoming parameters straight through and every one of them disappears at the call | [`calleearitycut`](#calleearitycut) |
-| f() is called where a separate decompile of f declares f(int8,char *,int8,uint4) | [`calleearitycut`](#calleearitycut) |
-| only the argument register the caller writes just before the CALL survives trial scoring, and the list still comes out empty | [`calleearitycut`](#calleearitycut) |
-| a call still renders with no arguments although calleearity, calleearitybody and calleearitycut are all on | [`calleearityscratch`](#calleearityscratch) |
-| an explicit prototype assert restores the argument that the unlocked call site drops | [`calleearityscratch`](#calleearityscratch) |
-| the argument register just past the recovered run is written inside an unrolled loop for the caller's own use | [`calleearityscratch`](#calleearityscratch) |
-| a decoding loop is followed by f() where the buffer pointer is plainly live into the CALL | [`calleearityscratch`](#calleearityscratch) |
-| the register the callee-body run stops at is compared, stored or XORed by the caller before the CALL | [`calleearityscratch`](#calleearityscratch) |
-| a function signature takes only the first argument while the body reads later argument registers as undefined locals | [`inputparamgap`](#inputparamgap) |
-| int vN; // r8d and int vN; // r9d are declared and read with nothing ever assigning them | [`inputparamgap`](#inputparamgap) |
-| a Wayland/qsort/GTK callback reached only through a function-pointer table renders with one parameter instead of its ABI signature | [`inputparamgap`](#inputparamgap) |
-| the first condition of a handler tests a variable that has no definition | [`inputparamgap`](#inputparamgap) |
-| arguments the disassembly shows arriving in R8D/R9D are missing from the recovered prototype | [`inputparamgap`](#inputparamgap) |
-| a call to an imported API renders with more arguments than the API takes | [`stackarggap`](#stackarggap) |
-| the extra arguments of a call are the enclosing function's own untouched parameter and a constant | [`stackarggap`](#stackarggap) |
-| EVP_DigestFinal_ex or another three-argument import is called with five arguments | [`stackarggap`](#stackarggap) |
-| a Win64 import call gains a fifth argument from a value stored to [RSP+0x20] that belongs to the frame | [`stackarggap`](#stackarggap) |
-| declaring the callee's prototype removes the bogus arguments but every other call then gains some | [`stackarggap`](#stackarggap) |
-| a call passes one more argument than the callee's own recovered prototype takes | [`argclobber`](#argclobber) |
-| the last argument of a call is a local that is never assigned anywhere in the function | [`argclobber`](#argclobber) |
-| a declaration carries a // rdx storage comment and no write | [`argclobber`](#argclobber) |
-| two calls to the same callee in one function render with different arities and the longer one reads an undefined value | [`argclobber`](#argclobber) |
-| Ghidra names the same value extraout_RDX and kuna renders it as an ordinary local | [`argclobber`](#argclobber) |
-| a wrapper renders void f(void) { g(); } although g takes an argument in the same output | [`passthrough`](#passthrough) |
-| a call renders with no arguments while the callee's declaration in the same file takes one | [`passthrough`](#passthrough) |
-| a tail-call thunk returns void while the function it jumps to returns a value | [`passthrough`](#passthrough) |
-| decompiling the caller shows a parameter-less function whose only instruction is a jmp to a function with parameters | [`passthrough`](#passthrough) |
-| DWARF gives a forwarding function a parameter kuna does not | [`passthrough`](#passthrough) |
-| a function that returns a value on one path and tail-calls a function on the other is printed void | [`mixedtailret`](#mixedtailret) |
-| if (6 <= *a0) return; getv(); // tail-call where the source returns *a0 on that path | [`mixedtailret`](#mixedtailret) |
-| a function returns xmm0 although its callee and its other path return an int in eax | [`mixedtailret`](#mixedtailret) |
-| the return value a function tests before returning it is lost beside a tail call | [`mixedtailret`](#mixedtailret) |
-| a call passes an argument to a callee the same output declares as taking void | [`calleedeadarg`](#calleedeadarg) |
-| _secret_function(v3) called where int _secret_function(void) is declared | [`calleedeadarg`](#calleedeadarg) |
-| the decompiled project does not recompile because a call and its prototype disagree on arity | [`calleedeadarg`](#calleedeadarg) |
-| the return value of the previous call reappears as the next call's argument | [`calleedeadarg`](#calleedeadarg) |
-| a scanf/getchar result is passed to an unrelated no-argument function | [`calleedeadarg`](#calleedeadarg) |
-| a call to a function in the same binary prints with no argument although the argument register is loaded right before the CALL | [`calleereadarg`](#calleereadarg) |
-| f() is called where the same output declares f(int) | [`calleereadarg`](#calleereadarg) |
-| the argument register is compared or branched on just before the CALL and the argument disappears | [`calleereadarg`](#calleereadarg) |
-| a value returned on one path and passed to a tail call on the other loses the argument | [`calleereadarg`](#calleereadarg) |
-| return ext() + 1 where the disassembly loads edi just before call ext | [`calleereadarg`](#calleereadarg) |
-| a call to a same-binary function prints one argument more than the callee takes | [`pushpadread`](#pushpadread) |
-| the extra call argument is a value the caller computed for a loop bound or comparison | [`pushpadread`](#pushpadread) |
-| the callee pushes an unset rdx before a printf-family call to align its stack arguments | [`pushpadread`](#pushpadread) |
-| an AArch64 call's first argument is a small constant the callee never uses | [`hiddenretarg`](#hiddenretarg) |
-| foo(0x38,3) where foo takes one argument | [`hiddenretarg`](#hiddenretarg) |
-| a syscall number appears as the first argument of the call after an svc | [`hiddenretarg`](#hiddenretarg) |
-| a call passes one more argument than its callee's prototype, and the extra one is first | [`hiddenretarg`](#hiddenretarg) |
-| an AArch64 function gains a leading unsigned long parameter that is only its caller's x8 | [`hiddenretarg`](#hiddenretarg) |
-| a call argument is an undefined local the function never assigns | [`calleepreserves`](#calleepreserves) |
-| a conditional stack store or a saved frame pointer is lost across a helper that only touches registers | [`calleepreserves`](#calleepreserves) |
-| a value loaded before a call is lost while one loaded after the same call is recovered | [`calleepreserves`](#calleepreserves) |
-| a get-PC thunk or PIE GOT-base helper eats a live register | [`calleepreserves`](#calleepreserves) |
-| an argument register that provably crosses a helper renders as `unsigned int v1; // edx` with no definition | [`calleepreserves`](#calleepreserves) |
-| the recovered return of a call is sourced from a register the callee never writes | [`calleepreserves`](#calleepreserves) |
-| an i386 caller of a struct-returning function splits one local into two after the call | [`calleeretpurge`](#calleeretpurge) |
-| a local written before a call to a `ret $4` callee reads back undefined after it | [`calleeretpurge`](#calleeretpurge) |
-| stack offsets drift by 4 after every call that returns a struct through a hidden pointer | [`calleeretpurge`](#calleeretpurge) |
-| a stdcall callee's argument bytes are never removed from the caller's stack | [`calleeretpurge`](#calleeretpurge) |
-| kuna decompile of a thunk is void while its callers use the result | [`tailcontract`](#tailcontract) |
-| a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract) |
-| a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract) |
-| return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract) |
-| locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor) |
-| a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor) |
-| the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor) |
-| pseudocode continues past a call that does not return into the next fragment's code | [`fdeflowbound`](#fdeflowbound) |
-| a function returns a constant that belongs to the bytes after it | [`fdeflowbound`](#fdeflowbound) |
-| _Unwind_Resume() is followed by more statements | [`fdeflowbound`](#fdeflowbound) |
-| a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves) |
-| main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves) |
-| a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves) |
-| a void helper's call result is assigned to a variable | [`calleeretpreserves`](#calleeretpreserves) |
-| declaring the callee void trades the invented call result for an uninitialised local | [`calleeretpreserves`](#calleeretpreserves) |
-| a value read after a call the callee provably never writes is an undefined local | [`calleeretpreserves`](#calleeretpreserves) |
-| a double accumulator copied from XMM6 to XMM0 disappears across a declared-void MSVC cookie check | [`calleeretpreserves`](#calleeretpreserves) |
-| a declared-double helper result becomes a discarded statement after a later cookie call | [`calleeretpreserves`](#calleeretpreserves) |
-| a large-frame MSVC prologue loses its stack allocation and indexes every local off an undefined local | [`calleescratchbody`](#calleescratchbody) |
-| `sub rsp,rax` renders as `v1 = -v2` with `// rax` never assigned | [`calleescratchbody`](#calleescratchbody) |
-| frame slots render as `&(&Stack000000000005dfd0)[v1]` instead of fixed offsets | [`calleescratchbody`](#calleescratchbody) |
-| a constant the caller loads before a __chkstk / stack-probe call disappears | [`calleescratchbody`](#calleescratchbody) |
-| naming a helper __chkstk or declaring it void does not recover the value it preserves | [`calleescratchbody`](#calleescratchbody) |
-| calleepreserves declines a helper that clobbers only volatile registers | [`calleescratchbody`](#calleescratchbody) |
-| a call is emitted as a bare statement and the next line tests a local the function never assigns | [`indirectanchor`](#indirectanchor) |
-| a Win32 API called through its IAT slot loses its NTSTATUS while sibling imports keep theirs | [`indirectanchor`](#indirectanchor) |
-| declaring a prototype for the callee restores the assignment `v15 = f(...)` | [`indirectanchor`](#indirectanchor) |
-| a call whose last stack argument renders as `v70 & 0xffffffff00000000` has no return value | [`indirectanchor`](#indirectanchor) |
-| a call's `NTSTATUS` is tested through `v16` where v16 has no definition anywhere in the function | [`indirectanchor`](#indirectanchor) |
-| call emitted with no arguments or fewer arguments than the disassembly passes | [`calloverlap`](#calloverlap) |
-| call result read from a local that is never assigned | [`calloverlap`](#calloverlap) |
-| enclosing function loses its own parameter list and return type (void f(void)) | [`calloverlap`](#calloverlap) |
-| argument register written whole-width by pxor movdqa movdqu por pand orpd or movq before the call | [`calloverlap`](#calloverlap) |
-| second call binds a stale pre-call value where the first call should have defined it | [`calloverlap`](#calloverlap) |
-| stack array subscripted past its own declared bound under a guard that proves the larger index | [`loadguardrange`](#loadguardrange) |
-| stack scalar at the end of an array read but never assigned and never address-taken | [`loadguardrange`](#loadguardrange) |
-| array written through a computed index capped at 4 elements regardless of the real extent | [`loadguardrange`](#loadguardrange) |
-| decompile-project output recompiles into a stack overflow the binary does not have | [`loadguardrange`](#loadguardrange) |
-| servo/config fields validated and stored from uninitialized stack locals | [`loadguardrange`](#loadguardrange) |
-| a stack byte written through an incrementing pointer still reads as its initial value | [`stackstoreguard`](#stackstoreguard) |
-| a call after a stack-buffer fill loop disappears | [`stackstoreguard`](#stackstoreguard) |
-| indexaliasguard full restores a branch depending on a stack store | [`stackstoreguard`](#stackstoreguard) |
-| a stack array element read after an indexed store prints the value written before the store | [`stackstoreguard`](#stackstoreguard) |
-| stack array declared and read but never initialised in the emitted C | [`indexaliasguard`](#indexaliasguard) |
-| a run of direct frame stores vanishes when the same slots are later read through a pointer | [`indexaliasguard`](#indexaliasguard) |
-| constants loaded from .rdata into a local buffer do not appear in the decompilation | [`indexaliasguard`](#indexaliasguard) |
-| accumulator or key schedule buffer looks uninitialised before an XOR loop walks it | [`indexaliasguard`](#indexaliasguard) |
-| value stored through a pointer does not appear to reach the frame slot it aliases | [`indexaliasguard`](#indexaliasguard) |
-| a global read back after a store through a pointer prints the value stored before that store | [`indexaliasguard`](#indexaliasguard) |
-| a global read before a store through a pointer is printed after it | [`indexaliasguard`](#indexaliasguard) |
-| a store to a global before a pointer load is missing when the global is stored again later | [`indexaliasguard`](#indexaliasguard) |
-| a loop that bumps a global around a pointer load prints with no store to the global | [`indexaliasguard`](#indexaliasguard) |
-| a local is set to NULL and then used as an indirect-call target with nothing assigned in between | [`tiedstorekeep`](#tiedstorekeep) |
-| GetProcAddress/dlsym result assigned to a temporary and the function pointer local it is stored into stays NULL | [`tiedstorekeep`](#tiedstorekeep) |
-| call result stored to the frame but the store is missing from the emitted C so the later read looks uninitialized | [`tiedstorekeep`](#tiedstorekeep) |
-| indirect call through a stack slot that no statement ever writes | [`tiedstorekeep`](#tiedstorekeep) |
-| a stack local read after a call shows only its initialiser | [`tiedstorekeep`](#tiedstorekeep) |
-| global structure field stores become local assignments | [`globalfieldstore`](#globalfieldstore) |
-| array member writes target unrelated local arrays | [`globalfieldstore`](#globalfieldstore) |
-| a global structure is assigned individual scalar fields | [`globalfieldstore`](#globalfieldstore) |
-| a call sees stale fields after a cached record copy | [`globalfieldstore`](#globalfieldstore) |
-| a global is assigned before a call although the binary stores it after the call returns | [`globalcallstore`](#globalcallstore) |
-| a call that reads a global appears to see a value the caller stores only afterwards | [`globalcallstore`](#globalcallstore) |
-| a loop that walks a global list frees the head but never advances the global | [`globalcallstore`](#globalcallstore) |
-| a variable's storage comment lists a global it is only copied into | [`globalcallstore`](#globalcallstore) |
-| an int converted to float and then to double prints as a direct (double) conversion | [`intfloatround`](#intfloatround) |
-| (double)(float)i prints as (double)i | [`intfloatround`](#intfloatround) |
-| a long long converted to double and then to float prints as one (float) conversion | [`intfloatround`](#intfloatround) |
-| an x87 int spilled to a float slot prints without the (float) rounding | [`intfloatround`](#intfloatround) |
-| a for loop initialises and tests one variable but assigns its increment to another | [`loopcounterstore`](#loopcounterstore) |
-| the induction variable is never updated so the emitted loop cannot terminate | [`loopcounterstore`](#loopcounterstore) |
-| several loop counters lose their increments to one shared register temporary | [`loopcounterstore`](#loopcounterstore) |
-| a stack-resident counter is incremented into a variable that has no storage comment | [`loopcounterstore`](#loopcounterstore) |
-| the loop test compares against a value nothing ever assigns | [`loopcounterstore`](#loopcounterstore) |
-| a stack-to-stack buffer copy is missing the bytes in its middle | [`splitstorekeep`](#splitstorekeep) |
-| a struct or array assignment emits only its first and last word | [`splitstorekeep`](#splitstorekeep) |
-| two of the four MOVs of an inlined memcpy have no statement in the emitted C | [`splitstorekeep`](#splitstorekeep) |
-| a copied buffer looks half-uninitialised although the disassembly writes every byte | [`splitstorekeep`](#splitstorekeep) |
-| the stores that vanish are exactly the ones whose 8-byte ranges overlap | [`splitstorekeep`](#splitstorekeep) |
-| an unsigned long long local is commented with a register pair such as l4_5 | [`pairrefine`](#pairrefine) |
-| 32-bit counters are updated through CONCAT44 piece writes | [`pairrefine`](#pairrefine) |
-| a loop index is read as the high word of a 64-bit variable | [`pairrefine`](#pairrefine) |
-| two unrelated 32-bit values share one 64-bit local | [`pairrefine`](#pairrefine) |
-| ldd/std copies make the registers they load into one fused variable | [`pairrefine`](#pairrefine) |
-| goto label_N; directly above label_N: | [`gotonext`](#gotonext) |
-| switch case falls into the next case through a goto | [`gotonext`](#gotonext) |
-| case N: label_X: right after a goto label_X; | [`gotonext`](#gotonext) |
-| an if arm ends in a goto to the statement after the if | [`gotonext`](#gotonext) |
-| iVar1/uVar2/param_1 ghidra-style names wanted instead of v1/a1 (set ghidra) | [`namestyle`](#namestyle) |
-| v-numbered locals and sub_/dat_/label_ names in the default output | [`namestyle`](#namestyle) |
-| byte-for-byte comparison against upstream ghidra naming | [`namestyle`](#namestyle) |
-| undefined8/xunknownN placeholder types wanted for upstream comparison (flip off) | [`realtypes`](#realtypes) |
-| size-guessed unsigned long/int/char types shown for values the inference never typed | [`realtypes`](#realtypes) |
-| a DWARF or asserted by-value struct parameter is declared as a pointer | [`indirectargs`](#indirectargs) |
-| calls pass &local to a function declared to take the struct by value | [`indirectargs`](#indirectargs) |
-| function pointer type spells T * for a by-value aggregate parameter | [`indirectargs`](#indirectargs) |
-| want the raw ABI pointer for a large struct parameter (flip off) | [`indirectargs`](#indirectargs) |
-| a void function ends with a redundant return; the source does not have | [`voidtailreturn`](#voidtailreturn) |
-| GED counts one extra exit node against an otherwise perfect function | [`voidtailreturn`](#voidtailreturn) |
-| the last statement of a void function is a bare return | [`voidtailreturn`](#voidtailreturn) |
-| a data import read through __got renders *dat_<slot> | [`importdata`](#importdata) |
-| __stack_chk_guard shows as a dereferenced dat_ address | [`importdata`](#importdata) |
-| imported globals are anonymous even though their GOT slot is named | [`importdata`](#importdata) |
-| an ELF shared object reads stdout or environ as *dat_<slot> or *stdout_ptr | [`importdata`](#importdata) |
-| a libc argument is cast to the very type the parameter declares, memchr(v10,(int)v4,n) | [`castimplied`](#castimplied) |
-| a widening cast assigned to a variable already declared that type, v2 = (long)v1; with long v2 | [`castimplied`](#castimplied) |
-| return (unsigned long)v1; from a function declared unsigned long | [`castimplied`](#castimplied) |
-| several casts stacked over one byte, (long)(int)(unsigned int)(unsigned char)c | [`castimplied`](#castimplied) |
-| kuna prints more casts than IDA on the same function | [`castimplied`](#castimplied) |
-| v10 and v11 declared between v1 and v2 | [`declorder`](#declorder) |
-| local declarations in string order v1, v10, v11, v2 | [`declorder`](#declorder) |
-| a numbered local hard to find among ten or more declarations | [`declorder`](#declorder) |
-| a local holding open()'s result named v1 | [`libcnames`](#libcnames) |
-| read's byte count kept as a vN | [`libcnames`](#libcnames) |
-| a buffer length from strlen named vN | [`libcnames`](#libcnames) |
-| a local passed to a libc function keeps a vN name | [`libcnames`](#libcnames) |
-| kuna names fewer locals than IDA on libc-heavy code | [`libcnames`](#libcnames) |
-| loop counters print as v5, v3, v1 instead of i, j, k | [`contextnames`](#contextnames) |
-| the accumulator a function returns keeps a vN name | [`contextnames`](#contextnames) |
-| nested loops are hard to tell apart in stripped code | [`contextnames`](#contextnames) |
-| a double parameter stored into a global prints as unsigned long and moves ahead of the integer parameters | [`floatglobals`](#floatglobals) |
-| a float parameter copied into a global prints as unsigned int | [`floatglobals`](#floatglobals) |
-| a global passed to a float parameter prints as a union reinterpretation ((union { unsigned int from; float to; }){ .from = dat_10001d78 }).to | [`floatglobals`](#floatglobals) |
-| firmware calls of float helpers wrap every global argument in a union | [`floatglobals`](#floatglobals) |
-| a parameter is declared char and every use of it is if (a0) or !a0 | [`boolbyte`](#boolbyte) |
-| a one-byte local is char but only ever assigned 0 and 1 | [`boolbyte`](#boolbyte) |
-| a flag argument reads as a character, so a call site looks like it passes text | [`boolbyte`](#boolbyte) |
-| char v1; followed by v1 = 0; v1 = 1; if (v1) | [`boolbyte`](#boolbyte) |
-| DWARF says _Bool and kuna says char or unsigned char | [`boolbyte`](#boolbyte) |
-| an ARM hard-float helper like fabsf prints unsigned int f(unsigned int) and every caller wraps its result in a union | [`floatbits`](#floatbits) |
-| copysignf(M_PI, x) prints as copysignf(0x40490fdb, x) | [`floatbits`](#floatbits) |
-| a float classifier (isnanf, isfinitef) takes an unsigned int parameter its callers pass a float to | [`floatbits`](#floatbits) |
-| movd %xmm0,%eax; and $0x7fffffff,%eax; movd %eax,%xmm0 prints as integer arithmetic | [`floatbits`](#floatbits) |
-| a string pointer is declared unsigned char * and its bytes print as (char)*p | [`charbyte`](#charbyte) |
-| a comparison against a character constant prints as a number: v3 != 9, *p == 0x2d | [`charbyte`](#charbyte) |
-| a wrapper takes unsigned char *a1 and passes (char *)a1 to mbrtowc or strlen | [`charbyte`](#charbyte) |
-| strchr("...",(int)(char)*v1) | [`charbyte`](#charbyte) |
-| a loop variable that walks text is unsigned char | [`charbyte`](#charbyte) |
-| *(unsigned int *)((long)a0 + 0xac) | [`castarith`](#castarith) |
-| every read through one parameter is a cast to (long) and back | [`castarith`](#castarith) |
-| (char *)((long)v4 + 0x10) assigned to a pointer variable | [`castarith`](#castarith) |
-| (void *)((long)a0 + 8) passed to a callee | [`castarith`](#castarith) |
-| two casts for one field read where IDA prints one | [`castarith`](#castarith) |
-| *(long *)((long)v7 + v19 * 8) | [`castindex`](#castindex) |
-| (long)v24 - (long)v14 passed as a length | [`castindex`](#castindex) |
-| free(*(void **)((long)v1 + (long)v2 * 8)) | [`castindex`](#castindex) |
-| an array walk through a void * base prints two casts per element | [`castindex`](#castindex) |
-| a pointer difference of two char * is cast to long on both sides | [`castindex`](#castindex) |
-| the JSON variables array is empty although the function plainly has a stack frame | [`framelayout`](#framelayout) |
-| fewer locals reported than the source declares | [`framelayout`](#framelayout) |
-| a stack slot the disassembly writes is missing from variables | [`framelayout`](#framelayout) |
-| a recovered slot is typed char[N] rather than N bytes of unknown type | [`framelayout`](#framelayout) |
-| a variable is named $$undef00000000 | [`framelayout`](#framelayout) |
-| a JSON variable is typed char although the decompiler never established an element type | [`bytehonest`](#bytehonest) |
-| a one-byte parameter of a boolean-valued function is reported as char | [`bytehonest`](#bytehonest) |
-| the variables array claims a committed type the C text only picked for legibility | [`bytehonest`](#bytehonest) |
-| xunknown1 appears as a type name with realtypes off | [`bytehonest`](#bytehonest) |
-| a -O0 stack slot is reported as undefined8 although the C body prints the value stored into it as char * | [`slotptr`](#slotptr) |
-| a local that holds a FILE * or a libc record pointer is reported as eight bytes of unknown type | [`slotptr`](#slotptr) |
-| the variables array has fewer pointer-typed locals than the C body declares | [`slotptr`](#slotptr) |
-| a spilled pointer argument's home slot is reported as undefined8 | [`slotptr`](#slotptr) |
-| a local the C declares has no row in the JSON variables array | [`reglocals`](#reglocals) |
-| the variables array lists only parameters and stack slots at -O2 | [`reglocals`](#reglocals) |
-| an optimized function's vN locals are missing from decompile-all --json | [`reglocals`](#reglocals) |
-| type_match misses every register-resident local | [`reglocals`](#reglocals) |
-| the variables array reports local_N undefinedN at the offset the C declares vN in | [`slotreport`](#slotreport) |
-| a local whose declaration comment lists a stack home has an undefined frame row | [`slotreport`](#slotreport) |
-| the decompile-project .asm stack header types a slot undefinedN that the C declares | [`slotreport`](#slotreport) |
-| type_match pairs a stack local with an undefined row | [`slotreport`](#slotreport) |
-| a -O0 local merged with its spill is reported by width only | [`slotreport`](#slotreport) |
-| the variables array reports one undefined16 row over a pointer the C declares at its start | [`slotsplit`](#slotsplit) |
-| a local declared at stack - 0x40 has no row of its own inside a wider frame row | [`slotsplit`](#slotsplit) |
-| the decompile-project .asm stack header lists one wide undefined slot over several declared locals | [`slotsplit`](#slotsplit) |
-| type_match pairs a stack local with a wider undefined row | [`slotsplit`](#slotsplit) |
-| int4/uint1/uint4/float8/float10 appear in the emitted C instead of C type names | [`ctypes`](#ctypes) |
-| the same function mixes `unsigned int` with `int4` | [`ctypes`](#ctypes) |
-| `code *` appears as a function-pointer type | [`ctypes`](#ctypes) |
-| the emitted C does not compile because its type names are not C | [`ctypes`](#ctypes) |
-| the same local declared once although many HighVariables share the stack slot | [`dedupvardecls`](#dedupvardecls) |
-| flip off to see one declaration line per high (e.g. int4 option_index repeated hundreds of times) | [`dedupvardecls`](#dedupvardecls) |
-| a variable is declared a pointer to one width and dereferenced at another | [`declhightype`](#declhightype) |
-| a byte comparison reads through an unsigned long long pointer | [`declhightype`](#declhightype) |
-| the declared type disagrees with the cast on the line that assigns the variable | [`declhightype`](#declhightype) |
-| an integer is assigned to a variable declared as a pointer with no cast | [`declhightype`](#declhightype) |
-| a one-byte load prints without the sign extension the instruction performs | [`declhightype`](#declhightype) |
-| a parameter from the signature is declared again as a local at the top of the body | [`paramrefdecl`](#paramrefdecl) |
-| the duplicate declaration has a different type from the signature (unsigned int a0 then int4 a0) | [`paramrefdecl`](#paramrefdecl) |
-| the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl) |
-| a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl) |
-| --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl) |
-| avx code reads SUB6432(zmm0,0) instead of ymm0 | [`vexzeroupper`](#vexzeroupper) |
-| a ymm or xmm argument shows as a 64-byte zmm local | [`vexzeroupper`](#vexzeroupper) |
-| vector values are widened to char[64] | [`vexzeroupper`](#vexzeroupper) |
-| eight float additions on slices of one register instead of a vector add | [`lanefuse`](#lanefuse) |
-| avx-512 mask applied as sixteen per-lane multiply-or statements | [`lanefuse`](#lanefuse) |
-| a vector function body is one statement per lane | [`lanefuse`](#lanefuse) |
-| a function taking __m256 shows (void) parameters and reads ymm registers as locals | [`vectorabi`](#vectorabi) |
-| a vector-returning function is void or undefined32 | [`vectorabi`](#vectorabi) |
-| x86-64 xmm parameter wider than 8 bytes is lost | [`vectorabi`](#vectorabi) |
-| char[32] locals for vector values | [`vectorabi`](#vectorabi) |
-| vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics) |
-| fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics) |
-| avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics) |
-| a global one function accessed whole prints as unrelated dat_ names in another | [`mapglobalsyms`](#mapglobalsyms) |
-| later functions do not see the DAT_ symbol an earlier decompile created, unlike upstream decomp_dbg sessions | [`mapglobalsyms`](#mapglobalsyms) |
-| a loop that only reads a stack buffer prints a store into its first element | [`tiedphitrim`](#tiedphitrim) |
-| a while condition tests buf[0] and the loop body assigns a later element into buf[0] | [`tiedphitrim`](#tiedphitrim) |
-| a byte fetched through a pointer is assigned to a stack-offset variable the binary never writes | [`tiedphitrim`](#tiedphitrim) |
-| a loop over a global linked list advances the global head although the binary only reads it | [`tiedphitrim`](#tiedphitrim) |
-| strcmp or strlen after an in-place string loop reads a buffer the C already overwrote | [`tiedphitrim`](#tiedphitrim) |
-| a helper that plainly computes a status recovers as void with a bare return; | [`noreturnretuse`](#noreturnretuse) |
-| the callee's return value is missing at the call site on ARM/AArch64 | [`noreturnretuse`](#noreturnretuse) |
-| a function whose error path calls a no-return handler loses its return type | [`noreturnretuse`](#noreturnretuse) |
-| the return type differs between two builds of the same function that differ only in stack-protector hardening | [`noreturnretuse`](#noreturnretuse) |
-| a call inside a loop renders with an empty argument list while the disassembly loads its argument registers immediately before it | [`zeroidiomuse`](#zeroidiomuse) |
-| the same function recovers arguments at one call site and drops them at another with the identical mov-immediate-then-call shape | [`zeroidiomuse`](#zeroidiomuse) |
-| an explicit prototype override restores the arguments but nothing else does | [`zeroidiomuse`](#zeroidiomuse) |
-| a call loses its arguments only when a sibling call in the same loop is preceded by xor reg,reg or sub reg,reg | [`zeroidiomuse`](#zeroidiomuse) |
-| a call renders with fewer arguments than the disassembly sets up and the missing registers are written before a nearby branch | [`exclusivearguse`](#exclusivearguse) |
-| a call keeps only the arguments assigned on its own branch arm and drops the ones assigned before the test | [`exclusivearguse`](#exclusivearguse) |
-| an explicit prototype override restores the arguments but no option does | [`exclusivearguse`](#exclusivearguse) |
-| the callee decompiled on its own has more parameters than any of its call sites pass | [`exclusivearguse`](#exclusivearguse) |
-| a container append or push_back helper is called with just the container | [`exclusivearguse`](#exclusivearguse) |
-| a call renders as a bare statement and the value it returned is read through a local the function never assigns | [`callretpair`](#callretpair) |
-| a local commented `// rdx` or `// edx` is declared and read but has no definition anywhere in the function | [`callretpair`](#callretpair) |
-| decompiling the callee reports an undefined16 return but every call site shows no output | [`callretpair`](#callretpair) |
-| a 16-byte struct return (JSValue, div_t, a fat pointer, a two-word value) is lost at the call site | [`callretpair`](#callretpair) |
-| a tag-and-payload pair is tested right after a call and the tag variable is never assigned | [`callretpair`](#callretpair) |
-| a caller that reads only the high word of a 64-bit callee result prints a bare `full(a0);` and an unassigned `// r1`, `// edx` or `// v1` local | [`callretpair`](#callretpair) |
-| an untyped MIPS32 big-endian producer loses its low return word despite a declared 64-bit consumer | [`callwide`](#callwide) |
-| producer and caller disagree about a complete big-endian eight-byte integer return | [`callwide`](#callwide) |
-| a long long return on a big-endian 32-bit target prints CONCAT44 with the low word first | [`bejoin`](#bejoin) |
-| a 64-bit product, sum or shift returned on PowerPC, MIPS, SPARC or ARM big-endian comes back with its halves swapped | [`bejoin`](#bejoin) |
-| an AVR function returning a 16-bit int prints a read of R25R24 nothing assigns | [`bejoin`](#bejoin) |
-| a call to a function returning int is printed (unsigned long)(unsigned int)f() on RISC-V or LoongArch | [`narrowext`](#narrowext) |
-| a signed char or short result is zero-extended where the callee sign-extends it | [`narrowext`](#narrowext) |
-| a declared int parameter used as a 64-bit value prints (unsigned long)(unsigned int)x | [`narrowext`](#narrowext) |
-| a narrow result or parameter prints as CONCAT31(v1,f()) or CONCAT44(v1,x) with an unassigned v1 | [`narrowext`](#narrowext) |
-| a function that stores its return value to a global prints void | [`callerreads`](#callerreads) |
-| kuna decompile prints void f while main prints f(2) as a value | [`callerreads`](#callerreads) |
-| a wrapper that returns a call's result prints void in a single-function decompile | [`callerreads`](#callerreads) |
-| kuna decompile and decompile-all disagree on whether a function returns a value | [`callerreads`](#callerreads) |
-| a double return becomes SUB84 or zero | [`armfloatreturn`](#armfloatreturn) |
-| an ARM hard-float function loses its d0 parameter | [`armfloatreturn`](#armfloatreturn) |
-| a caller reads an undefined floating result | [`armfloatreturn`](#armfloatreturn) |
-| an AArch64 function returning a double prints as undefined16 | [`zerofillreturn`](#zerofillreturn) |
-| v1._8_8_ = 0 before return v1._0_16_ | [`zerofillreturn`](#zerofillreturn) |
-| return ZEXT816(0) where the source returns 0.0 | [`zerofillreturn`](#zerofillreturn) |
-| a caller casts an AArch64 call result to double: (double)f(x) | [`zerofillreturn`](#zerofillreturn) |
-| a struct of two doubles or a complex double returned in d0 and d1 prints as q0 with an upper half of zero | [`zerofillreturn`](#zerofillreturn) |
-| a function built with -fzero-call-used-regs returns a constant 0 on every path | [`zerocallregs`](#zerocallregs) |
-| an int-returning function prints as double with return 0.0 | [`zerocallregs`](#zerocallregs) |
-| a double-returning function prints as unsigned long f(void) { return 0; } | [`zerocallregs`](#zerocallregs) |
-| a long return prints as undefined16 whose upper half is 0 | [`zerocallregs`](#zerocallregs) |
-| a void function prints return 0 | [`zerocallregs`](#zerocallregs) |
-| xor and pxor of every scratch register right before ret | [`zerocallregs`](#zerocallregs) |
-| missing floating argument | [`armfloatargs`](#armfloatargs) |
-| double input split into two words | [`armfloatargs`](#armfloatargs) |
-| caller and callee disagree on mixed argument contract | [`armfloatargs`](#armfloatargs) |
-| CONCAT22 in a short byte-swap helper | [`partialconcat`](#partialconcat) |
-| CONCAT after a partial register write | [`partialconcat`](#partialconcat) |
-| an unchanged upper word joined to a replaced lower word | [`partialconcat`](#partialconcat) |
-| unconditional loop prints do-while (true) at the bottom | [`infloopstyle`](#infloopstyle) |
-| prefer while (true) at the top | [`infloopstyle`](#infloopstyle) |
-| need the previous infinite-loop spelling for comparison | [`infloopstyle`](#infloopstyle) |
-| a signed ARM value is shifted left by a constant in the emitted C | [`armconstshift`](#armconstshift) |
-| UBSan reports a left shift of a negative value in recompiled ARM output | [`armconstshift`](#armconstshift) |
-| a signed ARM shift overflows into the sign bit in recompiled output | [`armconstshift`](#armconstshift) |
-| a local read appears before the machine branch that guards it | [`guardedreadtrim`](#guardedreadtrim) |
-| a call-written volatile stack local is read on the failure path | [`guardedreadtrim`](#guardedreadtrim) |
-| an overwritten register argument renders as a stale half of a previous wide value | [`multiregargs`](#multiregargs) |
-| a live entry argument disappears after a wide register read | [`multiregargs`](#multiregargs) |
-| large global initializer exhausts memory during heritage | [`globalcallranges`](#globalcallranges) |
-| tiny constructors cause a quadratic number of global call guards | [`globalcallranges`](#globalcallranges) |
-| a function with many global assignments uses gigabytes before emitting C | [`globalcallranges`](#globalcallranges) |
-| 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x... | [`segmentize`](#segmentize) |
-| segment(0x1000,0x10) instead of a folded address | [`segmentize`](#segmentize) |
-| every stack access of 16-bit code is a segment(...) expression | [`segmentize`](#segmentize) |
+| the signature says FILE * or struct_0 * and nothing says what the fields are | [`structdefs`](#structdefs----on--off-default-off) |
+| a field access like f->_flags with no layout anywhere in the output | [`structdefs`](#structdefs----on--off-default-off) |
+| you have to run decompile-project just to read the .h for one function's struct | [`structdefs`](#structdefs----on--off-default-off) |
+| a synthesized struct_N appears in a parameter type with no definition | [`structdefs`](#structdefs----on--off-default-off) |
+| a byte swap prints as four masked shifts ORed together | [`bitidioms`](#bitidioms----on--off-default-on) |
+| a rotate prints as a pair of opposite shifts ORed together | [`bitidioms`](#bitidioms----on--off-default-on) |
+| bswap or rev instructions decompile to shift and mask soup | [`bitidioms`](#bitidioms----on--off-default-on) |
+| hash or crc code full of paired shifts | [`bitidioms`](#bitidioms----on--off-default-on) |
+| memcpy(d, s, strlen(s) + 1) is printed instead of strcpy(d, s) | [`helperroles`](#helperroles----on--off-default-on) |
+| an inlined strcpy shows as a strlen call followed by a memcpy | [`helperroles`](#helperroles----on--off-default-on) |
+| a variable-length array prints as &(&Stack[-8])[-n] | [`dynalloca`](#dynalloca----on--off-default-off) |
+| sub rsp, rax decompiles to stack pointer arithmetic instead of alloca | [`dynalloca`](#dynalloca----on--off-default-off) |
+| a 16-byte local (`char vN [16]` / `undefined1 auVarN [16]`) is declared for every operand of an unsigned multiply | [`mulblob`](#mulblob----on--off-default-on) |
+| `vN._8_8_ = 0; vN._0_8_ = x;` pairs appear in front of a `SUB168(... * ...,0)` | [`mulblob`](#mulblob----on--off-default-on) |
+| a function with several `mul` instructions declares twice as many locals as it has values | [`mulblob`](#mulblob----on--off-default-on) |
+| the high half of a 64x64 product is read out of a blob instead of off the multiply | [`mulblob`](#mulblob----on--off-default-on) |
+| a loop summing an array prints as eight lane accumulators added into one total after the loop | [`devectorize`](#devectorize----on--off-default-off) |
+| a vectorised reduction is followed by a second copy of the loop over the remainder | [`devectorize`](#devectorize----on--off-default-off) |
+| an array sum is guarded by if (8 <= length) with a stride-eight do-while behind it | [`devectorize`](#devectorize----on--off-default-off) |
+| a line like v8 + v12 + v6 + v10 + v7 + v11 + v5 + v9 follows a loop | [`devectorize`](#devectorize----on--off-default-off) |
+| an inner test that an outer test already decides is printed | [`rangefold`](#rangefold----on--off-default-on) |
+| if (x < 10) { if (x > 20) ... } keeps the dead branch | [`rangefold`](#rangefold----on--off-default-on) |
+| x & 0xff kept on a value an earlier range check bounds below 256 | [`rangefold`](#rangefold----on--off-default-on) |
+| a range check repeated inside the branch of the same check | [`rangefold`](#rangefold----on--off-default-on) |
+| v = x + 3; if (0 <= x) v = x; return v >> 2; where the source divides by 4 | [`pow2select`](#pow2select----on--off-default-on) |
+| a signed remainder by a power of two prints as a select between x & m and -(-x & m) | [`pow2select`](#pow2select----on--off-default-on) |
+| (x + ((unsigned)(x >> 31) >> 30)) >> 2 instead of x / 4 | [`pow2select`](#pow2select----on--off-default-on) |
+| a < b or a == b printed as two tests where a <= b would do | [`cmpmerge`](#cmpmerge----on--off-default-off) |
+| a0 != a1 && !(a0 < a1) on floats | [`cmpmerge`](#cmpmerge----on--off-default-off) |
+| two branches in a row test the same value against neighbouring constants and jump to one place | [`cmpmerge`](#cmpmerge----on--off-default-off) |
+| x == 3 or 3 < x printed as two tests | [`cmpmerge`](#cmpmerge----on--off-default-off) |
+| the same arithmetic expression on the same values is computed twice into two temporaries | [`latecse`](#latecse----on--off-default-off) |
+| v1 = a + b * 4; ... v2 = a + b * 4; where one would do | [`latecse`](#latecse----on--off-default-off) |
+| duplicated address arithmetic in both arms of an if | [`latecse`](#latecse----on--off-default-off) |
+| if (c) x = a; else x = b; return f(x); where the source called f on each path | [`unmergecall`](#unmergecall----on--off-default-off) |
+| the compiler shared one call block between two paths and the arguments became a merged variable | [`unmergecall`](#unmergecall----on--off-default-off) |
+| a do/while that decrements a 0xffffffffffffffff counter while stepping a char pointer until the byte read is zero | [`strlenscan`](#strlenscan----on--off-default-on) |
+| if (!v3) break; v3 -= 1; inside a loop that reads one byte per step | [`strlenscan`](#strlenscan----on--off-default-on) |
+| ~v3 - 1 or ~v3 - 5 where the source computes a string length | [`strlenscan`](#strlenscan----on--off-default-on) |
+| repnz scasb in the disassembly where IDA prints strlen | [`strlenscan`](#strlenscan----on--off-default-on) |
+| a while loop that copies one element per iteration and steps two pointers and a count | [`repstring`](#repstring----on--off-default-on) |
+| rep movsq / rep stosd from -Os code printed as a loop instead of memcpy/memset | [`repstring`](#repstring----on--off-default-on) |
+| a struct copy prints as a 16-iteration word loop | [`repstring`](#repstring----on--off-default-on) |
+| a struct copy prints as eight paired assignments through a register | [`copyrun`](#copyrun----on--off-default-on) |
+| *a0 = *a1; a0[1] = v1; ... for a fixed-size memcpy | [`copyrun`](#copyrun----on--off-default-on) |
+| SSE xmm0 lanes shuttle a buffer one word at a time | [`copyrun`](#copyrun----on--off-default-on) |
+| stack string initialisation renders as an array-typed cast such as (char[8])s_addr._0_8_ | [`rodatastring`](#rodatastring----on--off-default-on) |
+| partial-symbol slice assignments like buf._0_9_ = s_addr._16_9_ instead of the string | [`rodatastring`](#rodatastring----on--off-default-on) |
+| a recognized rodata literal never appears in the function that copies it onto the stack | [`rodatastring`](#rodatastring----on--off-default-on) |
+| builtin_strncpy call where the individual slice assignments are wanted (flip off) | [`rodatastring`](#rodatastring----on--off-default-on) |
+| long run of per-element constant stores instead of a single memset | [`memsetrecover`](#memsetrecover----on--off-default-on) |
+| unrolled or SIMD zeroing rendered as dozens of assignments | [`memsetrecover`](#memsetrecover----on--off-default-on) |
+| builtin_memset call where the individual element stores are wanted (flip off) | [`memsetrecover`](#memsetrecover----on--off-default-on) |
+| spurious CONCAT44 return value in a void or single-register function | [`returnpair`](#returnpair----pair--single-default-pair-destructive-opt-in) |
+| two return registers joined into one double-width return (e.g. sparc o0/o1) | [`returnpair`](#returnpair----pair--single-default-pair-destructive-opt-in) |
+| return type twice the natural width built from a register concat | [`returnpair`](#returnpair----pair--single-default-pair-destructive-opt-in) |
+| v850 jmp [reg] rendered as an indirect call instead of a recovered switch | [`v850indirectbranch`](#v850indirectbranch----on--off-default-off-destructive-opt-in) |
+| jump table on v850 never recovered because the dispatch decodes as a computed call | [`v850indirectbranch`](#v850indirectbranch----on--off-default-off-destructive-opt-in) |
+| __ftol() / __ftol2() called with no arguments | [`msvcftol`](#msvcftol----on--off-default-on) |
+| the float computation feeding a float-to-int conversion is missing from an MSVC x86-32 binary | [`msvcftol`](#msvcftol----on--off-default-on) |
+| a __thiscall method lost its `this` pointer and reads its fields off a stack argument instead | [`msvcftol`](#msvcftol----on--off-default-on) |
+| __udivdi3 / __divdi3 / __umoddi3 / __moddi3 called with four 32-bit words instead of a / b | [`arithhelpers`](#arithhelpers----on--off-default-on) |
+| __aeabi_uldivmod() / __aeabi_idiv() / __aeabi_lmul() called with missing or reordered arguments on ARM | [`arithhelpers`](#arithhelpers----on--off-default-on) |
+| __alldiv / __allrem called and the caller returns void on an MSVC x86-32 image | [`arithhelpers`](#arithhelpers----on--off-default-on) |
+| a 64-bit division on a 32-bit target prints as a helper call | [`arithhelpers`](#arithhelpers----on--off-default-on) |
+| an Objective-C method is mostly objc_retain/objc_release lines | [`objcarc`](#objcarc----on--off-default-on) |
+| objc_retainAutoreleasedReturnValue() rendered with no argument and its result typed unsigned long | [`objcarc`](#objcarc----on--off-default-on) |
+| objc_storeStrong(&self->field, x) where an assignment is meant | [`objcarc`](#objcarc----on--off-default-on) |
+| [[Foo alloc] init] typed objc_object * or unsigned long | [`objcrettype`](#objcrettype----on--off-default-on) |
+| every message sent to a freshly allocated object carries a cast | [`objcrettype`](#objcrettype----on--off-default-on) |
+| an init… call's result loses the receiver's class | [`objcrettype`](#objcrettype----on--off-default-on) |
+| objc_msgSend(self, sel_foo) where -[Class foo] is a method of this image | [`objcresolve`](#objcresolve----on--off-default-on) |
+| objc_msgSend$count(v2) on a receiver whose class is known | [`objcresolve`](#objcresolve----on--off-default-on) |
+| the call graph of an ObjC image stops at objc_msgSend | [`objcresolve`](#objcresolve----on--off-default-on) |
+| an `if (isCurrentModePrivileged())` block wraps every interrupt-mask or special-register access in Cortex-M firmware | [`cortexmpriv`](#cortexmpriv----on--off-default-off) |
+| `isCurrentModePrivileged()` appears in the emitted C at all | [`cortexmpriv`](#cortexmpriv----on--off-default-off) |
+| a Cortex-M function has more basic blocks and branches than its source | [`cortexmpriv`](#cortexmpriv----on--off-default-off) |
+| `getBasePriority()`/`isIRQinterruptsEnabled()`/`getCurrentExceptionNumber()` are each read under their own conditional | [`cortexmpriv`](#cortexmpriv----on--off-default-off) |
+| leaf function ends in a (*dat_...)(...) computed call with a 'Treating indirect jump as call' warning | [`tailcalljump`](#tailcalljump----on--direct--off-default-on) |
+| jmp to a plt stub inlined into the caller instead of a named tail call | [`tailcalljump`](#tailcalljump----on--direct--off-default-on) |
+| plt thunk body absorbed where func(...) is expected | [`tailcalljump`](#tailcalljump----on--direct--off-default-on) |
+| a veneer renders as switch(0x...) with one case holding another function's body, or halt_missing() with a 'flows out of bounds' warning | [`tailcalljump`](#tailcalljump----on--direct--off-default-on) |
+| a function decompiled by address continues into an unrelated function's body | [`tailcallframe`](#tailcallframe----on--off-default-on) |
+| an event/listener callback emits a second routine's UI strings and callees | [`tailcallframe`](#tailcallframe----on--off-default-on) |
+| the same callee is emitted twice in one function, once as a named call and once inlined | [`tailcallframe`](#tailcallframe----on--off-default-on) |
+| an unconditional jmp after add rsp,N; pop reg is followed instead of ending the function | [`tailcallframe`](#tailcallframe----on--off-default-on) |
+| kuna emits thousands of lines for a function the disassembly shows is a few hundred bytes | [`tailcallframe`](#tailcallframe----on--off-default-on) |
+| a recovered tail call whose target is an internal block of the same function | [`tailcallsaved`](#tailcallsaved----on--off-default-on) |
+| `tailcallframe: recovered tail call` on a `jmp` that follows `call f; add esp,N` | [`tailcallsaved`](#tailcallsaved----on--off-default-on) |
+| the tail of a cdecl function is emitted as a separate callee instead of inline | [`tailcallsaved`](#tailcallsaved----on--off-default-on) |
+| a function decompiled by address stops at an if/else join and calls sub_<join address> | [`tailcallsaved`](#tailcallsaved----on--off-default-on) |
+| a store to a nonsense global (dat_<huge hex>) appears right after a call | [`calltrampoline`](#calltrampoline----on--off-default-on) |
+| the callee of a call starts with lea esp,[esp+4] / add esp,4 / pop reg and ends in a jmp back into the caller | [`calltrampoline`](#calltrampoline----on--off-default-on) |
+| the body after a call is decoded one byte out of phase with the disassembly | [`calltrampoline`](#calltrampoline----on--off-default-on) |
+| a protected PE emits garbage arithmetic on undefined registers after each call fragment | [`calltrampoline`](#calltrampoline----on--off-default-on) |
+| port-input operations (`in(...)`) appear in a function that does no I/O | [`callpopret`](#callpopret----on--off-default-on) |
+| the body after a call is ASCII decoded as instructions | [`callpopret`](#callpopret----on--off-default-on) |
+| a one-line pointer helper decompiles to dozens of statements over undefined registers | [`callpopret`](#callpopret----on--off-default-on) |
+| the callee of a call is `pop reg; ret` or `add esp,4; ret` and the bytes after the call are a string table | [`callpopret`](#callpopret----on--off-default-on) |
+| a function entry containing push continuation; push target; ret decompiles to only return | [`entryretdispatch`](#entryretdispatch----on--off-default-on) |
+| only the first helper in a stack-built RET dispatcher appears after one manual flow override | [`entryretdispatch`](#entryretdispatch----on--off-default-on) |
+| multiple flow <address> call assertions are required to recover one entry routine | [`entryretdispatch`](#entryretdispatch----on--off-default-on) |
+| a packer or crackme dispatch chain is truncated at its first ret | [`entryretdispatch`](#entryretdispatch----on--off-default-on) |
+| a push immediate followed by ret disappears from emitted C | [`pushimmediateret`](#pushimmediateret----on--off-default-on) |
+| an unpacker call remains but the original-entry transfer after it is missing | [`pushimmediateret`](#pushimmediateret----on--off-default-on) |
+| a manual flow branch assertion on a RET restores an indirect transfer to a constant address | [`pushimmediateret`](#pushimmediateret----on--off-default-on) |
+| a packed entry stub ends at ret even though it pushed a destination first | [`pushimmediateret`](#pushimmediateret----on--off-default-on) |
+| mapped return lost after another path leaves the image | [`mappedflowboundary`](#mappedflowboundary----on--off-default-on) |
+| decompile exits with Unable to load bytes at a segment edge | [`mappedflowboundary`](#mappedflowboundary----on--off-default-on) |
+| JSON code is null although a mapped branch returns | [`mappedflowboundary`](#mappedflowboundary----on--off-default-on) |
+| zero-padded instructions decoded beyond mapped memory | [`mappedflowboundary`](#mappedflowboundary----on--off-default-on) |
+| a function's tail is really the body of the NEXT function | [`funcboundflow`](#funcboundflow----on--off-default-on) |
+| dead/garbage code after a call to a die()/fatal()/throw wrapper that never returns | [`funcboundflow`](#funcboundflow----on--off-default-on) |
+| two adjacent functions merged into one, the second also decompiled on its own | [`funcboundflow`](#funcboundflow----on--off-default-on) |
+| uninitialized reads in the tail after an unrecognized no-return call | [`funcboundflow`](#funcboundflow----on--off-default-on) |
+| a call to a sub_<hex> address that is not in the binary | [`overlapbranch`](#overlapbranch----on--off-default-on) |
+| writes through pointers that are never assigned right after a short conditional jump | [`overlapbranch`](#overlapbranch----on--off-default-on) |
+| a bogus dat_<hex> global incremented once and never read | [`overlapbranch`](#overlapbranch----on--off-default-on) |
+| a comparison whose operands are unreadable CONCAT/subpiece salad in hand-written or obfuscated code | [`overlapbranch`](#overlapbranch----on--off-default-on) |
+| core::ptr::drop_in_place(...) calls all over a decompiled rust function | [`cleanupcode`](#cleanupcode----on--off-default-on-destructive-opt-in) |
+| drop glue and deallocation calls that are nowhere in the rust source | [`cleanupcode`](#cleanupcode----on--off-default-on-destructive-opt-in) |
+| Drop::drop / __rust_dealloc / RawVecInner::deallocate noise at every scope exit | [`cleanupcode`](#cleanupcode----on--off-default-on-destructive-opt-in) |
+| rust output is twice as long as the source because of automatic resource management | [`cleanupcode`](#cleanupcode----on--off-default-on-destructive-opt-in) |
+| flip off to see when a rust value is actually dropped or freed | [`cleanupcode`](#cleanupcode----on--off-default-on-destructive-opt-in) |
+| a syscall renders as (*(void *)swi(0x80))() - a call through a pointer nothing assigns | [`linuxsyscall`](#linuxsyscall----on--off-default-off) |
+| the mov $N,%eax before an int 0x80 has vanished from the output | [`linuxsyscall`](#linuxsyscall----on--off-default-off) |
+| an int 0x80 site shows no arguments even though the disassembly loads ebx/ecx/edx | [`linuxsyscall`](#linuxsyscall----on--off-default-off) |
+| 32-bit linux _start or shellcode where every system call is an unnamed indirect call | [`linuxsyscall`](#linuxsyscall----on--off-default-off) |
+| esp-relative locals shift by four bytes after an int 0x80 | [`linuxsyscall`](#linuxsyscall----on--off-default-off) |
+| several near-identical if/else blocks in a row, each comparing two adjacent stack slots and either calling a helper with the same object or storing one character through a 16-byte-threshold pointer select | [`msvcstrappend`](#msvcstrappend----on--off-default-off-destructive-opt-in) |
+| an msvc c++ function whose string-building code shows a `0x10 <= v` buffer select before every character store | [`msvcstrappend`](#msvcstrappend----on--off-default-off-destructive-opt-in) |
+| a loop body that is a whole capacity check plus a grow call to append one byte to a std::string | [`msvcstrappend`](#msvcstrappend----on--off-default-off-destructive-opt-in) |
+| counting inlined std::string appends from the c output gives the wrong number | [`msvcstrappend`](#msvcstrappend----on--off-default-off-destructive-opt-in) |
+| a re-rolled switch dispatches on a function parameter and the compiler's if/else-if chain would read better | [`switchselector`](#switchselector----on--off-default-off) |
+| a callback or window/dialog procedure's message dispatch reads better as the chain the compiler emitted | [`switchselector`](#switchselector----on--off-default-off) |
+| option loweredswitch off gives the rendering you want, but you want it for one cascade and not for the whole binary | [`switchselector`](#switchselector----on--off-default-off) |
+| decompiling a Rust or -fno-plt PIE takes about twice as long per function once its panic helpers are known no-return | [`relronoreturn`](#relronoreturn----on--off-default-off) |
+| a function restarts once for every no-return callee reached through a .got slot | [`relronoreturn`](#relronoreturn----on--off-default-off) |
+| stack locals render as offsets off a char * instead of named locals | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
+| explicit stores of a call's own return address, like *(unsigned long long *)&v66[-8] = 0x140003e16 | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
+| Win32/API call arguments come out as *(unsigned long long *)&v66[0x50] stack blobs instead of values | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
+| (*(void *)swi(0x29))(5); is followed by a stack-pointer bump such as v62 = &v61[8] | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
+| an MSVC C++ function emits hundreds of lines and a hundred-plus anonymous variables | [`fastfailnoreturn`](#fastfailnoreturn----on--off-default-on) |
+| an int3 pad renders as (*(void *)swi(3))() - a call through a pointer nothing assigns | [`int3pad`](#int3pad----off--warn--halt-default-warn) |
+| a function returns the result of a call through swi(3) | [`int3pad`](#int3pad----off--warn--halt-default-warn) |
+| nothing in the C says control ran into a run of 0xcc padding bytes | [`int3pad`](#int3pad----off--warn--halt-default-warn) |
+| an anti-debug binary's clean-run path ends in an indirect call that only the disassembly explains | [`int3pad`](#int3pad----off--warn--halt-default-warn) |
+| an x86-64 syscall renders as syscall() with empty parens, with the number and every argument erased | [`x64syscall`](#x64syscall----off--on--abi-default-off) |
+| a syscall wrapper returns its own first parameter, the syscall number, instead of the syscall's result | [`x64syscall`](#x64syscall----off--on--abi-default-off) |
+| the register writes feeding a SYSCALL are all missing from the C while kuna disassemble shows them | [`x64syscall`](#x64syscall----off--on--abi-default-off) |
+| a SYSCALL's result is never assigned to anything | [`x64syscall`](#x64syscall----off--on--abi-default-off) |
+| a function containing svc/ecall/syscall/sc returns its arguments as a register pair (CONCAT44 or undefined16) | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a MIPS syscall wrapper returns the syscall number it loaded into v0 | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| software_interrupt(0), CallSupervisor(0), ecall() or syscall() shows no arguments while the disassembly loads registers before it | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a test of a system call's result tests the argument the function set up instead | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a syscall wrapper returns its own first parameter | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| the same wrapper is right in a linked Linux program but wrong in its .o or a static musl build | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a MIPS syscall wrapper grows a fourth parameter a3 it tests after the syscall | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a PowerPC syscall wrapper tests an uninitialized cr0 after sc | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| a MIPS syscall wrapper that passes its parameters straight to the kernel shows none of them | [`syscallregs`](#syscallregs----off--auto--on-default-auto) |
+| garbage code after a call to __stack_chk_fail or abort in a relocatable .o | [`noreturn_extern`](#noreturn_extern----on--off-default-on) |
+| function balloons by swallowing the next function after an extern no-return call | [`noreturn_extern`](#noreturn_extern----on--off-default-on) |
+| dead fall-through after exit or assert-fail in an object file | [`noreturn_extern`](#noreturn_extern----on--off-default-on) |
+| switch reports 'Could not recover jumptable ... Too many branches' and renders as a computed call | [`switchmodbound`](#switchmodbound----on--off-default-off-destructive-opt-in) |
+| indirect jump bounded only by a modulo or and-mask on its index never becomes a switch | [`switchmodbound`](#switchmodbound----on--off-default-off-destructive-opt-in) |
+| indirect jump renders as a computed (code *)() call whose destinations are already constants in the emitted C | [`constselectjump`](#constselectjump----on--off-default-off-destructive-opt-in) |
+| 'Treating indirect jump as call' on a CMOV/predicated dispatch | [`constselectjump`](#constselectjump----on--off-default-off-destructive-opt-in) |
+| the body behind a conditional indirect branch is never decoded | [`constselectjump`](#constselectjump----on--off-default-off-destructive-opt-in) |
+| a Dalvik sparse-switch prints as switchAssist(...) followed by a computed call | [`jumpassist`](#jumpassist----on--off-default-on) |
+| 'jump-as-call' on a switchAssist or lookupswitch user-op | [`jumpassist`](#jumpassist----on--off-default-on) |
+| 'Too many branches' jumptable failure where a cbranch range guard bounds the index | [`switchguardbound`](#switchguardbound----on--off-default-off-destructive-opt-in) |
+| computed (code *)() call at a gcc sub/ja guarded dispatch with the index spilled to the stack | [`switchguardbound`](#switchguardbound----on--off-default-off-destructive-opt-in) |
+| a switch with a far outlier case prints as if (x <= N) { switch } if (x == C) ... | [`switchguardmerge`](#switchguardmerge----on--off-default-on) |
+| a case value outside the jump table is tested after the switch | [`switchguardmerge`](#switchguardmerge----on--off-default-on) |
+| a variable declared undefined4/undefined8 although it is shifted, masked or compared | [`typevote`](#typevote----on--off-default-on) |
+| a cast back to a variable's own declared type at each read | [`typevote`](#typevote----on--off-default-on) |
+| *(int *)((long)p + v1) where v1 only takes multiples of 4 | [`indexrescale`](#indexrescale----on--off-default-on) |
+| a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale----on--off-default-on) |
+| a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart----on--off-default-on) |
+| a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart----on--off-default-on) |
+| va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses | [`vaarg`](#vaarg----on--off-default-on) |
+| a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads | [`vaarg`](#vaarg----on--off-default-on) |
+| a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc----on--off-default-on) |
+| if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate----on--off-default-on) |
+| a while loop prints as an if around a do-while | [`looprotate`](#looprotate----on--off-default-on) |
+| getopt-style switch inside a loop degrades to a computed call with goto spaghetti | [`switchsharedcase`](#switchsharedcase----on--off-default-on-destructive-opt-in) |
+| pic relative-offset jump table with a loop-carried base register never recovered | [`switchsharedcase`](#switchsharedcase----on--off-default-on-destructive-opt-in) |
+| 'Too many branches' on a dispatch whose table base is set before the loop | [`switchsharedcase`](#switchsharedcase----on--off-default-on-destructive-opt-in) |
+| image-base-relative switch whose bound guard is duplicated across multiple predecessors renders as a computed call | [`switchmultipred`](#switchmultipred----on--off-default-on-destructive-opt-in) |
+| 'Too many branches' where the dispatch block has several guarded incoming paths | [`switchmultipred`](#switchmultipred----on--off-default-on-destructive-opt-in) |
+| msvc memmove small-count tail dispatch truncated to an indirect call | [`switchmultipred`](#switchmultipred----on--off-default-on-destructive-opt-in) |
+| a switch with an unreachable default renders as a computed jump-as-call through a table | [`switchtrim`](#switchtrim----on--off-default-on) |
+| `*(code **)(a0 * 8 + table)` called instead of a switch | [`switchtrim`](#switchtrim----on--off-default-on) |
+| Too many branches on a table indexed with no range check | [`switchtrim`](#switchtrim----on--off-default-on) |
+| one switch recovered but sibling interleaved jump tables degrade to computed calls | [`unrolledguard`](#unrolledguard----on--off-default-off-destructive-opt-in) |
+| 'Could not find op at target address' during recovery of an msvc optimized memcpy dispatch | [`unrolledguard`](#unrolledguard----on--off-default-off-destructive-opt-in) |
+| duff's-device tail dispatch rendered as 'Treating indirect jump as call' | [`unrolledguard`](#unrolledguard----on--off-default-off-destructive-opt-in) |
+| decompiling one function with several switch statements takes far longer than its size suggests | [`jtsharepartial`](#jtsharepartial----on--off-default-on-destructive-opt-in) |
+| per-function latency scales with the NUMBER of jump tables rather than their size | [`jtsharepartial`](#jtsharepartial----on--off-default-on-destructive-opt-in) |
+| profile shows the reduced jumptable action set running once per switch | [`jtsharepartial`](#jtsharepartial----on--off-default-on-destructive-opt-in) |
+| dozens of garbage *v = *v + c; lines after a __stack_chk_fail call in a .o | [`noreturn_externmatch`](#noreturn_externmatch----on--off-default-on) |
+| inter-function alignment padding decoded as add [rax],al style instructions | [`noreturn_externmatch`](#noreturn_externmatch----on--off-default-on) |
+| flow runs past an undefined-extern abort or exit call in a relocatable object | [`noreturn_externmatch`](#noreturn_externmatch----on--off-default-on) |
+| *(unsigned long *)&v28[-8] = 0xbc79; before every call after an alloca | [`callpush`](#callpush----on--off-default-on) |
+| a constant code address stored through a char * that aliases the stack pointer | [`callpush`](#callpush----on--off-default-on) |
+| the return address of the next call printed as a statement | [`callpush`](#callpush----on--off-default-on) |
+| a stack char buffer is declared one element short, e.g. [63] where the source has [64] | [`nulterminator`](#nulterminator----on--off-default-off) |
+| the NUL terminator after strncpy renders as an assignment to a separate char local | [`nulterminator`](#nulterminator----on--off-default-off) |
+| a stack char local is assigned 0 and never read, right after the end of an array | [`nulterminator`](#nulterminator----on--off-default-off) |
+| the buffer's last element is missing from the array and declared as its own variable | [`nulterminator`](#nulterminator----on--off-default-off) |
+| a pointer loop over a stack buffer ends at the address of an unrelated local (`while (v3 != v2)`) | [`endptrbound`](#endptrbound----on--off-default-on) |
+| a loop's `while (p != vN)` names a local declared at the stack offset just past the buffer the loop reads | [`endptrbound`](#endptrbound----on--off-default-on) |
+| a stack buffer walked bytewise is declared as a scalar of the neighbour's width (`unsigned int v1;` for eight bytes) | [`endptrbound`](#endptrbound----on--off-default-on) |
+| the walking pointer is typed after the neighbouring local instead of the bytes it reads | [`endptrbound`](#endptrbound----on--off-default-on) |
+| a local char buffer is declared 8 bytes longer than the length passed to fgets/snprintf/read with it, e.g. char v3 [8200] beside fgets(v3,0x2000,fp) | [`arraysize`](#arraysize----off--on--calls-default-on) |
+| a stack array's size is a multiple of 16 plus 8 and it ends where the stack-protector canary slot starts | [`arraysize`](#arraysize----off--on--calls-default-on) |
+| a buffer passed to __snprintf_chk(buf, n, 1, 0x100, ...) is declared longer than the 0x100 object size the call carries | [`arraysize`](#arraysize----off--on--calls-default-on) |
+| an out-parameter local is passed as (int *)&v2 to waitpid or wait | [`castobject`](#castobject----on--off-default-on) |
+| a stack local is declared unsigned int where the callee that fills it declares int * | [`castobject`](#castobject----on--off-default-on) |
+| return (int)v1 >> 8 & 0xff; over an unsigned int status filled by waitpid | [`castobject`](#castobject----on--off-default-on) |
+| a reused local frame slot loses an observable native store | [`localstackviews`](#localstackviews----on--off-default-on) |
+| a saved pointer names an unrelated object after stack storage reuse | [`localstackviews`](#localstackviews----on--off-default-on) |
+| a reused stack slot is assigned a value of an incompatible type | [`stackviews`](#stackviews----on--off-default-off) |
+| two object views of one frame address become unrelated local variables | [`stackviews`](#stackviews----on--off-default-off) |
+| spurious uninitialized local (xStack_N) returned after storing through a pointer to a local | [`stackalias`](#stackalias----on--off-default-off-destructive-opt-in) |
+| store through a take-address-of-local pointer dropped as dead so the later read is garbage | [`stackalias`](#stackalias----on--off-default-off-destructive-opt-in) |
+| bogus (*pcVar1)() indirect call after calling a struct-returning function on sparc | [`sparcstructret`](#sparcstructret----on--off-default-off-destructive-opt-in) |
+| function tail dropped after a sparc call followed by unimp | [`sparcstructret`](#sparcstructret----on--off-default-off-destructive-opt-in) |
+| switch rendered as nested if/else-if compare tree over one variable | [`loweredswitch`](#loweredswitch----on--off-default-on) |
+| binary-search cascade of constant compares where source had a switch | [`loweredswitch`](#loweredswitch----on--off-default-on) |
+| flip off to keep the compiler's lowered compare-tree rendering | [`loweredswitch`](#loweredswitch----on--off-default-on) |
+| a switch inlined into a larger function renders as an if/else or goto ladder into a shared join while the same switch in its own function re-rolls | [`loweredswitchheads`](#loweredswitchheads----on--off-default-on) |
+| every arm of a compare ladder assigns one variable and jumps to the same label | [`loweredswitchheads`](#loweredswitchheads----on--off-default-on) |
+| option loweredswitch off and on give byte-identical output on a binary-search compare tree preceded by another test of the same variable | [`loweredswitchheads`](#loweredswitchheads----on--off-default-on) |
+| values below an x87 call are read from the wrong register-stack positions after consecutive calls | [`callmechanisms`](#callmechanisms----on--off-default-off-destructive-opt-in) |
+| a store the compiler spec says a callee always makes is missing after the call | [`callmechanisms`](#callmechanisms----on--off-default-off-destructive-opt-in) |
+| a custom compiler spec's uponentry or uponreturn p-code has no effect on the output | [`callmechanisms`](#callmechanisms----on--off-default-off-destructive-opt-in) |
+| a 32-bit PowerPC -O0 variadic call drops a trailing double that an earlier argument is computed from | [`varargsharedfloat`](#varargsharedfloat----on--off-default-off) |
+| `sumi(2, x * 2, x)` prints as `sumi(2,x + x)` on PowerPC | [`varargsharedfloat`](#varargsharedfloat----on--off-default-off) |
+| a uint8_t parameter prints as unsigned int and is only ever used as a1 & 0xff or (char)a1 | [`narrowargs`](#narrowargs----off--on--callers-default-callers) |
+| an int parameter prints as unsigned long on x86-64 and is used as (unsigned int)a0 | [`narrowargs`](#narrowargs----off--on--callers-default-callers) |
+| a caller passes v + 5 to a callee whose parameter is a byte and another caller passes v - 8 & 0xff | [`narrowargs`](#narrowargs----off--on--callers-default-callers) |
+| a uint8_t loop counter prints as unsigned int v with v = v + 1 & 0xff | [`regnarrow`](#regnarrow----on--off-default-on) |
+| a byte loaded with ldrb is declared unsigned int and used as an index | [`regnarrow`](#regnarrow----on--off-default-on) |
+| an int local prints as unsigned long on x86-64 though every value is a zero-extended 32-bit result | [`regnarrow`](#regnarrow----on--off-default-on) |
+| a signed char loaded with ldrsb is declared int | [`regsigned`](#regsigned----on--off-default-off) |
+| a short counter prints as int with (int)(short) casts at every use | [`regsigned`](#regsigned----on--off-default-off) |
+| an int local prints as long on x86-64 though every value is a movsxd | [`regsigned`](#regsigned----on--off-default-off) |
+| a FILE * or char * the caller holds becomes long at the callee's parameter | [`protoorder`](#protoorder----off--types--cycles--lock-default-cycles) |
+| a function that only hands a string on to a recursive function (quotearg_buffer_restyled, a tree walk, a pair of functions calling each other) keeps an integer parameter | [`protoorder`](#protoorder----off--types--cycles--lock-default-cycles) |
+| an argument is typed at one call site of a callee and not at another | [`protoorder`](#protoorder----off--types--cycles--lock-default-cycles) |
+| decompiling one function alone gives it a prototype the whole-binary output does not use at its call sites | [`protoorder`](#protoorder----off--types--cycles--lock-default-cycles) |
+| the same sub_ address is called with one argument at one site and three at another in the same function | [`protoorder`](#protoorder----off--types--cycles--lock-default-cycles) |
+| a callee's parameter is void * or long while every call to it passes a struct_N * or a string | [`calleevote`](#calleevote----off--types--fields-default-fields) |
+| a one-field getter reads *(unsigned long *)((long)a0 + 0x10) and its caller's own parameter is a synthesized record | [`calleevote`](#calleevote----off--types--fields-default-fields) |
+| the same record is struct_N * in the caller and void * in the function it passes it to | [`calleevote`](#calleevote----off--types--fields-default-fields) |
+| a wrapper that only compares or forwards a pointer keeps an integer parameter | [`calleevote`](#calleevote----off--types--fields-default-fields) |
+| a parameter is long or unsigned long while every call to it passes a struct_N *, a void * or a string | [`callerptr`](#callerptr----on--off-default-on) |
+| unsigned long sub_8514(void *a0,unsigned long a1) for a hash_insert whose callers pass two different records | [`callerptr`](#callerptr----on--off-default-on) |
+| a list or table insert keeps an integer item parameter although its callers pass malloc results | [`callerptr`](#callerptr----on--off-default-on) |
+| a wrapper that only forwards a pointer to a function pointer keeps an integer parameter | [`callerptr`](#callerptr----on--off-default-on) |
+| a qsort comparator's parameters print as unsigned long * or int * where the program declares const void * | [`callbacktype`](#callbacktype----on--off-default-on) |
+| a signal handler renders void sub_1100(void) and its ground truth takes the signal number | [`callbacktype`](#callbacktype----on--off-default-on) |
+| a pthread start routine takes a pointer-width integer instead of void * | [`callbacktype`](#callbacktype----on--off-default-on) |
+| a function reached only through a function pointer keeps whatever its own body recovered, with no prototype anywhere | [`callbacktype`](#callbacktype----on--off-default-on) |
+| a call to a function the same listing declares char * prints (char *)sub_43ee(a0) | [`callrettype`](#callrettype----on--off-default-on) |
+| v7 = (char *)sub_e8ca(4,(char *)sub_43ee(a0)); | [`callrettype`](#callrettype----on--off-default-on) |
+| a caller converts a call's result to the type the callee is declared to return | [`callrettype`](#callrettype----on--off-default-on) |
+| (FILE *)f(a0) under FILE * f(int a0) | [`callrettype`](#callrettype----on--off-default-on) |
+| a function declared unsigned char sub_x(...) whose callers hold the result in an unsigned int | [`narrowret`](#narrowret----on--off-default-on) |
+| v1 = sub_8017ac6(a0); with unsigned int v1 beside unsigned char sub_8017ac6 | [`narrowret`](#narrowret----on--off-default-on) |
+| a bool-returning callee's result kept in an int and only tested | [`narrowret`](#narrowret----on--off-default-on) |
+| an x86-64 unsigned-int-returning callee's result held in an unsigned long | [`narrowret`](#narrowret----on--off-default-on) |
+| call rendered with fewer arguments than the disassembly passes when the missing argument register is spilled to the frame before the call | [`spillargtrial`](#spillargtrial----off--reload--spill-default-off) |
+| floating-point argument dropped at the FIRST of several calls that reuse the same value | [`spillargtrial`](#spillargtrial----off--reload--spill-default-off) |
+| a spurious 4-byte stack local appears where a call argument should be | [`spillargtrial`](#spillargtrial----off--reload--spill-default-off) |
+| clang -O2 packed-double code calls atan2 with one argument instead of two | [`spillargtrial`](#spillargtrial----off--reload--spill-default-off) |
+| argument register stored to a caller-frame slot and reloaded after the call is not recognized as an argument | [`spillargtrial`](#spillargtrial----off--reload--spill-default-off) |
+| goto placement follows the sailr region walk instead of ghidra's collapse order (flip off to force CollapseStructure) | [`regionstructure`](#regionstructure----on--off-default-on) |
+| uncompilable c where a loop body folded into a while condition | [`regionstructure`](#regionstructure----on--off-default-on) |
+| structuring differs from upstream ghidra on the same function | [`regionstructure`](#regionstructure----on--off-default-on) |
+| guard clause with a fatal no-return call comes out inverted and the whole body is nested inside the if | [`guardarm`](#guardarm----on--off-default-off) |
+| the function's only return sits inside an if-arm and the body ends on a no-return call | [`guardarm`](#guardarm----on--off-default-off) |
+| kuna negates a guard condition that ida and ghidra leave alone | [`guardarm`](#guardarm----on--off-default-off) |
+| a leading validation guard is emitted at the tail of the function | [`guardarm`](#guardarm----on--off-default-off) |
+| loop emitted as while( true ) with the head test as a guarded exit on the first statement | [`loopcondhoist`](#loopcondhoist----on--off-default-off) |
+| a for/while header condition is left inside the loop body | [`loopcondhoist`](#loopcondhoist----on--off-default-off) |
+| kuna writes while(true) where ida writes while (cond) | [`loopcondhoist`](#loopcondhoist----on--off-default-off) |
+| a loop's early-exit return is the loop's first statement instead of its condition | [`loopcondhoist`](#loopcondhoist----on--off-default-off) |
+| one source loop emitted as multiple nested infinite loops | [`loopcontinue`](#loopcontinue----on--off-default-on) |
+| early continues emitted as retry loops | [`loopcontinue`](#loopcontinue----on--off-default-on) |
+| accept and fork retries obscure a server's main loop | [`loopcontinue`](#loopcontinue----on--off-default-on) |
+| goto-heavy multi-exit loop where angr recovers a clean while/for with break/continue | [`regionlooprefine`](#regionlooprefine----on--off-default-on) |
+| irreducible or multi-latch loop falls back to raw gotos instead of folding | [`regionlooprefine`](#regionlooprefine----on--off-default-on) |
+| secondary loop exits rendered as gotos rather than break statements | [`regionlooprefine`](#regionlooprefine----on--off-default-on) |
+| more gotos than angr on a function forced to virtualize several edges | [`regionedgeorder`](#regionedgeorder----on--off-default-off) |
+| goto cut at an awkward edge where a dominance/post-dominator ordering exposes more structure | [`regionedgeorder`](#regionedgeorder----on--off-default-off) |
+| crossing goto from the else arm back into the then arm's shared clause | [`condfold`](#condfold----off--on--wide-default-on) |
+| goto plus label into the shared body of a guard cascade whose arms reconverge | [`condfold`](#condfold----off--on--wide-default-on) |
+| nested if where angr emits one compound short-circuit condition | [`condfold`](#condfold----off--on--wide-default-on) |
+| second condition block assigns one value or calls something before its test and the fold is declined | [`condfold`](#condfold----off--on--wide-default-on) |
+| a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch----off--3--4---default-off) |
+| loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch----off--3--4---default-off) |
+| nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch----off--3--4---default-off) |
+| a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight----off---default-off) |
+| many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight----off---default-off) |
+| want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight----off---default-off) |
+| a condition holds a long comma chain of assignments before its test | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
+| if ((a) && (v1 = x, v2 = y, v3 = z, call(..) == v1)) on one very long line | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
+| a while header carries several comma-separated assignments | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
+| want a cap on how many statements a short-circuit operand may print | [`condstmts`](#condstmts----off--0--1--2--3---default-3) |
+| goto label_N; inside a while loop where label_N: is the loop condition | [`whilecontinue`](#whilecontinue----on--off-default-on) |
+| a do-while body jumps to a label in front of the loop test | [`whilecontinue`](#whilecontinue----on--off-default-on) |
+| continue; printed in while(true) loops but goto in while(cond) loops | [`whilecontinue`](#whilecontinue----on--off-default-on) |
+| if (c) goto label_N; ... label_N: where an if around the skipped statements would do | [`gotosink`](#gotosink----on--off-default-on) |
+| label_N: ... if (c) goto label_N; where a do-while would do | [`gotosink`](#gotosink----on--off-default-on) |
+| label_N: ... goto label_N; at the end of a statement run instead of a loop | [`gotosink`](#gotosink----on--off-default-on) |
+| goto to a label that only returns | [`gotoreduce`](#gotoreduce----on--off-default-on) |
+| label_N: return; shared tail after an if | [`gotoreduce`](#gotoreduce----on--off-default-on) |
+| more gotos than angr for the same function | [`gotoreduce`](#gotoreduce----on--off-default-on) |
+| else block kept although the matching if branch always returns or aborts | [`ifelseflatten`](#ifelseflatten----on--off-default-on) |
+| guard-clause body indented one level deeper than the source | [`ifelseflatten`](#ifelseflatten----on--off-default-on) |
+| redundant else after an early-return arm | [`ifelseflatten`](#ifelseflatten----on--off-default-on) |
+| goto into the middle of a sibling branch's arm (compiler cross-jumping) | [`crossjumprevert`](#crossjumprevert----on--off-default-on) |
+| shared non-return tail reached by goto from an else-if chain | [`crossjumprevert`](#crossjumprevert----on--off-default-on) |
+| label planted inside an else block targeted from another branch | [`crossjumprevert`](#crossjumprevert----on--off-default-on) |
+| the same run of dat_<addr> = ... statements is emitted two or three times in one function | [`retsplitglobal`](#retsplitglobal----on--off-default-on) |
+| a long global-filling epilogue is duplicated once per path that reaches the return | [`retsplitglobal`](#retsplitglobal----on--off-default-on) |
+| option returndup off does not stop a shared epilogue from being cloned | [`retsplitglobal`](#retsplitglobal----on--off-default-on) |
+| 46% of a function's text is three copies of one exit block | [`retsplitglobal`](#retsplitglobal----on--off-default-on) |
+| goto to a shared free(p); return; style epilogue | [`taildup`](#taildup----on--off-default-on) |
+| cleanup-call return tail reached via label instead of duplicated inline | [`taildup`](#taildup----on--off-default-on) |
+| flip off when many error checks share one cleanup block (the goto out; idiom) | [`taildup`](#taildup----on--off-default-on) |
+| both arms of an if/else begin or end with the same duplicated statements | [`dedupitetail`](#dedupitetail----on--off-default-on) |
+| shared cleanup or help call repeated verbatim in the two branches | [`dedupitetail`](#dedupitetail----on--off-default-on) |
+| compiler-duplicated tail emitted twice instead of hoisted out of the if | [`dedupitetail`](#dedupitetail----on--off-default-on) |
+| if (c) v = A; else v = B; assignment diamond where a ternary v = c ? A : B is expected | [`iteregion`](#iteregion----on--off-default-on) |
+| format/flag builder full of two-arm constant assignments to the same variable | [`iteregion`](#iteregion----on--off-default-on) |
+| flip off when the source likely wrote an explicit if/else | [`iteregion`](#iteregion----on--off-default-on) |
+| if (c) v = <expr1>; else v = <expr2>; where a ternary v = c ? expr1 : expr2 is expected | [`iteexpr`](#iteexpr----on--off-default-off) |
+| kuna emits far fewer ?: ternaries than angr/ida on format/flag/size code | [`iteexpr`](#iteexpr----on--off-default-off) |
+| computed-arm assignment diamond (v = *p / v = b + k) not folded to a ternary | [`iteexpr`](#iteexpr----on--off-default-off) |
+| if (a && b) v = 1; else v = 0; where the source has a single boolean assignment v = a && b | [`iteboolean`](#iteboolean----on--off-default-on) |
+| -O0 boolean materialization printed as an explicit 0/1 constant diamond | [`iteboolean`](#iteboolean----on--off-default-on) |
+| extra CFG blocks/edges vs Hex-Rays around a short-circuit boolean assignment | [`iteboolean`](#iteboolean----on--off-default-on) |
+| only every other ternary in a chain of identical ?: assignments is recovered | [`itecondlist`](#itecondlist----on--off-default-on) |
+| a re-rolled v = c ? A : B; is immediately followed by an identical un-re-rolled if (c) v = A; else v = B; | [`itecondlist`](#itecondlist----on--off-default-on) |
+| iteboolean re-rolls 1 of 3 identical short-circuit boolean assignments | [`itecondlist`](#itecondlist----on--off-default-on) |
+| a diamond folds in isolation but declines when a structured if precedes it | [`itecondlist`](#itecondlist----on--off-default-on) |
+| giant short-circuit if with comma-expression side effects merging several source early-return guards | [`returndup`](#returndup----on--off-default-on) |
+| one trailing return shared by many guard paths where the source used per-guard early returns | [`returndup`](#returndup----on--off-default-on) |
+| merged guard condition containing v = f(...) assignments inline | [`returndup`](#returndup----on--off-default-on) |
+| a source boolean return renders as a cascade of if (c) return 0; / if (c) return 1; guards | [`orchain`](#orchain----on--off-default-on) |
+| option returndup off collapses the whole function to one short-circuit expression | [`orchain`](#orchain----on--off-default-on) |
+| a source guard testing several conditions with and/or becomes that many identical constant-return guards | [`orchain`](#orchain----on--off-default-on) |
+| the return-dupe slug on a function whose source wrote one short-circuit condition | [`orchain`](#orchain----on--off-default-on) |
+| if (!c) return 0; f(); return 0; where the source has if (c) f(); return 0; | [`rettriangle`](#rettriangle----on--off-default-off) |
+| a duplicated constant return right after a one-statement body | [`rettriangle`](#rettriangle----on--off-default-off) |
+| // return-dupe on a function whose only split is a short if before its return | [`rettriangle`](#rettriangle----on--off-default-off) |
+| inverted diamond: if (guard) { entire body } else { v = 0; } return v; | [`earlyreturn`](#earlyreturn----on--off-default-on) |
+| leading argument-validity check wraps the whole body instead of an early return | [`earlyreturn`](#earlyreturn----on--off-default-on) |
+| function opens with if (p != 0) { everything } where source wrote if (!p) return 0; | [`earlyreturn`](#earlyreturn----on--off-default-on) |
+| wide switch where every case assigns a constant and breaks to one shared return | [`switchreturn`](#switchreturn----on--off-default-on) |
+| switch (x) { case A: v = K; break; ... } return v; instead of per-case return K | [`switchreturn`](#switchreturn----on--off-default-on) |
+| 17-plus-case const dispatch keeps a merged return variable | [`switchreturn`](#switchreturn----on--off-default-on) |
+| call result spilled to a temp used exactly once: v5 = f(); if (v5 < 0) | [`foldcallret`](#foldcallret----on--off-default-on) |
+| single-use call return not inlined into its use site | [`foldcallret`](#foldcallret----on--off-default-on) |
+| flip off to force every call output into a named temporary (ghidra style) | [`foldcallret`](#foldcallret----on--off-default-on) |
+| single-use call result still gets its own local although the call and the use are adjacent | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| call takes a global (stdin/stdout/errno) as an argument and its result will not fold | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| foldcallret on but v3 = f(glob); use(v3) is still two statements | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| flip off to put every call result that reads a global back in its own local | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| a --assert type vN / name vN directive written before the flip now names a different local | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| v = sub_x(stdin), v == -1 stays two statements: the undeclared callee's eax output is narrower than the rax it returns, and the spill's int declaration is that narrowing | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| v = f(g) stays two statements on i386/ARM32: an undeclared callee may return a long long in edx:eax / r0:r1 | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| v = f(g); x = a && !v stays two statements: folded into the right of &&, the call would be skipped when a decides | [`foldcallretphi`](#foldcallretphi----on--off-default-on) |
+| too many single-use temporaries: v7 = v3 + 8 declared and read once | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
+| a value read three times is written out three times instead of being declared | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
+| want to ablate the implied-expression threshold without rebuilding | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
+| expressions are too deeply nested to read and every sub-term should get a name | [`impliedrefs`](#impliedrefs----2--3--4---default-2) |
+| a two-term expression is declared as a temporary instead of being inlined at its two uses | [`termdup`](#termdup----2--3--4---default-2) |
+| want to ablate the term-duplication threshold without rebuilding | [`termdup`](#termdup----2--3--4---default-2) |
+| raising impliedrefs did not inline an expression because the expression itself is too wide | [`termdup`](#termdup----2--3--4---default-2) |
+| switch with more than 1024 cases prints as a computed call (jump-as-call) | [`jumptablemax`](#jumptablemax----1024---default-1024) |
+| state-machine function with a giant jump table decompiles to a stub | [`jumptablemax`](#jumptablemax----1024---default-1024) |
+| functions --summary lists a switch over jumptablemax | [`jumptablemax`](#jumptablemax----1024---default-1024) |
+| xrefs miss references made from switch cases past the first 1024 | [`jumptablemax`](#jumptablemax----1024---default-1024) |
+| stack-protector canary compare against fs:0x28 and a __stack_chk_fail branch cluttering the epilogue | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
+| shared-return goto forced by the canary check block | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
+| flip off to keep the real canary instructions for auditing the protector | [`stackguard`](#stackguard----on--off-default-on-destructive-opt-in) |
+| aarch64 functions keep the stack canary compare and __stack_chk_fail branch | [`canaryglobal`](#canaryglobal----on--off-default-on) |
+| an arm or powerpc function ends in a goto to a canary check | [`canaryglobal`](#canaryglobal----on--off-default-on) |
+| stackguard strips x86-64 canaries but not aarch64 ones | [`canaryglobal`](#canaryglobal----on--off-default-on) |
+| a Windows PE function opens with `v8 = dat_140074040 ^ (unsigned long long)v1;` and ends with a one-argument call taking `v8 ^ (unsigned long long)v1` | [`msvcstackguard`](#msvcstackguard----on--off-default-off-destructive-opt-in) |
+| an unnamed one-argument callee (`__security_check_cookie`) called just before every return | [`msvcstackguard`](#msvcstackguard----on--off-default-off-destructive-opt-in) |
+| `--option stackguard on` and `off` give byte-identical output on a Windows binary | [`msvcstackguard`](#msvcstackguard----on--off-default-off-destructive-opt-in) |
+| an otherwise unused 8-byte stack slot declared in every function of an MSVC binary | [`msvcstackguard`](#msvcstackguard----on--off-default-off-destructive-opt-in) |
+| Rust output littered with `panic_bounds_check()` / `slice_error_fail()` / `panic_const_div_by_zero()` calls | [`securitycheck`](#securitycheck----on--off-default-on-destructive-opt-in) |
+| every slice index guarded by an `if` whose arm only panics | [`securitycheck`](#securitycheck----on--off-default-on-destructive-opt-in) |
+| Rust function CFG roughly twice the size of the source control flow | [`securitycheck`](#securitycheck----on--off-default-on-destructive-opt-in) |
+| flip off to keep the real bounds-check instructions for auditing | [`securitycheck`](#securitycheck----on--off-default-on-destructive-opt-in) |
+| if (x == 0) guard with the common path in the else arm | [`branchflip`](#branchflip----on--off-default-on) |
+| negated condition where angr renders the positive complement first | [`branchflip`](#branchflip----on--off-default-on) |
+| if/else polarity inverted versus the source's reading order | [`branchflip`](#branchflip----on--off-default-on) |
+| an arm function returns or assigns dat_<addr> where the disassembly shows a .word literal | [`litpoolconst`](#litpoolconst----on--off-default-on) |
+| a pc-relative literal-pool constant renders as an opaque global instead of its value | [`litpoolconst`](#litpoolconst----on--off-default-on) |
+| option readonly on exposes a constant the default output hides | [`litpoolconst`](#litpoolconst----on--off-default-on) |
+| a value loaded from inside the function's own extent has no readable definition | [`litpoolconst`](#litpoolconst----on--off-default-on) |
+| loop exit rendered as goto label_N; plus a synthesized label instead of break; | [`loopbreak_recovery`](#loopbreak_recovery----on--off-default-on) |
+| switch-case exit gotos where break; is expected | [`loopbreak_recovery`](#loopbreak_recovery----on--off-default-on) |
+| error paths leave a loop by goto to its successor label | [`loopbreak_recovery`](#loopbreak_recovery----on--off-default-on) |
+| an -O2 counter is declared unsigned int but every comparison on it is written (int)v | [`signedness`](#signedness----upstream--auto--prefer-signed--prefer-unsigned-default-auto) |
+| unsigned long locals whose only uses are signed compares | [`signedness`](#signedness----upstream--auto--prefer-signed--prefer-unsigned-default-auto) |
+| the declared signedness contradicts the casts in the body | [`signedness`](#signedness----upstream--auto--prefer-signed--prefer-unsigned-default-auto) |
+| want C-conventional signed declarations for values no operation settles | [`signedness`](#signedness----upstream--auto--prefer-signed--prefer-unsigned-default-auto) |
+| want the declaration type inference produced, without any rounding | [`signedness`](#signedness----upstream--auto--prefer-signed--prefer-unsigned-default-auto) |
+| a stack local is declared unsigned long and every comparison on it is written (long)v | [`castsign`](#castsign----on--off-default-on) |
+| if (0 <= (long)v15) with unsigned long v15; // stack - 0x60 | [`castsign`](#castsign----on--off-default-on) |
+| the declared signedness of a frame local contradicts the casts in the body | [`castsign`](#castsign----on--off-default-on) |
+| a conditional arm is cast to the type the conditional already has, v = c ? (int)*(char *)p : 0; | [`castternary`](#castternary----on--off-default-on) |
+| every arm of a ?: over bytes carries an (int) cast | [`castternary`](#castternary----on--off-default-on) |
+| (unsigned long)v1 on one arm of a ?: whose other arm is already unsigned long | [`castternary`](#castternary----on--off-default-on) |
+| an int widened to long beside a long operand, ((long *)a0)[1] + (long)a1 | [`castwiden`](#castwiden----off--on--literal-default-literal) |
+| a widened index times a literal, (long)i * 8 + 0x2b200 | [`castwiden`](#castwiden----off--on--literal-default-literal) |
+| v = (unsigned long)i; into a variable already declared unsigned long | [`castwiden`](#castwiden----off--on--literal-default-literal) |
+| a store of (long)i through a long pointer | [`castwiden`](#castwiden----off--on--literal-default-literal) |
+| memchr(p,c,(long)n) for an int n | [`castwiden`](#castwiden----off--on--literal-default-literal) |
+| a truncation assigned to a variable already declared that type, v1 = (unsigned int)a0; with unsigned int v1 | [`castnarrow`](#castnarrow----on--off-default-on) |
+| return (int)x; from a function declared int | [`castnarrow`](#castnarrow----on--off-default-on) |
+| a long passed to a declared int parameter as toupper((int)a0) | [`castnarrow`](#castnarrow----on--off-default-on) |
+| a byte store through a char pointer written *a1 = (char)a0; | [`castnarrow`](#castnarrow----on--off-default-on) |
+| kuna prints a narrowing cast IDA leaves to C's assignment conversion | [`castnarrow`](#castnarrow----on--off-default-on) |
+| a local is declared with three or more levels of pointer indirection | [`ptrdepthcap`](#ptrdepthcap----on--off-default-off) |
+| unsigned long long ***** or char ***** appears in the output | [`ptrdepthcap`](#ptrdepthcap----on--off-default-off) |
+| C++ std::string / ostringstream locals get absurd pointer types | [`ptrdepthcap`](#ptrdepthcap----on--off-default-off) |
+| the type of a stack object grows one pointer level per decompilation pass | [`ptrdepthcap`](#ptrdepthcap----on--off-default-off) |
+| an indirect call through a table entry prints (**(void **)p)(), which does not compile | [`calltargettype`](#calltargettype----on--off-default-off) |
+| a local holding a function pointer is declared void * and called as (*v1)(a1,7) | [`calltargettype`](#calltargettype----on--off-default-off) |
+| a parameter, global or struct field holding a function pointer is declared void * and its call does not compile | [`calltargettype`](#calltargettype----on--off-default-off) |
+| a DWARF function-pointer parameter or field prints void * | [`calltargettype`](#calltargettype----on--off-default-off) |
+| called object is not a function or function pointer when the output is compiled | [`calltargettype`](#calltargettype----on--off-default-off) |
+| a local is declared void with no pointer star and then assigned or added | [`codescalar`](#codescalar----on--off-default-on) |
+| a call result is cast (void) and stored | [`codescalar`](#codescalar----on--off-default-on) |
+| void v4; // al followed by (char)v4 arithmetic | [`codescalar`](#codescalar----on--off-default-on) |
+| a byte loaded or stored through a function pointer has no scalar type | [`codescalar`](#codescalar----on--off-default-on) |
+| a parameter is declared long or unsigned long and is only ever dereferenced | [`ptrfromuse`](#ptrfromuse----off--byte--void-default-void) |
+| every use of an argument is *(T *)(a0 + k) but the argument is not a pointer | [`ptrfromuse`](#ptrfromuse----off--byte--void-default-void) |
+| one function takes T *a0 and its sibling takes long a0 for the same kind of argument | [`ptrfromuse`](#ptrfromuse----off--byte--void-default-void) |
+| an argument dereferenced at offset 0 gets a pointer type but one dereferenced at +8 does not | [`ptrfromuse`](#ptrfromuse----off--byte--void-default-void) |
+| a string parameter is declared unsigned long and every call site passes it to strlen or printf | [`charptr`](#charptr----on--off-default-off) |
+| a buffer indexed one byte at a time is declared void * | [`charptr`](#charptr----on--off-default-off) |
+| two functions take the same string and one says char * and the other unsigned long | [`charptr`](#charptr----on--off-default-off) |
+| a -O0 parameter is an integer although the callee's prototype declares char * | [`charptr`](#charptr----on--off-default-off) |
+| void * sub_e680(uint1 *a0) for a function that passes its argument to strlen | [`charptr`](#charptr----on--off-default-off) |
+| a buffer indexed one byte at a time prints as *(char *)((long)v6 + (long)v8) | [`elemptr`](#elemptr----on--off-default-on) |
+| a parameter only ever indexed is declared long | [`elemptr`](#elemptr----on--off-default-on) |
+| malloc's result is declared void * and every store through it casts | [`elemptr`](#elemptr----on--off-default-on) |
+| a table in .data read with a computed index prints as *(unsigned char *)((long)v1 + 0x4020) | [`elemptr`](#elemptr----on--off-default-on) |
+| argv-like parameters are declared long and each element is cast to char * | [`elemptr`](#elemptr----on--off-default-on) |
+| a local commented // gs_offset or // fs_offset is read through constant offsets | [`pebnames`](#pebnames----off--auto--on-default-auto) |
+| an anti-debug check reads *(char *)(*(long long *)(v1 + 0x60) + 2) | [`pebnames`](#pebnames----off--auto--on-default-auto) |
+| PEB fields such as BeingDebugged or NtGlobalFlag render as magic offsets | [`pebnames`](#pebnames----off--auto--on-default-auto) |
+| a thread-local or stack-limit read renders as *(long long *)(v1 + 0x58) or (v1 + 0x10) | [`pebnames`](#pebnames----off--auto--on-default-auto) |
+| a parameter is declared `unsigned long *` or `void *` and read at two or more fixed offsets | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| a local assigned from `xmalloc` or another call is written as `*(char *)((long)v1 + 0x14) = 0x6e` | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| the body is a wall of `*(int *)(p + 0x18)` casts over one pointer | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| `*(unsigned int *)&a0[1]` appears where a record field is meant | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| two functions read the same object and neither names its fields | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| a local loaded from a `struct_N` field is read as `*(int *)((long)v1 + 0xc)` | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| a synthesized struct's link fields are `long *` or `unsigned long` where the nodes they point at are the same record | [`structsynth`](#structsynth----off--param--locals--nest--all-default-locals) |
+| one object has two or more struct_N names whose fields agree as far as both go | [`structmerge`](#structmerge----off--siblings-default-off) |
+| a synthesized record declares fewer fields than the program's own accesses show | [`structmerge`](#structmerge----off--siblings-default-off) |
+| two functions take a pointer to the same thing and their parameter types differ | [`structmerge`](#structmerge----off--siblings-default-off) |
+| the exported header defines struct_2 and struct_7 with the same first members | [`structmerge`](#structmerge----off--siblings-default-off) |
+| a parameter is declared `void *` and every read of it is `((T *)a0)[K]` or `*(T *)((long)a0 + K)` with no read at offset 0 | [`structheadless`](#structheadless----off--closed-default-off) |
+| a function reads a record's later members and the listing shows a cast per access | [`structheadless`](#structheadless----off--closed-default-off) |
+| `statx_to_stat` or a `fileinfo` accessor renders as casts of an untyped pointer | [`structheadless`](#structheadless----off--closed-default-off) |
+| a record reader keeps `void *` while a sibling that reads the first member gets `struct_N *` | [`structheadless`](#structheadless----off--closed-default-off) |
+| a synthesized record declares long field_0x0 and every read of it is (char *)a0->field_0x0 | [`fieldtype`](#fieldtype----on--off-default-off) |
+| free((void *)a0->field_0xb0) on a struct_N field | [`fieldtype`](#fieldtype----on--off-default-off) |
+| a function-pointer field prints as (*(void *)a0->field_0x40)(...) | [`fieldtype`](#fieldtype----on--off-default-off) |
+| a record's buffer field is used in pointer arithmetic that prints as (char *)(a0->field_0x8 + a0->field_0x0) | [`fieldtype`](#fieldtype----on--off-default-off) |
+| dead code kept after calls to exit/abort/panic when off | [`noreturn_known`](#noreturn_known----on--off-default-on) |
+| call to a known no-return libc function still shows a fall-through path | [`noreturn_known`](#noreturn_known----on--off-default-on) |
+| unreachable epilogue after std::terminate or a rust panic call | [`noreturn_known`](#noreturn_known----on--off-default-on) |
+| windows api calls render as (*dat_411324)() with no name | [`peimportcall`](#peimportcall----on--off-default-on) |
+| a Mach-O objc_msgSend import renders as (*dat_100004038)() through __got | [`peimportcall`](#peimportcall----on--off-default-on) |
+| an ELF -fno-plt call to abort or exit renders as (*dat_3fb0)() and flow runs into the next function | [`peimportcall`](#peimportcall----on--off-default-on) |
+| a PE function runs past ExitProcess or ExitThread and absorbs the next function's body | [`peimportcall`](#peimportcall----on--off-default-on) |
+| no Win32 API names anywhere in a decompiled PE | [`peimportcall`](#peimportcall----on--off-default-on) |
+| an arm64e call renders as (*dat_<addr>)(...) through an __auth_ptr slot | [`authptrcall`](#authptrcall----on--off-default-on) |
+| ___chkstk_darwin call unnamed in an arm64e function with a large frame | [`authptrcall`](#authptrcall----on--off-default-on) |
+| an arm64e virtual call renders as (**(code **)(*obj + 0x18))(obj) with no hint of the method | [`arm64evcall`](#arm64evcall----on--off-default-on) |
+| c++ method calls in an ios binary or kernelcache are all anonymous function-pointer calls | [`arm64evcall`](#arm64evcall----on--off-default-on) |
+| swift class method calls on arm64e are anonymous slot calls | [`arm64evcall`](#arm64evcall----on--off-default-on) |
+| kuna xrefs --to a virtual method finds no callers | [`arm64evcall`](#arm64evcall----on--off-default-on) |
+| obfuscated arithmetic such as (a ^ b) + (a & b) * 2 instead of a + b | [`mba`](#mba----on--off-default-off) |
+| xor and and terms combined with additions and multiplications by 2 | [`mba`](#mba----on--off-default-off) |
+| ollvm or tigress instruction substitution in the output | [`mba`](#mba----on--off-default-off) |
+| products of and/or terms such as (x & y) * (x  | [`mba`](#mba----on--off-default-off) |
+|  y) that hide a plain multiplication | [`mba`](#mba----on--off-default-off) |
+| heavily-called custom die()/fatal() wrapper still treated as returning | [`noreturn_disc`](#noreturn_disc----on--off-default-on) |
+| dead code after a stripped sub_ wrapper that never falls through at 3+ call sites | [`noreturn_disc`](#noreturn_disc----on--off-default-on) |
+| caller swallows the next function after a wrapper call | [`noreturn_disc`](#noreturn_disc----on--off-default-on) |
+| live code after a call disappears and the callee is annotated // no-return | [`noreturn_discstrict`](#noreturn_discstrict----on--off-default-on) |
+| a plainly-returning function is reported no-return | [`noreturn_discstrict`](#noreturn_discstrict----on--off-default-on) |
+| caller collapses to void f(); // no-return where it should return a value | [`noreturn_discstrict`](#noreturn_discstrict----on--off-default-on) |
+| dead code removed after a call on an architecture with decoder gaps (Thumb/MIPS16/PPC VLE) | [`noreturn_discstrict`](#noreturn_discstrict----on--off-default-on) |
+| unreachable code after a call to an exit/fatal wrapper | [`noreturn_propagate`](#noreturn_propagate----on--off-default-on) |
+| function truncated after calling a cold wrapper | [`noreturn_propagate`](#noreturn_propagate----on--off-default-on) |
+| spurious while(true) around a call that never returns | [`noreturn_propagate`](#noreturn_propagate----on--off-default-on) |
+| stripped binary's unnamed exit wrapper swallows the functions after it | [`noreturn_propagate`](#noreturn_propagate----on--off-default-on) |
+| caller keeps decoding the cold path after error(2, ...) into the next function | [`noreturn_error`](#noreturn_error----on--off-default-on) |
+| function balloons past a wrapper that tail-calls error with nonzero status | [`noreturn_error`](#noreturn_error----on--off-default-on) |
+| dead fall-through after a gnu error(nonzero, ...) call | [`noreturn_error`](#noreturn_error----on--off-default-on) |
+| wrapper with a mid-body fatal call still treated as returning | [`noreturn_reach`](#noreturn_reach----on--off-default-on) |
+| unreachable write()/return tail keeps a fatal wrapper looking like it returns | [`noreturn_reach`](#noreturn_reach----on--off-default-on) |
+| switch whose every arm ends in a no-return call not concluded no-return | [`noreturn_reach`](#noreturn_reach----on--off-default-on) |
+| caller decodes garbage past an sshpkt_fatal-style wrapper | [`noreturn_reach`](#noreturn_reach----on--off-default-on) |
+| rust or go string argument renders as a raw rodata address beside its length instead of the literal text | [`fatstr`](#fatstr----off--auto--always-default-auto) |
+| takes_str(&DAT_00102000, 15) where the 15 bytes at that address are plainly the string | [`fatstr`](#fatstr----off--auto--always-default-auto) |
+| string literals recovered on C binaries but never on rust or go ones | [`fatstr`](#fatstr----off--auto--always-default-auto) |
+| swift string literal shows as two 64-bit constants (0xe500000000000000 and 0x6570616873) instead of its text | [`swiftstr`](#swiftstr----off--auto--always-default-auto) |
+| 0x8000000100xxxxxx object word and 0xd000000000000028 count stored beside each other | [`swiftstr`](#swiftstr----off--auto--always-default-auto) |
+| string literals recovered on C binaries but never on swift ones | [`swiftstr`](#swiftstr----off--auto--always-default-auto) |
+| every function of a Go binary opens with if (condition) { runtime_morestack_noctxt(); } inside a loop to the entry | [`gomorestack`](#gomorestack----off--auto--always-default-auto-destructive-opt-in) |
+| go function parameters recovered as phi-fed locals or missing because the entry is a loop head | [`gomorestack`](#gomorestack----off--auto--always-default-auto-destructive-opt-in) |
+| do-while wrapping an entire go function body with a morestack call in its latch | [`gomorestack`](#gomorestack----off--auto--always-default-auto-destructive-opt-in) |
+| every pointer store in a go function wrapped in if (writeBarrier flag) with a gcWriteBarrier call | [`gowritebarrier`](#gowritebarrier----off--auto--always-default-auto-destructive-opt-in) |
+| stores through an undefined local after a gcWriteBarrier call because the thunk's buffer register is not modeled | [`gowritebarrier`](#gowritebarrier----off--auto--always-default-auto-destructive-opt-in) |
+| go output doubled in size by GC bookkeeping diamonds | [`gowritebarrier`](#gowritebarrier----off--auto--always-default-auto-destructive-opt-in) |
+| if ((v ^ v << 1) >> 0x3e & 1) before a tail call in an arm64e function | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+| (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+| a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+|  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+| a __chkstk_darwin() or ___chkstk_darwin() call in an apple function | [`chkstkdarwin`](#chkstkdarwin----on--off-default-on-destructive-opt-in) |
+| a value kept in a caller-saved register across the stack probe prints as an undefined local | [`chkstkdarwin`](#chkstkdarwin----on--off-default-on-destructive-opt-in) |
+| an apple function calls _OUTLINED_FUNCTION_<n>(...) with arguments that make no sense | [`outlinedinline`](#outlinedinline----on--off-default-on) |
+| a function body is a string of OUTLINED_FUNCTION calls | [`outlinedinline`](#outlinedinline----on--off-default-on) |
+| go function returning bool prints v = CONCAT71((undefined7)(v >> 8), a == b) instead of returning the comparison | [`gobool`](#gobool----off--auto--always-default-auto-destructive-opt-in) |
+| return value masked with 0xffffffff around a boolean | [`gobool`](#gobool----off--auto--always-default-auto-destructive-opt-in) |
+| undefined7 casts feeding a concatenation at every boolean return | [`gobool`](#gobool----off--auto--always-default-auto-destructive-opt-in) |
+| objc_msgSend renders its selector as dat_<addr> or selRef_<sel> instead of the selector | [`objcrefconst`](#objcrefconst----on--off-default-on) |
+| objc_msgSendSuper2 shows the super struct filled from a data global instead of the class | [`objcrefconst`](#objcrefconst----on--off-default-on) |
+| a class-method receiver renders as dat_<addr> instead of _OBJC_CLASS_$_<Class> | [`objcrefconst`](#objcrefconst----on--off-default-on) |
+| an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
+| self is objc_object * in every -[Class sel] although the class declares ivars | [`objcivars`](#objcivars----on--off-default-on) |
+| objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
+| the same value is assigned to one variable twice in a row with nothing in between | [`hideshadow`](#hideshadow----on--off-default-on) |
+| a comma-expression condition repeats an assignment: (v3 = a2, v4 = a0, v4 = a0, ...) | [`hideshadow`](#hideshadow----on--off-default-on) |
+| a repeated vN = dat_XXXX; around a conditional goto | [`hideshadow`](#hideshadow----on--off-default-on) |
+| kuna prints a copy assignment that stock Ghidra does not | [`hideshadow`](#hideshadow----on--off-default-on) |
+| parameter copy-shadow assignment (v6 = a1;) emitted below an earlier guard instead of at the top of the function | [`paramcopyhoist`](#paramcopyhoist----on--off-default-off) |
+| kuna places some parameter spill copies in the entry block and others after a guard in the same function | [`paramcopyhoist`](#paramcopyhoist----on--off-default-off) |
+| extra CFG nodes versus the source around a cascade of if (p && !*p) p = NULL; parameter guards | [`paramcopyhoist`](#paramcopyhoist----on--off-default-off) |
+| vN = aM; for an unmodified incoming parameter appearing in the middle of a guard cascade | [`paramcopyhoist`](#paramcopyhoist----on--off-default-off) |
+| a value stored into a stack slot is printed into a register local and the slot is never assigned | [`indirectonly`](#indirectonly----on--off-default-off) |
+| a struct filled on the frame is passed by address to a call although the emitted C never wrote it | [`indirectonly`](#indirectonly----on--off-default-off) |
+| a declared local is never written and never read anywhere in the function | [`indirectonly`](#indirectonly----on--off-default-off) |
+| a `vN = slot;` ... `slot = vN;` round-trip copy pair around a loop that only reads the slot | [`indirectonly`](#indirectonly----on--off-default-off) |
+| a call result assigned to a temporary that is immediately assigned to a stack slot | [`indirectonly`](#indirectonly----on--off-default-off) |
+| an inlined callee body is spliced into the caller and should read as a call | [`outline`](#outline----off----default-off-destructive-opt-in) |
+| want to pull a chosen region out of a function into a named pseudofunction | [`outline`](#outline----off----default-off-destructive-opt-in) |
+| acting on an almostregion inline-candidate report by hand or with an llm | [`outline`](#outline----off----default-off-destructive-opt-in) |
+| an unprototyped call loses a local output pointer | [`stackaddrargtrial`](#stackaddrargtrial----on--off-default-off) |
+| a post-call word or halfword output folds to its initializer | [`stackaddrargtrial`](#stackaddrargtrial----on--off-default-off) |
+| a helper's stack output array is shorter than the helper writes | [`callarrayextent`](#callarrayextent----on--off-default-off-destructive-opt-in) |
+| a post-call stack read is emitted as an independent uninitialized scalar | [`callarrayextent`](#callarrayextent----on--off-default-off-destructive-opt-in) |
+| a stack array passed to a helper loses aliases with neighboring frame slots | [`callarrayextent`](#callarrayextent----on--off-default-off-destructive-opt-in) |
+| a local passed by address to a callee is declared unsigned long and read as v1._4_2_ or v1._6_1_ | [`stackstruct`](#stackstruct----on--off-default-off) |
+| byte and short fields of a local header print as partial accesses | [`stackstruct`](#stackstruct----on--off-default-off) |
+| a struct the source zero-initializes or memsets prints as several unrelated stack scalars | [`stackstruct`](#stackstruct----on--off-default-off) |
+| memcpy copies 0x40 bytes into a local declared char v13[12] | [`stackstruct`](#stackstruct----on--off-default-off) |
+| negative index displacement hides a declared global array | [`globalarrayanchor`](#globalarrayanchor----on--off-default-off) |
+| indexed stores use an address immediately before an array | [`globalarrayanchor`](#globalarrayanchor----on--off-default-off) |
+| numerical integer conversion is stored in a float local | [`fputruncviews`](#fputruncviews----on--off-default-on) |
+| short call argument uses inverse floating storage unions | [`fputruncviews`](#fputruncviews----on--off-default-on) |
+| one floating register carries both integers and genuine floating values | [`fputruncviews`](#fputruncviews----on--off-default-on) |
+| rule pools spend most of their time re-testing ops nothing changed | [`dirtypool`](#dirtypool----on--off-default-off) |
+| a large function's simplification repeats full sweeps for a handful of rewrites | [`dirtypool`](#dirtypool----on--off-default-off) |
+| a DEX method prints CPOOLREF(...) calls and loads | [`dexmodel`](#dexmodel----on--off-default-on) |
+| a DEX method's parameters print as uninitialized locals | [`dexmodel`](#dexmodel----on--off-default-on) |
+| invoke-range calls lose their arguments | [`dexmodel`](#dexmodel----on--off-default-on) |
+| a DEX method's catch blocks are missing from the output | [`javatry`](#javatry----on--off-default-on) |
+| code after a call that can throw runs on as if nothing could be thrown | [`javatry`](#javatry----on--off-default-on) |
+| throwException(x); return; instead of throw x; | [`javatry`](#javatry----on--off-default-on) |
+| puts/printf arguments untyped so string literals render as bare constants or dat_ addresses | [`libproto`](#libproto----on--off-default-on) |
+| imports carry no signatures and call arguments stay untyped | [`libproto`](#libproto----on--off-default-on) |
+| a caller's parameter is unsigned long where it is only ever passed to a libc function that takes a char */int | [`libcsigs`](#libcsigs----on--off-default-on) |
+| a libc call renders its string argument as a bare 0x... constant instead of a literal | [`libcsigs`](#libcsigs----on--off-default-on) |
+| a wrapper around a libc function loses its return value or return type | [`libcsigs`](#libcsigs----on--off-default-on) |
+| __printf_chk / __fprintf_chk arguments are shifted by the fortify flag | [`libcsigs`](#libcsigs----on--off-default-on) |
+| an exit or __stack_chk_fail call shows phantom arguments | [`libcsigs`](#libcsigs----on--off-default-on) |
+| a function that only ever passes its argument to a libc stdio call still declares it long or unsigned long | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a fopen or fdopen result is a void * that nothing can name | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a stat or lstat call fills an untyped void * buffer | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| getopt_long takes a bare (void *)0x... long-option table | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| readdir returns a void * whose fields are casts and offsets | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a stream parameter is void * where the ground truth is FILE * | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a FILE * or stat * renders its members as field_0x8 / field_0x30 instead of _IO_read_ptr / st_size | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a value loaded out of a named libc struct keeps the cast's type instead of the field's | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| stdin/stdout/stderr render as an untyped word and their fields as raw offsets ((long)stdout + 0x28) | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a shared object's stream slot has no name at all (*(long *)(*dat_3fe0 + 0x28)) | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| two functions in one binary disagree about what stdout is, one calling it FILE * and the other a long | [`libctypes`](#libctypes----off--opaque--glibc-default-opaque) |
+| a Windows API call renders with an empty argument list | [`win32sigs`](#win32sigs----on--off-default-on) |
+| LoadLibraryExW() or CreateFileW() has no arguments but the pushes are visible above it | [`win32sigs`](#win32sigs----on--off-default-on) |
+| a PE function declares dozens of stack locals that only ever hold outgoing call arguments | [`win32sigs`](#win32sigs----on--off-default-on) |
+| CALL fall-through addresses are assigned to stack variables | [`win32sigs`](#win32sigs----on--off-default-on) |
+| a Win32 call's wide string argument renders as a bare 0x... constant | [`win32sigs`](#win32sigs----on--off-default-on) |
+| calleearity and varargstackargs both on and a Windows API call is still argumentless | [`win32sigs`](#win32sigs----on--off-default-on) |
+| a SPARC32 caller stores the low word of a 64-bit quotient from a local nothing assigns | [`libgccsigs`](#libgccsigs----on--off-default-off) |
+| __divdi3 is called with four 32-bit arguments and only %o0 is read back | [`libgccsigs`](#libgccsigs----on--off-default-off) |
+| *p = v1; after a __divdi3 call where v1 is never written | [`libgccsigs`](#libgccsigs----on--off-default-off) |
+| a call to a function I named with --define-function still renders with no arguments | [`declaredlibcproto`](#declaredlibcproto----on--off-default-on) |
+| the argument stores are emitted as raw stack writes on the lines above an argumentless call | [`declaredlibcproto`](#declaredlibcproto----on--off-default-on) |
+| naming a callee changes the spelling of the call and nothing else | [`declaredlibcproto`](#declaredlibcproto----on--off-default-on) |
+| calleearity and varargstackargs both on and a stripped statically linked libc call is still argumentless | [`declaredlibcproto`](#declaredlibcproto----on--off-default-on) |
+| a declared ptrace/read/write/open call loses every argument | [`declaredlibcproto`](#declaredlibcproto----on--off-default-on) |
+| string constants render as raw addresses or unnamed data instead of quoted char[N] literals | [`strings`](#strings----on--off-default-on) |
+| no data symbols at ascii runs in rodata | [`strings`](#strings----on--off-default-on) |
+| four-character commands such as quit, show, bind, or fork render as hexadecimal addresses | [`strings`](#strings----on--off-default-on) |
+| a wide Windows API argument renders as a one-character string literal | [`widestrings`](#widestrings----on--off-default-on) |
+| LoadLibraryW("n") or FindWindowW("O",0) in the emitted C | [`widestrings`](#widestrings----on--off-default-on) |
+| kuna strings --encoding utf16 reports a literal the decompiled C truncates to its first character | [`widestrings`](#widestrings----on--off-default-on) |
+| a UTF-16 string address carries no data symbol while the ascii ones do | [`widestrings`](#widestrings----on--off-default-on) |
+| an anti-debugging check names no DLL or window class | [`widestrings`](#widestrings----on--off-default-on) |
+| a wchar_t or char32_t string literal argument renders as an address such as &dat_2004 | [`widestrings32`](#widestrings32----on--off-default-off) |
+| a wide literal renders as its first character in a narrow string | [`widestrings32`](#widestrings32----on--off-default-off) |
+| L"..." appears only where a libc wide-string prototype types the argument | [`widestrings32`](#widestrings32----on--off-default-off) |
+| a wide default such as s = L"(NULL)" renders as s = &dat_2038 | [`widestrings32`](#widestrings32----on--off-default-off) |
+| a stripped binary yields almost no functions (symbol stream only) | [`entry_disc`](#entry_disc----on--off-default-on) |
+| functions discovered via e_entry/init_array/.eh_frame/prologues missing from the list | [`entry_disc`](#entry_disc----on--off-default-on) |
+| c++ catch/cleanup landing pads missing from a stripped binary's function list | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
+| exception-handler code never discovered as entries | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
+| gcc_except_table call-site targets left unexplored | [`eh_frame_full`](#eh_frame_full----on--off-default-off) |
+| catch block missing from a c++ function | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| destructor calls on the exception path are missing | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| __cxa_begin_catch never appears in the pseudocode | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| _Unwind_Resume never appears although the binary calls it | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| a c++ function with try/catch shows only the normal return | [`itaniumeh`](#itaniumeh----on--catch--off-default-off) |
+| a rust panic call passes a bare address as its last argument | [`panicloc`](#panicloc----on--off-default-on) |
+| panic_bounds_check shows a hex constant instead of a source location | [`panicloc`](#panicloc----on--off-default-on) |
+| rust unwrap_failed or expect_failed location argument is an unnamed address | [`panicloc`](#panicloc----on--off-default-on) |
+| a rust string literal prints glued to the next literal | [`strcodelen`](#strcodelen----on--off-default-on) |
+| a &str pointer alone shows several literals run together | [`strcodelen`](#strcodelen----on--off-default-on) |
+| rust string symbol names concatenate two messages | [`strcodelen`](#strcodelen----on--off-default-on) |
+| a go runtime.newobject call passes a bare address | [`gortti`](#gortti----on--off-default-on) |
+| go interface conversion stores an unnamed itab address | [`gortti`](#gortti----on--off-default-on) |
+| stripped go binary shows hex constants where type descriptors are used | [`gortti`](#gortti----on--off-default-on) |
+| a stripped mach-o yields almost no functions although __text is large | [`unwindstarts`](#unwindstarts----on--off-default-off) |
+| an ios app function list is only __mh_execute_header, main, exports and import stubs | [`unwindstarts`](#unwindstarts----on--off-default-off) |
+| LC_FUNCTION_STARTS absent and the arm64 gap walk cannot reach the body | [`unwindstarts`](#unwindstarts----on--off-default-off) |
+| functions the unwinder describes in __unwind_info missing from the inventory | [`unwindstarts`](#unwindstarts----on--off-default-off) |
+| a stripped mach-o loses functions whose unwind info is a dwarf fde in __eh_frame | [`machoehframe`](#machoehframe----on--off-default-on) |
+| functions listed by llvm-objdump --dwarf=frames on a mach-o missing from the inventory | [`machoehframe`](#machoehframe----on--off-default-on) |
+| functions ghidra finds in a stripped gcc binary's .cold region missing from kuna's function list | [`coldentry`](#coldentry----on--off-default-on) |
+| a hot function's decompile inlines an abort or error tail reached by a jump into another function's fde | [`coldentry`](#coldentry----on--off-default-on) |
+| gaps between consecutive sub_<addr> cold fragments that hold code | [`coldentry`](#coldentry----on--off-default-on) |
+| many sub_<addr> functions that end in _Unwind_Resume() | [`ehcold`](#ehcold----on--off-default-on) |
+| a stripped c++ binary's function list is full of cleanup fragments from .text.unlikely | [`ehcold`](#ehcold----on--off-default-on) |
+| a function that starts by reading an undefined rbx and frees buffers before _Unwind_Resume | [`ehcold`](#ehcold----on--off-default-on) |
+| a tail jump to an undeclared import drops an argument the function passes through | [`importvote`](#importvote----on--off-default-on) |
+| a forwarder to a library function prints void and no return | [`importvote`](#importvote----on--off-default-on) |
+| return helper() with fewer arguments than the other calls to helper pass | [`importvote`](#importvote----on--off-default-on) |
+| a c++ function's cleanups and catch bodies are missing with no hint | [`ehnote`](#ehnote----on--off-default-on) |
+| nothing says which calls can throw | [`ehnote`](#ehnote----on--off-default-on) |
+| a rust drop-glue landing pad disappears silently | [`ehnote`](#ehnote----on--off-default-on) |
+| spurious sub_<addr> functions inside a c++ function that uses try/catch | [`fdeinterior`](#fdeinterior----on--off-default-on) |
+| a decompiled function body dereferences an uninitialised frame pointer so every local is garbage | [`fdeinterior`](#fdeinterior----on--off-default-on) |
+| function count inflated by unwinder-only landing pads | [`fdeinterior`](#fdeinterior----on--off-default-on) |
+| a function entry lands in the middle of an instruction | [`fdeinterior`](#fdeinterior----on--off-default-on) |
+| extra entries between two real functions in a binary built with exceptions | [`fdeinterior`](#fdeinterior----on--off-default-on) |
+| a pe function entry inside another function's known address range | [`pdatainterior`](#pdatainterior----on--off-default-on) |
+| an unaligned sub_<addr> that starts in the middle of an instruction | [`pdatainterior`](#pdatainterior----on--off-default-on) |
+| decompiled output stops early with a funcboundflow truncation warning | [`pdatainterior`](#pdatainterior----on--off-default-on) |
+| function count inflated by gap-walk starts on an obfuscated pe | [`pdatainterior`](#pdatainterior----on--off-default-on) |
+| a large .pdata-described function decompiles as a fragment | [`pdatainterior`](#pdatainterior----on--off-default-on) |
+| a sub_<addr> inside a function the pdb names | [`pdbinterior`](#pdbinterior----on--off-default-on) |
+| a pdb-named leaf function decompiles with a funcboundflow truncation warning | [`pdbinterior`](#pdbinterior----on--off-default-on) |
+| a switch case missing from a function whose .pdb is present | [`pdbinterior`](#pdbinterior----on--off-default-on) |
+| function count inflated by gap-walk starts inside crt leaves of an msvc binary | [`pdbinterior`](#pdbinterior----on--off-default-on) |
+| an entry in the middle of an instruction inside a pdb procedure | [`pdbinterior`](#pdbinterior----on--off-default-on) |
+| a function entry at an address outside every section of the image | [`unmappedentry`](#unmappedentry----on--off-default-on) |
+| kuna functions lists a size-0 sub_<addr> far above or below the image | [`unmappedentry`](#unmappedentry----on--off-default-on) |
+| decompiling a discovered function returns no body at all | [`unmappedentry`](#unmappedentry----on--off-default-on) |
+| the function inventory of an anti-disassembly binary contains an address that is not mapped | [`unmappedentry`](#unmappedentry----on--off-default-on) |
+| a call target from junk bytes behind an always-taken branch becomes a function | [`unmappedentry`](#unmappedentry----on--off-default-on) |
+| kuna functions lists only the 5-byte jmp thunks of an msvc incremental-link image | [`thunkentry`](#thunkentry----on--off-default-on) |
+| a thunk's size covers many real functions | [`thunkentry`](#thunkentry----on--off-default-on) |
+| decompile-all prints each body under the name of its thunk | [`thunkentry`](#thunkentry----on--off-default-on) |
+| function behind a jmp rel32 thunk is never a function start | [`thunkentry`](#thunkentry----on--off-default-on) |
+| fast mode finds no function bodies at all on an msvc debug build | [`thunkentry`](#thunkentry----on--off-default-on) |
+| a function called only through a pointer is missing from kuna functions | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| kuna xrefs reports a data reference to an address kuna functions does not list | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| a registration stub's size covers the handler after it | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| decompile --addr at a lea target prints a body no listed function has | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| relocated handler pointers before the first .pdata record are not functions | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| a frame-less leaf with no .pdata record is folded into the function before it | [`addrtakenentry`](#addrtakenentry----on--off-default-on) |
+| every function in a ppc64 binary is listed twice, as an 8-byte named husk plus an anonymous body | [`ppclocalentry`](#ppclocalentry----on--off-default-on) |
+| kuna decompile of a named ppc64 function returns an empty body with a funcboundflow truncation warning | [`ppclocalentry`](#ppclocalentry----on--off-default-on) |
+| kuna functions reports size 8 for a ppc64 function that is plainly longer | [`ppclocalentry`](#ppclocalentry----on--off-default-on) |
+| a ppc64le function body is only reachable under a generated sub_<hex> name | [`ppclocalentry`](#ppclocalentry----on--off-default-on) |
+| a function entry sits 8 bytes into another function on PowerPC | [`ppclocalentry`](#ppclocalentry----on--off-default-on) |
+| an A32 function after a Thumb helper decompiles as halt_missing in a stripped ARM binary | [`flowmode`](#flowmode----on--aftercall--off-default-off) |
+| flow reaches unmapped memory two bytes into an A32 instruction | [`flowmode`](#flowmode----on--aftercall--off-default-off) |
+| --isa arm decompiles an ARM function correctly that the default run turns into garbage | [`flowmode`](#flowmode----on--aftercall--off-default-off) |
+| a function reached with bl after a blx call decodes in the wrong instruction set | [`flowmode`](#flowmode----on--aftercall--off-default-off) |
+| --option listing off fixes the decompilation of an ARM function | [`flowmode`](#flowmode----on--aftercall--off-default-off) |
+| kuna strings reports xrefs_count 0 and an empty functions list for every string in a 32-bit binary | [`picbase`](#picbase----on--off-default-on) |
+| a string the disassembly plainly forms the address of has no cross-references | [`picbase`](#picbase----on--off-default-on) |
+| kuna xrefs --to a .rodata address finds nothing in a position-independent i386 executable | [`picbase`](#picbase----on--off-default-on) |
+| no function is reported as the owner of a prompt the program prints | [`picbase`](#picbase----on--off-default-on) |
+| globals reached as [ebx+disp] have no readers or writers in the xref index | [`picbase`](#picbase----on--off-default-on) |
+| main or the entry function is declared void(void) but is called with arguments | [`entrymainproto`](#entrymainproto----on--off-default-on) |
+| a stripped PE's entry function takes no parameters while its caller passes three | [`entrymainproto`](#entrymainproto----on--off-default-on) |
+| argc and argv are invisible in the decompiled main of a stripped windows binary | [`entrymainproto`](#entrymainproto----on--off-default-on) |
+| the CRT startup calls sub_<addr>(a,b,c) and sub_<addr> declares (void) | [`entrymainproto`](#entrymainproto----on--off-default-on) |
+| command-line handling in main cannot be followed because the arguments have no names | [`entrymainproto`](#entrymainproto----on--off-default-on) |
+| kuna functions on a macOS binary lists no main at all | [`machomain`](#machomain----on--off-default-on) |
+| the entry of a stripped Mach-O is reported only as sub_<addr> | [`machomain`](#machomain----on--off-default-on) |
+| a Mach-O program routine decompiles as unsigned long sub_<addr>(void) | [`machomain`](#machomain----on--off-default-on) |
+| argc and argv are invisible in the decompiled main of a stripped mach-o binary | [`machomain`](#machomain----on--off-default-on) |
+| there is no way to tell which of a stripped Mach-O's functions the program starts in | [`machomain`](#machomain----on--off-default-on) |
+| kuna functions on a windows binary lists no main at all | [`pemain`](#pemain----on--off-default-on) |
+| the entry of a stripped PE is reported only as the CRT startup sub_<addr> | [`pemain`](#pemain----on--off-default-on) |
+| there is no way to tell which of a stripped PE's functions the program starts in | [`pemain`](#pemain----on--off-default-on) |
+| functions --summary gives the entry as mainCRTStartup and never names main | [`pemain`](#pemain----on--off-default-on) |
+| WinMain of a stripped GUI exe is reported only as sub_<addr> | [`pemain`](#pemain----on--off-default-on) |
+| kuna strings reports xrefs_count 0 and functions [] for every literal in a stripped ARM binary | [`armlibcmain`](#armlibcmain----on--off-default-on) |
+| kuna functions on an ARM ELF lists no main and one entry covering most of .text | [`armlibcmain`](#armlibcmain----on--off-default-on) |
+| a prompt an ARM binary plainly prints has no owning function | [`armlibcmain`](#armlibcmain----on--off-default-on) |
+| kuna xrefs --to a .rodata address finds nothing in a non-PIE ARM executable | [`armlibcmain`](#armlibcmain----on--off-default-on) |
+| most of a stripped ARM binary's .text is never decoded although it is inside a discovered function's extent | [`armlibcmain`](#armlibcmain----on--off-default-on) |
+| an unstripped ELF's main decompiles with anonymous a0/a1 parameters and an unsigned return | [`elfmain`](#elfmain----on--off-default-on) |
+| argv[1] in main reads as a struct field or a cast of a1 | [`elfmain`](#elfmain----on--off-default-on) |
+| kuna functions on a stripped Linux binary lists no main at all | [`elfmain`](#elfmain----on--off-default-on) |
+| the entry of a stripped ELF is reported only as sub_<addr> | [`elfmain`](#elfmain----on--off-default-on) |
+| a stripped ELF program routine decompiles as unsigned long sub_<addr>(int a0,char **a1) | [`elfmain`](#elfmain----on--off-default-on) |
+| argc and argv are invisible in the decompiled main of a stripped elf binary | [`elfmain`](#elfmain----on--off-default-on) |
+| main returns unsigned long instead of int in a stripped ELF | [`elfmain`](#elfmain----on--off-default-on) |
+| there is no way to tell which of a stripped ELF's functions the program starts in | [`elfmain`](#elfmain----on--off-default-on) |
+| functions after nop padding missing in a stripped binary | [`funcstart_patterns`](#funcstart_patterns----on--off-default-off) |
+| a push rbx; mov rbx,rdi prologue never discovered as a function start | [`funcstart_patterns`](#funcstart_patterns----on--off-default-off) |
+| code-bearing gaps between discovered functions left undefined | [`funcstart_patterns`](#funcstart_patterns----on--off-default-off) |
+| a stripped a32 firmware omits disconnected functions | [`armframes`](#armframes----inventory--on--off-default-inventory) |
+| stripped arm xref queries omit calls from disconnected stack frames | [`armframes`](#armframes----inventory--on--off-default-inventory) |
+| an arm caller is assigned to an interior prologue | [`armframes`](#armframes----inventory--on--off-default-inventory) |
+| arm interworking frame discovery leaves stale call references | [`armframes`](#armframes----inventory--on--off-default-inventory) |
+| stripped cortex-m firmware yields only a handful of functions | [`cortexmvectors`](#cortexmvectors----on--off-default-off) |
+| arm firmware body decodes as a32 garbage instead of thumb | [`cortexmvectors`](#cortexmvectors----on--off-default-off) |
+| nmi/hardfault/systick exception handlers never discovered as entries | [`cortexmvectors`](#cortexmvectors----on--off-default-off) |
+| isr_vector table present but no vector-derived function starts | [`cortexmvectors`](#cortexmvectors----on--off-default-off) |
+| a small arm callback or isr handler produces no decompiled output at all | [`ptrentry`](#ptrentry----on--off-default-off) |
+| kuna emits one function then the next with un-decompiled code in between | [`ptrentry`](#ptrentry----on--off-default-off) |
+| bare bx lr exception handlers never discovered as entries | [`ptrentry`](#ptrentry----on--off-default-off) |
+| vtable or fops-struct callbacks missing from a stripped arm binary | [`ptrentry`](#ptrentry----on--off-default-off) |
+| driver op-struct function pointers left undiscovered | [`ptrentry`](#ptrentry----on--off-default-off) |
+| a stripped arm function list carries sub_<addr> entries two bytes below the real function | [`poolentry`](#poolentry----on--off-default-off) |
+| the same arm function appears twice at addresses two bytes apart | [`poolentry`](#poolentry----on--off-default-off) |
+| a decompiled arm function returns a constant or drops its first parameter because of a dead leading movs | [`poolentry`](#poolentry----on--off-default-off) |
+| kuna reports far more functions than the binary has on bare-metal arm | [`poolentry`](#poolentry----on--off-default-off) |
+| an arm function entry lands one halfword before the real prologue | [`poolentry`](#poolentry----on--off-default-off) |
+| a32 u-boot recall is far below the cortex-m images | [`poolentry`](#poolentry----on--off-default-off) |
+| thumb code misdecoded as arm garbage instructions | [`arm_markers`](#arm_markers----on--off-default-on) |
+| $t/$a mapping symbols ignored so the wrong decode mode applies | [`arm_markers`](#arm_markers----on--off-default-on) |
+| an a32 function after a thumb function decodes as thumb garbage | [`armfuncmode`](#armfuncmode----on--off-default-on) |
+| function flow reaches unmapped memory in an a32 function of an image without mapping symbols | [`armfuncmode`](#armfuncmode----on--off-default-on) |
+| a thumb function's mode leaks into the even-addressed function after it | [`armfuncmode`](#armfuncmode----on--off-default-on) |
+| an A32 function after a Thumb helper decompiles as halt_missing in a stripped ARM binary | [`armwalkmode`](#armwalkmode----on--off-default-on) |
+| flow reaches unmapped memory two bytes into an A32 instruction | [`armwalkmode`](#armwalkmode----on--off-default-on) |
+| a function reached with bl after a blx call decodes in the wrong instruction set | [`armwalkmode`](#armwalkmode----on--off-default-on) |
+| --option listing off fixes the decompilation of an ARM function | [`armwalkmode`](#armwalkmode----on--off-default-on) |
+| --isa arm decompiles an ARM function correctly that the default run turns into garbage | [`armwalkmode`](#armwalkmode----on--off-default-on) |
+| unresolved *(gp + offset) loads on mips | [`mips_gp`](#mips_gp----on--off-default-on) |
+| got/.sdata references never fold to real addresses in a pic mips binary | [`mips_gp`](#mips_gp----on--off-default-on) |
+| i386 pie libc calls render as sub_<addr> instead of exit/dcgettext | [`i386_pie_plt`](#i386_pie_plt----on--off-default-on) |
+| spurious do{}while(true) or goto loop after an unnamed exit stub in a 32-bit pie binary | [`i386_pie_plt`](#i386_pie_plt----on--off-default-on) |
+| kuna functions on a .o or .obj lists phantom sub_<addr> entries below 0x400000 beside the real ones | [`relocrebase`](#relocrebase----on--off-default-on) |
+| functions and decompile-all disagree on how many functions a relocatable object has | [`relocrebase`](#relocrebase----on--off-default-on) |
+| a -g .o names one function at address 0 and leaves the rest sub_<addr> | [`relocrebase`](#relocrebase----on--off-default-on) |
+| string literals and dwarf-named globals in a .o never attach to the loaded image | [`relocrebase`](#relocrebase----on--off-default-on) |
+| a stripped distribution binary prints sub_<addr> for every function although its debug package is installed | [`debuglink`](#debuglink----on--off-default-on) |
+| a Fedora/RHEL binary keeps function names in .gnu_debugdata but kuna shows none | [`debuglink`](#debuglink----on--off-default-on) |
+| a call in a pie binary renders as (*dat_<addr>)(...) with no name although the callee is a named function in the same image | [`dynrelocs`](#dynrelocs----on--off-default-on) |
+| a got slot reads back as 0 in the decompiled output | [`dynrelocs`](#dynrelocs----on--off-default-on) |
+| reading a relocated function-pointer table in a pie binary yields all zeroes | [`dynrelocs`](#dynrelocs----on--off-default-on) |
+| could not build an architecture for <binary>: Non-global scope has empty name | [`symbolnamerepair`](#symbolnamerepair----on--off-default-on) |
+| an unstripped C++ binary fails to load entirely while a stripped copy of it loads fine | [`symbolnamerepair`](#symbolnamerepair----on--off-default-on) |
+| kuna functions, decompile-all and decompile-project all fail on the same binary with the same scope error | [`symbolnamerepair`](#symbolnamerepair----on--off-default-on) |
+| a binary loads in ghidra or ida but kuna refuses it at load with a symbol-scope error | [`symbolnamerepair`](#symbolnamerepair----on--off-default-on) |
+| a function name in the emitted c contains a newline and splits the declaration across two lines | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| the // Function: header comment ends early and the address becomes code | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| decompile-project emits two functions with the same name and the .h has a duplicate prototype | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| a symbol name renders with a U+FFFD replacement character | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| kuna decompile <name> cannot address a function that kuna functions printed | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| the exported .c does not compile because a function name contains */ or // | [`symbolnamechars`](#symbolnamechars----off--safe--ident-default-safe) |
+| kuna functions or decompile-all uses hundreds of megabytes of rss on a small binary | [`symbolnamebound`](#symbolnamebound------off-default-256) |
+| kuna stalls for tens of seconds or is oom-killed loading a binary whose symbol table is a few hundred kilobytes | [`symbolnamebound`](#symbolnamebound------off-default-256) |
+| a stripped copy of a binary loads instantly while the unstripped copy hangs | [`symbolnamebound`](#symbolnamebound------off-default-256) |
+| memory grows roughly 1.5 kb per :: in a symbol name | [`symbolnamebound`](#symbolnamebound------off-default-256) |
+| a floating-point expression in an msvc .obj is written entirely in dat_<addr> operands | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
+| an msvc object's fp constant reads as dat_<addr> although its symbol name spells the value | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
+| one operand of an fp expression is a literal and the neighbouring one is still dat_<addr> | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
+| a __real@ symbol in a .obj has no bytes behind it and any read of it fails | [`msvcfpconst`](#msvcfpconst----on--off-default-on) |
+| a glibc math/mem/str wrapper tail-jumps to `(*dat_...)(...)` with the callee dropped | [`ifuncfpret`](#ifuncfpret----on--off-default-off) |
+| an x86-64 IFUNC .plt.sec stub is not a discovered function | [`ifuncfpret`](#ifuncfpret----on--off-default-off) |
+| xmm0 read uninitialized after calling a void-typed ifunc-dispatching wrapper | [`ifuncfpret`](#ifuncfpret----on--off-default-off) |
+| mips16/micromips function body misdecoded as mips32 garbage | [`mips_isa`](#mips_isa----on--off-default-on) |
+| odd-address mips functions decode in the wrong isa mode | [`mips_isa`](#mips_isa----on--off-default-on) |
+| a -g binary still shows default names and inferred types | [`dwarf`](#dwarf----on--off-default-on) |
+| dwarf function/global names and typed signatures ignored | [`dwarf`](#dwarf----on--off-default-on) |
+| libc globals render as dat_<addr> where every other decompiler prints stderr/stdout/optind | [`datasyms`](#datasyms----on--off-default-on) |
+| fprintf stream argument shows a raw dat_ address so error paths are indistinguishable from output paths | [`datasyms`](#datasyms----on--off-default-on) |
+| a stripped binary's copy-relocated externs unnamed | [`datasyms`](#datasyms----on--off-default-on) |
+| an unstripped dwarf-less binary's own statics render dat_<addr> | [`datasyms`](#datasyms----on--off-default-on) |
+| decompile-project exports reference undeclared dat_<addr> identifiers where a stdio global belongs | [`datasyms`](#datasyms----on--off-default-on) |
+| no /* file:line */ source-location comments in the output | [`dwarf_lines`](#dwarf_lines----on--off-default-off) |
+| want each instruction annotated with its dwarf source line | [`dwarf_lines`](#dwarf_lines----on--off-default-off) |
+| c++ member functions decompile with a0/a1 parameters despite -g debug info | [`cppproto`](#cppproto----on--off-default-on) |
+| Foo *this renders as void * | [`cppproto`](#cppproto----on--off-default-on) |
+| a namespaced or templated function loses its dwarf prototype | [`cppproto`](#cppproto----on--off-default-on) |
+| one unmappable parameter type discards the whole dwarf signature | [`cppproto`](#cppproto----on--off-default-on) |
+| a clang -O2 static function's dwarf prototype names a parameter the body never reads | [`dwarfnocall`](#dwarfnocall----on--off-default-on) |
+| a parameter renders under the name of the one before it | [`dwarfnocall`](#dwarfnocall----on--off-default-on) |
+| callers of an optimized static function pass an undefined extra argument | [`dwarfnocall`](#dwarfnocall----on--off-default-on) |
+| a constant argument folded away by the compiler still appears in the prototype | [`dwarfnocall`](#dwarfnocall----on--off-default-on) |
+| a dwarf-typed local or parameter renders void * despite -g debug info | [`typedepth`](#typedepth----on--off-default-on) |
+| const char ** or char *const [] loses its element type | [`typedepth`](#typedepth----on--off-default-on) |
+| a typedef'd struct pointer degrades to void * | [`typedepth`](#typedepth----on--off-default-on) |
+| a global array of string pointers is marked one byte wide | [`typedepth`](#typedepth----on--off-default-on) |
+| deep pointer chains (char ***) truncate to void ** | [`typedepth`](#typedepth----on--off-default-on) |
+| a struct passed by value degrades to an integer parameter despite -g debug info | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| a small struct return grows a phantom rethidden parameter that the body does arithmetic on | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| struct fields render as casts and offsets instead of p->field | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| a bitfield member renders as a shift-and-mask of the whole word | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| a union parameter loses its member names | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| a dwarf-recovered struct or union has size 0 | [`dwarfstructs`](#dwarfstructs----on--off-default-on) |
+| a rust enum return grows a phantom rethidden parameter despite -g debug info | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| a dwarf-recovered rust enum has a byte size but no fields | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| Result or Option renders as an opaque container with byte offsets | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| a tagged-union discriminant renders as an unnamed integer at offset 0 | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| a variant payload renders as a cast-and-offset instead of a named field | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| a rust enum's discriminant and payload have no names even though the binary was built with full debug info | [`dwarfvariants`](#dwarfvariants----on--off-default-on) |
+| a rust match on Result or Option renders its discriminant tests against bare integers | [`variantnames`](#variantnames----on--off-default-on) |
+| if ((*e).tag == 1) where the binary carries full debug info | [`variantnames`](#variantnames----on--off-default-on) |
+| a recovered rust enum's tag field is a plain integer type though DWARF names every variant | [`variantnames`](#variantnames----on--off-default-on) |
+| switch cases over a rust enum discriminant print numbers instead of variant names | [`variantnames`](#variantnames----on--off-default-on) |
+| c++ member functions on a stripped binary decompile with a0/a1 parameters | [`cppsig`](#cppsig----off--proven--inferred-default-proven) |
+| this renders as int8 * or unsigned long instead of the class type | [`cppsig`](#cppsig----off--proven--inferred-default-proven) |
+| a mangled symbol names the function but not its parameter types | [`cppsig`](#cppsig----off--proven--inferred-default-proven) |
+| no signature recovery on a stripped c++ shared library | [`cppsig`](#cppsig----off--proven--inferred-default-proven) |
+| a __thiscall c++ import call loses its this argument | [`msvcsig`](#msvcsig----on--off-default-on) |
+| an msvc-mangled import is named but its call has no arguments | [`msvcsig`](#msvcsig----on--off-default-on) |
+| a call to a c++ import that returns a class loses its hidden return pointer | [`msvcsig`](#msvcsig----on--off-default-on) |
+| arguments of one call are given to an earlier msvc c++ import call | [`msvcsig`](#msvcsig----on--off-default-on) |
+| a __cdecl c++ import is treated as popping its own arguments | [`msvcsig`](#msvcsig----on--off-default-on) |
+| mcount/__fentry__ profiling calls clutter every -pg function prologue | [`callfixup`](#callfixup----on--off-default-on) |
+| cspec call-fixup targets rendered as plain calls instead of dissolved | [`callfixup`](#callfixup----on--off-default-on) |
+| absolute function-pointer table in rodata never recognized | [`addrtable`](#addrtable----on--off-default-off) |
+| indirect calls through an unrecovered address table in a stripped target | [`addrtable`](#addrtable----on--off-default-off) |
+| an immediate operand pointing at a rodata string renders as a bare number | [`operand_refs`](#operand_refs----on--off-default-off) |
+| string argument of a no-prototype call not typed as char[N] | [`operand_refs`](#operand_refs----on--off-default-off) |
+| printf/scanf variadic arguments render untyped at the call site | [`formatstring`](#formatstring----off--static--full--on-default-static) |
+| %d and %s arguments carry generic types instead of int/char * | [`formatstring`](#formatstring----off--static--full--on-default-static) |
+| error/warn/syslog format arguments carry generic types | [`formatstring`](#formatstring----off--static--full--on-default-static) |
+| a program's own printf-like logger is called without its double argument | [`formatcallees`](#formatcallees----on--off-default-on) |
+| a call to an unnamed function with a literal format string has a phantom trailing argument | [`formatcallees`](#formatcallees----on--off-default-on) |
+| %d arguments to a custom logger carry (unsigned long)(unsigned int) casts | [`formatcallees`](#formatcallees----on--off-default-on) |
+| a scanf-like wrapper's destinations are typed as integers | [`formatcallees`](#formatcallees----on--off-default-on) |
+| noreturn discovery inert on a stripped binary | [`listing`](#listing----on--off-default-off) |
+| analysis passes that need whole-image xrefs do nothing | [`listing`](#listing----on--off-default-off) |
+| no program-wide instruction/xref/function model for consumer passes | [`listing`](#listing----on--off-default-off) |
+| fast decompile-project emits only import veneers and the binary entry | [`fast_funcdisc`](#fast_funcdisc----on--off-default-off) |
+| internal direct callees have no project bodies | [`fast_funcdisc`](#fast_funcdisc----on--off-default-off) |
+| function reachable through a callback or vtable pointer is absent while explicit --addr decompiles it | [`fast_funcdisc`](#fast_funcdisc----on--off-default-off) |
+| kuna functions on a --raw-image reports one function whose size is the whole file | [`rawdiscover`](#rawdiscover----on--off-default-on) |
+| decompile-all on a raw image emits a single enormous body | [`rawdiscover`](#rawdiscover----on--off-default-on) |
+| a firmware image decompiles only at addresses passed by hand | [`rawdiscover`](#rawdiscover----on--off-default-on) |
+| kuna strings or functions on a TE image finds no strings and no functions beyond the entry | [`objectview`](#objectview----on--off-default-on) |
+| a raw firmware image decompiles with every string as a bare address | [`objectview`](#objectview----on--off-default-on) |
+| prologue-only functions in a raw image are never discovered | [`objectview`](#objectview----on--off-default-on) |
+| stripped static-linked library function stays sub_<addr> although its fingerprint is known | [`fid`](#fid----on--off-default-off) |
+| no .fid database renames applied in a stripped binary | [`fid`](#fid----on--off-default-off) |
+| a stripped static binary lists libc functions as sub_<addr> | [`flirt`](#flirt----on--off-default-off) |
+| kuna cannot use ida flirt signatures | [`flirt`](#flirt----on--off-default-off) |
+| memcpy and printf in a static binary have no names | [`flirt`](#flirt----on--off-default-off) |
+| flirt leaves printf-style wrappers unnamed because several modules match | [`flirtsites`](#flirtsites----on--off-default-on) |
+| flirt names a short i386 wrapper after the wrong library function | [`flirtsites`](#flirtsites----on--off-default-on) |
+| flirt misses an ifunc resolver whose reference is a lea of a function address | [`flirtsites`](#flirtsites----on--off-default-on) |
+| a function fid or flirt named memcpy keeps its recovered parameters | [`fidproto`](#fidproto----on--off-default-on) |
+| a flirt-named exit or abort is not treated as no-return | [`fidproto`](#fidproto----on--off-default-on) |
+| code after a call to a renamed library abort is decompiled as reachable | [`fidproto`](#fidproto----on--off-default-on) |
+| fid leaves a function unnamed because two library functions share its hash | [`fidcallees`](#fidcallees----on--off-default-on) |
+| fid renames a small stub to the wrong library function | [`fidcallees`](#fidcallees----on--off-default-on) |
+| fid names a function whose calls go to differently named functions | [`fidcallees`](#fidcallees----on--off-default-on) |
+| msvc c++ class names missing and vftables left as unnamed data | [`rtti`](#rtti----on--off-default-off) |
+| no Class::vftable or RTTI_ labels in a windows pe with polymorphic classes | [`rtti`](#rtti----on--off-default-off) |
+| gcc/clang c++ class names missing and vtables left as unnamed DAT_ data | [`itaniumrtti`](#itaniumrtti----on--off-default-off) |
+| no Class::vtable or typeinfo labels in a stripped elf with polymorphic classes | [`itaniumrtti`](#itaniumrtti----on--off-default-off) |
+| virtual dispatch slot resolves to sub_<addr> with no class | [`itaniumrtti`](#itaniumrtti----on--off-default-off) |
+| function reachable only through a rodata function-pointer table never discovered | [`aif`](#aif----on--off-default-off) |
+| undefined gap between functions that clearly holds code | [`aif`](#aif----on--off-default-off) |
+| call *reg targets missing from the function list | [`aif`](#aif----on--off-default-off) |
+| a stripped binary reports far more functions than it has | [`aifstrict`](#aifstrict----on--off-default-off) |
+| a discovered function starts in the middle of another functions body | [`aifstrict`](#aifstrict----on--off-default-off) |
+| a sub_ entry lands on an ordinary call or mov instruction rather than a prologue | [`aifstrict`](#aifstrict----on--off-default-off) |
+| two overlapping functions decompile the same instructions twice | [`aifstrict`](#aifstrict----on--off-default-off) |
+| aif adds thousands of entries a reference decompiler does not agree are functions | [`aifstrict`](#aifstrict----on--off-default-off) |
+| an arm function entry lands one halfword before the real prologue | [`aifstrict`](#aifstrict----on--off-default-off) |
+| a sub_ entry lands on a routine that calls nothing and only falls off the end of a hole | [`aifcorroborate`](#aifcorroborate----on--off-default-off) |
+| aif accepts a function on nothing but four other functions sharing its first two instructions | [`aifcorroborate`](#aifcorroborate----on--off-default-off) |
+| a stripped function list is full of leaf routines that are not functions | [`aifcorroborate`](#aifcorroborate----on--off-default-off) |
+| a discovered function starts in the middle of another functions body | [`aifbracket`](#aifbracket----on--off-default-on) |
+| a sub_ entry lands on a switch case or tail block that jumps back into the function around it | [`aifbracket`](#aifbracket----on--off-default-on) |
+| funcboundflow truncates a function at a sub_ entry that is not a function | [`aifbracket`](#aifbracket----on--off-default-on) |
+| aif adds entries a reference decompiler does not agree are functions | [`aifbracket`](#aifbracket----on--off-default-on) |
+| a sub_ entry starts on the nop padding in front of a function | [`aifnoppad`](#aifnoppad----on--off-default-on) |
+| a stripped function list has a short sub_ of nothing but nops before each thunk | [`aifnoppad`](#aifnoppad----on--off-default-on) |
+| a discovered function starts a few bytes early on the padding before it | [`aifnoppad`](#aifnoppad----on--off-default-on) |
+| aif adds entries on zero fill between arm sections | [`aifnoppad`](#aifnoppad----on--off-default-on) |
+| a sub_ entry lands on a switch case of a thumb function | [`thumbswitch`](#thumbswitch----on--off-default-on) |
+| a stripped cortex-m function list has sub_ entries in the middle of a switch | [`thumbswitch`](#thumbswitch----on--off-default-on) |
+| kuna functions reports a tbb or tbh function far smaller than its symbol | [`thumbswitch`](#thumbswitch----on--off-default-on) |
+| a function called only from a switch case is missing from a stripped firmware image | [`thumbswitch`](#thumbswitch----on--off-default-on) |
+| aif adds entries inside cortex-m switch statements | [`thumbswitch`](#thumbswitch----on--off-default-on) |
+| aif lists return-terminated i386 switch cases as functions | [`x86listingswitch`](#x86listingswitch----on--off-default-off) |
+| a direct callee reached only through an i386 switch case is missing from discovery | [`x86listingswitch`](#x86listingswitch----on--off-default-off) |
+| the discovery Listing stops at an absolute-pointer jump table | [`x86listingswitch`](#x86listingswitch----on--off-default-off) |
+| independent reference queries see case bodies absent from the initial instruction partition | [`x86listingswitch`](#x86listingswitch----on--off-default-off) |
+| kuna xrefs reports 0 references to a function called only from a switch case | [`switchreach`](#switchreach----on--off-default-on) |
+| a function called from a switch case body has no caller in decompile-graph | [`switchreach`](#switchreach----on--off-default-on) |
+| calleevote refuses a function because its recorded calls differ from the call graph | [`switchreach`](#switchreach----on--off-default-on) |
+| protoorder decompiles a caller before the callees its switch cases call | [`switchreach`](#switchreach----on--off-default-on) |
+| every call inside a switch is missing from a gcc -O0 binary | [`switchreach`](#switchreach----on--off-default-on) |
+| a recursive interpreter function loses its pointer parameter types in a whole-binary run | [`switchreach`](#switchreach----on--off-default-on) |
+| kuna xrefs reports 0 references to a function called only from an aarch64 switch case | [`compacttable`](#compacttable----on--off-default-on) |
+| an aarch64 switch's case bodies are missing from decompile-graph | [`compacttable`](#compacttable----on--off-default-on) |
+| calleevote refuses an aarch64 function because its recorded calls differ from the call graph | [`compacttable`](#compacttable----on--off-default-on) |
+| j_printf gets no printf prototype | [`nameladder`](#nameladder----on--off-default-on) |
+| __imp_exit is not marked no-return | [`nameladder`](#nameladder----on--off-default-on) |
+| a flirt-named memcpy_0 has no memcpy prototype | [`nameladder`](#nameladder----on--off-default-on) |
+| a mach-o or coff name with a leading underscore misses its libc prototype | [`nameladder`](#nameladder----on--off-default-on) |
+| a char array literal appears at an address inside a function's code | [`codestrings`](#codestrings----on--off-default-on) |
+| instruction bytes print as a four-character string literal | [`codestrings`](#codestrings----on--off-default-on) |
+| a function pointer argument renders as a short garbage string | [`codestrings`](#codestrings----on--off-default-on) |
+| a libc function's FILE * parameter becomes void * because a later source declared it | [`protomerge`](#protomerge----on--off-default-on) |
+| a demangled C++ class pointer parameter is replaced by unsigned long | [`protomerge`](#protomerge----on--off-default-on) |
+| a dwarf prototype erases a parameter name the library table gave | [`protomerge`](#protomerge----on--off-default-on) |
+| a sub_ entry starts on a literal pool word one word before a real function | [`aifpoolslide`](#aifpoolslide----on--off-default-on) |
+| a stripped arm function list lists a function 4 bytes early | [`aifpoolslide`](#aifpoolslide----on--off-default-on) |
+| a function's first decoded instruction is a conditional addvs or a movs r0,#0 that no code reaches | [`aifpoolslide`](#aifpoolslide----on--off-default-on) |
+| a real arm function is missing from a stripped inventory while the entry just before it is a pool word | [`aifpoolslide`](#aifpoolslide----on--off-default-on) |
+| aif adds entries on literal pools | [`aifpoolslide`](#aifpoolslide----on--off-default-on) |
+| routine reached only by a tail B produces no decompiled output at all | [`tailcallentry`](#tailcallentry----on--off-default-off) |
+| a shared ISR handler is swallowed by the two-instruction stub that branches to it | [`tailcallentry`](#tailcallentry----on--off-default-off) |
+| function entry missing where the previous function ends in an unconditional branch | [`tailcallentry`](#tailcallentry----on--off-default-off) |
+| kuna emits one oversized function where the ground truth has two | [`tailcallentry`](#tailcallentry----on--off-default-off) |
+| fid misses a library function whose body is split by the compiler | [`funcchunks`](#funcchunks----on--off-default-off) |
+| a function's body in the inventory absorbs the function after it | [`funcchunks`](#funcchunks----on--off-default-off) |
+| a shared epilogue is counted in only one function | [`funcchunks`](#funcchunks----on--off-default-off) |
+| a .cold part after the next function is not part of its parent's fingerprint | [`funcchunks`](#funcchunks----on--off-default-off) |
+| a symbol-table array prints as *(short *)&g[i * 2] | [`globalwidth`](#globalwidth----on--off-default-on) |
+| a global array with a symbol but no debug info decompiles as byte offsets | [`globalwidth`](#globalwidth----on--off-default-on) |
+| element accesses to a named global table need casts | [`globalwidth`](#globalwidth----on--off-default-on) |
+| a sub_ entry starts on a table the code loads from | [`aifdataveto`](#aifdataveto----on--off-default-on) |
+| aif adds a function at an address the program writes to | [`aifdataveto`](#aifdataveto----on--off-default-on) |
+| a stripped function list contains data the code reads | [`aifdataveto`](#aifdataveto----on--off-default-on) |
+| function discovery on an i386 binary full of push imm callbacks is slow | [`incrementalwalk`](#incrementalwalk----on--off-default-on) |
+| each callback round re-decodes the whole program | [`incrementalwalk`](#incrementalwalk----on--off-default-on) |
+| a function reached only through a table of function pointers is missing | [`calltable`](#calltable----on--off-default-on) |
+| kuna xrefs shows no caller for a function called through ops[i](x) | [`calltable`](#calltable----on--off-default-on) |
+| a switch case that opens with push rbp is listed as a function | [`calltable`](#calltable----on--off-default-on) |
+| a dispatcher's table of tail calls is printed as a switch | [`calltable`](#calltable----on--off-default-on) |
+| a static function reached only by a tail jmp is missing from a stripped x86 function list | [`tailcallentryall`](#tailcallentryall----on--off-default-off) |
+| a stripped aarch64 binary emits a tail-called helper inside its caller | [`tailcallentryall`](#tailcallentryall----on--off-default-off) |
+| tailcallentry does nothing on x86 or aarch64 | [`tailcallentryall`](#tailcallentryall----on--off-default-off) |
+| a uefi te entry function decompiles as garbage a32 although its entry address is odd | [`entrythumbflow`](#entrythumbflow----on--off-default-on) |
+| a callee reached by bl from a thumb entry decodes as a32 | [`entrythumbflow`](#entrythumbflow----on--off-default-on) |
+| a32 code in the same section as a thumb entry decodes as thumb | [`entrythumbflow`](#entrythumbflow----on--off-default-on) |
+| loading a te reports the thumb context walk stopped | [`entrythumbflow`](#entrythumbflow----on--off-default-on) |
+| stripped go binary renders sub_<addr> instead of main.main and runtime.* names | [`gopclntab`](#gopclntab----on--off-default-on) |
+| go package function names missing | [`gopclntab`](#gopclntab----on--off-default-on) |
+| go binary decompiles with anonymous synthesized struct types where the program declared named ones | [`gotypes`](#gotypes----on--off-default-on) |
+| a type surface lists no main.* or package types on a stripped go binary | [`gotypes`](#gotypes----on--off-default-on) |
+| go string and slice headers carry no facet records for downstream passes | [`gotypes`](#gotypes----on--off-default-on) |
+| stripped go binary renders code after a runtime.panicshift or runtime.gopanic call as if the helper returned | [`gonoreturn`](#gonoreturn----on--off-default-on) |
+| a go panic arm falls through into the next block and the output interleaves panic and normal paths | [`gonoreturn`](#gonoreturn----on--off-default-on) |
+| a go function keeps its morestack entry loop because the grow arm follows a panic call kuna treats as returning | [`gonoreturn`](#gonoreturn----on--off-default-on) |
+| go functions declare a local commented r14 or x28 that is read but never assigned | [`goreg`](#goreg----on--off-default-on) |
+| stackguard reads render as *(long *)(v3 + 0x10) instead of g->stackguard0 | [`goreg`](#goreg----on--off-default-on) |
+| go runtime internals full of unexplained register arithmetic | [`goreg`](#goreg----on--off-default-on) |
+| go function parameters missing or void while the body reads rax/rbx locals that are never assigned | [`goabi`](#goabi----auto--off-default-auto) |
+| a go function returning two values loses the second and the statements computing it | [`goabi`](#goabi----auto--off-default-auto) |
+| go output full of unassigned register-commented locals | [`goabi`](#goabi----auto--off-default-auto) |
+| multi-return go call sites read registers the call never defines | [`goabi`](#goabi----auto--off-default-auto) |
+| swift binary symbol names render as $s4main5PointV mangled soup | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
+| swift function names unreadable in kuna functions output | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
+| swift type metadata symbols show raw manglings instead of named paths | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
+| objc method labels show _TtC runtime class names | [`swiftdemangle`](#swiftdemangle----on--off-default-on) |
+| a dyld_shared_cache file is rejected as an unrecognized input format | [`dyldimage`](#dyldimage----none---default-none) |
+| cannot decompile an ios or macos system library because it only exists inside the dyld shared cache | [`dyldimage`](#dyldimage----none---default-none) |
+| dyld shared cache holds N images; choose one with --image | [`dyldimage`](#dyldimage----none---default-none) |
+| calls in a dyld shared cache image render as sub_<addr> into a __TEXT_STUBS island | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
+| a cache image's __got loads name nothing | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
+| cross-library calls of an ios framework have no names | [`dyldcrossrefs`](#dyldcrossrefs----on--off-default-on) |
+| a call through a mach-o function pointer bound to an import renders (*dat_<addr>)() | [`machobinds`](#machobinds----on--off-default-on) |
+| a mach-o data pointer bound to an external symbol reads as *dat_<addr> | [`machobinds`](#machobinds----on--off-default-on) |
+| arm64e __auth_ptr or vtable slots bound to imports have no names | [`machobinds`](#machobinds----on--off-default-on) |
+| a stripped mach-o dylib's exported functions are unnamed although its export trie lists them | [`exporttrie`](#exporttrie----on--off-default-on) |
+| a dyld cache call is named after the implementation (_platform_memmove) instead of the imported name (memmove) | [`exporttrie`](#exporttrie----on--off-default-on) |
+| re-exported symbols resolve to the wrong name | [`exporttrie`](#exporttrie----on--off-default-on) |
+| rust binary renders with c output and no rust abi handling because a stripped image lost its language signals | [`sourcelang`](#sourcelang----auto--c--rust--go--swift-default-auto) |
+| a c binary is detected as another language and language-gated rules misfire | [`sourcelang`](#sourcelang----auto--c--rust--go--swift-default-auto) |
+| go runtime passes do not run on a go binary whose buildinfo section was stripped | [`sourcelang`](#sourcelang----auto--c--rust--go--swift-default-auto) |
+| kuna decompile on a large c++ .so needs ~750 MB for one function | [`lazyfuncs`](#lazyfuncs----on--off-default-off) |
+| read symbols dominates a single-function run on an entry-dense image | [`lazyfuncs`](#lazyfuncs----on--off-default-off) |
+| objective-c methods render as sub_<addr> instead of -[Class sel] | [`objc`](#objc----on--off-default-off) |
+| __objc_ metadata present but classes and selectors unnamed in a mach-o | [`objc`](#objc----on--off-default-off) |
+| a message send renders as sub_<addr>(obj) through an __objc_stubs entry | [`objc`](#objc----on--off-default-off) |
+| objc_msgSend selector argument renders as dat_<addr> | [`objc`](#objc----on--off-default-off) |
+| a category method renders as sub_<addr> instead of -[Class(Category) sel] | [`objc`](#objc----on--off-default-off) |
+| objc_msgSend$setFoo:() renders with no argument although the caller sets one | [`objcsdk`](#objcsdk------off-default-off) |
+| objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0 | [`objcsdk`](#objcsdk------off-default-off) |
+| objc_msgSend$setFrame: passes one word where a CGRect was built | [`objcsdk`](#objcsdk------off-default-off) |
+| a framework method's stub returns undefined16 or unsigned long instead of its declared type | [`objcsdk`](#objcsdk------off-default-off) |
+| swift binary functions render as sub_<addr> although swift5 metadata sections are present | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
+| type metadata accessors unnamed in a stripped swift mach-o | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
+| protocol witnesses and class methods of a stripped swift app have no names | [`swiftmetadata`](#swiftmetadata----on--off-default-off) |
+| swift struct and class fields render as raw offsets off self | [`swifttypes`](#swifttypes----on--off-default-on) |
+| swift getters named by swiftmetadata take no self parameter | [`swifttypes`](#swifttypes----on--off-default-on) |
+| type metadata accessors return undefined16 | [`swifttypes`](#swifttypes----on--off-default-on) |
+| swift methods named by swiftmetadata read self from an unnamed x20 or r13 | [`swiftcall`](#swiftcall----on--off-default-on) |
+| calls to swift methods drop the self they pass | [`swiftcall`](#swiftcall----on--off-default-on) |
+| a try? error path or a do/catch after a throwing call folds away | [`swiftcall`](#swiftcall----on--off-default-on) |
+| swift struct mutating methods write through an untyped register | [`swiftcall`](#swiftcall----on--off-default-on) |
+| swift_retain / swift_release / swift_allocObject calls show recovered arguments and untyped returns | [`swiftruntime`](#swiftruntime----on--off-default-on) |
+| swift_getGenericMetadata's result is used as a raw word instead of .metadata | [`swiftruntime`](#swiftruntime----on--off-default-on) |
+| swift runtime calls in a stripped swift binary carry no signature | [`swiftruntime`](#swiftruntime----on--off-default-on) |
+| core-foundation / objc string constants render as dat_<addr> instead of their text | [`cfstrings`](#cfstrings----on--off-default-off) |
+| a CFSTR(...) argument shows an address in a mach-o | [`cfstrings`](#cfstrings----on--off-default-off) |
+| a stripped kext shows sub_<addr> for every IOKit method | [`iokitclasses`](#iokitclasses----on--off-default-on) |
+| gMetaClass objects render as dat_<addr> | [`iokitclasses`](#iokitclasses----on--off-default-on) |
+| methods reachable only through a vtable are missing from kuna functions | [`iokitclasses`](#iokitclasses----on--off-default-on) |
+| a kext's vtables are unnamed data | [`iokitclasses`](#iokitclasses----on--off-default-on) |
+| a user client's external methods are sub_<addr> with no selector numbers | [`xnutables`](#xnutables----on--off-default-on) |
+| an IOExternalMethodDispatch table renders as dat_<addr> | [`xnutables`](#xnutables----on--off-default-on) |
+| a kalloc_type_impl call passes dat_<addr> instead of a named view | [`xnutables`](#xnutables----on--off-default-on) |
+| a typed allocation returns a long that is cast at every store | [`xnutables`](#xnutables----on--off-default-on) |
+| a got slot in a stripped kext has no name | [`xnutables`](#xnutables----on--off-default-on) |
+| a DriverKit dext's metaclass globals render as dat_<addr> | [`osclassinfo`](#osclassinfo----on--off-default-on) |
+| a dext's class New functions are sub_<addr> | [`osclassinfo`](#osclassinfo----on--off-default-on) |
+| __osclassinfo records are unnamed data | [`osclassinfo`](#osclassinfo----on--off-default-on) |
+| stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb----on--off-default-on) |
+| pdb symbol names not applied to a pe | [`pdb`](#pdb----on--off-default-on) |
+| a .pdb beside the exe is ignored | [`pdb`](#pdb----on--off-default-on) |
+| windows function names need kuna_pdb_path to be set by hand | [`pdb`](#pdb----on--off-default-on) |
+| a .o relocatable object fails with 'Unable to load N bytes at ...' | [`relocobjects`](#relocobjects----on--off-default-on) |
+| ET_REL object maps zero bytes so nothing decompiles | [`relocobjects`](#relocobjects----on--off-default-on) |
+| a COFF .obj lists only its first function (the rest collide at address 0) | [`relocobjects`](#relocobjects----on--off-default-on) |
+| arm64e mach-o decoded with the generic v8A spec so pointer-auth ops are unmodeled | [`macho-arm64e`](#macho-arm64e----on--off-default-off) |
+| pac instructions in an apple-silicon binary not modeled by the loaded spec | [`macho-arm64e`](#macho-arm64e----on--off-default-off) |
+| an iOS kernelcache (IMG4/IM4P) is rejected as an unrecognized input format | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| kuna functions on a decompressed MH_FILESET kernelcache finds no functions | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| a kext cannot be selected out of a kernel collection | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| pointers in a kernelcache read as packed chained-fixup words instead of addresses | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| an ios 12-14 kernelcache or an sptm/txm image reads its pointers as packed __thread_starts / __chain_starts words | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| a kext of an older prelinked kernelcache cannot be selected | [`kernelcache`](#kernelcache----auto--off--all---default-auto) |
+| a pe function stops early with the funcboundflow fall-through-reached-the-next-function-entry warning | [`pdatachained`](#pdatachained----on--off-default-on) |
+| kuna decompile of an msvc function emits `} while ;` or an empty if body where ghidra emits the whole function | [`pdatachained`](#pdatachained----on--off-default-on) |
+| kuna functions reports an msvc function far smaller than its .pdata extent | [`pdatachained`](#pdatachained----on--off-default-on) |
+| a sub_<addr> in a pe starts at a movaps or mov [rsp+N],reg register-save run instead of a prologue | [`pdatachained`](#pdatachained----on--off-default-on) |
+| the second half of an msvc function is only reachable under a generated sub_<hex> name | [`pdatachained`](#pdatachained----on--off-default-on) |
+| a pe function entry starts one byte into a jmp qword ptr [import] instruction | [`rexthunk`](#rexthunk----on--off-default-on) |
+| kuna functions lists a sub_<addr> named after an import in the middle of another function | [`rexthunk`](#rexthunk----on--off-default-on) |
+| a one-line sub_<addr> wrapper around an import appears right after a function that tail-calls the same import | [`rexthunk`](#rexthunk----on--off-default-on) |
+| kuna functions reports a pe function's size as ending one byte into its own last jump | [`rexthunk`](#rexthunk----on--off-default-on) |
+| a pe call renders as OLEAUT32_Ordinal_<n> or WS2_32_Ordinal_<n> instead of the api name | [`peordinal`](#peordinal----on--off-default-on) |
+| kuna functions lists <dll>_Ordinal_<n> imports | [`peordinal`](#peordinal----on--off-default-on) |
+| a BSTR or VARIANT api call has no prototype because its import is ordinal-only | [`peordinal`](#peordinal----on--off-default-on) |
+| a winsock program shows socket, connect and recv as ordinal placeholders | [`peordinal`](#peordinal----on--off-default-on) |
+| an EFI driver entry point takes two undefined8 parameters | [`uefi`](#uefi----on--off-default-on) |
+| a UEFI boot service call renders as (**(code **)(*(long *)(param_2 + 0x60) + 0x140))(...) | [`uefi`](#uefi----on--off-default-on) |
+| a protocol GUID in .data is an unnamed 16-byte blob | [`uefi`](#uefi----on--off-default-on) |
+| a DXE core's static boot-services table is raw words | [`uefi`](#uefi----on--off-default-on) |
+| a global holding a service table is an untyped dat_ word in every function but the one that stores it | [`storetype`](#storetype----off--uefi--all-default-uefi) |
+| a UEFI helper calls (**(code **)(dat_1a70 + 0x40))(...) instead of gBS->AllocatePool | [`storetype`](#storetype----off--uefi--all-default-uefi) |
+| the same global prints typed in one function and untyped in the next | [`storetype`](#storetype----off--uefi--all-default-uefi) |
+| a variable declared inside a loop or if block of a -g binary is an anonymous vN | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| a clang -O0 binary names the wrong stack slot after a DWARF local | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| a -O1 spilled variable has no name although DWARF describes its slot | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| an -O2 variable kept in a register is an anonymous vN although DWARF names it | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| an inlined function's locals have no names | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| a regparm function reads registers it never names and its callers pass stack values | [`dwarfscopes`](#dwarfscopes----on--off-default-on) |
+| a global described by DWARF as a struct renders as raw offsets off its address | [`dwarfglobaltypes`](#dwarfglobaltypes----on--off-default-off) |
+| a DWARF-typed pointer global is a long or undefined8 | [`dwarfglobaltypes`](#dwarfglobaltypes----on--off-default-off) |
+| a -g binary's globals have names but not types | [`dwarfglobaltypes`](#dwarfglobaltypes----on--off-default-off) |
+| a __thread variable reads as *(int *)(v1 + -0x10) with v1 an fs_offset | [`tlsnames`](#tlsnames----on--off-default-on) |
+| thread-local variables of an executable have no names although .symtab has STT_TLS symbols | [`tlsnames`](#tlsnames----on--off-default-on) |
+| the TLS block is not modelled | [`tlsnames`](#tlsnames----on--off-default-on) |
+| comparison constant off by one versus upstream ghidra (x <= 9 vs x < 10) | [`compareform`](#compareform----canonical--original-default-original) |
+| need the analysis-canonical compare form to diff against upstream ghidra output | [`compareform`](#compareform----canonical--original-default-original) |
+| &base[index] rendering unwanted; consumer expects raw pointer arithmetic | [`arraynotation`](#arraynotation----on--off-default-on) |
+| indexed array form where base + offset arithmetic is desired for diffing | [`arraynotation`](#arraynotation----on--off-default-on) |
+| if (x != 0) where idiomatic C reads if (x) | [`truthycond`](#truthycond----on--off-default-on) |
+| if (p == NULL) where if (!p) is wanted | [`truthycond`](#truthycond----on--off-default-on) |
+| explicit zero comparison in conditions unwanted | [`truthycond`](#truthycond----on--off-default-on) |
+| truthy condition rendering needs to match upstream ghidra for diffing | [`truthycond`](#truthycond----on--off-default-on) |
+| if (x) { stmt; } where braceless if (x) stmt; is wanted | [`braceelide`](#braceelide----on--off-default-on) |
+| single-statement if body keeps braces | [`braceelide`](#braceelide----on--off-default-on) |
+| braced one-liner bodies unwanted | [`braceelide`](#braceelide----on--off-default-on) |
+| brace style needs to match upstream ghidra for diffing | [`braceelide`](#braceelide----on--off-default-on) |
+| a 16-byte movaps/movdqa transfer emits as v1[0] = v2[0] | [`arraycoverwidth`](#arraycoverwidth----on--off-default-on) |
+| a vector zero store emits as arr[0] = 0 | [`arraycoverwidth`](#arraycoverwidth----on--off-default-on) |
+| an array-typed local is assigned at element zero for a whole-array copy | [`arraycoverwidth`](#arraycoverwidth----on--off-default-on) |
+| the same variable shows both v1._0_4_ and v1[0] for accesses of different width | [`arraycoverwidth`](#arraycoverwidth----on--off-default-on) |
+| declared char v[16] but every whole-bank access reads as one byte | [`arraycoverwidth`](#arraycoverwidth----on--off-default-on) |
+| the emitted C contains a member named like `._4_2_` or `._0_8_` | [`partialaccess`](#partialaccess----on--off-default-off) |
+| a variable is read as `v1._6_1_` and the text does not compile | [`partialaccess`](#partialaccess----on--off-default-off) |
+| a 16-byte register pair returns as `v1._0_16_` | [`partialaccess`](#partialaccess----on--off-default-off) |
+| a libc record such as `stat` is read as `v3._24_4_` | [`partialaccess`](#partialaccess----on--off-default-off) |
+| mapped unsigned char array uses invalid ._offset_size_ members | [`bytearrayc`](#bytearrayc----on--off-default-off) |
+| wide byte-array accesses need compilable C | [`bytearrayc`](#bytearrayc----on--off-default-off) |
+| unaligned mapped integer transfer needs an alias-safe C representation | [`bytearrayc`](#bytearrayc----on--off-default-off) |
+| a pointer variable is initialised to an empty string literal and then indexed past its terminator | [`emptystrconst`](#emptystrconst----on--off-default-on) |
+| a data address visible in the disassembly appears nowhere in the emitted C | [`emptystrconst`](#emptystrconst----on--off-default-on) |
+| a blob or table pointer renders as = "" instead of its address | [`emptystrconst`](#emptystrconst----on--off-default-on) |
+| two locals are both assigned "" and then walked as buffers | [`emptystrconst`](#emptystrconst----on--off-default-on) |
+| a call argument is a raw address behind a cast, like sub_e4ca((struct_2 *)0x2b080) | [`globalref`](#globalref----on--off-default-on) |
+| (unsigned long *)0x21180 or (void *)0x2b460 where IDA prints qword_21180 or &unk_2B460 | [`globalref`](#globalref----on--off-default-on) |
+| getopt_long's option table prints as (option *)0x2a0c0 | [`globalref`](#globalref----on--off-default-on) |
+| a loop runs from (int *)0x1a664 to (int *)0x1a690 | [`globalref`](#globalref----on--off-default-on) |
+| the same global is dat_2b080 in one statement and (struct_2 *)0x2b080 in the next | [`globalref`](#globalref----on--off-default-on) |
+| a constant address you want to keep as an address (flip off) | [`globalref`](#globalref----on--off-default-on) |
+| full-line WARNING banner comments clutter the output | [`warnstyle`](#warnstyle----inline--banner-default-inline) |
+| warning text wanted inline at the end of the statement it describes | [`warnstyle`](#warnstyle----inline--banner-default-inline) |
+| terse warning slugs unwanted; full upstream warning text needed | [`warnstyle`](#warnstyle----inline--banner-default-inline) |
+| warning style needs to match upstream ghidra for diffing | [`warnstyle`](#warnstyle----inline--banner-default-inline) |
+| thumb function pointer renders as symbolic &fn[1] where the raw odd-address constant is wanted | [`thumbfuncptr`](#thumbfuncptr----on--off-default-on) |
+| callback constant on arm resolves to a function symbol plus one instead of a bare hex literal | [`thumbfuncptr`](#thumbfuncptr----on--off-default-on) |
+| a bare constant equal to a function entry renders as the named function pointer | [`inferfuncentry`](#inferfuncentry----on--off-default-on) |
+| hex literal at a single-bit image base unexpectedly named as a function (flip off for the raw constant) | [`inferfuncentry`](#inferfuncentry----on--off-default-on) |
+| want the raw (b<<k) s>> k sign-extension shift idiom visible instead of the folded comparison | [`booleanmask`](#booleanmask----on--off-default-on) |
+| flag-as-high-bit lowering (8051 style) hidden by the cleaned boolean compare | [`booleanmask`](#booleanmask----on--off-default-on) |
+| byte arithmetic retains -2*x + (x << 1) instead of cancelling modulo 256 | [`cancelbytearithmetic`](#cancelbytearithmetic----on--off-default-on) |
+| a string initializer is split by one computed byte even though its coefficients sum to zero | [`cancelbytearithmetic`](#cancelbytearithmetic----on--off-default-on) |
+| an exact low-byte multiply/left-shift cancellation remains unsimplified | [`cancelbytearithmetic`](#cancelbytearithmetic----on--off-default-on) |
+| a vectorised loop declares 9- to 15-byte char array locals that exist nowhere in the source | [`wideslice`](#wideslice----on--off-default-on) |
+| lane sums are written as SUB133, SUB137 or ZEXT513 expressions over a wide temporary | [`wideslice`](#wideslice----on--off-default-on) |
+| an XMM value rebuilt from byte lanes prints as a stack of _N_M_ partial assignments | [`wideslice`](#wideslice----on--off-default-on) |
+| a call argument is rebuilt from a 12-byte packed-double temporary instead of read from its register | [`wideslice`](#wideslice----on--off-default-on) |
+| a wall of SUB161( lane temporaries read off one pshufb( result | [`simdlane`](#simdlane----on--off-default-on) |
+| dozens of char vN; declarations each assigned once from a consecutive SIMD byte lane | [`simdlane`](#simdlane----on--off-default-on) |
+| a vectorised byte loop needs SSE lanes simulated by hand to see that every lane holds the same broadcast byte | [`simdlane`](#simdlane----on--off-default-on) |
+| a constant-mask pshufb result is never folded even though the mask is an immediate zero | [`simdlane`](#simdlane----on--off-default-on) |
+| a zeroed struct or buffer renders as reads from (0 + 4), (0 + 8), (0 + 0xc) | [`constspaceload`](#constspaceload----on--off-default-on) |
+| a SIMD immediate becomes a near-null memory read instead of a constant | [`constspaceload`](#constspaceload----on--off-default-on) |
+| address expressions print as an unfolded 0 + k instead of the constant k | [`constspaceload`](#constspaceload----on--off-default-on) |
+| only the word at offset 0 of a vector initialization is correct | [`constspaceload`](#constspaceload----on--off-default-on) |
+| want the raw S/OV overflow-flag arithmetic visible instead of the folded signed compare | [`ovlesssimplify`](#ovlesssimplify----on--off-default-on) |
+| v850-style explicit flag compare collapsed to a clean signed less-than | [`ovlesssimplify`](#ovlesssimplify----on--off-default-on) |
+| want the raw CONCAT11(CARRY1(...)) intrinsics visible instead of one wide add | [`addcarrychain`](#addcarrychain----on--off-default-on) |
+| 8-bit adc carry-chain pair (6502 style) folded into a single 16-bit addition | [`addcarrychain`](#addcarrychain----on--off-default-on) |
+| invalidInstructionException() after a call in a stripped rust or clang binary | [`trapaftercall`](#trapaftercall----on--off-default-on) |
+| a panic helper call is not marked no-return | [`trapaftercall`](#trapaftercall----on--off-default-on) |
+| ud2 after a call is printed as a jump-as-call | [`trapaftercall`](#trapaftercall----on--off-default-on) |
+| a function-pointer call renders as a call of __llvm_retpoline_r11 | [`retpolinethunk`](#retpolinethunk----on--off-default-on) |
+| a call of a stripped retpoline thunk sub_<addr> loses the called pointer | [`retpolinethunk`](#retpolinethunk----on--off-default-on) |
+| the pointer loaded into r11 before a call is never used | [`retpolinethunk`](#retpolinethunk----on--off-default-on) |
+| a function that runs into undecodable, encrypted or packed bytes ends with a plain return; and no warning | [`decodehalt`](#decodehalt----on--off-default-on) |
+| a self-decrypting stub decompiles to case 0x<hex>: return; with error null in --json | [`decodehalt`](#decodehalt----on--off-default-on) |
+| nothing in the emitted C says the decompiled body is incomplete | [`decodehalt`](#decodehalt----on--off-default-on) |
+| a branch that leaves a --define-function extent renders as an ordinary return | [`decodehalt`](#decodehalt----on--off-default-on) |
+| kuna disassemble reports .byte at an address the decompiled C returns from | [`decodehalt`](#decodehalt----on--off-default-on) |
+| PowerPC64 isel becomes halt_baddata with no target-selection advice | [`decodehalt`](#decodehalt----on--off-default-on) |
+| boolean shifted into the sign bit tested with a less-than-zero compare | [`flagcompare`](#flagcompare----on--off-default-on) |
+| N==V signed-overflow branch idiom rendered as raw flag arithmetic | [`flagcompare`](#flagcompare----on--off-default-on) |
+| want the explicit condition-flag math visible (flip off) | [`flagcompare`](#flagcompare----on--off-default-on) |
+| Java output prints v = new(T); followed by v.<init>(args); | [`javanew`](#javanew----on--off-default-on) |
+| a constructor call prints as a method named <init> | [`javanew`](#javanew----on--off-default-on) |
+| a constructor prints as void <init>(...) calling this.<init>(...) | [`javanew`](#javanew----on--off-default-on) |
+| &pxVar[-0x1000] page-probe noise in a large-frame function | [`stackprobeloop`](#stackprobeloop----on--off-default-on) |
+| calls rendered argument-less because the stack pointer never resolved to a constant offset | [`stackprobeloop`](#stackprobeloop----on--off-default-on) |
+| gcc stack-clash probe loop leaves the frame layout unrecovered | [`stackprobeloop`](#stackprobeloop----on--off-default-on) |
+| a win32 api renders with only the arguments pushed after an intervening call | [`calleeprotostack`](#calleeprotostack----on--off-default-on) |
+| GetLastError() or another argument-less import eats the pushes staged for the call after it | [`calleeprotostack`](#calleeprotostack----on--off-default-on) |
+| a buffer whose address is passed to an api is read back as an incoming parameter instead of the local | [`calleeprotostack`](#calleeprotostack----on--off-default-on) |
+| an import with a known signature still has its cleanup guessed from the caller's push run | [`calleeprotostack`](#calleeprotostack----on--off-default-on) |
+| a void i386 function returns an uninitialised long double | [`x87depth`](#x87depth----on--off-default-on) |
+| a function that discards a float call result returns st0 | [`x87depth`](#x87depth----on--off-default-on) |
+| `long double v1; // st0  | [`x87depth`](#x87depth----on--off-default-on) |
+|  st1` is returned but never assigned | [`x87depth`](#x87depth----on--off-default-on) |
+| a caller's x87 push makes a void callee return a float | [`x87depth`](#x87depth----on--off-default-on) |
+| a variadic function has fourteen parameters a0..a13 | [`varargsave`](#varargsave----on--off-default-off) |
+| if (al) guards stores of xmm registers in a printf wrapper | [`varargsave`](#varargsave----on--off-default-off) |
+| va_list fields are assigned 8 and 0x30 by hand | [`varargsave`](#varargsave----on--off-default-off) |
+| __builtin_dwarf_cfa() appears in a variadic function | [`varargsave`](#varargsave----on--off-default-off) |
+| the format argument of a logging function is the ninth parameter | [`varargsave`](#varargsave----on--off-default-off) |
+| a variable-length array renders as negative indexing off a stack symbol | [`alloca`](#alloca----on--off-default-on) |
+| alloca renders as stack pointer arithmetic | [`alloca`](#alloca----on--off-default-on) |
+| a while loop assigns a stack word to itself (stack-clash probe) | [`alloca`](#alloca----on--off-default-on) |
+| use(&(&Stack...)[v1]) where the source passes a VLA | [`alloca`](#alloca----on--off-default-on) |
+| the size of a dynamic allocation appears rounded to 16 in the C | [`alloca`](#alloca----on--off-default-on) |
+| a call to an msvc c++ import that takes a class by value keeps only its hidden return pointer | [`msvcbyval`](#msvcbyval----on--off-default-on) |
+| the arguments after a by-value class render as stores before the call | [`msvcbyval`](#msvcbyval----on--off-default-on) |
+| a copy constructor or a by-value return fills a local the caller never passes on | [`msvcbyval`](#msvcbyval----on--off-default-on) |
+| an x86 function gains an ecx parameter from a push ecx that only reserves a by-value slot | [`msvcbyval`](#msvcbyval----on--off-default-on) |
+| an x86 windows pe passes `&Stackffffffe0` to an api and reads a DIFFERENT variable afterwards | [`calleepop`](#calleepop----on--off-default-on) |
+| a buffer filled by ReadFile/RegQueryValueEx is checksummed as a constant zero | [`calleepop`](#calleepop----on--off-default-on) |
+| declaring a prototype for one callee turns another function's locals into raw `&Stack` references | [`calleepop`](#calleepop----on--off-default-on) |
+| stack locals in an msvc x86 pe sit at offsets that drift further from the truth after every call | [`calleepop`](#calleepop----on--off-default-on) |
+| after an msvc c++ call that takes a class by value every later call in the function loses its stack arguments | [`calleepopslot`](#calleepopslot----on--off-default-on) |
+| return addresses print as constants stored to stack locals in an x86 windows pe | [`calleepopslot`](#calleepopslot----on--off-default-on) |
+| a pushed argument becomes an assignment to a local before the call | [`calleepopslot`](#calleepopslot----on--off-default-on) |
+| a __thiscall import that pops a by-value class argument is called with no arguments | [`calleepopslot`](#calleepopslot----on--off-default-on) |
+| a mingw i386 function drops an incoming stack argument after a win32 api call | [`calleepopframe`](#calleepopframe----on--off-default-on) |
+| a handle an api returned through a pointer is passed on as a different local | [`calleepopframe`](#calleepopframe----on--off-default-on) |
+| an api call is passed an uninitialized local where the caller forwarded its own argument | [`calleepopframe`](#calleepopframe----on--off-default-on) |
+| an msvc /GS binary drops the stack-passed arguments of every call in a function | [`cookiescramble`](#cookiescramble----on--off-default-on) |
+| a variadic call renders with only its register arguments after the format string | [`cookiescramble`](#cookiescramble----on--off-default-on) |
+| a value stored to [rsp+0x20] right before a call never reaches the call | [`cookiescramble`](#cookiescramble----on--off-default-on) |
+| an argument-producing store survives as a dead assignment to a stack local | [`cookiescramble`](#cookiescramble----on--off-default-on) |
+| a stack array is declared with 4 elements while a loop subscripts it further | [`arrayextent`](#arrayextent----off--bound--on-default-on) |
+| the elements after the fourth of a local array are separate scalars that are assigned and never read | [`arrayextent`](#arrayextent----off--bound--on-default-on) |
+| a recompiled function reads past a local array under AddressSanitizer | [`arrayextent`](#arrayextent----off--bound--on-default-on) |
+| a masked or clamped index (`v[n & 7]`, `min(n, 5)`) subscripts a smaller declared array | [`arrayextent`](#arrayextent----off--bound--on-default-on) |
+| decompilation aborts with 'Unable to find unique hash for varnode' | [`dynamichashmax`](#dynamichashmax----on--off-default-on) |
+| dense unrolled simd/neon loop (aarch64, go) fails to decompile at symbol mapping | [`dynamichashmax`](#dynamichashmax----on--off-default-on) |
+| loop walks an array with a raw offset accumulator (iVar += 0x414) instead of an index | [`arraystride`](#arraystride----on--off-default-on) |
+| strided induction offset never re-expressed as counter*stride array indexing | [`arraystride`](#arraystride----on--off-default-on) |
+| malformed do/while whose body holds an out-of-place constant assignment | [`condexeplace`](#condexeplace----on--off-default-on) |
+| spurious = 0 copy materialized inside a loop block | [`condexeplace`](#condexeplace----on--off-default-on) |
+| function aborts with 'Cannot properly adjust input varnodes' | [`inputvarnodeadjust`](#inputvarnodeadjust----on--off-default-on) |
+| overlapping stack parameters (mc68k link/unlk) kill the whole decompilation | [`inputvarnodeadjust`](#inputvarnodeadjust----on--off-default-on) |
+| a parameter the disassembly plainly passes is missing from the recovered signature | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| a two-register struct return comes back as one register when the second half is just an argument | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| two near-identical functions recover different arities, one dropping an argument | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| the returned pair survives when the half is arithmetic but not when it is a plain copy of a parameter | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| an argument kept in a callee-saved register across a call and moved back into its own register is dropped from the return and the signature | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| a 32-bit function returning its argument as the low word of a 64-bit value prints void, or returns the high word alone | [`retinputhalf`](#retinputhalf----on--off-default-on) |
+| an int function prints as unsigned long long returning CONCAT44 of a constant and its real result | [`retsysreg`](#retsysreg----on--off-default-on) |
+| the high word of a returned pair is the operand of a vmsr fpscr, msr cpsr_c, msr basepri or mtc0 | [`retsysreg`](#retsysreg----on--off-default-on) |
+| a FreeRTOS-style ulPortRaiseBASEPRI returns CONCAT44(0x50,v1) | [`retsysreg`](#retsysreg----on--off-default-on) |
+| a function that sets a system register through r1 and returns a computed r0 prints unsigned long long | [`retsysreg`](#retsysreg----on--off-default-on) |
+| a variadic tail call prints extra trailing arguments after push %rax ... pop %rcx | [`reloadarg`](#reloadarg----on--off-default-on) |
+| printf or a varargs callee gains a variable declared // rax  | [`reloadarg`](#reloadarg----on--off-default-on) |
+|  rcx  | [`reloadarg`](#reloadarg----on--off-default-on) |
+|  stack - 0x8 as its last argument | [`reloadarg`](#reloadarg----on--off-default-on) |
+| an rdx variable with no assignment is passed between the real arguments and a popped register | [`reloadarg`](#reloadarg----on--off-default-on) |
+| a function gains a phantom parameter that is only passed on to a variadic call | [`reloadarg`](#reloadarg----on--off-default-on) |
+| a function grows one more argument than the disassembly passes, used only as the high half of the return | [`retpushedhalf`](#retpushedhalf----on--off-default-on) |
+| an alignment push/pop around the body turns a pointer return into undefined16 | [`retpushedhalf`](#retpushedhalf----on--off-default-on) |
+| the recovered signature ends in an extra argument whose only appearance is `v._8_8_ = aN;` | [`retpushedhalf`](#retpushedhalf----on--off-default-on) |
+| a prologue PUSH of an argument register and an epilogue POP into a different register invent a 128-bit return | [`retpushedhalf`](#retpushedhalf----on--off-default-on) |
+| a function whose every path writes the return register renders as void f(void) { return; } | [`condexeret`](#condexeret----on--off-default-on) |
+| a return value set under a condition disappears when the next branch tests the same condition | [`condexeret`](#condexeret----on--off-default-on) |
+| declaring the prototype brings the return value back while the recovered one is void | [`condexeret`](#condexeret----on--off-default-on) |
+| a conditional-execution core (META SUBLS/BLS) loses return 0 / return 1 paths | [`condexeret`](#condexeret----on--off-default-on) |
+| an ARM function that returns a constant through bxeq lr and otherwise tail-calls prints void | [`condexeretuse`](#condexeretuse----on--off-default-on) |
+| a return value set by a conditional mov just before a conditional return disappears | [`condexeretuse`](#condexeretuse----on--off-default-on) |
+| declaring the prototype brings the return value back while the recovered one is void | [`condexeretuse`](#condexeretuse----on--off-default-on) |
+| a Rust Result or Option producer recovers as bool and the payload register is missing from the return | [`rustabi`](#rustabi----off--auto--always-default-off) |
+| a local commented with a register name is declared and read but never assigned anywhere in the function | [`rustabi`](#rustabi----off--auto--always-default-off) |
+| a call to a Rust function that returns Result renders with no output at all | [`rustabi`](#rustabi----off--auto--always-default-off) |
+| a discriminant guard tests a variable whose companion payload variable has no definition | [`rustabi`](#rustabi----off--auto--always-default-off) |
+| two-register return recovered as one register when the first half holds a setCC flag | [`rustabi`](#rustabi----off--auto--always-default-off) |
+| an unsigned char switch has a negative case label | [`loweredswitchlabels`](#loweredswitchlabels----on--off-default-on) |
+| an unsigned selector's high-bit case is printed as a negative number | [`loweredswitchlabels`](#loweredswitchlabels----on--off-default-on) |
+| a lowered switch's case labels disagree with the signedness of its range comparisons | [`loweredswitchlabels`](#loweredswitchlabels----on--off-default-on) |
+| a re-rolled switch dispatches on a variable assigned just before it that the cascade never compared | [`loweredswitchvalue`](#loweredswitchvalue----on--off-default-on) |
+| switch(v) where v was loaded as a call argument or holds an unrelated call result | [`loweredswitchvalue`](#loweredswitchvalue----on--off-default-on) |
+| a switch over a parameter renders over a local while option loweredswitch off shows the chain comparing the parameter | [`loweredswitchvalue`](#loweredswitchvalue----on--off-default-on) |
+| a re-rolled switch dispatches on a constant such as switch(6) | [`loweredswitchvalue`](#loweredswitchvalue----on--off-default-on) |
+| a parameter the compare tree tests disappears from the prototype when the switch re-rolls | [`loweredswitchvalue`](#loweredswitchvalue----on--off-default-on) |
+| two case values that share a body in the compare tree show only one case label and the other value takes the default | [`loweredswitchexact`](#loweredswitchexact----on--off-default-on) |
+| a re-rolled switch's default arm runs code the compare tree only reaches for one specific value | [`loweredswitchexact`](#loweredswitchexact----on--off-default-on) |
+| an assignment on one arm of a compare tree disappears when the tree re-rolls into a switch | [`loweredswitchexact`](#loweredswitchexact----on--off-default-on) |
+| a case body jumps to a join that reads a variable no case arm assigns | [`loweredswitchexact`](#loweredswitchexact----on--off-default-on) |
+| an x86 Windows function renders as (void) though it takes arguments | [`evalcurrentproto`](#evalcurrentproto----on--off-default-on) |
+| a local carrying a // ecx or // edx storage comment is read before it is ever written | [`evalcurrentproto`](#evalcurrentproto----on--off-default-on) |
+| __fastcall/__thiscall arguments missing from the signature | [`evalcurrentproto`](#evalcurrentproto----on--off-default-on) |
+| calls pass fewer arguments than the callee reads | [`evalcurrentproto`](#evalcurrentproto----on--off-default-on) |
+| call rendered with exactly six arguments on x86-64 | [`callsitestackargs`](#callsitestackargs----on--off-default-on) |
+| call rendered with an empty argument list on i386 | [`callsitestackargs`](#callsitestackargs----on--off-default-on) |
+| a for loop whose exit variable is written through a pointer argument disappears | [`callsitestackargs`](#callsitestackargs----on--off-default-on) |
+| ternary guards feeding a logging call are dead-code eliminated | [`callsitestackargs`](#callsitestackargs----on--off-default-on) |
+| outgoing-argument stack slots render as locals commented stack - 0xNN | [`callsitestackargs`](#callsitestackargs----on--off-default-on) |
+| a variable declared at stack + 0x18 is passed to a call as &Stack0000000000000018 | [`protoranges`](#protoranges----on--off-default-on) |
+| a store to a Win64 home slot and the call reading it name two different variables | [`protoranges`](#protoranges----on--off-default-on) |
+| a MIPS function keeps an argument it only spills to its register backup area | [`protoranges`](#protoranges----on--off-default-on) |
+| scanf rendered with only its format string and no destination pointer | [`varargstackargs`](#varargstackargs----on--off-default-on) |
+| printf with a %s conversion and no corresponding argument | [`varargstackargs`](#varargstackargs----on--off-default-on) |
+| a variadic call on arm64 keeps only the arguments that fit in registers before the first empty one | [`varargstackargs`](#varargstackargs----on--off-default-on) |
+| a stack local is compared or printed but never assigned after a scanf call | [`varargstackargs`](#varargstackargs----on--off-default-on) |
+| Apple arm64 variadic arguments missing from the call | [`varargstackargs`](#varargstackargs----on--off-default-on) |
+| a variadic integer argument disappears after the same value is stored through a pointer | [`varargforward`](#varargforward----on--off-default-on) |
+| a variadic call passes CONCAT44 of a never-assigned variable and a declared int parameter | [`varargforward`](#varargforward----on--off-default-on) |
+| a wrapper that forwards its own parameter to printf or open drops it | [`varargforward`](#varargforward----on--off-default-on) |
+| a variadic call on AArch64 loses the double the caller received in d0 | [`varargforward`](#varargforward----on--off-default-on) |
+| `g(k); return vr(k);` where g returns a double the source passes on | [`varargforward`](#varargforward----on--off-default-on) |
+| a declared parameter appears in no statement of a function that tail-calls a variadic function | [`varargforward`](#varargforward----on--off-default-on) |
+| the same sub_ address is called with an argument at one site and with an empty argument list at another | [`calleearity`](#calleearity----on--off-default-on) |
+| an allocator wrapper call loses its size argument | [`calleearity`](#calleearity----on--off-default-on) |
+| a call whose argument register is compared and branched on just before the call renders with no arguments | [`calleearity`](#calleearity----on--off-default-on) |
+| MSVC operator new[] overflow guard leaves the allocation size unused | [`calleearity`](#calleearity----on--off-default-on) |
+| the same sub_ address is called with an argument at one site and with an empty argument list at another and `calleearity` does not fix it | [`calleearityfwd`](#calleearityfwd----on--off-default-on) |
+| the FIRST call to a callee in a function is the one that lost its argument | [`calleearityfwd`](#calleearityfwd----on--off-default-on) |
+| an MSVC aligned allocation wrapper renders alloc(a0 + 0x27) on one branch and alloc() on the other | [`calleearityfwd`](#calleearityfwd----on--off-default-on) |
+| a call loses the argument its callee-save prologue copied into another register | [`calleearityfwd`](#calleearityfwd----on--off-default-on) |
+| the same callee renders with five arguments at some call sites and three at others in one function | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| a call loses its last two arguments although a mov writes each argument register right before the CALL | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| calleearity and calleearityfwd both leave a short argument list alone | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| the trailing parameters of a helper are invisible at half its call sites | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| an argument register that is also compared and branched on drops that argument and every one after it | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| a stripped printf-like helper prints the same format twice but one call loses values stored to state immediately beforehand | [`calleearitylive`](#calleearitylive----on--off-default-on) |
+| a callee that is called only once renders with an empty argument list | [`calleearitybody`](#calleearitybody----on--off-default-on) |
+| f() is called where the same output declares f(char *) | [`calleearitybody`](#calleearitybody----on--off-default-on) |
+| calleearity, calleearityfwd and calleearitylive all leave an empty argument list alone | [`calleearitybody`](#calleearitybody----on--off-default-on) |
+| a thread entry point or one-shot payload loses the context pointer the caller passes it | [`calleearitybody`](#calleearitybody----on--off-default-on) |
+| the argument register is compared or branched on just before the CALL and the argument disappears | [`calleearitybody`](#calleearitybody----on--off-default-on) |
+| a call renders with no arguments although the disassembly loads every argument register before it | [`calleearitycut`](#calleearitycut----on--off-default-on) |
+| calleearitybody leaves an empty argument list alone on a callee whose prologue calls another function | [`calleearitycut`](#calleearitycut----on--off-default-on) |
+| the caller passes its own incoming parameters straight through and every one of them disappears at the call | [`calleearitycut`](#calleearitycut----on--off-default-on) |
+| f() is called where a separate decompile of f declares f(int8,char *,int8,uint4) | [`calleearitycut`](#calleearitycut----on--off-default-on) |
+| only the argument register the caller writes just before the CALL survives trial scoring, and the list still comes out empty | [`calleearitycut`](#calleearitycut----on--off-default-on) |
+| a call still renders with no arguments although calleearity, calleearitybody and calleearitycut are all on | [`calleearityscratch`](#calleearityscratch----on--off-default-on) |
+| an explicit prototype assert restores the argument that the unlocked call site drops | [`calleearityscratch`](#calleearityscratch----on--off-default-on) |
+| the argument register just past the recovered run is written inside an unrolled loop for the caller's own use | [`calleearityscratch`](#calleearityscratch----on--off-default-on) |
+| a decoding loop is followed by f() where the buffer pointer is plainly live into the CALL | [`calleearityscratch`](#calleearityscratch----on--off-default-on) |
+| the register the callee-body run stops at is compared, stored or XORed by the caller before the CALL | [`calleearityscratch`](#calleearityscratch----on--off-default-on) |
+| a function signature takes only the first argument while the body reads later argument registers as undefined locals | [`inputparamgap`](#inputparamgap----on--off-default-on) |
+| int vN; // r8d and int vN; // r9d are declared and read with nothing ever assigning them | [`inputparamgap`](#inputparamgap----on--off-default-on) |
+| a Wayland/qsort/GTK callback reached only through a function-pointer table renders with one parameter instead of its ABI signature | [`inputparamgap`](#inputparamgap----on--off-default-on) |
+| the first condition of a handler tests a variable that has no definition | [`inputparamgap`](#inputparamgap----on--off-default-on) |
+| arguments the disassembly shows arriving in R8D/R9D are missing from the recovered prototype | [`inputparamgap`](#inputparamgap----on--off-default-on) |
+| a call to an imported API renders with more arguments than the API takes | [`stackarggap`](#stackarggap----on--off-default-on) |
+| the extra arguments of a call are the enclosing function's own untouched parameter and a constant | [`stackarggap`](#stackarggap----on--off-default-on) |
+| EVP_DigestFinal_ex or another three-argument import is called with five arguments | [`stackarggap`](#stackarggap----on--off-default-on) |
+| a Win64 import call gains a fifth argument from a value stored to [RSP+0x20] that belongs to the frame | [`stackarggap`](#stackarggap----on--off-default-on) |
+| declaring the callee's prototype removes the bogus arguments but every other call then gains some | [`stackarggap`](#stackarggap----on--off-default-on) |
+| a call passes one more argument than the callee's own recovered prototype takes | [`argclobber`](#argclobber----on--off-default-on-destructive-opt-in) |
+| the last argument of a call is a local that is never assigned anywhere in the function | [`argclobber`](#argclobber----on--off-default-on-destructive-opt-in) |
+| a declaration carries a // rdx storage comment and no write | [`argclobber`](#argclobber----on--off-default-on-destructive-opt-in) |
+| two calls to the same callee in one function render with different arities and the longer one reads an undefined value | [`argclobber`](#argclobber----on--off-default-on-destructive-opt-in) |
+| Ghidra names the same value extraout_RDX and kuna renders it as an ordinary local | [`argclobber`](#argclobber----on--off-default-on-destructive-opt-in) |
+| a wrapper renders void f(void) { g(); } although g takes an argument in the same output | [`passthrough`](#passthrough----on--off-default-on) |
+| a call renders with no arguments while the callee's declaration in the same file takes one | [`passthrough`](#passthrough----on--off-default-on) |
+| a tail-call thunk returns void while the function it jumps to returns a value | [`passthrough`](#passthrough----on--off-default-on) |
+| decompiling the caller shows a parameter-less function whose only instruction is a jmp to a function with parameters | [`passthrough`](#passthrough----on--off-default-on) |
+| DWARF gives a forwarding function a parameter kuna does not | [`passthrough`](#passthrough----on--off-default-on) |
+| a function that returns a value on one path and tail-calls a function on the other is printed void | [`mixedtailret`](#mixedtailret----on--off-default-off) |
+| if (6 <= *a0) return; getv(); // tail-call where the source returns *a0 on that path | [`mixedtailret`](#mixedtailret----on--off-default-off) |
+| a function returns xmm0 although its callee and its other path return an int in eax | [`mixedtailret`](#mixedtailret----on--off-default-off) |
+| the return value a function tests before returning it is lost beside a tail call | [`mixedtailret`](#mixedtailret----on--off-default-off) |
+| a call passes an argument to a callee the same output declares as taking void | [`calleedeadarg`](#calleedeadarg----on--off-default-on) |
+| _secret_function(v3) called where int _secret_function(void) is declared | [`calleedeadarg`](#calleedeadarg----on--off-default-on) |
+| the decompiled project does not recompile because a call and its prototype disagree on arity | [`calleedeadarg`](#calleedeadarg----on--off-default-on) |
+| the return value of the previous call reappears as the next call's argument | [`calleedeadarg`](#calleedeadarg----on--off-default-on) |
+| a scanf/getchar result is passed to an unrelated no-argument function | [`calleedeadarg`](#calleedeadarg----on--off-default-on) |
+| a call to a function in the same binary prints with no argument although the argument register is loaded right before the CALL | [`calleereadarg`](#calleereadarg----on--off-default-on) |
+| f() is called where the same output declares f(int) | [`calleereadarg`](#calleereadarg----on--off-default-on) |
+| the argument register is compared or branched on just before the CALL and the argument disappears | [`calleereadarg`](#calleereadarg----on--off-default-on) |
+| a value returned on one path and passed to a tail call on the other loses the argument | [`calleereadarg`](#calleereadarg----on--off-default-on) |
+| return ext() + 1 where the disassembly loads edi just before call ext | [`calleereadarg`](#calleereadarg----on--off-default-on) |
+| a call to a same-binary function prints one argument more than the callee takes | [`pushpadread`](#pushpadread----on--off-default-on) |
+| the extra call argument is a value the caller computed for a loop bound or comparison | [`pushpadread`](#pushpadread----on--off-default-on) |
+| the callee pushes an unset rdx before a printf-family call to align its stack arguments | [`pushpadread`](#pushpadread----on--off-default-on) |
+| an AArch64 call's first argument is a small constant the callee never uses | [`hiddenretarg`](#hiddenretarg----on--off-default-on) |
+| foo(0x38,3) where foo takes one argument | [`hiddenretarg`](#hiddenretarg----on--off-default-on) |
+| a syscall number appears as the first argument of the call after an svc | [`hiddenretarg`](#hiddenretarg----on--off-default-on) |
+| a call passes one more argument than its callee's prototype, and the extra one is first | [`hiddenretarg`](#hiddenretarg----on--off-default-on) |
+| an AArch64 function gains a leading unsigned long parameter that is only its caller's x8 | [`hiddenretarg`](#hiddenretarg----on--off-default-on) |
+| a call argument is an undefined local the function never assigns | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| a conditional stack store or a saved frame pointer is lost across a helper that only touches registers | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| a value loaded before a call is lost while one loaded after the same call is recovered | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| a get-PC thunk or PIE GOT-base helper eats a live register | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| an argument register that provably crosses a helper renders as `unsigned int v1; // edx` with no definition | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| the recovered return of a call is sourced from a register the callee never writes | [`calleepreserves`](#calleepreserves----on--off-default-on) |
+| an i386 caller of a struct-returning function splits one local into two after the call | [`calleeretpurge`](#calleeretpurge----on--off-default-on) |
+| a local written before a call to a `ret $4` callee reads back undefined after it | [`calleeretpurge`](#calleeretpurge----on--off-default-on) |
+| stack offsets drift by 4 after every call that returns a struct through a hidden pointer | [`calleeretpurge`](#calleeretpurge----on--off-default-on) |
+| a stdcall callee's argument bytes are never removed from the caller's stack | [`calleeretpurge`](#calleeretpurge----on--off-default-on) |
+| kuna decompile of a thunk is void while its callers use the result | [`tailcontract`](#tailcontract----on--off-default-on) |
+| a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract----on--off-default-on) |
+| a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract----on--off-default-on) |
+| return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract----on--off-default-on) |
+| locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
+| a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
+| the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
+| pseudocode continues past a call that does not return into the next fragment's code | [`fdeflowbound`](#fdeflowbound----on--off-default-on) |
+| a function returns a constant that belongs to the bytes after it | [`fdeflowbound`](#fdeflowbound----on--off-default-on) |
+| _Unwind_Resume() is followed by more statements | [`fdeflowbound`](#fdeflowbound----on--off-default-on) |
+| a function returns the result of a call the disassembly makes for its side effect | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| main ends `return __security_check_cookie(...)` on an MSVC /GS binary | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a constant the caller moves into EAX just before a call never reaches the RET | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a void helper's call result is assigned to a variable | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| declaring the callee void trades the invented call result for an uninitialised local | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a value read after a call the callee provably never writes is an undefined local | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a double accumulator copied from XMM6 to XMM0 disappears across a declared-void MSVC cookie check | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a declared-double helper result becomes a discarded statement after a later cookie call | [`calleeretpreserves`](#calleeretpreserves----on--off-default-on) |
+| a large-frame MSVC prologue loses its stack allocation and indexes every local off an undefined local | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| `sub rsp,rax` renders as `v1 = -v2` with `// rax` never assigned | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| frame slots render as `&(&Stack000000000005dfd0)[v1]` instead of fixed offsets | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| a constant the caller loads before a __chkstk / stack-probe call disappears | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| naming a helper __chkstk or declaring it void does not recover the value it preserves | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| calleepreserves declines a helper that clobbers only volatile registers | [`calleescratchbody`](#calleescratchbody----on--off-default-on) |
+| a call is emitted as a bare statement and the next line tests a local the function never assigns | [`indirectanchor`](#indirectanchor----on--off-default-on) |
+| a Win32 API called through its IAT slot loses its NTSTATUS while sibling imports keep theirs | [`indirectanchor`](#indirectanchor----on--off-default-on) |
+| declaring a prototype for the callee restores the assignment `v15 = f(...)` | [`indirectanchor`](#indirectanchor----on--off-default-on) |
+| a call whose last stack argument renders as `v70 & 0xffffffff00000000` has no return value | [`indirectanchor`](#indirectanchor----on--off-default-on) |
+| a call's `NTSTATUS` is tested through `v16` where v16 has no definition anywhere in the function | [`indirectanchor`](#indirectanchor----on--off-default-on) |
+| call emitted with no arguments or fewer arguments than the disassembly passes | [`calloverlap`](#calloverlap----off--in--full-default-off) |
+| call result read from a local that is never assigned | [`calloverlap`](#calloverlap----off--in--full-default-off) |
+| enclosing function loses its own parameter list and return type (void f(void)) | [`calloverlap`](#calloverlap----off--in--full-default-off) |
+| argument register written whole-width by pxor movdqa movdqu por pand orpd or movq before the call | [`calloverlap`](#calloverlap----off--in--full-default-off) |
+| second call binds a stale pre-call value where the first call should have defined it | [`calloverlap`](#calloverlap----off--in--full-default-off) |
+| stack array subscripted past its own declared bound under a guard that proves the larger index | [`loadguardrange`](#loadguardrange----on--off-default-on) |
+| stack scalar at the end of an array read but never assigned and never address-taken | [`loadguardrange`](#loadguardrange----on--off-default-on) |
+| array written through a computed index capped at 4 elements regardless of the real extent | [`loadguardrange`](#loadguardrange----on--off-default-on) |
+| decompile-project output recompiles into a stack overflow the binary does not have | [`loadguardrange`](#loadguardrange----on--off-default-on) |
+| servo/config fields validated and stored from uninitialized stack locals | [`loadguardrange`](#loadguardrange----on--off-default-on) |
+| a stack byte written through an incrementing pointer still reads as its initial value | [`stackstoreguard`](#stackstoreguard----on--off-default-on) |
+| a call after a stack-buffer fill loop disappears | [`stackstoreguard`](#stackstoreguard----on--off-default-on) |
+| indexaliasguard full restores a branch depending on a stack store | [`stackstoreguard`](#stackstoreguard----on--off-default-on) |
+| a stack array element read after an indexed store prints the value written before the store | [`stackstoreguard`](#stackstoreguard----on--off-default-on) |
+| stack array declared and read but never initialised in the emitted C | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a run of direct frame stores vanishes when the same slots are later read through a pointer | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| constants loaded from .rdata into a local buffer do not appear in the decompilation | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| accumulator or key schedule buffer looks uninitialised before an XOR loop walks it | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| value stored through a pointer does not appear to reach the frame slot it aliases | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a global read back after a store through a pointer prints the value stored before that store | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a global read before a store through a pointer is printed after it | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a store to a global before a pointer load is missing when the global is stored again later | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a loop that bumps a global around a pointer load prints with no store to the global | [`indexaliasguard`](#indexaliasguard----off--load--global--full-default-global) |
+| a local is set to NULL and then used as an indirect-call target with nothing assigned in between | [`tiedstorekeep`](#tiedstorekeep----on--off-default-on) |
+| GetProcAddress/dlsym result assigned to a temporary and the function pointer local it is stored into stays NULL | [`tiedstorekeep`](#tiedstorekeep----on--off-default-on) |
+| call result stored to the frame but the store is missing from the emitted C so the later read looks uninitialized | [`tiedstorekeep`](#tiedstorekeep----on--off-default-on) |
+| indirect call through a stack slot that no statement ever writes | [`tiedstorekeep`](#tiedstorekeep----on--off-default-on) |
+| a stack local read after a call shows only its initialiser | [`tiedstorekeep`](#tiedstorekeep----on--off-default-on) |
+| global structure field stores become local assignments | [`globalfieldstore`](#globalfieldstore----on--off-default-on) |
+| array member writes target unrelated local arrays | [`globalfieldstore`](#globalfieldstore----on--off-default-on) |
+| a global structure is assigned individual scalar fields | [`globalfieldstore`](#globalfieldstore----on--off-default-on) |
+| a call sees stale fields after a cached record copy | [`globalfieldstore`](#globalfieldstore----on--off-default-on) |
+| a global is assigned before a call although the binary stores it after the call returns | [`globalcallstore`](#globalcallstore----on--off-default-on) |
+| a call that reads a global appears to see a value the caller stores only afterwards | [`globalcallstore`](#globalcallstore----on--off-default-on) |
+| a loop that walks a global list frees the head but never advances the global | [`globalcallstore`](#globalcallstore----on--off-default-on) |
+| a variable's storage comment lists a global it is only copied into | [`globalcallstore`](#globalcallstore----on--off-default-on) |
+| an int converted to float and then to double prints as a direct (double) conversion | [`intfloatround`](#intfloatround----on--off-default-on) |
+| (double)(float)i prints as (double)i | [`intfloatround`](#intfloatround----on--off-default-on) |
+| a long long converted to double and then to float prints as one (float) conversion | [`intfloatround`](#intfloatround----on--off-default-on) |
+| an x87 int spilled to a float slot prints without the (float) rounding | [`intfloatround`](#intfloatround----on--off-default-on) |
+| a for loop initialises and tests one variable but assigns its increment to another | [`loopcounterstore`](#loopcounterstore----on--off-default-on) |
+| the induction variable is never updated so the emitted loop cannot terminate | [`loopcounterstore`](#loopcounterstore----on--off-default-on) |
+| several loop counters lose their increments to one shared register temporary | [`loopcounterstore`](#loopcounterstore----on--off-default-on) |
+| a stack-resident counter is incremented into a variable that has no storage comment | [`loopcounterstore`](#loopcounterstore----on--off-default-on) |
+| the loop test compares against a value nothing ever assigns | [`loopcounterstore`](#loopcounterstore----on--off-default-on) |
+| a stack-to-stack buffer copy is missing the bytes in its middle | [`splitstorekeep`](#splitstorekeep----on--off-default-on) |
+| a struct or array assignment emits only its first and last word | [`splitstorekeep`](#splitstorekeep----on--off-default-on) |
+| two of the four MOVs of an inlined memcpy have no statement in the emitted C | [`splitstorekeep`](#splitstorekeep----on--off-default-on) |
+| a copied buffer looks half-uninitialised although the disassembly writes every byte | [`splitstorekeep`](#splitstorekeep----on--off-default-on) |
+| the stores that vanish are exactly the ones whose 8-byte ranges overlap | [`splitstorekeep`](#splitstorekeep----on--off-default-on) |
+| an unsigned long long local is commented with a register pair such as l4_5 | [`pairrefine`](#pairrefine----on--off-default-on) |
+| 32-bit counters are updated through CONCAT44 piece writes | [`pairrefine`](#pairrefine----on--off-default-on) |
+| a loop index is read as the high word of a 64-bit variable | [`pairrefine`](#pairrefine----on--off-default-on) |
+| two unrelated 32-bit values share one 64-bit local | [`pairrefine`](#pairrefine----on--off-default-on) |
+| ldd/std copies make the registers they load into one fused variable | [`pairrefine`](#pairrefine----on--off-default-on) |
+| goto label_N; directly above label_N: | [`gotonext`](#gotonext----on--off-default-on) |
+| switch case falls into the next case through a goto | [`gotonext`](#gotonext----on--off-default-on) |
+| case N: label_X: right after a goto label_X; | [`gotonext`](#gotonext----on--off-default-on) |
+| an if arm ends in a goto to the statement after the if | [`gotonext`](#gotonext----on--off-default-on) |
+| iVar1/uVar2/param_1 ghidra-style names wanted instead of v1/a1 (set ghidra) | [`namestyle`](#namestyle----angr--ghidra-default-angr) |
+| v-numbered locals and sub_/dat_/label_ names in the default output | [`namestyle`](#namestyle----angr--ghidra-default-angr) |
+| byte-for-byte comparison against upstream ghidra naming | [`namestyle`](#namestyle----angr--ghidra-default-angr) |
+| undefined8/xunknownN placeholder types wanted for upstream comparison (flip off) | [`realtypes`](#realtypes----on--off-default-on) |
+| size-guessed unsigned long/int/char types shown for values the inference never typed | [`realtypes`](#realtypes----on--off-default-on) |
+| a DWARF or asserted by-value struct parameter is declared as a pointer | [`indirectargs`](#indirectargs----on--off-default-on) |
+| calls pass &local to a function declared to take the struct by value | [`indirectargs`](#indirectargs----on--off-default-on) |
+| function pointer type spells T * for a by-value aggregate parameter | [`indirectargs`](#indirectargs----on--off-default-on) |
+| want the raw ABI pointer for a large struct parameter (flip off) | [`indirectargs`](#indirectargs----on--off-default-on) |
+| a void function ends with a redundant return; the source does not have | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
+| GED counts one extra exit node against an otherwise perfect function | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
+| the last statement of a void function is a bare return | [`voidtailreturn`](#voidtailreturn----on--off-default-off) |
+| a data import read through __got renders *dat_<slot> | [`importdata`](#importdata----on--off-default-off) |
+| __stack_chk_guard shows as a dereferenced dat_ address | [`importdata`](#importdata----on--off-default-off) |
+| imported globals are anonymous even though their GOT slot is named | [`importdata`](#importdata----on--off-default-off) |
+| an ELF shared object reads stdout or environ as *dat_<slot> or *stdout_ptr | [`importdata`](#importdata----on--off-default-off) |
+| a libc argument is cast to the very type the parameter declares, memchr(v10,(int)v4,n) | [`castimplied`](#castimplied----on--off-default-on) |
+| a widening cast assigned to a variable already declared that type, v2 = (long)v1; with long v2 | [`castimplied`](#castimplied----on--off-default-on) |
+| return (unsigned long)v1; from a function declared unsigned long | [`castimplied`](#castimplied----on--off-default-on) |
+| several casts stacked over one byte, (long)(int)(unsigned int)(unsigned char)c | [`castimplied`](#castimplied----on--off-default-on) |
+| kuna prints more casts than IDA on the same function | [`castimplied`](#castimplied----on--off-default-on) |
+| v10 and v11 declared between v1 and v2 | [`declorder`](#declorder----natural--name-default-natural) |
+| local declarations in string order v1, v10, v11, v2 | [`declorder`](#declorder----natural--name-default-natural) |
+| a numbered local hard to find among ten or more declarations | [`declorder`](#declorder----natural--name-default-natural) |
+| a local holding open()'s result named v1 | [`libcnames`](#libcnames----on--off-default-off) |
+| read's byte count kept as a vN | [`libcnames`](#libcnames----on--off-default-off) |
+| a buffer length from strlen named vN | [`libcnames`](#libcnames----on--off-default-off) |
+| a local passed to a libc function keeps a vN name | [`libcnames`](#libcnames----on--off-default-off) |
+| kuna names fewer locals than IDA on libc-heavy code | [`libcnames`](#libcnames----on--off-default-off) |
+| loop counters print as v5, v3, v1 instead of i, j, k | [`contextnames`](#contextnames----on--off-default-off) |
+| the accumulator a function returns keeps a vN name | [`contextnames`](#contextnames----on--off-default-off) |
+| nested loops are hard to tell apart in stripped code | [`contextnames`](#contextnames----on--off-default-off) |
+| a double parameter stored into a global prints as unsigned long and moves ahead of the integer parameters | [`floatglobals`](#floatglobals----on--off-default-on) |
+| a float parameter copied into a global prints as unsigned int | [`floatglobals`](#floatglobals----on--off-default-on) |
+| a global passed to a float parameter prints as a union reinterpretation ((union { unsigned int from; float to; }){ .from = dat_10001d78 }).to | [`floatglobals`](#floatglobals----on--off-default-on) |
+| firmware calls of float helpers wrap every global argument in a union | [`floatglobals`](#floatglobals----on--off-default-on) |
+| a parameter is declared char and every use of it is if (a0) or !a0 | [`boolbyte`](#boolbyte----on--off-default-on) |
+| a one-byte local is char but only ever assigned 0 and 1 | [`boolbyte`](#boolbyte----on--off-default-on) |
+| a flag argument reads as a character, so a call site looks like it passes text | [`boolbyte`](#boolbyte----on--off-default-on) |
+| char v1; followed by v1 = 0; v1 = 1; if (v1) | [`boolbyte`](#boolbyte----on--off-default-on) |
+| DWARF says _Bool and kuna says char or unsigned char | [`boolbyte`](#boolbyte----on--off-default-on) |
+| an ARM hard-float helper like fabsf prints unsigned int f(unsigned int) and every caller wraps its result in a union | [`floatbits`](#floatbits----on--off-default-on) |
+| copysignf(M_PI, x) prints as copysignf(0x40490fdb, x) | [`floatbits`](#floatbits----on--off-default-on) |
+| a float classifier (isnanf, isfinitef) takes an unsigned int parameter its callers pass a float to | [`floatbits`](#floatbits----on--off-default-on) |
+| movd %xmm0,%eax; and $0x7fffffff,%eax; movd %eax,%xmm0 prints as integer arithmetic | [`floatbits`](#floatbits----on--off-default-on) |
+| a string pointer is declared unsigned char * and its bytes print as (char)*p | [`charbyte`](#charbyte----on--off-default-on) |
+| a comparison against a character constant prints as a number: v3 != 9, *p == 0x2d | [`charbyte`](#charbyte----on--off-default-on) |
+| a wrapper takes unsigned char *a1 and passes (char *)a1 to mbrtowc or strlen | [`charbyte`](#charbyte----on--off-default-on) |
+| strchr("...",(int)(char)*v1) | [`charbyte`](#charbyte----on--off-default-on) |
+| a loop variable that walks text is unsigned char | [`charbyte`](#charbyte----on--off-default-on) |
+| *(unsigned int *)((long)a0 + 0xac) | [`castarith`](#castarith----on--off-default-on) |
+| every read through one parameter is a cast to (long) and back | [`castarith`](#castarith----on--off-default-on) |
+| (char *)((long)v4 + 0x10) assigned to a pointer variable | [`castarith`](#castarith----on--off-default-on) |
+| (void *)((long)a0 + 8) passed to a callee | [`castarith`](#castarith----on--off-default-on) |
+| two casts for one field read where IDA prints one | [`castarith`](#castarith----on--off-default-on) |
+| *(long *)((long)v7 + v19 * 8) | [`castindex`](#castindex----on--off-default-on) |
+| (long)v24 - (long)v14 passed as a length | [`castindex`](#castindex----on--off-default-on) |
+| free(*(void **)((long)v1 + (long)v2 * 8)) | [`castindex`](#castindex----on--off-default-on) |
+| an array walk through a void * base prints two casts per element | [`castindex`](#castindex----on--off-default-on) |
+| a pointer difference of two char * is cast to long on both sides | [`castindex`](#castindex----on--off-default-on) |
+| the JSON variables array is empty although the function plainly has a stack frame | [`framelayout`](#framelayout----on--off-default-on) |
+| fewer locals reported than the source declares | [`framelayout`](#framelayout----on--off-default-on) |
+| a stack slot the disassembly writes is missing from variables | [`framelayout`](#framelayout----on--off-default-on) |
+| a recovered slot is typed char[N] rather than N bytes of unknown type | [`framelayout`](#framelayout----on--off-default-on) |
+| a variable is named $$undef00000000 | [`framelayout`](#framelayout----on--off-default-on) |
+| a JSON variable is typed char although the decompiler never established an element type | [`bytehonest`](#bytehonest----on--off-default-on) |
+| a one-byte parameter of a boolean-valued function is reported as char | [`bytehonest`](#bytehonest----on--off-default-on) |
+| the variables array claims a committed type the C text only picked for legibility | [`bytehonest`](#bytehonest----on--off-default-on) |
+| xunknown1 appears as a type name with realtypes off | [`bytehonest`](#bytehonest----on--off-default-on) |
+| a -O0 stack slot is reported as undefined8 although the C body prints the value stored into it as char * | [`slotptr`](#slotptr----on--off-default-on) |
+| a local that holds a FILE * or a libc record pointer is reported as eight bytes of unknown type | [`slotptr`](#slotptr----on--off-default-on) |
+| the variables array has fewer pointer-typed locals than the C body declares | [`slotptr`](#slotptr----on--off-default-on) |
+| a spilled pointer argument's home slot is reported as undefined8 | [`slotptr`](#slotptr----on--off-default-on) |
+| a local the C declares has no row in the JSON variables array | [`reglocals`](#reglocals----on--off-default-on) |
+| the variables array lists only parameters and stack slots at -O2 | [`reglocals`](#reglocals----on--off-default-on) |
+| an optimized function's vN locals are missing from decompile-all --json | [`reglocals`](#reglocals----on--off-default-on) |
+| type_match misses every register-resident local | [`reglocals`](#reglocals----on--off-default-on) |
+| the variables array reports local_N undefinedN at the offset the C declares vN in | [`slotreport`](#slotreport----on--off-default-on) |
+| a local whose declaration comment lists a stack home has an undefined frame row | [`slotreport`](#slotreport----on--off-default-on) |
+| the decompile-project .asm stack header types a slot undefinedN that the C declares | [`slotreport`](#slotreport----on--off-default-on) |
+| type_match pairs a stack local with an undefined row | [`slotreport`](#slotreport----on--off-default-on) |
+| a -O0 local merged with its spill is reported by width only | [`slotreport`](#slotreport----on--off-default-on) |
+| the variables array reports one undefined16 row over a pointer the C declares at its start | [`slotsplit`](#slotsplit----on--off-default-on) |
+| a local declared at stack - 0x40 has no row of its own inside a wider frame row | [`slotsplit`](#slotsplit----on--off-default-on) |
+| the decompile-project .asm stack header lists one wide undefined slot over several declared locals | [`slotsplit`](#slotsplit----on--off-default-on) |
+| type_match pairs a stack local with a wider undefined row | [`slotsplit`](#slotsplit----on--off-default-on) |
+| int4/uint1/uint4/float8/float10 appear in the emitted C instead of C type names | [`ctypes`](#ctypes----on--off-default-off) |
+| the same function mixes `unsigned int` with `int4` | [`ctypes`](#ctypes----on--off-default-off) |
+| `code *` appears as a function-pointer type | [`ctypes`](#ctypes----on--off-default-off) |
+| the emitted C does not compile because its type names are not C | [`ctypes`](#ctypes----on--off-default-off) |
+| the same local declared once although many HighVariables share the stack slot | [`dedupvardecls`](#dedupvardecls----on--off-default-on) |
+| flip off to see one declaration line per high (e.g. int4 option_index repeated hundreds of times) | [`dedupvardecls`](#dedupvardecls----on--off-default-on) |
+| a variable is declared a pointer to one width and dereferenced at another | [`declhightype`](#declhightype----on--off-default-on) |
+| a byte comparison reads through an unsigned long long pointer | [`declhightype`](#declhightype----on--off-default-on) |
+| the declared type disagrees with the cast on the line that assigns the variable | [`declhightype`](#declhightype----on--off-default-on) |
+| an integer is assigned to a variable declared as a pointer with no cast | [`declhightype`](#declhightype----on--off-default-on) |
+| a one-byte load prints without the sign extension the instruction performs | [`declhightype`](#declhightype----on--off-default-on) |
+| a parameter from the signature is declared again as a local at the top of the body | [`paramrefdecl`](#paramrefdecl----on--off-default-on) |
+| the duplicate declaration has a different type from the signature (unsigned int a0 then int4 a0) | [`paramrefdecl`](#paramrefdecl----on--off-default-on) |
+| the only use of the redeclared name is &name passed to a call | [`paramrefdecl`](#paramrefdecl----on--off-default-on) |
+| a decompile-project export does not compile because a local shadows a parameter of the same name | [`paramrefdecl`](#paramrefdecl----on--off-default-on) |
+| --json reports a parameter with no line_numbers although the C shows it used | [`paramrefdecl`](#paramrefdecl----on--off-default-on) |
+| avx code reads SUB6432(zmm0,0) instead of ymm0 | [`vexzeroupper`](#vexzeroupper----on--off-default-on) |
+| a ymm or xmm argument shows as a 64-byte zmm local | [`vexzeroupper`](#vexzeroupper----on--off-default-on) |
+| vector values are widened to char[64] | [`vexzeroupper`](#vexzeroupper----on--off-default-on) |
+| eight float additions on slices of one register instead of a vector add | [`lanefuse`](#lanefuse----on--all--off-default-on) |
+| avx-512 mask applied as sixteen per-lane multiply-or statements | [`lanefuse`](#lanefuse----on--all--off-default-on) |
+| a vector function body is one statement per lane | [`lanefuse`](#lanefuse----on--all--off-default-on) |
+| a function taking __m256 shows (void) parameters and reads ymm registers as locals | [`vectorabi`](#vectorabi----on--off-default-on) |
+| a vector-returning function is void or undefined32 | [`vectorabi`](#vectorabi----on--off-default-on) |
+| x86-64 xmm parameter wider than 8 bytes is lost | [`vectorabi`](#vectorabi----on--off-default-on) |
+| char[32] locals for vector values | [`vectorabi`](#vectorabi----on--off-default-on) |
+| vector code prints ghidra user-op names such as vpaddd_avx2 | [`avxintrinsics`](#avxintrinsics----on--off-default-on) |
+| fma prints as vfmadd132ps_fma with the instruction's operand order | [`avxintrinsics`](#avxintrinsics----on--off-default-on) |
+| avx-512 arithmetic prints as vaddps_avx512f | [`avxintrinsics`](#avxintrinsics----on--off-default-on) |
+| a global one function accessed whole prints as unrelated dat_ names in another | [`mapglobalsyms`](#mapglobalsyms----on--off-default-off) |
+| later functions do not see the DAT_ symbol an earlier decompile created, unlike upstream decomp_dbg sessions | [`mapglobalsyms`](#mapglobalsyms----on--off-default-off) |
+| a loop that only reads a stack buffer prints a store into its first element | [`tiedphitrim`](#tiedphitrim----on--off-default-on) |
+| a while condition tests buf[0] and the loop body assigns a later element into buf[0] | [`tiedphitrim`](#tiedphitrim----on--off-default-on) |
+| a byte fetched through a pointer is assigned to a stack-offset variable the binary never writes | [`tiedphitrim`](#tiedphitrim----on--off-default-on) |
+| a loop over a global linked list advances the global head although the binary only reads it | [`tiedphitrim`](#tiedphitrim----on--off-default-on) |
+| strcmp or strlen after an in-place string loop reads a buffer the C already overwrote | [`tiedphitrim`](#tiedphitrim----on--off-default-on) |
+| a helper that plainly computes a status recovers as void with a bare return; | [`noreturnretuse`](#noreturnretuse----on--off-default-on) |
+| the callee's return value is missing at the call site on ARM/AArch64 | [`noreturnretuse`](#noreturnretuse----on--off-default-on) |
+| a function whose error path calls a no-return handler loses its return type | [`noreturnretuse`](#noreturnretuse----on--off-default-on) |
+| the return type differs between two builds of the same function that differ only in stack-protector hardening | [`noreturnretuse`](#noreturnretuse----on--off-default-on) |
+| a call inside a loop renders with an empty argument list while the disassembly loads its argument registers immediately before it | [`zeroidiomuse`](#zeroidiomuse----on--off-default-on) |
+| the same function recovers arguments at one call site and drops them at another with the identical mov-immediate-then-call shape | [`zeroidiomuse`](#zeroidiomuse----on--off-default-on) |
+| an explicit prototype override restores the arguments but nothing else does | [`zeroidiomuse`](#zeroidiomuse----on--off-default-on) |
+| a call loses its arguments only when a sibling call in the same loop is preceded by xor reg,reg or sub reg,reg | [`zeroidiomuse`](#zeroidiomuse----on--off-default-on) |
+| a call renders with fewer arguments than the disassembly sets up and the missing registers are written before a nearby branch | [`exclusivearguse`](#exclusivearguse----on--off-default-on) |
+| a call keeps only the arguments assigned on its own branch arm and drops the ones assigned before the test | [`exclusivearguse`](#exclusivearguse----on--off-default-on) |
+| an explicit prototype override restores the arguments but no option does | [`exclusivearguse`](#exclusivearguse----on--off-default-on) |
+| the callee decompiled on its own has more parameters than any of its call sites pass | [`exclusivearguse`](#exclusivearguse----on--off-default-on) |
+| a container append or push_back helper is called with just the container | [`exclusivearguse`](#exclusivearguse----on--off-default-on) |
+| a call renders as a bare statement and the value it returned is read through a local the function never assigns | [`callretpair`](#callretpair----on--off-default-on) |
+| a local commented `// rdx` or `// edx` is declared and read but has no definition anywhere in the function | [`callretpair`](#callretpair----on--off-default-on) |
+| decompiling the callee reports an undefined16 return but every call site shows no output | [`callretpair`](#callretpair----on--off-default-on) |
+| a 16-byte struct return (JSValue, div_t, a fat pointer, a two-word value) is lost at the call site | [`callretpair`](#callretpair----on--off-default-on) |
+| a tag-and-payload pair is tested right after a call and the tag variable is never assigned | [`callretpair`](#callretpair----on--off-default-on) |
+| a caller that reads only the high word of a 64-bit callee result prints a bare `full(a0);` and an unassigned `// r1`, `// edx` or `// v1` local | [`callretpair`](#callretpair----on--off-default-on) |
+| an untyped MIPS32 big-endian producer loses its low return word despite a declared 64-bit consumer | [`callwide`](#callwide----on--off-default-off) |
+| producer and caller disagree about a complete big-endian eight-byte integer return | [`callwide`](#callwide----on--off-default-off) |
+| a long long return on a big-endian 32-bit target prints CONCAT44 with the low word first | [`bejoin`](#bejoin----off--evidence--on-default-evidence) |
+| a 64-bit product, sum or shift returned on PowerPC, MIPS, SPARC or ARM big-endian comes back with its halves swapped | [`bejoin`](#bejoin----off--evidence--on-default-evidence) |
+| an AVR function returning a 16-bit int prints a read of R25R24 nothing assigns | [`bejoin`](#bejoin----off--evidence--on-default-evidence) |
+| a call to a function returning int is printed (unsigned long)(unsigned int)f() on RISC-V or LoongArch | [`narrowext`](#narrowext----off--abi--compiler-default-abi) |
+| a signed char or short result is zero-extended where the callee sign-extends it | [`narrowext`](#narrowext----off--abi--compiler-default-abi) |
+| a declared int parameter used as a 64-bit value prints (unsigned long)(unsigned int)x | [`narrowext`](#narrowext----off--abi--compiler-default-abi) |
+| a narrow result or parameter prints as CONCAT31(v1,f()) or CONCAT44(v1,x) with an unassigned v1 | [`narrowext`](#narrowext----off--abi--compiler-default-abi) |
+| a function that stores its return value to a global prints void | [`callerreads`](#callerreads----on--off-default-on) |
+| kuna decompile prints void f while main prints f(2) as a value | [`callerreads`](#callerreads----on--off-default-on) |
+| a wrapper that returns a call's result prints void in a single-function decompile | [`callerreads`](#callerreads----on--off-default-on) |
+| kuna decompile and decompile-all disagree on whether a function returns a value | [`callerreads`](#callerreads----on--off-default-on) |
+| a double return becomes SUB84 or zero | [`armfloatreturn`](#armfloatreturn----on--off-default-off) |
+| an ARM hard-float function loses its d0 parameter | [`armfloatreturn`](#armfloatreturn----on--off-default-off) |
+| a caller reads an undefined floating result | [`armfloatreturn`](#armfloatreturn----on--off-default-off) |
+| an AArch64 function returning a double prints as undefined16 | [`zerofillreturn`](#zerofillreturn----on--off-default-on) |
+| v1._8_8_ = 0 before return v1._0_16_ | [`zerofillreturn`](#zerofillreturn----on--off-default-on) |
+| return ZEXT816(0) where the source returns 0.0 | [`zerofillreturn`](#zerofillreturn----on--off-default-on) |
+| a caller casts an AArch64 call result to double: (double)f(x) | [`zerofillreturn`](#zerofillreturn----on--off-default-on) |
+| a struct of two doubles or a complex double returned in d0 and d1 prints as q0 with an upper half of zero | [`zerofillreturn`](#zerofillreturn----on--off-default-on) |
+| a function built with -fzero-call-used-regs returns a constant 0 on every path | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| an int-returning function prints as double with return 0.0 | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| a double-returning function prints as unsigned long f(void) { return 0; } | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| a long return prints as undefined16 whose upper half is 0 | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| a void function prints return 0 | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| xor and pxor of every scratch register right before ret | [`zerocallregs`](#zerocallregs----on--off-default-on) |
+| missing floating argument | [`armfloatargs`](#armfloatargs----on--off-default-off) |
+| double input split into two words | [`armfloatargs`](#armfloatargs----on--off-default-off) |
+| caller and callee disagree on mixed argument contract | [`armfloatargs`](#armfloatargs----on--off-default-off) |
+| CONCAT22 in a short byte-swap helper | [`partialconcat`](#partialconcat----on--off-default-on) |
+| CONCAT after a partial register write | [`partialconcat`](#partialconcat----on--off-default-on) |
+| an unchanged upper word joined to a replaced lower word | [`partialconcat`](#partialconcat----on--off-default-on) |
+| unconditional loop prints do-while (true) at the bottom | [`infloopstyle`](#infloopstyle----while--do-default-while) |
+| prefer while (true) at the top | [`infloopstyle`](#infloopstyle----while--do-default-while) |
+| need the previous infinite-loop spelling for comparison | [`infloopstyle`](#infloopstyle----while--do-default-while) |
+| a signed ARM value is shifted left by a constant in the emitted C | [`armconstshift`](#armconstshift----on--off-default-off) |
+| UBSan reports a left shift of a negative value in recompiled ARM output | [`armconstshift`](#armconstshift----on--off-default-off) |
+| a signed ARM shift overflows into the sign bit in recompiled output | [`armconstshift`](#armconstshift----on--off-default-off) |
+| a local read appears before the machine branch that guards it | [`guardedreadtrim`](#guardedreadtrim----on--off-default-on) |
+| a call-written volatile stack local is read on the failure path | [`guardedreadtrim`](#guardedreadtrim----on--off-default-on) |
+| an overwritten register argument renders as a stale half of a previous wide value | [`multiregargs`](#multiregargs----on--off-default-on) |
+| a live entry argument disappears after a wide register read | [`multiregargs`](#multiregargs----on--off-default-on) |
+| large global initializer exhausts memory during heritage | [`globalcallranges`](#globalcallranges----on--off-default-on) |
+| tiny constructors cause a quadratic number of global call guards | [`globalcallranges`](#globalcallranges----on--off-default-on) |
+| a function with many global assignments uses gigabytes before emitting C | [`globalcallranges`](#globalcallranges----on--off-default-on) |
+| 16-bit real-mode code stores its return address as *(unsigned short *)segment(ss,...) = 0x... | [`segmentize`](#segmentize----on--off-default-on) |
+| segment(0x1000,0x10) instead of a folded address | [`segmentize`](#segmentize----on--off-default-on) |
+| every stack access of 16-bit code is a segment(...) expression | [`segmentize`](#segmentize----on--off-default-on) |
 
 ## Toggleable transforms
 
@@ -2945,7 +2945,7 @@ The control surface: each of these can make output worse on the wrong source sha
 ### `objcivars` -- on | off, default `on`
 
 - **Symptoms:** an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar; self is objc_object * in every -[Class sel] although the class declares ivars; objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar.
-- **What it does:** Give every Objective-C class of the image an instance struct built from its ivar list and type each of its methods' `self` with it. `class_ro_t.ivars` names each ivar with its type encoding, its size and a pointer to its OFFSET VARIABLE in `__objc_ivar` — the word a compiled method loads and adds to `self` (`ldrsw x8,[x8,#off]; ldr d0,[x19,x8]`), because under the non-fragile ABI the runtime may slide that offset when a superclass from another image grows. Statically the word holds the compile-time layout, so this builds `struct <Class>` with each ivar at that offset (a local superclass embedded as `super` at 0, an imported one left as an anonymous prefix; field types from the encoding, `@"NSString"` an opaque `NSString *`), types `self` as `<Class> *` in the class's instance methods and its categories' instance methods, and reports the offset variables constant (the `dynrelocs` RELRO fold path), so `*(double *)((long)self + Foo::ratio)` renders `self->ratio` and `objc_storeStrong((long)self + Foo::_name, x)` renders `objc_storeStrong(&self->_name, x)`. A class of another image, or one with no field of its own, still types `self` as a pointer to its declared (opaque) record. An ivar, a property getter/setter (its attribute string names the class: `T@"Base"`) and a stub whose declaration names a class of this image are typed with that class's struct too, so `self->inner->count` and `Base * -[Holder inner]` render. Off: no class struct is interned, `self` stays `objc_object *`, the offset variable keeps its `<Class>::<ivar>` name and the load through it stays a load. A class whose name already denotes a complete struct (DWARF) is that struct. A Swift class's struct carries its demangled name under `swiftdemangle`; on a Swift image under `swifttypes` its layout is left to the Swift field descriptors (the ivar list encodes Swift types as nothing) and only the record is declared here, so one struct per class remains. Inert unless `objc` is on; a structural no-op on every non-Mach-O image. Load-time, env-bridged (KUNA_OBJCIVARS) as well as commit-time: set it before the `load file` it should apply to.
+- **What it does:** Give every Objective-C class of the image an instance struct built from its ivar list and type each of its methods' `self` with it. `class_ro_t.ivars` names each ivar with its type encoding, its size and a pointer to its OFFSET VARIABLE in `__objc_ivar` — the word a compiled method loads and adds to `self` (`ldrsw x8,[x8,#off]; ldr d0,[x19,x8]`), because under the non-fragile ABI the runtime may slide that offset when a superclass from another image grows. Statically the word holds the compile-time layout, so this builds `struct <Class>` with each ivar at that offset (a local superclass embedded as `super` at 0, an imported one left as an anonymous prefix; field types from the encoding, `@"NSString"` an opaque `NSString *`), types `self` as `<Class> *` in the class's instance methods and its categories' instance methods, and reports the offset variables constant (the `dynrelocs` RELRO fold path), so `*(double *)((long)self + Foo::ratio)` renders `self->ratio` and `objc_storeStrong((long)self + Foo::_name, x)` renders `objc_storeStrong(&self->_name, x)`. A class of another image, or one with no field of its own, still types `self` as a pointer to its declared (opaque) record. An ivar, a property getter/setter (its attribute string names the class: `T@"Base"`) and a stub whose declaration names a class of this image are typed with that class's struct too, so `self->inner->count` and `Base * -[Holder inner]` render. Off: no class struct is interned, `self` stays `objc_object *`, the offset variable keeps its `<Class>::<ivar>` name and the load through it stays a load. A class whose name already denotes a complete struct (DWARF) is that struct. A Swift class's struct carries its demangled name under `swiftdemangle`; on a Swift image the Swift pass runs on, under `swifttypes`, its layout is left to the Swift field descriptors (the ivar list encodes Swift types as nothing) and only the record is declared here, so one struct per class remains; with no Swift pass (`sourcelang` forced to another language) the ivar list builds it. Inert unless `objc` is on; a structural no-op on every non-Mach-O image. Load-time, env-bridged (KUNA_OBJCIVARS) as well as commit-time: set it before the `load file` it should apply to.
 - **When to flip:** On by default: the layout is the one the compiler emitted and IDA renders the same `self->_ivar`. Flip off when a superclass from another image may have grown since the binary was built (then the runtime slides the offsets and the static layout is stale) or to read the offset-variable loads themselves.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-objc
 - **Example:** `option objcivars off`
@@ -3997,7 +3997,7 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 ### `swiftcall` -- on | off, default `on`
 
 - **Symptoms:** swift methods named by swiftmetadata read self from an unnamed x20 or r13; calls to swift methods drop the self they pass; a try? error path or a do/catch after a throwing call folds away; swift struct mutating methods write through an untyped register.
-- **What it does:** The calling-convention arm of the Swift metadata pass (inert unless swiftmetadata is on; it reads the type-layout arm, so swifttypes off turns it off too). Swift passes a method's self in the swiftself register (x20 on arm64, r13 on x86-64) when it is one pointer - a class instance, the address of a mutating or indirect value, a thick metatype - and returns a throwing function's error in the swifterror register (x21 / r12), which the caller zeroes before the call and tests after it. Under the C model neither register is a parameter, so a method's self is an unnamed register read, a call drops the self it passes, and the caller's test reads the zero it stored, so the error path of try? folds away. Every AArch64 and x86-64 compiler spec gains __swiftcall (its default model with swiftself as an input resource section of its own, so self is a parameter exactly when the body reads it and never forces the argument registers around it) and __swiftcall_throws (the same, handing the error register back to the caller), derived when the spec is read unless it declares models of those names, so they need no edit to the vendored specs and a spec a Ghidra host sends carries them too. The arm binds __swiftcall to every function it can place in a type, with no signature so the arity stays recovered: a class's vtable slots and overrides, a conformance's witnesses, a protocol's default implementations, and in an image that kept its symbols each method, accessor, initializer and deinitializer the demangler places in a class, struct or enum (throws read off the function type selects __swiftcall_throws; a struct's static member, whose metatype is thin, takes none). Its self is named and, where the type is known, typed as an unlocked hint the recovered parameter takes: Class * for an instance member, swift.class_metadata * for a class member or allocating initializer, the address of the value for a witness (T * for a struct, Class ** for a class), swift.type_metadata * for a static requirement; a body two types share (identical code folding) keeps the name and drops the type. A direct call to a bound function recovers its arguments under the model, so it passes self; a call to a struct member, which may take self exploded into its trailing arguments instead, keeps a swiftself argument only when the caller set the register after its last call. A method's own self handed on untouched (x20 / r13 never rewritten) is passed at a direct call, and an indirect call passes swiftself exactly when its target is loaded through the isa of the value the register holds (obj->isa[k](obj, ...)), so a virtual call on an object shows that object and a value-witness call shows none. Any call, direct or indirect, whose block zeroes the error register as its last write before it is given __swiftcall_throws, so the test after it reads the callee's error. Default-ON because it is inert unless swiftmetadata is on (default-off), the XML corpus never runs the pass (0/675), and on the Toyota iOS app (84 MB) the arm adds no measurable load time and about 8 MB, and decompiling the 42,240 functions it binds takes 2.5% longer (1:13:53 against 1:12:07).
+- **What it does:** The calling-convention arm of the Swift metadata pass (inert unless swiftmetadata is on; it reads the type-layout arm, so swifttypes off turns it off too). Swift passes a method's self in the swiftself register (x20 on arm64, r13 on x86-64) when it is one pointer - a class instance, the address of a mutating or indirect value, a thick metatype - and returns a throwing function's error in the swifterror register (x21 / r12), which the caller zeroes before the call and tests after it. Under the C model neither register is a parameter, so a method's self is an unnamed register read, a call drops the self it passes, and the caller's test reads the zero it stored, so the error path of try? folds away. Every AArch64 and x86-64 compiler spec gains __swiftcall (its default model with swiftself as an input resource section of its own, so self is a parameter exactly when the body reads it and never forces the argument registers around it) and __swiftcall_throws (the same, handing the error register back to the caller), derived when the spec is read unless it declares models of those names, so they need no edit to the vendored specs and a spec a Ghidra host sends carries them too. The arm binds __swiftcall to every function it can place in a type, with no signature so the arity stays recovered: a class's vtable slots and overrides, a conformance's witnesses, a protocol's default implementations, and in an image that kept its symbols each method, accessor, initializer and deinitializer the demangler places in a class, struct or enum (throws read off the function type selects __swiftcall_throws; a struct's static member, whose metatype is thin, takes none). Its self is named and, where the type is known, typed as an unlocked hint the recovered parameter takes: Class * for an instance member, swift.class_metadata * for a class member or allocating initializer, the address of the value for a witness (T * for a struct, Class ** for a class), swift.type_metadata * for a static requirement; a body two types share (identical code folding) keeps the name and drops the type. A direct call to a bound function recovers its arguments under the model, so it passes self; a call to a struct member, which may take self exploded into its trailing arguments instead, keeps a swiftself argument only when the caller set the register after its last call that may read it (a runtime helper with a C name, such as swift_retain, preserves the register and reads none of it). A method's own self handed on untouched (x20 / r13 never rewritten) is passed at a direct call, and an indirect call passes swiftself exactly when its target is loaded through the isa of the value the register holds (obj->isa[k](obj, ...)), so a virtual call on an object shows that object and a value-witness call shows none. Any call, direct or indirect, whose block zeroes the error register as its last write before it is given __swiftcall_throws, so the test after it reads the callee's error. Default-ON because it is inert unless swiftmetadata is on (default-off), the XML corpus never runs the pass (0/675), and on the Toyota iOS app (84 MB) the arm adds no measurable load time and about 8 MB, and decompiling the 42,240 functions it binds takes 2.5% longer (1:13:53 against 1:12:07).
 - **When to flip:** Off to see a swiftmetadata-named binary under the C model: methods without self, calls without the self they pass, and try? error paths folded away. On (default) when swiftmetadata is on: self typed in methods, initializers, accessors and witnesses, passed at direct calls, and the error a throwing call returns tested where the binary tests it.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftcall
 - **Example:** `option swiftcall off`
