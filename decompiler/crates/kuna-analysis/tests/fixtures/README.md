@@ -2235,6 +2235,25 @@ typefix.Point.type_metadata_accessor(void) { return
 (swift.MetadataResponse)ZEXT816(0x5318); }`, with no request parameter; with
 `swifttypes off` the getter takes no parameter and reads `*(long *)(v2 + 0x60)`.
 
+
+### `swift_ext_types_elf` — a struct nested in an extension (`swifttypes`)
+
+`swift_ext_types_elf` (x86-64 ELF, 9.5 KB, stripped) is the fixture for a type
+whose context descriptor's parent is an extension context
+(`kuna-console/tests/verify_swifttypes.rs`). Its source
+`swift_ext_types_elf.swift` declares `extension Int { struct Pair { lo, hi } }`
+and a struct `Holder { pair: Int.Pair; count: Int }`:
+
+```bash
+swiftc -O -module-name extfix swift_ext_types_elf.swift -o swift_ext_types_elf
+llvm-strip --strip-all swift_ext_types_elf
+```
+
+SHA-256: `6935ca9260321b3ed56912a451185edb29091c5e3c9c87e56cc821b3c21eec1e`.
+
+**Expected layouts:** `Swift.Int.Pair {lo@0, hi@8}` 16 bytes and
+`extfix.Holder {pair@0: Swift.Int.Pair, count@16}` 24 bytes; before the
+extension context resolved, `pair` was untyped.
 ### `swift_icf_elf` — a stripped Swift executable with folded code (`swiftmetadata`)
 
 `swift_icf_elf` (x86-64 ELF, 12 KB) is the identical-code-folding fixture
@@ -2379,3 +2398,22 @@ SHA-256: `75ac6939c3c6bf428c1ea95c799eb03b2cb781dbf36fc8c1affcda1550692aea`.
 `$s9helperfix7CounterV4bumpyyF`@`0x2640`. With `swiftmetadata on` both calls
 decompile as `helperfix.Counter.bump()(a0)`; with `swiftcall off` they pass
 nothing.
+
+### `swift_call_leaf_elf` — a mutating struct call after a Swift leaf call (`swiftcall`)
+
+`swift_call_leaf_elf` (x86-64 ELF, 18 KB, with symbols) is the fixture for the
+`swiftself` value a Swift callee that never reads the register leaves set
+(`tests/stages/kuna-swiftcall.xml`). Its source `swift_call_leaf_elf.swift`
+calls the mutating `Counter.bump(_:)`, whose enum argument leaves it without a
+declared signature, after the leaf `tick(_:)` (`lea (%rdi,%rdi,2),%rax; inc
+%rax; ret`), which runs between `once` setting r13 and the call:
+
+```bash
+swiftc -O -module-name leaffix swift_call_leaf_elf.swift -o swift_call_leaf_elf
+```
+
+SHA-256: `1ba763c5d3b5707bba6d8fc58f3125312745f30e8e8d63eb05ea5e6dd39c3e93`.
+
+**Pinned VMAs:** `$s7leaffix4onceySiAA7CounterVz_SitF`@`0x2630`,
+`$s7leaffix4tickyS2iF`@`0x2800`, `$s7leaffix7CounterV4bumpyyAA4StepOF`@`0x27c0`.
+With `swiftmetadata on` the call decompiles as `leaffix.Counter.bump(_:)(a0,v1,0)`.

@@ -4668,9 +4668,14 @@ every other binary's pass list is byte-identical to before the pass existed):
   folds functions with identical bodies (identical code folding) and one
   address is then the target of records of unrelated types — on the Toyota
   app 2,350 of the 57,147 claimed functions, 2,037 of them claimed by more
-  than one type. Such a function is never named after one of its claimants:
-  when all claims come from one type it is named after the first member
-  (sorted) with the count of members it serves
+  than one type. A claimant is a type by its descriptor (a local one by
+  address, so two private types that print the same path are two claimants;
+  an imported one by symbol), and a type whose path cannot be named still
+  claims the functions it points at, it just offers no name. Such a function
+  is never named after one of its claimants: when all claims come from one
+  type it is named after the first member (in order, a number compared as a
+  number, so `requirement#2` comes before `requirement#10`) with the count of
+  members it serves
   (`<T:P>.requirement#0.merged#2`); when they are witnesses of one protocol
   member from different types it is named after the member alone
   (`<*:Swift.RawRepresentable>.init(rawValue:)`); any other mix (different
@@ -4712,7 +4717,11 @@ every other binary's pass list is byte-identical to before the pass existed):
   name and mangled type, whose symbolic references (`\x01` a direct, `\x02` an
   indirect context descriptor reference, with a 4-byte payload) the demangler
   resolves through a hook (`demangle_swift_type`, §1.3) that the pass answers
-  from its descriptor table or the import an indirect slot binds. The result
+  from its descriptor table or the import an indirect slot binds. A type
+  nested in an extension (`extension Int { struct Pair }`, whose descriptor's
+  parent is the extension context) resolves through the extension's
+  extended type, as its path does, so a `Holder.pair` field is the laid-out
+  `Swift.Int.Pair`. The result
   is one kuna struct per type under its dotted name — `metafix.Point { long x;
   long y; }`, a class as its object layout with a local superclass embedded as
   `super` at 0 and otherwise the `isa` word (and a Swift-native root's

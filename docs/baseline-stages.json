@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3923,
-    3923
+    3924,
+    3924
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3647,6 +3647,7 @@
     "data:swiftcall on: a five-word return goes through rax, ahead of the first argument",
     "data:swiftcall on: a five-word struct argument is taken by address",
     "data:swiftcall on: a generic function takes the metadata and the witness table after its arguments",
+    "data:swiftcall on: a leaf call that never reads r13 leaves the self the caller set",
     "data:swiftcall on: a mutating struct method takes self by address",
     "data:swiftcall on: a non-mutating struct method takes self by value",
     "data:swiftcall on: a payload-less enum is a C enum",
