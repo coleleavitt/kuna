@@ -99,6 +99,6 @@ c3
 <stringmatch name="swiftcall on: a generic function takes the metadata and the witness table after its arguments" min="1" max="1">hashed\(_:_:\)\(void \*a0,int8 a1,swift\.type_metadata \*metadata_A,void \*witness_A_Hashable\)</stringmatch>
 <stringmatch name="swiftcall on: a non-mutating struct method takes self by value" min="1" max="1">sigfix\.Triple\.sum\(\)\(sigfix\.Triple self\)</stringmatch>
 <stringmatch name="swiftcall on: a mutating struct method takes self by address" min="1" max="1">sigfix\.Triple\.bump\(_:\)\(int8 a0,sigfix\.Triple \*self\)</stringmatch>
-<stringmatch name="swiftcall on: an accessor returns a MetadataResponse" min="1" max="1">swift\.MetadataResponse sigfix\.Color\.type_metadata_accessor\(int8 request\)</stringmatch>
+<stringmatch name="swiftcall on: an accessor returns a MetadataResponse" min="1" max="1">swift\.MetadataResponse sigfix\.Color\.type_metadata_accessor\(void\)</stringmatch>
 <stringmatch name="swiftcall on: the async context has its layout" min="1" max="1">async_context\[1\]\.resume_parent = self;</stringmatch>
 </decompilertest>

@@ -2230,10 +2230,10 @@ a getter)@`0x3e60`, `$s7typefix6SpriteC6originAA5PointVvg` (slot 0)@`0x3cb0`,
 `area()`@`0x2cc0` and `name.getter`@`0x2ce0`. With `swiftmetadata on` (the
 layout arm `swifttypes` is on by default) the getters decompile as
 `long typefix.Sprite.vtable#6.getter(typefix.Sprite *self) { … return
-self->count; }` and the accessor as `swift.type_metadata *
-typefix.Point.type_metadata_accessor(long request) { return
-&typefix.Point.type_metadata; }`; with `swifttypes off` the getter takes no
-parameter and reads `*(long *)(v2 + 0x60)`.
+self->count; }` and the accessor as `swift.MetadataResponse
+typefix.Point.type_metadata_accessor(void) { return
+(swift.MetadataResponse)ZEXT816(0x5318); }`, with no request parameter; with
+`swifttypes off` the getter takes no parameter and reads `*(long *)(v2 + 0x60)`.
 
 ### `swift_icf_elf` — a stripped Swift executable with folded code (`swiftmetadata`)
 
@@ -2334,7 +2334,7 @@ sigfix.swap2(_:)((Swift.Int,Swift.Int) a0)`, `long sigfix.hashed(_:_:)(void *a0,
 long a1, swift.type_metadata *metadata_A, void *witness_A_Hashable)`, `long
 sigfix.Triple.sum()(sigfix.Triple self)`, `void sigfix.Triple.bump(_:)(long a0,
 sigfix.Triple *self)` and `swift.MetadataResponse
-sigfix.Color.type_metadata_accessor(long request)`.
+sigfix.Color.type_metadata_accessor(void)`.
 
 `$s7callfix7AccountC7deposit_3feeS2i_SitF` (vtable slot 7)@`0x3830`,
 `$s7callfix7AccountC8withdrawyS2iKF` (slot 8, throws)@`0x3870`,

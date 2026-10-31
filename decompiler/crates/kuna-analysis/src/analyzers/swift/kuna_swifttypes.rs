@@ -21,7 +21,8 @@
 //! always real, only the field's own type is withheld.
 //!
 //! What binds today: the typed metadata records and value witness tables,
-//! the accessor prototypes (`swift.type_metadata *f(long request)`), the
+//! the accessor prototypes (`swift.MetadataResponse f(void)`: a located
+//! accessor writes its return register before it reads the request), the
 //! `self` of a class's vtable getter (the `swiftself` register, x20 / r13,
 //! which no calling-convention model describes, so it is pinned on the
 //! function as a register-locked parameter) and the `self` of a local
@@ -1015,7 +1016,6 @@ impl<'a> Types<'a> {
         let metadata_t = self.metadata_struct();
         let class_metadata_t = self.class_metadata_struct();
         let vwt_t = self.witness_table_struct();
-        let long = self.tf.get_base(8, type_metatype::TYPE_INT).ok();
         let response_t = self.metadata_response_struct();
         for addr in addrs {
             let Some(ctx) = self.md.contexts.get(&addr) else {
@@ -1082,20 +1082,19 @@ impl<'a> Types<'a> {
                 }
             }
             // An accessor returns a `MetadataResponse`: the metadata and its
-            // state, two words.
-            if let (Some(_), Some(_), Some(long), Some(ret)) = (ctx.accessor, record_t, long.clone(), response_t.clone()) {
-                {
-                    out.swift_types.prototypes.push(PrototypePieces {
-                        name: format!("{path}.type_metadata_accessor"),
-                        outtype: Some(ret),
-                        intypes: vec![long],
-                        innames: vec!["request".to_string()],
-                        first_var_arg_slot: -1,
-                        output_storage: None,
-                        input_storage: Vec::new(),
-                        kuna_library_names: None,
-                    });
-                }
+            // state, two words. The bodies `locate_metadata` admits compute the
+            // address into the return register and never read the request.
+            if let (Some(_), Some(_), Some(ret)) = (ctx.accessor, record_t, response_t.clone()) {
+                out.swift_types.prototypes.push(PrototypePieces {
+                    name: format!("{path}.type_metadata_accessor"),
+                    outtype: Some(ret),
+                    intypes: Vec::new(),
+                    innames: Vec::new(),
+                    first_var_arg_slot: -1,
+                    output_storage: None,
+                    input_storage: Vec::new(),
+                    kuna_library_names: None,
+                });
             }
         }
         if let Some(regs) = regs {

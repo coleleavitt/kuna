@@ -4719,10 +4719,13 @@ every other binary's pass list is byte-identical to before the pass existed):
   read through the wrong name. What then binds: the metadata records as typed
   data (`….type_metadata` as `swift.type_metadata`, `….class_metadata`,
   `….value_witness_table`); the accessor prototypes
-  (`swift.type_metadata *Module.Type.type_metadata_accessor(long request)`, so
-  `return &Module.Type.type_metadata;`); and the `self` of every class vtable
-  getter and of every local protocol's witness getter (the `IsInstance` flag
-  read, so a static property's metatype `self` is left alone; a getter whose
+  (`swift.MetadataResponse Module.Type.type_metadata_accessor(void)`, so
+  `return &Module.Type.type_metadata;`; the call sites pass no argument). A
+  located accessor computes its address into the return register and returns
+  (or tail-calls the runtime with it) without reading the request, so it takes
+  none. A generic or cache accessor reads the request and gets no prototype
+  here. The `self` of every class vtable getter and of every local protocol's
+  witness getter (the `IsInstance` flag read, so a static property's metatype `self` is left alone; a getter whose
   body the linker folded with another type's, or with a member that is not a
   getter, gets no `self` at all — `Namer::ambiguous_self`). Swift passes
   `self` in the `swiftself` register (x20 on arm64, r13 on x86-64), which a
