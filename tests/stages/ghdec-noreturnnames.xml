@@ -44,6 +44,7 @@ c3
   <com>option noreturn_extern off</com>
   <com>option noreturn_externmatch off</com>
   <com>option fdeflowbound off</com>
+  <com>option itaniumeh off</com>
   <com>read symbols</com>
   <com>load function quit_now</com>
   <com>decompile</com>

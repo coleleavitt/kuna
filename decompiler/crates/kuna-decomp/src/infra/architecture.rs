@@ -836,6 +836,8 @@ pub struct Architecture {
     /// (kuna) `option ptrauthtrap`: cut the branch into each arm64e
     /// pointer-auth failure trap.  Default on.
     pub ptrauth_trap: bool,
+    /// (kuna) `option callothernoreturn`: a jump whose target a CALLOTHER forms ends its path as no-return.
+    pub calloter_noreturn: bool,
     /// (kuna) `option chkstkdarwin`: delete the `___chkstk_darwin` stack-probe
     /// calls.  Default on.
     pub chkstk_darwin: bool,
@@ -3388,6 +3390,7 @@ impl Architecture {
             go_bool: 0, // (kuna) option gobool; reset_defaults sets the shipped default (auto)
             go_write_barrier: 0, // (kuna) option gowritebarrier; reset_defaults sets the shipped default (auto)
             ptrauth_trap: false,
+            calloter_noreturn: false,
             chkstk_darwin: false, // (kuna) option chkstkdarwin; reset_defaults sets the shipped default (on)
             outlined_inline: false, // (kuna) option outlinedinline; reset_defaults sets the shipped default (on) // (kuna) option ptrauthtrap; reset_defaults sets the shipped default (on)
             condexe_block_placement: false,
@@ -3851,7 +3854,7 @@ impl Architecture {
         self.struct_headless = crate::kuna_structheadless::StructHeadlessMode::Off; // (kuna) structheadless default `off`: a closed function's parameter read at two or more constant offsets, none of them zero, is declared `struct_N *` with filler over the bytes before its first access; `option structheadless closed` turns it on
         self.decode_halt = true; // (kuna) DIV-151 default-on: a `CPUI_RETURN` kuna planted because it could NOT decode the bytes renders as upstream `PrintC::opReturn`'s `halt_baddata()`/`halt_unimplemented()`/`halt_missing()` pseudo-call rather than a bare `return;`, and carries the upstream truncation + header warnings. Reachable only through the three decode-failure halt types, which no datatest function produces, so it is byte-identical there (0/675); `option decodehalt off` restores the silent `return;`
         self.fastfail_noreturn = true; // (kuna) DIV-119 default-on: REMOVES CODE. Ends the flow at a Windows `int 0x29` (`__fastfail`), whose SLEIGH lifting is a call with no matching push and so gains 8 bytes of stack pointer from the cspec's `extrapop` at every site. Windows-cspec-gated and shape-gated on `swi(0x29:1)`, so it is structurally inert on the datatest corpus and byte-identical there (0/675); restore the unbalanced fall-through with `option fastfailnoreturn off`
-        self.relro_noreturn = false; // (kuna) option relronoreturn: default off, a speed trade (see its catalog row)
+        self.relro_noreturn = true; // (kuna) option relronoreturn: default on, a speed trade (see its catalog row)
         self.msvc_ftol = true; // (kuna) DIV-74 default-on: x86-32-only, and inert unless the binary imports an `__ftol`/`__ftol2`/`__ftol2_sse` symbol. Byte-identical (0/675) — no corpus function carries one of those names. Restore the un-fixed `__ftol()` rendering with `option msvcftol off`
         self.arith_helpers = true; // (kuna) default-on: x86-32 and ARM32 only, inert unless the binary names a helper; 0/675 datatests name one
         self.objc_arc = true; // (kuna) default-on: inert unless the image names an ObjC ARC runtime entry point (0/675 datatests carry one); `option objcarc off` shows the calls again
@@ -3914,6 +3917,7 @@ impl Architecture {
         self.go_morestack = crate::kuna_gomorestack::GoMorestackMode::Auto.as_u8(); // (kuna) fold the Go entry guard on Go images
         self.go_bool = crate::kuna_gobool::GoBoolMode::Auto.as_u8(); // (kuna) narrow Go boolean returns on Go images
         self.go_write_barrier = crate::kuna_gowritebarrier::GoWriteBarrierMode::Auto.as_u8(); // (kuna) fold the Go write barrier on Go images
+        self.calloter_noreturn = true;
         self.ptrauth_trap = true; // (kuna) drop arm64e pointer-auth failure checks; inert without a SoftwareBreakpoint brk #0xc47x trap, 0/675 datatests
         self.outlined_inline = true; // (kuna) inline OUTLINED_FUNCTION_<n> fragments; name-gated, 0/675 datatests
         self.chkstk_darwin = true; // (kuna) drop the Darwin stack probe; inert without a ___chkstk_darwin callee, 0/675 datatests
@@ -4056,7 +4060,7 @@ impl Architecture {
         self.reg_locals = true; // (kuna) option reglocals default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; measured +205 type_match-perfect / 0 lost, 2,207 improved / 10 worse over 10,748 scored functions of the 444 decbench slices
         self.byte_honest = true; // (kuna) default-on: JSON-surface only (no p-code, no emitted C), so the 675-assertion datatest corpus cannot observe it; measured +10 type_match-perfect / 121 improved / 0 worse over 5,298 scored decbench functions
         self.voidtailreturn = false; // (kuna) option voidtailreturn; default-OFF until its corpus bidirectional sweep is recorded in a DIV row
-        self.import_data = false; // (kuna) option importdata; default-off
+        self.import_data = true; // (kuna) option importdata; default-on
         self.goto_next = true; // (kuna) option gotonext default-on: upstream BlockGoto::gotoPrints; see docs/spec/08-structuring.md
         self.cast_implied = true; // (kuna) option castimplied default-on: leaves out only a value-preserving integer conversion C performs itself (argument to a type-locked parameter, assignment to a local or parameter declared that spelling, return, or under another conversion); 1/675 datatest assertion moved (Union #26, the intended form, pinned to upstream by a per-test opt-out), 10 stage assertions moved to the new form, speed within budget; docs/features/castimplied/default-on-evaluation.md
         self.cast_sign = true; // (kuna) option castsign default-on: a frame local or pointer index only ever compared signed, never an operand of + - * <<, and never met by a top-bit constant in == != & | ^, is declared signed; 0/675 datatest assertions and 0 stage assertions moved, test-cli unchanged, the 444-slice typesweep identical, casts 38,703 -> 38,602 on the census corpus, 41 functions fewer and 0 more; docs/features/castsign/default-on-evaluation.md
@@ -4082,7 +4086,7 @@ impl Architecture {
         self.copy_run = true; // (kuna) option copyrun default-on: an unrolled element-copy run prints as memcpy
         self.cortexmpriv = false; // (kuna) DIV-99: default-OFF -- "the core is privileged" is a modelling judgement, not a proof (Cortex-M Thread mode can run unprivileged); ON in the `aggressive` preset, which `auto` selects under 500 KiB, so it is the default rendering for real firmware
         self.float_globals = true; // (kuna) option floatglobals default-on
-        self.itanium_eh = false;
+        self.itanium_eh = true;
         self.itanium_eh_catch_only = false;
         self.vex_zero_upper = true;
         self.vector_abi = true;
@@ -4320,7 +4324,7 @@ impl Architecture {
         self.analysis_iokitclasses = true; // (kuna) IOKit class recovery, XNU images only
         self.analysis_xnutables = true; // (kuna) XNU data tables, XNU images only
         self.analysis_osclassinfo = true; // (kuna) DriverKit class records
-        self.analysis_cfstrings = false; // Mach-O __cfstring constant-string recovery default-off (Mach-O-only pass)
+        self.analysis_cfstrings = true; // Mach-O __cfstring constant-string recovery default-on (Mach-O-only pass)
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
         self.analysis_swiftruntime = true; // Swift runtime prototypes default-on (Swift-detected images only)
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
@@ -4880,6 +4884,11 @@ impl Architecture {
         ctx.go_bool = self.go_bool;
         ctx.go_write_barrier = self.go_write_barrier;
         ctx.chkstk_darwin = self.chkstk_darwin;
+        ctx.brk_userop = self
+            .calloter_noreturn
+            .then(|| self.userops.get_op_by_name(crate::kuna_ptrauthtrap::BREAKPOINT_USEROP))
+            .flatten()
+            .map(|u| u.get_index() as kuna_base::types::uint4);
         ctx.outlined_inline = self.outlined_inline;
         ctx.ptrauth_trap_userop = self
             .ptrauth_trap

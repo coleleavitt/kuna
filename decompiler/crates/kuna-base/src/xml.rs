@@ -2174,7 +2174,7 @@ mod tests {
         // and kuna-dedupitetail-switchgoto / a switch case goto into an unwrapped if clause keeps its target
         // and kuna-vaarg-loop-gcc/-clang / va_arg in loops on a promoted va_list
         // and kuna-vtabletypes / C++ virtual calls through typed vtable slots
-        assert_eq!(count, 718, "corpus file count drifted");
+        assert_eq!(count, 719, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
