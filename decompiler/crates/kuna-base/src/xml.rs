@@ -2171,7 +2171,8 @@ mod tests {
         // and kuna-p69 / latecse, implweight and dirtypool keep the gotonext fixture's output
         // and kuna-unmergecall / gcc -Os cross-jumped call tails
         // and kuna-prelinked / pre-fileset kernelcaches: threaded pointers rebased, a kext cut out
-        assert_eq!(count, 710, "corpus file count drifted");
+        // and kuna-dedupitetail-switchgoto / a switch case goto into an unwrapped if clause keeps its target
+        assert_eq!(count, 711, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

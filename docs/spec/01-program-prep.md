@@ -954,10 +954,16 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   base, and pointer-authentication bits are dropped. The kernel-cache formats
   name the collection a target lies in by its `cacheLevel`, xnu's index of the
   boot (0), System/pageable (1) and Auxiliary (3) collections
-  (`pexpert/gen/kcformat.c`); a collection points only into itself and the ones
-  loaded before it, so the highest level its chains name is its own and those
-  targets rebase from this file's base, while a target in an earlier collection
-  stays unwritten
+  (`pexpert/gen/kcformat.c`). Only targets at the collection's own level can be
+  rebased from this file's base. Neither the header nor the chains state that
+  level (xnu learns it from whoever loads the collection), so it is read from
+  the collections the `__PRELINK_INFO` plist links: no `_BootKCID` is the boot
+  collection (0), `_PageableKCID` an Auxiliary one (3), and `_BootKCID` alone is
+  a System collection or an Auxiliary one built without a System collection,
+  told apart by whichever of levels 1 and 3 its chains name (neither can point
+  into the other's level). With no plist, or chains naming both, the level is
+  unknown and no kernel-collection target is written; targets at other levels
+  are never written
   (`decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (resolve_kernel_cache_levels)`)
   — and one entry is cut out as a thin Mach-O by copying
   its header and load commands to file offset 0. Nothing else moves: every
@@ -4382,16 +4388,22 @@ every other binary's pass list is byte-identical to before the pass existed):
     (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_swiftclassnames.rs (display_class_name)`,
     `Toyota.Foo` under `swiftdemangle`, the runtime spelling off), the same
     mapping the method labels use, while the lookups between the ObjC tables
-    keep the runtime spelling. On a Swift image (one with `__swift5_fieldmd`)
-    under `swifttypes`, a Swift class's layout is left to the field descriptors:
+    keep the runtime spelling. On a Swift image (one with `__swift5_fieldmd`
+    that the Swift pass runs on) under `swifttypes`, a Swift class's layout is
+    left to the field descriptors:
     the ivar list encodes Swift-typed stored properties as nothing, so the ObjC
     pass only declares the record and `swifttypes` completes it with the Swift
     names and types — one struct per class (Toyota: `Toyota.AddMileageViewController`
     once, `Toyota.AddMileageViewModel *viewModel` and `bool nativePush` where
     the ivar list gave `unsigned long` and `char`; before, 3,114 `_TtC…`
-    structs sat beside 4,886 demangled ones). The stage test
+    structs sat beside 4,886 demangled ones). The Swift pass builds layouts
+    when the image is loaded, whatever `swiftmetadata` (which gates only the
+    commit of its facts) says; when it does not run at all (`sourcelang`
+    forced to another language) the ivar list builds the struct, under the
+    demangled name. The stage test
     `tests/stages/kuna-swiftclassnames.xml` proves both spellings on
-    `macho_swift_classnames_arm64`. Off (the option is read
+    `macho_swift_classnames_arm64`, and both owners of the layout on
+    `macho_swift_classnames_fieldmd_arm64`. Off (the option is read
     at load as `KUNA_OBJCIVARS` for the structs and at the commit for `self`
     and the fold, so it is set before the `load file` it applies to), no class
     struct is interned, `self` stays `id`, the offset variable keeps its name
