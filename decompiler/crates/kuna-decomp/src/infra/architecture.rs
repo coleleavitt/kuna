@@ -2657,6 +2657,11 @@ pub struct Architecture {
     /// (output-changing: it adds named data and function symbols);
     /// `--option itaniumrtti on` enables it.
     pub analysis_itaniumrtti: bool,
+    /// (kuna `vtabletypes`) Type each recovered Itanium vtable as a `C_vtbl`
+    /// structure of named method pointers, give the class structure a `vptr`
+    /// field of that type, and fold a load of a vtable slot to the method it
+    /// holds; see [`crate::kuna_vtabletypes`]. Default **on**.
+    pub analysis_vtabletypes: bool,
     /// (kuna) Gate the Aggressive Instruction Finder gap-walk (`aif`), the third
     /// Listing/xref consumer; default **off**. The kuna analog of Ghidra's
     /// `AggressiveInstructionFinderAnalyzer` (which ships `setDefaultEnablement(false)`
@@ -3711,6 +3716,7 @@ impl Architecture {
             analysis_fidcallees: true,
             analysis_rtti: false,
             analysis_itaniumrtti: false,
+            analysis_vtabletypes: true,
             analysis_aif: false,
             analysis_aifstrict: false,
             analysis_aifcorroborate: false,
@@ -4270,6 +4276,7 @@ impl Architecture {
         self.analysis_fidcallees = true;
         self.analysis_rtti = false; // MSVC RTTI / vftable recovery default-off (PE-only, output-changing)
         self.analysis_itaniumrtti = false; // (kuna, NOVEL) Itanium RTTI / vtable recovery default-off (ELF-only, output-changing)
+        self.analysis_vtabletypes = true;
         self.analysis_aif = false; // Aggressive Instruction Finder gap-walk default-off
         // (kuna, GH-299) AIF gap-cursor aligned slide — default-OFF (it REMOVES
         // entries), carried by the `aggressive` preset.
@@ -4990,6 +4997,7 @@ impl Architecture {
         ctx.pass_through = self.pass_through; // passthrough
         ctx.mixed_tail_ret = self.mixed_tail_ret; // mixedtailret
         ctx.callee_dead_arg = self.callee_dead_arg; // calleedeadarg
+        ctx.vtable_types = self.analysis_vtabletypes;
         ctx.hidden_ret_arg = self.hidden_ret_arg; // hiddenretarg
         ctx.callee_read_arg = self.callee_read_arg; // calleereadarg
         ctx.push_pad_read = self.push_pad_read; // pushpadread

@@ -142,24 +142,26 @@ impl Flavor {
 
 /// A decoded Itanium typeinfo object.
 #[derive(Clone, Debug)]
-struct TypeInfo {
+pub(super) struct TypeInfo {
     /// VMA of the typeinfo object (`_ZTI<C>`).
-    addr: u64,
+    pub(super) addr: u64,
     /// VMA of its NUL-terminated type-name string (`_ZTS<C>`).
     name_addr: u64,
     /// The demangled qualified class name (`leveldb::Env`, `Widget`).
-    class: String,
+    pub(super) class: String,
+    /// The demangled class name before sanitizing (`Vec<int>`).
+    pub(super) demangled: String,
     /// Direct base classes as `(base typeinfo VMA, byte displacement of the base
     /// subobject within this class)`. Empty for [`Flavor::Class`]. The displacement
     /// is the Itanium `offset_flags >> 8` for a vmi base and 0 for an si base —
     /// the datum the MSVC sibling pass discards with its `pmd` fields.
-    bases: Vec<(u64, i64)>,
+    pub(super) bases: Vec<(u64, i64)>,
     /// Virtual bases as `(base typeinfo VMA, offset of the vbase-offset word from
     /// the vtable address point)`: for a base with `__virtual_mask` set,
     /// `offset_flags >> 8` locates the displacement in the vtable instead of being
     /// it. Moved into [`Self::bases`] once the vtable is known
     /// ([`resolve_virtual_bases`]).
-    virtual_bases: Vec<(u64, i64)>,
+    pub(super) virtual_bases: Vec<(u64, i64)>,
     /// Byte extent of the object, used to reject a pointer *inside* a typeinfo from
     /// being read as a vtable header.
     size: u64,
@@ -168,21 +170,21 @@ struct TypeInfo {
 /// A recovered sub-vtable: one polymorphic base subobject's slice of a `_ZTV<C>`
 /// object.
 #[derive(Clone, Debug)]
-struct SubVtable {
+pub(super) struct SubVtable {
     /// VMA of the sub-vtable's `offset-to-top` word — what `_ZTV<C>` names for the
     /// primary, and what a secondary base subobject's vptr is derived from.
     header: u64,
     /// VMA of the first virtual slot (the value an object's vptr holds).
-    first_slot: u64,
+    pub(super) first_slot: u64,
     /// The `offset-to-top` displacement: 0 for the primary sub-vtable, negative for
     /// a secondary (the byte distance back to the most-derived object's start).
-    offset_to_top: i64,
+    pub(super) offset_to_top: i64,
     /// The typeinfo (hence the most-derived class) this sub-vtable belongs to.
-    typeinfo: u64,
+    pub(super) typeinfo: u64,
     /// The virtual-method target VAs, in slot order. A slot filled by the dynamic
     /// loader (an imported method) is recorded as `None` so slot INDICES stay
     /// faithful to the ABI while carrying no name.
-    slots: Vec<Option<u64>>,
+    pub(super) slots: Vec<Option<u64>>,
 }
 
 /// The Itanium (GCC/Clang) RTTI + vtable recovery pass (gate id `itaniumrtti`).
@@ -201,50 +203,78 @@ impl AnalysisPass for ItaniumRttiPass {
 
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
         let mut out = AnalysisOutput::default();
-
-        // The MSVC ABI owns PE. A Mach-O's pointer slots are chained-fixup
-        // entries, so they are resolved into a copy of the sections first.
-        let macho = match ctx.file.format() {
-            BinaryFormat::Elf => None,
-            BinaryFormat::MachO => Some(MachoSlots::new(ctx.file, ctx.bytes)),
-            _ => return out,
-        };
-
-        let rk = RefKind::new(
-            ctx.file.is_64(),
-            0,
-            if ctx.file.is_little_endian() { End::Little } else { End::Big },
-        );
-        // Discovery first, and bail before building anything else: a plain-C binary
-        // and a `-fno-rtti` C++ build both have no typeinfo, and that is the common
-        // case this pass must stay nearly free on.
-        let ptr = rk.ptr_size() as u64;
-        let candidates = match &macho {
-            None => discover_typeinfos(ctx.file, ptr),
-            Some(m) => m.discover_typeinfos(ctx.file, ptr),
-        };
-        if candidates.is_empty() {
-            return out;
+        if let Some(rec) = recover(ctx) {
+            emit(&rec.typeinfos, &rec.subs, &rec.rk, &mut out);
         }
-        let img = match &macho {
-            None => ImageBytes::new(ctx.file),
-            Some(m) => ImageBytes::from_spans(m.sections.iter().map(|(a, d)| (*a, d.as_slice())).collect()),
-        };
-        let mut typeinfos = decode_typeinfos(&img, &rk, &candidates);
-        if typeinfos.is_empty() {
-            return out;
-        }
-
-        let text = TextRanges::new(ctx.file);
-        let relocated = match &macho {
-            None => relocated_slots(ctx.file),
-            Some(m) => m.binds.clone(),
-        };
-        let subs = recover_subvtables(&img, &rk, &text, &relocated, &typeinfos);
-        resolve_virtual_bases(&img, &rk, &mut typeinfos, &subs);
-        emit(&typeinfos, &subs, &rk, &mut out);
         out
     }
+}
+
+/// The recovered Itanium class graph: every decoded typeinfo and every
+/// sub-vtable that names one.
+pub(super) struct Recovery {
+    pub(super) typeinfos: Vec<TypeInfo>,
+    pub(super) subs: Vec<SubVtable>,
+    pub(super) rk: RefKind,
+}
+
+/// Discover, decode and walk the image's typeinfo objects and vtables, or
+/// `None` for an image with none (a C binary, a `-fno-rtti` build, a PE).
+pub(super) fn recover(ctx: &AnalysisCtx) -> Option<Recovery> {
+    // The MSVC ABI owns PE. A Mach-O's pointer slots are chained-fixup
+    // entries, so they are resolved into a copy of the sections first.
+    let macho = match ctx.file.format() {
+        BinaryFormat::Elf => None,
+        BinaryFormat::MachO => Some(MachoSlots::new(ctx.file, ctx.bytes)),
+        _ => return None,
+    };
+
+    let rk = RefKind::new(
+        ctx.file.is_64(),
+        0,
+        if ctx.file.is_little_endian() { End::Little } else { End::Big },
+    );
+    // Discovery first, and bail before building anything else: a plain-C binary
+    // and a `-fno-rtti` C++ build both have no typeinfo, and that is the common
+    // case this pass must stay nearly free on.
+    let ptr = rk.ptr_size() as u64;
+    let mut candidates = match &macho {
+        None => discover_typeinfos(ctx.file, ptr),
+        Some(m) => m.discover_typeinfos(ctx.file, ptr),
+    };
+    let copied = match &macho {
+        None => copied_abi_vtables(ctx.file),
+        Some(_) => Vec::new(),
+    };
+    if candidates.is_empty() && copied.is_empty() {
+        return None;
+    }
+    let img = match &macho {
+        None => ImageBytes::new(ctx.file),
+        Some(m) => ImageBytes::from_spans(m.sections.iter().map(|(a, d)| (*a, d.as_slice())).collect()),
+    };
+    if !copied.is_empty() {
+        let points: HashMap<u64, Flavor> = copied.iter().map(|&(a, f)| (a + 2 * ptr, f)).collect();
+        for (slot, value) in img.scan_ptr_slots(&rk, &points.keys().copied().collect()) {
+            if !candidates.iter().any(|&(a, _)| a == slot) {
+                candidates.push((slot, Some(points[&value])));
+            }
+        }
+        candidates.sort_by_key(|&(a, _)| a);
+    }
+    let mut typeinfos = decode_typeinfos(&img, &rk, &candidates);
+    if typeinfos.is_empty() {
+        return None;
+    }
+
+    let text = TextRanges::new(ctx.file);
+    let relocated = match &macho {
+        None => relocated_slots(ctx.file),
+        Some(m) => m.binds.clone(),
+    };
+    let subs = recover_subvtables(&img, &rk, &text, &relocated, &typeinfos);
+    resolve_virtual_bases(&img, &rk, &mut typeinfos, &subs);
+    Some(Recovery { typeinfos, subs, rk })
 }
 
 /// A Mach-O's sections with every chained-fixup slot replaced by what dyld
@@ -326,6 +356,18 @@ impl MachoSlots {
         out.sort_by_key(|&(a, _)| a);
         out
     }
+}
+
+/// The `__cxxabiv1` typeinfo vtables a non-PIE executable defines itself: its
+/// code refers to them by absolute address, so the linker copies each into the
+/// image (`R_X86_64_COPY`) and every typeinfo's vptr word is a plain pointer two
+/// words into the copy, with no relocation to find it by. The copies keep their
+/// `.dynsym` names through `strip`.
+fn copied_abi_vtables(file: &object::File) -> Vec<(u64, Flavor)> {
+    file.dynamic_symbols()
+        .filter(|sym| sym.address() != 0)
+        .filter_map(|sym| Some((sym.address(), Flavor::from_abi_vtable(sym.name().ok()?)?)))
+        .collect()
 }
 
 /// The address of every slot a dynamic relocation writes. A vtable slot whose file
@@ -414,7 +456,7 @@ fn decode_typeinfos(
     const MAX_NAME: usize = 4096;
 
     let ptr = rk.ptr_size() as u64;
-    let mut named: Vec<(u64, Option<Flavor>, u64, String)> = Vec::new();
+    let mut named: Vec<(u64, Option<Flavor>, u64, String, String)> = Vec::new();
     for &(addr, flavor) in candidates {
         // Apple's arm64 ABI sets bit 63 of the name pointer on a type whose
         // typeinfo may be duplicated across images (compared by string, not by
@@ -425,22 +467,22 @@ fn decode_typeinfos(
         let Some(mangled) = img.read_cstr(name_addr, MAX_NAME) else {
             continue;
         };
-        let Some(class) = demangle_typeinfo_name(&mangled).map(|c| sanitize_class_name(&c))
-        else {
+        let Some(demangled) = demangle_typeinfo_name(&mangled) else {
             continue;
         };
+        let class = sanitize_class_name(&demangled);
         if class.is_empty() {
             continue;
         }
-        named.push((addr, flavor, name_addr, class));
+        named.push((addr, flavor, name_addr, class, demangled));
     }
     let accepted: HashSet<u64> = named.iter().map(|&(a, ..)| a).collect();
 
     let mut out = Vec::new();
-    for (addr, flavor, name_addr, class) in named {
+    for (addr, flavor, name_addr, class, demangled) in named {
         let flavor = flavor.unwrap_or_else(|| sniff_flavor(img, rk, addr, &accepted));
         let (bases, virtual_bases, size) = read_bases(img, rk, addr, flavor, &accepted);
-        out.push(TypeInfo { addr, name_addr, class, bases, virtual_bases, size });
+        out.push(TypeInfo { addr, name_addr, class, demangled, bases, virtual_bases, size });
     }
     out
 }
@@ -1054,6 +1096,7 @@ mod tests {
             addr: 0x7080,
             name_addr: 0x5000,
             class: "Drawable".into(),
+            demangled: "Drawable".into(),
             bases: vec![],
             virtual_bases: vec![],
             size: 16,
@@ -1062,6 +1105,7 @@ mod tests {
             addr: 0x70c0,
             name_addr: 0x5020,
             class: "Widget".into(),
+            demangled: "Widget".into(),
             bases: vec![(0x7080, 16)],
             virtual_bases: vec![],
             size: 56,

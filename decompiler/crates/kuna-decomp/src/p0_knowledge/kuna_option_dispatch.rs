@@ -1390,6 +1390,7 @@ kuna_options! { self, p1;
     "itaniumrtti" => {
         on_off!(analysis_itaniumrtti, "Itanium (GCC/Clang) RTTI / vtable recovery pass")
     },
+    "vtabletypes" => on_off!(analysis_vtabletypes, "typed C++ vtables and vtable slot folding"),
     "aif" => {
         on_off!(analysis_aif, "Aggressive Instruction Finder gap-walk Listing consumer")
     },
