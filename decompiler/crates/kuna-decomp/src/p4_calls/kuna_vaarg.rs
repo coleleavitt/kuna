@@ -1,35 +1,53 @@
 //! (kuna `vaarg`) The x86-64 SysV `va_arg` expansion prints as `va_arg(ap, T)`.
 //!
-//! `va_arg(ap, T)` on a `va_list` in memory compiles to a diamond (gcc
-//! `ix86_gimplify_va_arg`, clang `X86_64ABIInfo::EmitVAArg`): the block `C`
-//! loads `gp_offset` (or `fp_offset` for a double) and branches; the register
-//! arm `R` stores the offset plus `8n` (or 16) and forms
-//! `reg_save_area + offset`; the memory arm `M` loads `overflow_arg_area` and
-//! stores it plus the slot size; the join `J` reads `T` through the merged
-//! address, or merges the two loads. kuna printed both arms:
+//! `va_arg(ap, T)` compiles to a test of the offset into the register save
+//! area (gcc `ix86_gimplify_va_arg`, clang `X86_64ABIInfo::EmitVAArg`): below
+//! `48 - 8n` (`176 - 16` for a double) the register arm `R` reads
+//! `reg_save_area + offset` and steps the offset, otherwise the memory arm `M`
+//! reads `overflow_arg_area` and steps that pointer. kuna printed both arms.
 //!
-//! ```text
-//! v2 = argp->gp_offset;
-//! if (0x29 <= v2) { v7 = argp->overflow_arg_area; argp->overflow_arg_area = &v7[2]; }
-//! else { v7 = (int *)((unsigned long)v2 + (long)argp->reg_save_area); argp->gp_offset = v2 + 8; }
-//! ... *v7
-//! ```
+//! The va_list state takes one of three forms, and [`ActionVaArg`] collects
+//! each into *webs* of values: the offset web (`gp_offset` or `fp_offset`)
+//! and the overflow web.
+//! - Through a `va_list` pointer `ap` (a `va_list` parameter, or one whose
+//!   address escapes): each site loads `ap->gp_offset` and the arms store the
+//!   steps back; a web is that site's loads and steps.
+//! - Register-cached (clang loops): one load of `ap->gp_offset` before the
+//!   loop, the offset carried in a register and stored back after each step.
+//! - SSA (a `va_list` local that heritage promoted, gcc and clang at every
+//!   level): the offset web starts at the `va_start` constant (`8` per named
+//!   integer argument, `48 + 16` per named double) and the overflow web at the
+//!   caller's stack arguments (`SP + 8`); no memory `va_list` is left.
 //!
-//! [`ActionVaArg`] matches the diamond: every access is a LOAD or STORE at a
-//! constant offset from one pointer `ap` (0 `gp_offset`, 4 `fp_offset`, 8
-//! `overflow_arg_area`, 16 `reg_save_area`); the branch, evaluated on the
-//! offset, sends the in-register values (below `48 - 8n`, or `176 - 16`) to
-//! `R` and the others to `M`; `R` steps the offset by what it consumed and `M`
-//! the overflow pointer by the value's size rounded up to 8; the value is `n * 8` (or 16)
-//! bytes or fewer. When the join reads `T` through the merged address, that
-//! LOAD becomes the CALLOTHER `va_arg(ap)` and both arms go. When each arm
-//! loads the value, the arms may otherwise only do the same thing with it
-//! (copy or store it alike, checked at the join's MULTIEQUALs); the CALLOTHER
-//! goes before the branch, the register arm's load reads it, its offset step
-//! goes (with the INDIRECTs that STORE left), and the memory arm goes with the
-//! branch. The call's third input is 1 for the SSE half. It prints
-//! `va_arg(ap,T)`, `T` the type of its output, or for an untyped output (or a
-//! piece of a union) `double` (SSE, 8 bytes) or `int`/`long` by size.
+//! A web member may only feed other members, the site tests, the read
+//! addresses and (pointer forms) the stores back to its `ap` field; anything
+//! else and its sites stay as they are. A read is a LOAD through
+//! `reg_save_area + offset`, through an overflow member, or through the join
+//! of the two.
+//!
+//! The arms need not meet at a join. gcc duplicates the code after the read
+//! into each arm (a loop's latch, or the whole rest of the loop once the
+//! offset passes the limit). With every read taken as an abstract `va_arg`,
+//! the action checks that the path from `M` behaves as the path from `R`:
+//! it walks the two in step, matching their loads, stores, calls, reads and
+//! returns, their branch conditions (up to `x < c` / `x >= c` and `==` / `!=`
+//! swaps) and the values they hand to the blocks where they meet. A site test
+//! met on the way counts as already folded, going to its register arm; that is
+//! how gcc's overflow loop, which never tests the offset again, matches the
+//! register loop through the test.
+//!
+//! The webs that share a site, a read or a join fold together, or not at all,
+//! since an SSA offset or a register-cached one is only right while every
+//! read that steps it is still there: every read becomes the CALLOTHER
+//! `va_arg(ap, class)`, every site's edge to `M` goes and with it the blocks
+//! only `M` reached, and the stores back to `ap` go. The SSA form has no `ap`
+//! to pass: the call's `ap` input is the constant 0, printed `ap`, and the
+//! action adds the `va_start(ap, last)` the promoted prologue lost (`last` as
+//! in `vastart`). The class input is 1 for the SSE half. It prints
+//! `va_arg(ap,T)`, `T` the type of its output, or `double` for an SSE read of
+//! an integer or untyped output, and `int`/`long` by size for an untyped one.
+
+use std::collections::{HashMap, HashSet};
 
 use kuna_base::types::{int4, uintb};
 use kuna_num::opcodes::OpCode;
@@ -61,373 +79,1198 @@ fn field(data: &Funcdata, mut v: VarnodeId) -> Option<(VarnodeId, u64)> {
     Some((v, off))
 }
 
-/// The pointer a LOAD or STORE goes through, and its access size.
-fn access(data: &Funcdata, op: OpId) -> Option<(OpCode, VarnodeId, int4)> {
-    let o = data.obank().get(op)?;
-    let size = match o.code() {
-        OpCode::CPUI_LOAD => data.vbank().get(o.get_out()?)?.get_size(),
-        OpCode::CPUI_STORE => data.vbank().get(o.get_in(2)?)?.get_size(),
-        _ => return None,
-    };
-    Some((o.code(), o.get_in(1)?, size))
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Class {
+    Gp,
+    Fp,
 }
 
-/// Is `v` the `ap` field at `off` read by a LOAD of `size` bytes? Its LOAD op.
-fn loaded(data: &Funcdata, v: VarnodeId, ap: VarnodeId, off: u64, size: int4) -> Option<OpId> {
-    let mut v = v;
-    for _ in 0..3 {
-        let d = data.vbank().get(v)?.get_def()?;
-        let o = data.obank().get(d)?;
+/// What a value is to the va_list state.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Va {
+    /// A member of offset web `w`.
+    Off(usize),
+    /// A member of overflow web `w`.
+    Ovf(usize),
+    /// `ap->reg_save_area`, loaded.
+    Save,
+    /// `reg_save_area + offset`, the offset of web `w`.
+    Addr(usize),
+    /// The join of a register address of offset web `w` and overflow web `o`.
+    Merged(usize, usize),
+}
+
+#[derive(Default)]
+struct Web {
+    class: Option<Class>,
+    /// The `va_list` pointer of a pointer-form web.
+    ap: Option<VarnodeId>,
+    /// The `va_start` constant of an SSA offset web.
+    init: Option<u64>,
+    bad: bool,
+}
+
+struct Site {
+    c: BlockId,
+    r: BlockId,
+    m: BlockId,
+    web: usize,
+}
+
+/// A read: the LOAD, its offset web (register or merged address) and its
+/// overflow web (overflow or merged address).
+#[derive(Clone, Copy)]
+struct Read {
+    off: Option<usize>,
+    ovf: Option<usize>,
+}
+
+#[derive(Default)]
+struct Cls {
+    va: HashMap<VarnodeId, Va>,
+    webs: Vec<Web>,
+    sites: Vec<Site>,
+    /// Site tests (the compare and any BOOL_NEGATEs) and their CBRANCHes.
+    guards: HashSet<OpId>,
+    /// Stores of a web member back to its `ap` field, by web.
+    stores: HashMap<OpId, usize>,
+    reads: HashMap<OpId, Read>,
+    /// The LOADs of each `(base, offset)` field, by output.
+    fields: HashMap<(VarnodeId, u64), Vec<VarnodeId>>,
+}
+
+fn def_op(data: &Funcdata, v: VarnodeId) -> Option<(OpId, &crate::op::PcodeOp)> {
+    let d = data.vbank().get(v)?.get_def()?;
+    Some((d, data.obank().get(d)?))
+}
+
+fn constant(data: &Funcdata, v: VarnodeId) -> Option<u64> {
+    data.vbank().get(v).filter(|n| n.is_constant()).map(|n| n.get_offset())
+}
+
+fn size(data: &Funcdata, v: VarnodeId) -> int4 {
+    data.vbank().get(v).map_or(0, |n| n.get_size())
+}
+
+fn is_sp(data: &Funcdata, v: VarnodeId) -> bool {
+    data.vbank().get(v).is_some_and(|n| n.is_spacebase() && n.is_input())
+}
+
+/// The stack offset of `SP + c`, through COPYs and CASTs.
+fn sp_offset(data: &Funcdata, mut v: VarnodeId) -> Option<i64> {
+    for _ in 0..4 {
+        let (_, o) = def_op(data, v)?;
         match o.code() {
-            OpCode::CPUI_LOAD => {
-                let (_, p, s) = access(data, d)?;
-                return (s == size && field(data, p) == Some((ap, off))).then_some(d);
-            }
-            OpCode::CPUI_COPY | OpCode::CPUI_INT_ZEXT | OpCode::CPUI_INT_SEXT | OpCode::CPUI_CAST => v = o.get_in(0)?,
+            OpCode::CPUI_COPY | OpCode::CPUI_CAST => v = o.get_in(0)?,
+            OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRSUB if is_sp(data, o.get_in(0)?) => return Some(constant(data, o.get_in(1)?)? as i64),
             _ => return None,
         }
     }
     None
 }
 
-struct Site {
-    c: BlockId,
-    to_m: int4,
-    r: BlockId,
-    m: BlockId,
-    ap: VarnodeId,
-    /// The J LOAD through the merged address, or the register arm's value LOAD.
-    value: OpId,
-    /// The address MULTIEQUAL, in the merged-address form.
-    addr_phi: Option<OpId>,
-    /// The register arm's offset STORE.
-    step_store: OpId,
-    /// The value comes from the SSE half of the save area (`fp_offset`).
-    sse: bool,
-}
-
-fn defined_in(data: &Funcdata, v: VarnodeId, arm: BlockId) -> bool {
-    data.vbank().get(v).and_then(|n| n.get_def()).and_then(|d| data.obank().get(d)).and_then(|o| o.get_parent()) == Some(arm)
-}
-
-/// The op whose output is `v`, when it is a COPY of `of` in `arm`.
-fn copy_of(data: &Funcdata, v: VarnodeId, of: VarnodeId, arm: BlockId) -> bool {
-    defined_in(data, v, arm)
-        && data.vbank().get(v).and_then(|n| n.get_def()).and_then(|d| data.obank().get(d)).is_some_and(|o| o.code() == OpCode::CPUI_COPY && o.get_in(0) == Some(of))
-}
-
-fn arm_ops(data: &Funcdata, b: BlockId) -> Vec<OpId> {
-    data.bb_ops(b).into_iter().filter(|&o| data.obank().get(o).is_some_and(|p| p.code() != OpCode::CPUI_BRANCH)).collect()
-}
-
-fn match_site(data: &Funcdata, c: BlockId) -> Option<Site> {
+/// The site test of CBRANCH block `c`: the tested value, the test ops, the
+/// class, and the register and memory arms.
+fn guard(data: &Funcdata, c: BlockId) -> Option<(VarnodeId, Vec<OpId>, Class, BlockId, BlockId)> {
     let (t, f) = taken(data, c)?;
     let branch = data.bb_op_tail(c)?;
     let cond = data.obank().get(branch)?.get_in(1)?;
-    // The offset the branch tests, loaded from `ap`.
-    let cmp = data.obank().get(data.vbank().get(cond)?.get_def()?)?;
+    let mut ops = vec![branch];
+    let mut v = cond;
+    let cmp = loop {
+        let (d, o) = def_op(data, v)?;
+        if data.descend_snapshot(v).len() != 1 {
+            return None;
+        }
+        ops.push(d);
+        match o.code() {
+            OpCode::CPUI_BOOL_NEGATE => v = o.get_in(0)?,
+            OpCode::CPUI_INT_LESS | OpCode::CPUI_INT_LESSEQUAL | OpCode::CPUI_INT_SLESS | OpCode::CPUI_INT_SLESSEQUAL => break o,
+            _ => return None,
+        }
+        if ops.len() > 4 {
+            return None;
+        }
+    };
     let (a, b) = (cmp.get_in(0)?, cmp.get_in(1)?);
-    let tested = if data.vbank().get(a)?.is_constant() { b } else { a };
-    let ld = data.obank().get(data.vbank().get(tested)?.get_def()?)?;
-    let tested_load = if ld.code() == OpCode::CPUI_LOAD { data.vbank().get(tested)?.get_def()? } else { return None };
-    let (_, p, size) = access(data, tested_load)?;
-    let (ap, off) = field(data, p)?;
-    let (sse, limit, step) = match (off, size) {
-        (0, 4 | 8) => (false, 48u64, 8u64),
-        (4, 4) => (true, 176, 16),
+    let x = match (constant(data, a), constant(data, b)) {
+        (Some(_), None) => b,
+        (None, Some(_)) => a,
         _ => return None,
     };
-    let all = [c];
-    let goes = |x: u64| eval(data, cond, &[(tested, x)], &all, 0).map(|v| if v != 0 { t } else { f });
-    let (r, m) = (goes(if sse { 48 } else { 0 })?, goes(limit)?);
-    if r == m {
+    if !matches!(size(data, x), 4 | 8) {
         return None;
     }
-    // The registers it consumes: the smallest offset the branch sends away.
-    let n = (1..=2u64).find(|&n| goes(limit - step * n) == Some(r) && goes(limit - step * n + step) == Some(m))?;
-    if sse && n != 1 {
+    let goes = |val: u64| eval(data, cond, &[(x, val)], &[c], 0).map(|r| if r != 0 { t } else { f });
+    let arms = |lo: u64, limit: u64, step: u64, most: u64| -> Option<(BlockId, BlockId)> {
+        let (r, m) = (goes(lo)?, goes(limit)?);
+        (r != m && (1..=most).any(|n| goes(limit - step * n) == Some(r) && goes(limit - step * n + step) == Some(m))).then_some((r, m))
+    };
+    let (class, (r, m)) = match arms(0, 48, 8, 2) {
+        Some(rm) => (Class::Gp, rm),
+        None => (Class::Fp, arms(48, 176, 16, 1)?),
+    };
+    if r == c || m == c || data.bblocks_ref().block(r).size_in() != 1 {
         return None;
     }
-    let consumed = step * n;
-    let bb = |x: BlockId| data.bblocks_ref().block(x);
-    if bb(r).size_in() != 1 || bb(m).size_in() != 1 || bb(r).size_out() != bb(m).size_out() || bb(r).size_out() > 1 {
-        return None;
+    Some((x, ops, class, r, m))
+}
+
+impl Cls {
+    fn new_web(&mut self, class: Option<Class>) -> usize {
+        self.webs.push(Web { class, ..Web::default() });
+        self.webs.len() - 1
     }
-    // Both arms reach one join, or both return.
-    let join = (bb(r).size_out() == 1).then(|| bb(r).get_out(0));
-    if let Some(j) = join {
-        if bb(m).get_out(0) != j || bb(j).size_in() < 2 {
+
+    /// Collect the offset web through `x`.
+    fn offset_web(&mut self, data: &Funcdata, x: VarnodeId, class: Class) -> Option<usize> {
+        if let Some(Va::Off(w)) = self.va.get(&x) {
+            return (self.webs[*w].class == Some(class)).then_some(*w);
+        }
+        let mut members: HashSet<VarnodeId> = HashSet::new();
+        let mut work = vec![x];
+        let mut addrs: Vec<(OpId, VarnodeId)> = Vec::new();
+        let mut stores = Vec::new();
+        let mut init = None;
+        let mut ap = None;
+        let mut compares = Vec::new();
+        let field_off = if class == Class::Gp { 0 } else { 4 };
+        while let Some(v) = work.pop() {
+            if !members.insert(v) || members.len() > 64 {
+                if members.len() > 64 {
+                    return None;
+                }
+                continue;
+            }
+            match def_op(data, v) {
+                None => return None,
+                Some((_, o)) => match o.code() {
+                    OpCode::CPUI_COPY | OpCode::CPUI_CAST | OpCode::CPUI_INT_ZEXT | OpCode::CPUI_INT_SEXT | OpCode::CPUI_INDIRECT | OpCode::CPUI_MULTIEQUAL => {
+                        let n = if matches!(o.code(), OpCode::CPUI_MULTIEQUAL) { o.num_input() } else { 1 };
+                        for i in 0..n {
+                            let input = o.get_in(i)?;
+                            match constant(data, input) {
+                                Some(k) => {
+                                    let ok = match class {
+                                        Class::Gp => k % 8 == 0 && k <= 48,
+                                        Class::Fp => (48..=176).contains(&k) && (k - 48) % 16 == 0,
+                                    };
+                                    if !ok || init.is_some_and(|i| i != k) {
+                                        return None;
+                                    }
+                                    init = Some(k);
+                                }
+                                None => work.push(input),
+                            }
+                        }
+                    }
+                    OpCode::CPUI_INT_ADD if constant(data, o.get_in(1)?).is_some() => work.push(o.get_in(0)?),
+                    OpCode::CPUI_LOAD => {
+                        let (base, off) = field(data, o.get_in(1)?)?;
+                        if off != field_off || size(data, v) != 4 || ap.is_some_and(|a| a != base) {
+                            return None;
+                        }
+                        ap = Some(base);
+                    }
+                    _ => return None,
+                },
+            }
+            for u in data.descend_snapshot(v) {
+                let o = data.obank().get(u)?;
+                let out = o.get_out();
+                match o.code() {
+                    OpCode::CPUI_COPY | OpCode::CPUI_CAST | OpCode::CPUI_INT_ZEXT | OpCode::CPUI_INT_SEXT | OpCode::CPUI_MULTIEQUAL => work.push(out?),
+                    OpCode::CPUI_INDIRECT if o.get_in(0) == Some(v) => work.push(out?),
+                    OpCode::CPUI_INT_ADD => {
+                        let other = if o.get_in(0) == Some(v) { o.get_in(1)? } else { o.get_in(0)? };
+                        if constant(data, other).is_some() {
+                            work.push(out?);
+                        } else {
+                            addrs.push((u, other));
+                        }
+                    }
+                    OpCode::CPUI_INT_LESS | OpCode::CPUI_INT_LESSEQUAL | OpCode::CPUI_INT_SLESS | OpCode::CPUI_INT_SLESSEQUAL => compares.push(u),
+                    OpCode::CPUI_STORE if o.get_in(2) == Some(v) => stores.push(u),
+                    _ => return None,
+                }
+            }
+        }
+        if init.is_some() == ap.is_some() {
+            return None;
+        }
+        if compares.iter().any(|c| !self.guards.contains(c)) {
+            return None;
+        }
+        for &s in &stores {
+            let p = data.obank().get(s)?.get_in(1)?;
+            if ap.is_none() || field(data, p) != Some((ap?, field_off)) {
+                return None;
+            }
+        }
+        let w = self.new_web(Some(class));
+        self.webs[w].init = init;
+        self.webs[w].ap = ap;
+        for &m in &members {
+            self.va.insert(m, Va::Off(w));
+        }
+        for s in stores {
+            self.stores.insert(s, w);
+        }
+        for (add, save) in addrs {
+            if !self.save_area(data, save, ap) || data.obank().get(add).and_then(|o| o.get_out()).is_none_or(|o| size(data, o) != 8) {
+                self.webs[w].bad = true;
+                continue;
+            }
+            let out = data.obank().get(add)?.get_out()?;
+            self.address(data, out, w);
+        }
+        Some(w)
+    }
+
+    /// Is `v` the register save area: `SP + c` for an SSA web, the loaded
+    /// `ap->reg_save_area` for a pointer-form one?
+    fn save_area(&mut self, data: &Funcdata, v: VarnodeId, ap: Option<VarnodeId>) -> bool {
+        match ap {
+            None => sp_offset(data, v).is_some_and(|c| c < 0),
+            Some(ap) => {
+                let ok = def_op(data, v).is_some_and(|(_, o)| o.code() == OpCode::CPUI_LOAD && o.get_in(1).and_then(|p| field(data, p)) == Some((ap, 16)) && size(data, v) == 8);
+                if ok {
+                    self.va.insert(v, Va::Save);
+                }
+                ok
+            }
+        }
+    }
+
+    /// Record register address `v` of offset web `w` and what reads it.
+    fn address(&mut self, data: &Funcdata, v: VarnodeId, w: usize) {
+        let mut work = vec![v];
+        while let Some(v) = work.pop() {
+            if self.va.insert(v, Va::Addr(w)).is_some() {
+                continue;
+            }
+            for u in data.descend_snapshot(v) {
+                let Some(o) = data.obank().get(u) else { continue };
+                match o.code() {
+                    OpCode::CPUI_COPY | OpCode::CPUI_CAST => work.extend(o.get_out()),
+                    OpCode::CPUI_LOAD if o.get_in(1) == Some(v) => {
+                        self.reads.insert(u, Read { off: Some(w), ovf: None });
+                    }
+                    OpCode::CPUI_MULTIEQUAL => {}
+                    _ => self.webs[w].bad = true,
+                }
+            }
+        }
+    }
+
+    /// Collect the overflow web through `x`, rooted at `SP + 8k` (or `SP`
+    /// itself, a phi input) or at the loaded `ap->overflow_arg_area`.
+    fn overflow_web(&mut self, data: &Funcdata, x: VarnodeId) -> Option<usize> {
+        if let Some(Va::Ovf(w)) = self.va.get(&x) {
+            return Some(*w);
+        }
+        if self.va.contains_key(&x) {
+            return None;
+        }
+        let mut members: HashSet<VarnodeId> = HashSet::new();
+        let mut work = vec![x];
+        let mut reads = Vec::new();
+        let mut stores = Vec::new();
+        let mut ap = None;
+        let mut rooted = false;
+        while let Some(v) = work.pop() {
+            if !members.insert(v) {
+                continue;
+            }
+            if members.len() > 64 || self.va.contains_key(&v) {
+                return None;
+            }
+            let (_, o) = def_op(data, v)?;
+            match o.code() {
+                OpCode::CPUI_COPY | OpCode::CPUI_CAST | OpCode::CPUI_INDIRECT => work.push(o.get_in(0)?),
+                OpCode::CPUI_MULTIEQUAL => {
+                    for i in 0..o.num_input() {
+                        let input = o.get_in(i)?;
+                        if is_sp(data, input) {
+                            rooted = true;
+                        } else {
+                            work.push(input);
+                        }
+                    }
+                }
+                OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRSUB if is_sp(data, o.get_in(0)?) => {
+                    let k = constant(data, o.get_in(1)?)?;
+                    if k < 8 || k % 8 != 0 || k > 0x1000 {
+                        return None;
+                    }
+                    rooted = true;
+                }
+                OpCode::CPUI_INT_ADD if constant(data, o.get_in(1)?).is_some_and(|k| k % 8 == 0) => work.push(o.get_in(0)?),
+                OpCode::CPUI_PTRADD if constant(data, o.get_in(1)?).is_some() && constant(data, o.get_in(2)?).is_some() => work.push(o.get_in(0)?),
+                OpCode::CPUI_LOAD => {
+                    let (base, off) = field(data, o.get_in(1)?)?;
+                    if off != 8 || size(data, v) != 8 || ap.is_some_and(|a| a != base) {
+                        return None;
+                    }
+                    ap = Some(base);
+                    rooted = true;
+                }
+                _ => return None,
+            }
+            for u in data.descend_snapshot(v) {
+                let o = data.obank().get(u)?;
+                match o.code() {
+                    OpCode::CPUI_COPY | OpCode::CPUI_CAST => work.push(o.get_out()?),
+                    OpCode::CPUI_INDIRECT if o.get_in(0) == Some(v) => work.push(o.get_out()?),
+                    OpCode::CPUI_INT_ADD if o.get_in(0) == Some(v) && constant(data, o.get_in(1)?).is_some_and(|k| k % 8 == 0) => work.push(o.get_out()?),
+                    OpCode::CPUI_PTRADD if o.get_in(0) == Some(v) && constant(data, o.get_in(1)?).is_some() && constant(data, o.get_in(2)?).is_some() => work.push(o.get_out()?),
+                    OpCode::CPUI_MULTIEQUAL => {
+                        let ins: Vec<VarnodeId> = (0..o.num_input()).filter_map(|i| o.get_in(i)).collect();
+                        if !ins.iter().any(|&i| matches!(self.va.get(&i), Some(Va::Addr(_)))) {
+                            work.push(o.get_out()?);
+                        }
+                    }
+                    OpCode::CPUI_LOAD if o.get_in(1) == Some(v) => reads.push(u),
+                    OpCode::CPUI_STORE if o.get_in(2) == Some(v) => stores.push(u),
+                    _ => return None,
+                }
+            }
+        }
+        if !rooted {
+            return None;
+        }
+        for &s in &stores {
+            let p = data.obank().get(s)?.get_in(1)?;
+            if ap.is_none() || field(data, p) != Some((ap?, 8)) {
+                return None;
+            }
+        }
+        let w = self.new_web(None);
+        self.webs[w].ap = ap;
+        for &m in &members {
+            self.va.insert(m, Va::Ovf(w));
+        }
+        for s in stores {
+            self.stores.insert(s, w);
+        }
+        for r in reads {
+            self.reads.insert(r, Read { off: None, ovf: Some(w) });
+        }
+        Some(w)
+    }
+
+    /// The joins of register and overflow addresses, and their reads.
+    fn joins(&mut self, data: &Funcdata) {
+        let addrs: Vec<VarnodeId> = self.va.iter().filter(|(_, k)| matches!(k, Va::Addr(_))).map(|(v, _)| *v).collect();
+        let mut work: Vec<OpId> = addrs.iter().flat_map(|&a| data.descend_snapshot(a)).filter(|&u| data.obank().get(u).is_some_and(|o| o.code() == OpCode::CPUI_MULTIEQUAL)).collect();
+        let mut seen = HashSet::new();
+        while let Some(phi) = work.pop() {
+            if !seen.insert(phi) || seen.len() > 128 {
+                continue;
+            }
+            let Some(o) = data.obank().get(phi) else { continue };
+            let Some(out) = o.get_out() else { continue };
+            let ins: Vec<VarnodeId> = (0..o.num_input()).filter_map(|i| o.get_in(i)).collect();
+            let mut off = None;
+            let mut ovf = None;
+            let mut ok = true;
+            for &i in &ins {
+                let kind = match self.va.get(&i).copied() {
+                    Some(k) => Some(k),
+                    None => self.overflow_web(data, i).map(Va::Ovf),
+                };
+                match kind {
+                    Some(Va::Addr(w)) => ok &= off.replace(w).is_none_or(|x| x == w),
+                    Some(Va::Ovf(w)) => ok &= ovf.replace(w).is_none_or(|x| x == w),
+                    Some(Va::Merged(w, v)) => ok &= off.replace(w).is_none_or(|x| x == w) && ovf.replace(v).is_none_or(|x| x == v),
+                    _ => {
+                        // A join input still to be classified waits for its own phi.
+                        ok = false;
+                    }
+                }
+            }
+            let (Some(w), Some(v)) = (off, ovf) else {
+                if let Some(w) = off {
+                    self.webs[w].bad = true;
+                }
+                continue;
+            };
+            if !ok {
+                self.webs[w].bad = true;
+                self.webs[v].bad = true;
+                continue;
+            }
+            if self.va.insert(out, Va::Merged(w, v)).is_some() {
+                continue;
+            }
+            for u in data.descend_snapshot(out) {
+                let Some(uo) = data.obank().get(u) else { continue };
+                match uo.code() {
+                    OpCode::CPUI_LOAD if uo.get_in(1) == Some(out) => {
+                        self.reads.insert(u, Read { off: Some(w), ovf: Some(v) });
+                    }
+                    OpCode::CPUI_MULTIEQUAL => work.push(u),
+                    _ => {
+                        self.webs[w].bad = true;
+                        self.webs[v].bad = true;
+                    }
+                }
+            }
+        }
+    }
+
+    fn classify(data: &Funcdata) -> Cls {
+        let mut cls = Cls::default();
+        let blocks: Vec<BlockId> = (0..data.bblocks_get_size()).map(|i| data.bblocks_get_block(i)).collect();
+        let mut tests = Vec::new();
+        for &c in &blocks {
+            if let Some(g) = guard(data, c) {
+                cls.guards.extend(g.1.iter().copied());
+                tests.push((c, g));
+            }
+        }
+        if tests.is_empty() {
+            return cls;
+        }
+        for &b in &blocks {
+            for op in data.bb_ops(b) {
+                let Some(o) = data.obank().get(op) else { continue };
+                if o.code() == OpCode::CPUI_LOAD {
+                    if let (Some(p), Some(out)) = (o.get_in(1), o.get_out()) {
+                        if let Some(f) = field(data, p) {
+                            cls.fields.entry(f).or_default().push(out);
+                        }
+                    }
+                }
+            }
+        }
+        for (c, (x, _, class, r, m)) in tests {
+            if let Some(web) = cls.offset_web(data, x, class) {
+                cls.sites.push(Site { c, r, m, web });
+            }
+        }
+        // A pointer-form site may load its offset again for the address.
+        let aps: HashSet<VarnodeId> = cls.webs.iter().filter_map(|w| w.ap).collect();
+        let reloads: Vec<(VarnodeId, Class)> = cls
+            .fields
+            .iter()
+            .filter(|((base, off), _)| aps.contains(base) && matches!(off, 0 | 4))
+            .flat_map(|((_, off), vs)| vs.iter().map(move |&v| (v, if *off == 0 { Class::Gp } else { Class::Fp })))
+            .collect();
+        for (v, class) in reloads {
+            if !cls.va.contains_key(&v) {
+                cls.offset_web(data, v, class);
+            }
+        }
+        for i in 0..cls.sites.len() {
+            for op in data.bb_ops(cls.sites[i].m) {
+                let Some(o) = data.obank().get(op) else { continue };
+                if o.code() == OpCode::CPUI_LOAD && !cls.reads.contains_key(&op) {
+                    if let Some(p) = o.get_in(1) {
+                        cls.overflow_web(data, p);
+                    }
+                }
+            }
+        }
+        cls.joins(data);
+        cls
+    }
+
+    fn is_va_op(&self, data: &Funcdata, op: OpId) -> bool {
+        self.guards.contains(&op)
+            || self.stores.contains_key(&op)
+            || data.obank().get(op).and_then(|o| o.get_out()).is_some_and(|v| self.va.contains_key(&v))
+    }
+
+    fn read_webs(&self, op: OpId) -> impl Iterator<Item = usize> + '_ {
+        self.reads.get(&op).into_iter().flat_map(|r| r.off.into_iter().chain(r.ovf))
+    }
+}
+
+fn is_effect(code: OpCode) -> bool {
+    matches!(
+        code,
+        OpCode::CPUI_LOAD | OpCode::CPUI_STORE | OpCode::CPUI_CALL | OpCode::CPUI_CALLIND | OpCode::CPUI_CALLOTHER | OpCode::CPUI_RETURN | OpCode::CPUI_NEW | OpCode::CPUI_BRANCHIND
+    )
+}
+
+fn commutes(code: OpCode) -> bool {
+    matches!(
+        code,
+        OpCode::CPUI_INT_ADD
+            | OpCode::CPUI_INT_MULT
+            | OpCode::CPUI_INT_AND
+            | OpCode::CPUI_INT_OR
+            | OpCode::CPUI_INT_XOR
+            | OpCode::CPUI_INT_EQUAL
+            | OpCode::CPUI_INT_NOTEQUAL
+            | OpCode::CPUI_BOOL_AND
+            | OpCode::CPUI_BOOL_OR
+            | OpCode::CPUI_BOOL_XOR
+    )
+}
+
+/// A branch condition up to negation: `x >= t`, `x == c`, `a == b`, or a value.
+enum Pred {
+    AtLeast(bool, VarnodeId, u64),
+    EqConst(VarnodeId, u64),
+    Eq(VarnodeId, VarnodeId),
+    Value(VarnodeId),
+}
+
+/// Whether the walk from `M` behaves as the walk from `R` (see the module docs).
+struct Walk<'a> {
+    data: &'a Funcdata,
+    cls: &'a Cls,
+    /// Folded site tests, to their register arms.
+    fold: &'a HashMap<BlockId, BlockId>,
+    /// Webs whose reads are abstract.
+    live: &'a HashSet<usize>,
+    sigma: HashMap<VarnodeId, VarnodeId>,
+    ops: HashMap<OpId, OpId>,
+    m_vis: HashSet<BlockId>,
+    r_vis: HashSet<BlockId>,
+    /// Blocks defining a value both sides read as is.
+    shared: HashSet<BlockId>,
+    done: HashSet<(BlockId, BlockId)>,
+    phi_targets: HashSet<VarnodeId>,
+    m_reads: Vec<OpId>,
+    r_reads: Vec<OpId>,
+}
+
+#[derive(Clone, Copy)]
+struct Pos {
+    b: BlockId,
+    from: BlockId,
+}
+
+impl<'a> Walk<'a> {
+    fn op(&self, op: OpId) -> Option<&'a crate::op::PcodeOp> {
+        self.data.obank().get(op)
+    }
+
+    fn block_of(&self, v: VarnodeId) -> Option<BlockId> {
+        def_op(self.data, v).and_then(|(_, o)| o.get_parent())
+    }
+
+    fn is_read(&self, op: OpId) -> bool {
+        self.cls.reads.contains_key(&op) && self.cls.read_webs(op).all(|w| self.live.contains(&w))
+    }
+
+    fn eq(&mut self, a: VarnodeId, b: VarnodeId, depth: u32) -> bool {
+        if a == b {
+            if let Some(blk) = self.block_of(a) {
+                self.shared.insert(blk);
+            }
+            return true;
+        }
+        if let Some(&x) = self.sigma.get(&a) {
+            return x == b;
+        }
+        let data = self.data;
+        if let (Some(x), Some(y)) = (constant(data, a), constant(data, b)) {
+            return x == y && size(data, a) == size(data, b);
+        }
+        if depth > 24 || self.cls.va.contains_key(&a) || self.cls.va.contains_key(&b) {
+            return false;
+        }
+        let (Some((da, oa)), Some((db, ob))) = (def_op(data, a), def_op(data, b)) else { return false };
+        let (Some(ba), Some(bb)) = (oa.get_parent(), ob.get_parent()) else { return false };
+        if !self.m_vis.contains(&ba) || !self.r_vis.contains(&bb) {
+            return false;
+        }
+        if oa.code() != ob.code() || is_effect(oa.code()) || oa.code() == OpCode::CPUI_MULTIEQUAL || oa.num_input() != ob.num_input() || size(data, a) != size(data, b) {
+            return false;
+        }
+        if oa.code() == OpCode::CPUI_INDIRECT {
+            let iop = |o: &crate::op::PcodeOp| o.get_in(1).and_then(|v| data.vbank().get(v)).map(|v| {
+                use slotmap::KeyData;
+                OpId::from(KeyData::from_ffi(v.get_offset()))
+            });
+            let (ia, ib) = (iop(oa), iop(ob));
+            let paired = match (ia, ib) {
+                (Some(x), Some(y)) => self.ops.get(&x) == Some(&y) || (self.cls.is_va_op(data, x) && self.cls.is_va_op(data, y)),
+                _ => false,
+            };
+            let ok = paired && self.eq(oa.get_in(0).unwrap_or(a), ob.get_in(0).unwrap_or(b), depth + 1);
+            if ok {
+                self.sigma.insert(a, b);
+            }
+            return ok;
+        }
+        let n = oa.num_input();
+        let ins = |o: &crate::op::PcodeOp| -> Vec<VarnodeId> { (0..n).filter_map(|i| o.get_in(i)).collect() };
+        let (ia, ib) = (ins(oa), ins(ob));
+        let _ = (da, db);
+        let straight = ia.iter().zip(&ib).all(|(&x, &y)| self.eq(x, y, depth + 1));
+        let ok = straight || (n == 2 && commutes(oa.code()) && self.eq(ia[0], ib[1], depth + 1) && self.eq(ia[1], ib[0], depth + 1));
+        if ok {
+            self.sigma.insert(a, b);
+        }
+        ok
+    }
+
+    /// Is `x`, handed into the m-side block, the value `t` takes once the
+    /// r-side enters `r`: `t` with each phi of `r.b` read on the edge from
+    /// `r.from`, and each op `t` computes in the r-side segment `seg` matched
+    /// by the same op on the m-side.
+    fn eq_entry(&mut self, x: VarnodeId, t: VarnodeId, r: Pos, seg: &[BlockId], depth: u32) -> bool {
+        let data = self.data;
+        let Some((_, ot)) = def_op(data, t) else { return self.eq(x, t, depth) };
+        let Some(bt) = ot.get_parent() else { return false };
+        if ot.code() == OpCode::CPUI_MULTIEQUAL && bt == r.b {
+            let i = data.bblocks_ref().block(r.b).get_in_index(r.from);
+            return ot.get_in(i).is_some_and(|y| self.eq(x, y, depth));
+        }
+        if !seg.contains(&bt) || depth > 24 {
+            return self.eq(x, t, depth);
+        }
+        if constant(data, x).is_some() || self.cls.va.contains_key(&x) || self.cls.va.contains_key(&t) {
+            return false;
+        }
+        let Some((_, ox)) = def_op(data, x) else { return false };
+        if ox.code() != ot.code() || is_effect(ot.code()) || ot.code() == OpCode::CPUI_MULTIEQUAL || ox.num_input() != ot.num_input() || size(data, x) != size(data, t) {
+            return false;
+        }
+        if !ox.get_parent().is_some_and(|b| self.m_vis.contains(&b)) {
+            return false;
+        }
+        let n = ot.num_input();
+        let ins = |o: &crate::op::PcodeOp| -> Vec<VarnodeId> { (0..n).filter_map(|i| o.get_in(i)).collect() };
+        let (ix, it) = (ins(ox), ins(ot));
+        ix.iter().zip(&it).all(|(&a, &b)| match constant(data, b) {
+            Some(k) => constant(data, a) == Some(k),
+            None => self.eq_entry(a, b, r, seg, depth + 1),
+        })
+    }
+
+    /// The blocks run from `start`: single-successor chains into
+    /// single-predecessor blocks, and a folded test into its register arm.
+    fn segment(&self, start: BlockId) -> Vec<BlockId> {
+        let g = self.data.bblocks_ref();
+        let mut seg = vec![start];
+        while seg.len() < 16 {
+            let last = *seg.last().unwrap_or(&start);
+            let next = match self.fold.get(&last) {
+                Some(&r) => r,
+                None => {
+                    let blk = g.block(last);
+                    if blk.size_out() != 1 {
+                        break;
+                    }
+                    let s = blk.get_out(0);
+                    if g.block(s).size_in() != 1 {
+                        break;
+                    }
+                    s
+                }
+            };
+            if seg.contains(&next) {
+                break;
+            }
+            seg.push(next);
+        }
+        seg
+    }
+
+    fn effects(&self, seg: &[BlockId]) -> Option<Vec<OpId>> {
+        let mut out = Vec::new();
+        for &b in seg {
+            for op in self.data.bb_ops(b) {
+                let o = self.op(op)?;
+                if o.code() == OpCode::CPUI_MULTIEQUAL || self.cls.is_va_op(self.data, op) {
+                    continue;
+                }
+                if o.code() == OpCode::CPUI_BRANCHIND {
+                    return None;
+                }
+                if is_effect(o.code()) {
+                    out.push(op);
+                }
+            }
+        }
+        Some(out)
+    }
+
+    fn phis(&self, b: BlockId) -> Vec<OpId> {
+        self.data
+            .bb_ops(b)
+            .into_iter()
+            .filter(|&op| self.op(op).is_some_and(|o| o.code() == OpCode::CPUI_MULTIEQUAL && o.get_out().is_some_and(|v| !self.cls.va.contains_key(&v))))
+            .collect()
+    }
+
+    fn phi_in(&self, phi: OpId, b: BlockId, from: BlockId) -> Option<VarnodeId> {
+        let i = self.data.bblocks_ref().block(b).get_in_index(from);
+        self.op(phi)?.get_in(i)
+    }
+
+    fn pred(&self, cond: VarnodeId) -> (Pred, bool) {
+        let data = self.data;
+        let mut v = cond;
+        let mut neg = false;
+        for _ in 0..4 {
+            let Some((_, o)) = def_op(data, v) else { break };
+            let k = |i: int4| o.get_in(i).and_then(|x| constant(data, x));
+            let (a, b) = (o.get_in(0), o.get_in(1));
+            let sz = a.map_or(8, |a| size(data, a)).clamp(1, 8);
+            let mask = if sz >= 8 { u64::MAX } else { (1u64 << (8 * sz)) - 1 };
+            let atleast = |signed: bool, x: Option<VarnodeId>, t: u64, n: bool| x.map(|x| (Pred::AtLeast(signed, x, t & mask), n));
+            let got = match o.code() {
+                OpCode::CPUI_BOOL_NEGATE => {
+                    neg = !neg;
+                    v = o.get_in(0).unwrap_or(v);
+                    continue;
+                }
+                code @ (OpCode::CPUI_INT_LESS | OpCode::CPUI_INT_SLESS | OpCode::CPUI_INT_LESSEQUAL | OpCode::CPUI_INT_SLESSEQUAL) => {
+                    let signed = matches!(code, OpCode::CPUI_INT_SLESS | OpCode::CPUI_INT_SLESSEQUAL);
+                    let strict = matches!(code, OpCode::CPUI_INT_LESS | OpCode::CPUI_INT_SLESS);
+                    match (k(0), k(1)) {
+                        (None, Some(c)) => atleast(signed, a, if strict { c } else { c.wrapping_add(1) }, true),
+                        (Some(c), None) => atleast(signed, b, if strict { c.wrapping_add(1) } else { c }, false),
+                        _ => None,
+                    }
+                }
+                code @ (OpCode::CPUI_INT_EQUAL | OpCode::CPUI_INT_NOTEQUAL) => {
+                    let n = code == OpCode::CPUI_INT_NOTEQUAL;
+                    match (k(0), k(1), a, b) {
+                        (None, Some(c), Some(x), _) | (Some(c), None, _, Some(x)) => Some((Pred::EqConst(x, c), n)),
+                        (None, None, Some(x), Some(y)) => Some((Pred::Eq(x, y), n)),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
+            if let Some((p, n)) = got {
+                return (p, n != neg);
+            }
+            break;
+        }
+        (Pred::Value(v), neg)
+    }
+
+    fn same_pred(&mut self, a: &Pred, b: &Pred) -> bool {
+        match (a, b) {
+            (Pred::AtLeast(s, x, t), Pred::AtLeast(s2, y, t2)) => s == s2 && t == t2 && self.eq(*x, *y, 0),
+            (Pred::EqConst(x, c), Pred::EqConst(y, c2)) => c == c2 && self.eq(*x, *y, 0),
+            (Pred::Eq(x, x2), Pred::Eq(y, y2)) => (self.eq(*x, *y, 0) && self.eq(*x2, *y2, 0)) || (self.eq(*x, *y2, 0) && self.eq(*x2, *y, 0)),
+            (Pred::Value(x), Pred::Value(y)) => self.eq(*x, *y, 0),
+            _ => false,
+        }
+    }
+
+    /// Step past a segment that does nothing but hand on to one successor.
+    fn advance(&self, p: Pos, vis: &mut HashSet<BlockId>) -> Pos {
+        let mut p = p;
+        for _ in 0..8 {
+            if !self.phis(p.b).is_empty() {
+                break;
+            }
+            let seg = self.segment(p.b);
+            let Some(&last) = seg.last() else { break };
+            let blk = self.data.bblocks_ref().block(last);
+            if blk.size_out() != 1 || !self.effects(&seg).is_some_and(|e| e.is_empty()) {
+                break;
+            }
+            vis.extend(seg.iter().copied());
+            p = Pos { b: blk.get_out(0), from: last };
+        }
+        p
+    }
+
+    fn prove(&mut self, site: &Site) -> bool {
+        let mut work = vec![(Pos { b: site.m, from: site.c }, Pos { b: site.r, from: site.c }, true)];
+        let mut steps = 0;
+        while let Some((m, r, first)) = work.pop() {
+            steps += 1;
+            if steps > 48 {
+                return false;
+            }
+            let (m, r) = if m.b == r.b {
+                (m, r)
+            } else {
+                let mut mv = std::mem::take(&mut self.m_vis);
+                let m = self.advance(m, &mut mv);
+                self.m_vis = mv;
+                let mut rv = std::mem::take(&mut self.r_vis);
+                let r = self.advance(r, &mut rv);
+                self.r_vis = rv;
+                (m, r)
+            };
+            if m.b == r.b {
+                for phi in self.phis(m.b) {
+                    let (Some(x), Some(y)) = (self.phi_in(phi, m.b, m.from), self.phi_in(phi, r.b, r.from)) else { return false };
+                    if !self.eq(x, y, 0) {
+                        return false;
+                    }
+                }
+                continue;
+            }
+            let r_phis = self.phis(r.b);
+            let revisit = !self.done.insert((m.b, r.b));
+            self.m_vis.insert(m.b);
+            self.r_vis.insert(r.b);
+            for phi in self.phis(m.b) {
+                let (Some(out), Some(x)) = (self.op(phi).and_then(|o| o.get_out()), self.phi_in(phi, m.b, m.from)) else { return false };
+                if let Some(&target) = self.sigma.get(&out) {
+                    let seg = self.segment(r.b);
+                    if !self.eq_entry(x, target, r, &seg, 0) {
+                        return false;
+                    }
+                    continue;
+                }
+                let mut target = None;
+                for &p in &r_phis {
+                    let (Some(pout), Some(y)) = (self.op(p).and_then(|o| o.get_out()), self.phi_in(p, r.b, r.from)) else { continue };
+                    if self.phi_targets.contains(&pout) {
+                        continue;
+                    }
+                    if self.eq(x, y, 0) {
+                        target = Some(pout);
+                        break;
+                    }
+                }
+                let target = match target {
+                    Some(t) => {
+                        self.phi_targets.insert(t);
+                        t
+                    }
+                    None if first => x,
+                    None => match self.sigma.get(&x) {
+                        Some(&t) => t,
+                        None => {
+                            if let Some(b) = self.block_of(x) {
+                                self.shared.insert(b);
+                            }
+                            x
+                        }
+                    },
+                };
+                self.sigma.insert(out, target);
+            }
+            if revisit {
+                continue;
+            }
+            let (sm, sr) = (self.segment(m.b), self.segment(r.b));
+            self.m_vis.extend(sm.iter().copied());
+            self.r_vis.extend(sr.iter().copied());
+            let (Some(em), Some(er)) = (self.effects(&sm), self.effects(&sr)) else { return false };
+            if em.len() != er.len() {
+                return false;
+            }
+            for (&a, &b) in em.iter().zip(&er) {
+                if !self.same_effect(a, b) {
+                    return false;
+                }
+            }
+            let (Some(&lm), Some(&lr)) = (sm.last(), sr.last()) else { return false };
+            let g = self.data.bblocks_ref();
+            let (bm, br) = (g.block(lm), g.block(lr));
+            match (bm.size_out(), br.size_out()) {
+                (0, 0) => {}
+                (1, 1) => work.push((Pos { b: bm.get_out(0), from: lm }, Pos { b: br.get_out(0), from: lr }, false)),
+                (2, 2) => {
+                    let (Some((tm, fm)), Some((tr, fr))) = (taken(self.data, lm), taken(self.data, lr)) else { return false };
+                    let cond = |b: BlockId| self.data.bb_op_tail(b).and_then(|t| self.op(t)).and_then(|o| o.get_in(1));
+                    let (Some(cm), Some(cr)) = (cond(lm), cond(lr)) else { return false };
+                    let ((pm, nm), (pr, nr)) = (self.pred(cm), self.pred(cr));
+                    if !self.same_pred(&pm, &pr) {
+                        return false;
+                    }
+                    let (tr, fr) = if nm == nr { (tr, fr) } else { (fr, tr) };
+                    work.push((Pos { b: tm, from: lm }, Pos { b: tr, from: lr }, false));
+                    work.push((Pos { b: fm, from: lm }, Pos { b: fr, from: lr }, false));
+                }
+                _ => return false,
+            }
+        }
+        self.shared.iter().all(|b| !self.m_vis.contains(b) && !self.r_vis.contains(b))
+    }
+
+    fn same_effect(&mut self, a: OpId, b: OpId) -> bool {
+        let data = self.data;
+        let (Some(oa), Some(ob)) = (self.op(a), self.op(b)) else { return false };
+        let (ra, rb) = (self.is_read(a), self.is_read(b));
+        if ra || rb {
+            if !(ra && rb) {
+                return false;
+            }
+            let class = |op: OpId| self.cls.reads.get(&op).and_then(|r| r.off).and_then(|w| self.cls.webs[w].class);
+            let (ca, cb) = (class(a), class(b));
+            let (Some(xa), Some(xb)) = (oa.get_out(), ob.get_out()) else { return false };
+            if size(data, xa) != size(data, xb) || (ca.is_some() && cb.is_some() && ca != cb) {
+                return false;
+            }
+            self.m_reads.push(a);
+            self.r_reads.push(b);
+            self.ops.insert(a, b);
+            self.sigma.insert(xa, xb);
+            return true;
+        }
+        if oa.code() != ob.code() || oa.num_input() != ob.num_input() || oa.get_out().is_some() != ob.get_out().is_some() {
+            return false;
+        }
+        for i in 0..oa.num_input() {
+            let (Some(x), Some(y)) = (oa.get_in(i), ob.get_in(i)) else { return false };
+            let plain = |v: VarnodeId| data.vbank().get(v).is_some_and(|n| !n.is_constant() && n.get_def().is_none() && !n.is_input());
+            let ok = if i == 0 && matches!(oa.code(), OpCode::CPUI_CALL) || plain(x) && plain(y) {
+                data.vbank().get(x).map(|n| (n.get_addr().clone(), n.get_size())) == data.vbank().get(y).map(|n| (n.get_addr().clone(), n.get_size()))
+            } else {
+                self.eq(x, y, 0)
+            };
+            if !ok {
+                return false;
+            }
+        }
+        if let (Some(x), Some(y)) = (oa.get_out(), ob.get_out()) {
+            if size(data, x) != size(data, y) {
+                return false;
+            }
+            self.sigma.insert(x, y);
+        }
+        self.ops.insert(a, b);
+        true
+    }
+}
+
+/// The blocks reachable from the entry once every folded site's edge to its
+/// memory arm is gone.
+fn reachable(data: &Funcdata, cut: &HashSet<(BlockId, BlockId)>) -> HashSet<BlockId> {
+    let g = data.bblocks_ref();
+    let mut seen = HashSet::new();
+    if data.bblocks_get_size() == 0 {
+        return seen;
+    }
+    let mut work = vec![data.bblocks_get_block(0)];
+    while let Some(b) = work.pop() {
+        if !seen.insert(b) {
+            continue;
+        }
+        let blk = g.block(b);
+        for i in 0..blk.size_out() {
+            let s = blk.get_out(i);
+            if !cut.contains(&(b, s)) {
+                work.push(s);
+            }
+        }
+    }
+    seen
+}
+
+struct Plan {
+    sites: Vec<(BlockId, BlockId)>,
+    reads: Vec<(OpId, Option<VarnodeId>, bool)>,
+    stores: Vec<OpId>,
+    /// `(gp, fp)` named-argument counts of an SSA va_list.
+    ssa: Option<(Option<u64>, Option<u64>)>,
+}
+
+fn find(data: &Funcdata, cls: &Cls) -> Option<Plan> {
+    let n = cls.webs.len();
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn root(p: &mut [usize], x: usize) -> usize {
+        let mut x = x;
+        while p[x] != x {
+            p[x] = p[p[x]];
+            x = p[x];
+        }
+        x
+    }
+    let union = |p: &mut Vec<usize>, a: usize, b: usize| {
+        let (ra, rb) = (root(p, a), root(p, b));
+        p[ra] = rb;
+    };
+    for r in cls.reads.values() {
+        if let (Some(a), Some(b)) = (r.off, r.ovf) {
+            union(&mut parent, a, b);
+        }
+    }
+    let mut live: HashSet<usize> = (0..n).filter(|&w| !cls.webs[w].bad).collect();
+    for _ in 0..4 {
+        let fold: HashMap<BlockId, BlockId> = cls.sites.iter().filter(|s| live.contains(&s.web)).map(|s| (s.c, s.r)).collect();
+        let mut p = parent.clone();
+        let mut failed: HashSet<usize> = HashSet::new();
+        let mut m_reads = Vec::new();
+        for s in cls.sites.iter().filter(|s| live.contains(&s.web)) {
+            let mut walk = Walk {
+                data,
+                cls,
+                fold: &fold,
+                live: &live,
+                sigma: HashMap::new(),
+                ops: HashMap::new(),
+                m_vis: HashSet::new(),
+                r_vis: HashSet::new(),
+                shared: HashSet::new(),
+                done: HashSet::new(),
+                phi_targets: HashSet::new(),
+                m_reads: Vec::new(),
+                r_reads: Vec::new(),
+            };
+            if !walk.prove(s) {
+                failed.insert(s.web);
+                continue;
+            }
+            for &op in walk.m_reads.iter().chain(&walk.r_reads) {
+                for w in cls.read_webs(op) {
+                    union(&mut p, s.web, w);
+                }
+            }
+            m_reads.extend(walk.m_reads);
+        }
+        let cut: HashSet<(BlockId, BlockId)> = fold.iter().filter_map(|(&c, _)| cls.sites.iter().find(|s| s.c == c).map(|s| (c, s.m))).collect();
+        let reach = reachable(data, &cut);
+        for (&op, r) in &cls.reads {
+            let at = data.obank().get(op).and_then(|o| o.get_parent());
+            if at.is_some_and(|b| reach.contains(&b)) && r.off.is_none() {
+                failed.extend(cls.read_webs(op));
+            }
+        }
+        for &op in &m_reads {
+            if data.obank().get(op).and_then(|o| o.get_parent()).is_some_and(|b| reach.contains(&b)) {
+                failed.extend(cls.read_webs(op));
+            }
+        }
+        // Every web of a group with a failed web fails.
+        let bad_roots: HashSet<usize> = (0..n).filter(|&w| failed.contains(&w) || !live.contains(&w)).map(|w| root(&mut p, w)).collect();
+        let next: HashSet<usize> = live.iter().copied().filter(|&w| !bad_roots.contains(&root(&mut p, w))).collect();
+        if next == live {
+            if fold.is_empty() {
+                return None;
+            }
+            let mut plan = Plan { sites: cut.into_iter().collect(), reads: Vec::new(), stores: Vec::new(), ssa: None };
+            plan.sites.sort();
+            let mut reads: Vec<(&OpId, &Read)> = cls.reads.iter().collect();
+            reads.sort_by_key(|(op, _)| **op);
+            for (&op, r) in reads {
+                let at = data.obank().get(op).and_then(|o| o.get_parent());
+                if !at.is_some_and(|b| reach.contains(&b)) || !cls.read_webs(op).all(|w| live.contains(&w)) {
+                    continue;
+                }
+                let Some(w) = r.off else { continue };
+                let web = &cls.webs[w];
+                plan.reads.push((op, web.ap, web.class == Some(Class::Fp)));
+                if web.ap.is_none() {
+                    let (gp, fp) = plan.ssa.unwrap_or((None, None));
+                    plan.ssa = Some(match web.class {
+                        Some(Class::Fp) => (gp, web.init.or(fp)),
+                        _ => (web.init.or(gp), fp),
+                    });
+                }
+            }
+            let mut stores: Vec<OpId> = cls.stores.iter().filter(|(_, w)| live.contains(w)).map(|(op, _)| *op).collect();
+            stores.sort();
+            plan.stores = stores;
+            return (!plan.reads.is_empty()).then_some(plan);
+        }
+        live = next;
+        if live.is_empty() {
             return None;
         }
     }
-    // R: STORE(ap+off, offset + consumed); maybe value = LOAD(reg_save_area + offset).
-    let mut step_store = None;
-    let mut r_value: Option<(OpId, VarnodeId, VarnodeId, int4)> = None;
-    let mut r_sinks = Vec::new();
-    for op in arm_ops(data, r) {
-        let o = data.obank().get(op)?;
-        match o.code() {
-            OpCode::CPUI_STORE => {
-                let (_, sp, _) = access(data, op)?;
-                if field(data, sp) != Some((ap, off)) {
-                    r_sinks.push((field(data, sp)?, o.get_in(2)?));
-                    continue;
-                }
-                let sv = data.obank().get(data.vbank().get(o.get_in(2)?)?.get_def()?)?;
-                let plus = sv.code() == OpCode::CPUI_INT_ADD
-                    && sv.get_in(0).is_some_and(|x| x == tested || loaded(data, x, ap, off, size).is_some())
-                    && sv.get_in(1).and_then(|k| data.vbank().get(k)).is_some_and(|k| k.is_constant() && k.get_offset() == consumed);
-                if !plus || step_store.is_some() {
-                    return None;
-                }
-                step_store = Some(op);
-            }
-            OpCode::CPUI_LOAD => {
-                let (_, lp, s) = access(data, op)?;
-                if field(data, lp).is_some_and(|(b, _)| b == ap) {
-                    continue;
-                }
-                let (base, 0) = field(data, lp)? else { return None };
-                if r_value.is_some() {
-                    return None;
-                }
-                r_value = Some((op, o.get_out()?, base, s));
-            }
-            OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRADD | OpCode::CPUI_PTRSUB | OpCode::CPUI_COPY | OpCode::CPUI_CAST | OpCode::CPUI_INT_ZEXT | OpCode::CPUI_INT_SEXT | OpCode::CPUI_INDIRECT => {}
-            OpCode::CPUI_RETURN if join.is_none() => {}
-            _ => return None,
-        }
-    }
-    let step_store = step_store?;
-    // M: o = LOAD(ap+8); STORE(ap+8, o + slot); maybe value = LOAD(o).
-    let mut m_slot: Option<u64> = None;
-    let mut m_value: Option<(VarnodeId, int4, VarnodeId)> = None;
-    let mut m_sinks = Vec::new();
-    let mut ovf: Option<VarnodeId> = None;
-    for op in arm_ops(data, m) {
-        let o = data.obank().get(op)?;
-        match o.code() {
-            OpCode::CPUI_LOAD => {
-                let (_, lp, s) = access(data, op)?;
-                if field(data, lp) == Some((ap, 8)) && s == 8 {
-                    ovf = o.get_out();
-                } else {
-                    if m_value.is_some() {
-                        return None;
-                    }
-                    m_value = Some((o.get_out()?, s, lp));
-                }
-            }
-            OpCode::CPUI_STORE => {
-                let (_, sp, _) = access(data, op)?;
-                if field(data, sp) != Some((ap, 8)) {
-                    m_sinks.push((field(data, sp)?, o.get_in(2)?));
-                    continue;
-                }
-                if m_slot.is_some() {
-                    return None;
-                }
-                let (base, slot) = field(data, o.get_in(2)?)?;
-                m_slot = Some(slot);
-                if Some(base) != ovf {
-                    return None;
-                }
-            }
-            OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRADD | OpCode::CPUI_PTRSUB | OpCode::CPUI_COPY | OpCode::CPUI_CAST | OpCode::CPUI_INT_SEXT | OpCode::CPUI_INDIRECT => {}
-            OpCode::CPUI_RETURN if join.is_none() => {}
-            _ => return None,
-        }
-    }
-    let ovf = ovf?;
-    let m_slot = m_slot?;
-    let slot_of = |size: int4| (size as u64).div_ceil(8).max(1) * 8;
-    let save_plus_offset = |mut addr: VarnodeId| -> bool {
-        for _ in 0..3 {
-            match data.vbank().get(addr).and_then(|v| v.get_def()).and_then(|d| data.obank().get(d)) {
-                Some(o) if matches!(o.code(), OpCode::CPUI_COPY | OpCode::CPUI_CAST) => match o.get_in(0) {
-                    Some(x) => addr = x,
-                    None => return false,
-                },
-                _ => break,
-            }
-        }
-        let Some(d) = data.vbank().get(addr).and_then(|v| v.get_def()).and_then(|d| data.obank().get(d)) else { return false };
-        if !matches!(d.code(), OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRADD | OpCode::CPUI_PTRSUB) {
-            return false;
-        }
-        let ins: Vec<VarnodeId> = (0..2).filter_map(|i| d.get_in(i)).collect();
-        ins.len() == 2
-            && ins.iter().any(|&x| loaded(data, x, ap, 16, 8).is_some())
-            && ins.iter().any(|&x| loaded(data, x, ap, off, size).is_some() || x == tested)
-    };
-    // The pairs of values the arms hand on: the join's MULTIEQUAL inputs, or
-    // the two RETURNs' inputs.
-    let (ri, mi, phis, two_way) = match join {
-        Some(j) => {
-            let jb = bb(j);
-            let phis: Vec<OpId> = data.bb_ops(j).into_iter().filter(|&op| data.obank().get(op).is_some_and(|o| o.code() == OpCode::CPUI_MULTIEQUAL)).collect();
-            (jb.get_in_index(r), jb.get_in_index(m), phis, jb.size_in() == 2)
-        }
-        None => (0, 0, Vec::new(), false),
-    };
-    let returns = |b: BlockId| data.bb_op_tail(b).filter(|&o| data.obank().get(o).is_some_and(|p| p.code() == OpCode::CPUI_RETURN));
-    let handed: Vec<(VarnodeId, VarnodeId)> = match join {
-        Some(_) => phis.iter().filter_map(|&p| data.obank().get(p).and_then(|o| Some((o.get_in(ri)?, o.get_in(mi)?)))).collect(),
-        None => {
-            let (Some(rr), Some(mr)) = (returns(r), returns(m)) else { return None };
-            let (ro, mo) = (data.obank().get(rr)?, data.obank().get(mr)?);
-            if ro.num_input() != mo.num_input() {
-                return None;
-            }
-            (1..ro.num_input()).filter_map(|i| Some((ro.get_in(i)?, mo.get_in(i)?))).collect()
-        }
-    };
-    let site = |value: OpId, addr_phi: Option<OpId>| Site { c, to_m: bb(c).get_out_index(m), r, m, ap, value, addr_phi, step_store, sse };
-    match (r_value, m_value) {
-        // Each arm loads the value; whatever the arms do with it they do alike.
-        (Some((r_load, rv, ra, rs)), Some((mv, ms, mp))) => {
-            if rs != ms || rs as u64 > consumed || m_slot != slot_of(rs) || !save_plus_offset(ra) || field(data, mp) != Some((ovf, 0)) {
-                return None;
-            }
-            r_sinks.sort();
-            m_sinks.sort();
-            let sinks_alike = r_sinks.len() == m_sinks.len() && r_sinks.iter().zip(&m_sinks).all(|(a, b)| a.0 == b.0 && a.1 == rv && b.1 == mv);
-            if !sinks_alike {
-                return None;
-            }
-            for &(x, y) in &handed {
-                let through = |v: VarnodeId, arm: BlockId| -> VarnodeId {
-                    match data.vbank().get(v).and_then(|n| n.get_def()).and_then(|d| data.obank().get(d)) {
-                        Some(o) if o.code() == OpCode::CPUI_INDIRECT && o.get_parent() == Some(arm) => o.get_in(0).unwrap_or(v),
-                        _ => v,
-                    }
-                };
-                let alike = x == y
-                    || through(x, r) == through(y, m)
-                    || (x == rv && y == mv)
-                    || (copy_of(data, x, rv, r) && copy_of(data, y, mv, m));
-                if !alike {
-                    return None;
-                }
-            }
-            Some(site(r_load, None))
-        }
-        // J reads the value through the merged address.
-        (None, None) if two_way && r_sinks.is_empty() && m_sinks.is_empty() => {
-            let phi = phis.iter().copied().find(|&op| {
-                data.obank().get(op).is_some_and(|o| o.get_in(mi).and_then(|x| field(data, x)) == Some((ovf, 0)) && o.get_in(ri).is_some_and(save_plus_offset))
-            })?;
-            let addr = data.obank().get(phi)?.get_out()?;
-            let readers = data.descend_snapshot(addr);
-            let [load] = readers.as_slice() else { return None };
-            let (code, _, s) = access(data, *load)?;
-            if code != OpCode::CPUI_LOAD || s as u64 > consumed || m_slot != slot_of(s) {
-                return None;
-            }
-            for &other in phis.iter().filter(|&&p| p != phi) {
-                let o = data.obank().get(other)?;
-                if o.get_in(ri) != o.get_in(mi) {
-                    return None;
-                }
-            }
-            Some(site(*load, Some(phi)))
-        }
-        _ => None,
-    }
+    None
 }
 
-/// Every output of an arm op is read only by arm ops or by the join's
-/// MULTIEQUALs (which `match_site` checked), or by the value op.
-fn arms_closed(data: &Funcdata, s: &Site) -> bool {
-    let rb = data.bblocks_ref().block(s.r);
-    let j = (rb.size_out() == 1).then(|| rb.get_out(0));
-    let ok = |op: OpId| {
-        Some(op) == s.addr_phi
-            || op == s.value
-            || data.obank().get(op).is_some_and(|o| {
-                let b = o.get_parent();
-                b == Some(s.r) || b == Some(s.m) || (j.is_some() && b == j && o.code() == OpCode::CPUI_MULTIEQUAL)
+/// Destroy `store` and the INDIRECTs it left.
+fn destroy_store(data: &mut Funcdata, store: OpId) -> kuna_base::error::KunaResult<()> {
+    let Some(b) = data.obank().get(store).and_then(|o| o.get_parent()) else { return Ok(()) };
+    for op in data.bb_ops(b) {
+        let made = data.obank().get(op).filter(|o| o.code() == OpCode::CPUI_INDIRECT).and_then(|o| o.get_in(1)).and_then(|iop| data.vbank().get(iop)).is_some_and(|v| {
+            use slotmap::KeyData;
+            OpId::from(KeyData::from_ffi(v.get_offset())) == store
+        });
+        if made {
+            if let Some((out, input)) = data.obank().get(op).and_then(|o| Some((o.get_out()?, o.get_in(0)?))) {
+                data.total_replace(out, input)?;
+            }
+            data.op_destroy(op);
+        }
+    }
+    data.op_destroy(store);
+    Ok(())
+}
+
+/// The named integer arguments when no read says: the leading argument
+/// registers the function reads other than to spill them to the stack.
+fn named_registers(data: &Funcdata) -> u64 {
+    use kuna_base::address::Address;
+    let Some(lookup) = data.get_arch().manage().register_lookup() else { return 0 };
+    let mut n = 0;
+    for name in ["RDI", "RSI", "RDX", "RCX", "R8", "R9"] {
+        let Some(st) = lookup.probe_register(name) else { break };
+        let Some(space) = st.space.clone() else { break };
+        let addr = Address::new(space, st.offset);
+        let Some(v) = [8, 4].into_iter().find_map(|size| data.vbank().find_input(size, &addr)) else { break };
+        let spill = |op: &OpId| {
+            data.obank().get(*op).is_some_and(|o| {
+                o.code() == OpCode::CPUI_COPY && o.get_out().and_then(|w| data.vbank().get(w)).is_some_and(|w| w.get_addr().get_space().is_some_and(|s| Some(s.get_index()) == data.get_arch().manage().get_stack_space().map(|t| t.get_index())))
             })
-    };
-    [s.r, s.m].into_iter().all(|b| {
-        arm_ops(data, b).into_iter().all(|op| {
-            data.obank().get(op).is_some_and(|o| o.get_out().is_none_or(|out| data.descend_snapshot(out).into_iter().all(ok)))
-        })
+        };
+        if data.descend_snapshot(v).iter().all(spill) {
+            break;
+        }
+        n += 1;
+    }
+    n
+}
+
+fn has_va_start(data: &Funcdata) -> bool {
+    data.obank().iter_alive().any(|op| {
+        data.obank().get(op).is_some_and(|o| o.code() == OpCode::CPUI_CALLOTHER && o.get_in(0).and_then(|v| constant(data, v)) == Some(crate::userop::BUILTIN_VASTART as u64))
     })
 }
 
-fn rewrite(data: &mut Funcdata, s: &Site) -> kuna_base::error::KunaResult<()> {
+fn rewrite(data: &mut Funcdata, plan: &Plan) -> kuna_base::error::KunaResult<()> {
     use kuna_base::error::KunaError;
-    let id = data.new_constant(4, crate::userop::BUILTIN_VAARG as uintb);
-    match s.addr_phi {
-        Some(phi) => {
-            let class = data.new_constant(4, s.sse as uintb);
-            data.op_set_all_input(s.value, &[id, s.ap, class])?;
-            data.op_set_opcode(s.value, crate::typeop::type_op_for(OpCode::CPUI_CALLOTHER));
-            data.op_destroy(phi);
-            for op in arm_ops(data, s.r).into_iter().rev() {
-                if let Some((out, input)) = data.obank().get(op).filter(|o| o.code() == OpCode::CPUI_INDIRECT).and_then(|o| Some((o.get_out()?, o.get_in(0)?))) {
-                    data.total_replace(out, input)?;
-                }
-                data.op_destroy(op);
-            }
-        }
-        None => {
-            let (rv, size, at) = {
-                let o = data.obank().get(s.value).ok_or_else(|| KunaError::lowlevel("vaarg: value"))?;
-                let rv = o.get_out().ok_or_else(|| KunaError::lowlevel("vaarg: out"))?;
-                (rv, data.vbank().get(rv).map_or(8, |v| v.get_size()), o.get_addr().clone())
-            };
-            let branch = data.bb_op_tail(s.c).ok_or_else(|| KunaError::lowlevel("vaarg: branch"))?;
-            let call = data.new_op(3, at);
-            data.op_set_opcode_code(call, OpCode::CPUI_CALLOTHER);
-            data.op_set_input(call, id, 0)?;
-            data.op_set_input(call, s.ap, 1)?;
-            let class = data.new_constant(4, s.sse as uintb);
-            data.op_set_input(call, class, 2)?;
-            let u = data.new_unique_out(size, call)?;
-            data.op_insert_before(call, branch);
-            data.total_replace(rv, u)?;
-            // The step's STORE and the INDIRECTs it leaves go; then what only
-            // fed the address dies.
-            let step_ref = |data: &Funcdata, op: OpId| {
-                data.obank().get(op).filter(|o| o.code() == OpCode::CPUI_INDIRECT).and_then(|o| o.get_in(1)).and_then(|iop| data.vbank().get(iop)).is_some_and(|v| {
-                    use slotmap::KeyData;
-                    OpId::from(KeyData::from_ffi(v.get_offset())) == s.step_store
-                })
-            };
-            for op in arm_ops(data, s.r) {
-                if step_ref(data, op) {
-                    if let Some((out, input)) = data.obank().get(op).and_then(|o| Some((o.get_out()?, o.get_in(0)?))) {
-                        data.total_replace(out, input)?;
-                    }
-                    data.op_destroy(op);
-                }
-            }
-            data.op_destroy(s.step_store);
-            loop {
-                let dead: Vec<OpId> = arm_ops(data, s.r)
-                    .into_iter()
-                    .filter(|&op| {
-                        data.obank().get(op).is_some_and(|o| {
-                            matches!(o.code(), OpCode::CPUI_LOAD | OpCode::CPUI_INT_ADD | OpCode::CPUI_PTRADD | OpCode::CPUI_PTRSUB | OpCode::CPUI_CAST | OpCode::CPUI_INT_ZEXT)
-                                && o.get_out().is_some_and(|w| data.descend_snapshot(w).is_empty())
-                        })
-                    })
-                    .collect();
-                if dead.is_empty() {
-                    break;
-                }
-                for op in dead {
-                    data.op_destroy(op);
-                }
-            }
+    let id = crate::userop::BUILTIN_VAARG as uintb;
+    for &(op, ap, sse) in &plan.reads {
+        let ap = match ap {
+            Some(ap) => ap,
+            None => data.new_constant(8, 0),
+        };
+        let idv = data.new_constant(4, id);
+        let class = data.new_constant(4, sse as uintb);
+        data.op_set_all_input(op, &[idv, ap, class])?;
+        data.op_set_opcode(op, crate::typeop::type_op_for(OpCode::CPUI_CALLOTHER));
+    }
+    for &s in &plan.stores {
+        if data.obank().get(s).is_some_and(|o| o.get_parent().is_some()) {
+            destroy_store(data, s)?;
         }
     }
-    data.remove_branch(s.c, s.to_m)?;
+    for &(c, m) in &plan.sites {
+        let i = data.bblocks_ref().block(c).get_out_index(m);
+        if i < 0 {
+            return Err(KunaError::lowlevel("vaarg: stale arm"));
+        }
+        data.remove_branch(c, i)?;
+    }
     data.remove_unreachable_blocks(false, true)?;
+    if let Some((gp, fp)) = plan.ssa {
+        if !has_va_start(data) && data.bblocks_get_size() > 0 {
+            let entry = data.bblocks_get_block(0);
+            let at = data.bb_op_head(entry).and_then(|o| data.obank().get(o)).map(|o| o.get_addr().clone()).ok_or_else(|| KunaError::lowlevel("vaarg: empty entry"))?;
+            let fp = fp.unwrap_or(48);
+            let gp = gp.unwrap_or_else(|| 8 * named_registers(data));
+            let last = crate::kuna_vastart::last_named(data, (gp / 8 + (fp - 48) / 16) as int4, (gp / 8) as int4);
+            let call = data.new_op(if last.is_some() { 3 } else { 2 }, at);
+            data.op_set_opcode_code(call, OpCode::CPUI_CALLOTHER);
+            let idv = data.new_constant(4, crate::userop::BUILTIN_VASTART as uintb);
+            data.op_set_input(call, idv, 0)?;
+            let ap = data.new_constant(8, 0);
+            data.op_set_input(call, ap, 1)?;
+            if let Some(last) = last {
+                data.op_set_input(call, last, 2)?;
+            }
+            data.op_insert_begin(call, entry);
+        }
+        if !data.get_func_proto().is_input_locked() {
+            data.get_func_proto_mut().set_dotdotdot(true);
+        }
+    }
     Ok(())
 }
+
 
 /// Fold the `va_arg` expansion into one call (see the module docs).
 pub struct ActionVaArg {
@@ -454,18 +1297,15 @@ impl Action for ActionVaArg {
         if !data.get_arch().va_arg {
             return 0;
         }
-        let blocks: Vec<BlockId> = (0..data.bblocks_get_size()).map(|i| data.bblocks_get_block(i)).collect();
-        for c in blocks {
-            let Some(site) = match_site(data, c) else { continue };
-            if !arms_closed(data, &site) {
-                continue;
-            }
-            if rewrite(data, &site).is_err() {
-                return 0;
-            }
-            self.base.count += 1;
-            return 1;
+        let cls = Cls::classify(data);
+        if cls.sites.is_empty() {
+            return 0;
         }
-        0
+        let Some(plan) = find(data, &cls) else { return 0 };
+        if rewrite(data, &plan).is_err() {
+            return 0;
+        }
+        self.base.count += 1;
+        1
     }
 }

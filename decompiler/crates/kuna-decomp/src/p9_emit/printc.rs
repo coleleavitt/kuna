@@ -6684,7 +6684,7 @@ impl PrintC {
         use crate::dtype::type_metatype::{TYPE_PARTIALUNION, TYPE_UNKNOWN};
         let untyped = matches!(ty.get_metatype(), TYPE_UNKNOWN | TYPE_PARTIALUNION);
         let (front, back) = match (untyped, ty.get_size(), sse) {
-            (true, 8, true) => ("double".to_string(), String::new()),
+            (_, 8, true) => ("double".to_string(), String::new()),
             (true, 8, false) => ("long".to_string(), String::new()),
             (true, 4, false) => ("int".to_string(), String::new()),
             _ => type_name_for_decl(&ty, self.rt_ctx),
@@ -6692,12 +6692,44 @@ impl PrintC {
         self.push_op(&tokens::FUNCTION_CALL, Some(op_key(op)));
         self.push_atom(&Atom::with_op("va_arg".to_string(), TagType::OpToken, crate::printlanguage::SyntaxHighlight::funcname_color, op_key(op)));
         self.push_op(&tokens::COMMA, Some(op_key(op)));
+        self.push_va_list(fd, arch, ap, op);
+        self.push_atom(&Atom::syntax(format!("{front}{back}"), TagType::TypeToken, crate::printlanguage::SyntaxHighlight::type_color));
+        true
+    }
+
+    /// (kuna `vaarg`) The `va_list` of a `va_arg`/`va_start` call: `ap` for the
+    /// constant that stands for a promoted local one, `*ap` through a pointer
+    /// to a `va_list` (an array type).
+    fn push_va_list(&mut self, fd: &Funcdata, arch: &Architecture, ap: VarnodeId, op: OpId) {
+        if fd.vbank().get(ap).is_some_and(|v| v.is_constant()) {
+            self.push_atom(&Atom::with_op("ap".to_string(), TagType::VarToken, crate::printlanguage::SyntaxHighlight::var_color, op_key(op)));
+            return;
+        }
         let to_array = fd.vbank().get(ap).and_then(|v| v.get_type().get_ptr_to()).is_some_and(|t| t.get_metatype() == crate::dtype::type_metatype::TYPE_ARRAY);
         if to_array {
             self.push_op(&tokens::DEREFERENCE, Some(op_key(op)));
         }
         self.push_vn_ir(fd, arch, ap, op);
-        self.push_atom(&Atom::syntax(format!("{front}{back}"), TagType::TypeToken, crate::printlanguage::SyntaxHighlight::type_color));
+    }
+
+    /// (kuna `vaarg`) `va_start(ap,last)` for the `va_start` of a promoted
+    /// local `va_list`.
+    fn push_va_start(&mut self, fd: &Funcdata, arch: &Architecture, op: OpId) -> bool {
+        let Some(o) = fd.obank().get(op) else { return false };
+        let (Some(ap), last) = (o.get_in(1), o.get_in(2)) else { return false };
+        if !fd.vbank().get(ap).is_some_and(|v| v.is_constant()) {
+            return false;
+        }
+        self.push_op(&tokens::FUNCTION_CALL, Some(op_key(op)));
+        self.push_atom(&Atom::with_op("va_start".to_string(), TagType::OpToken, crate::printlanguage::SyntaxHighlight::funcname_color, op_key(op)));
+        match last {
+            Some(last) => {
+                self.push_op(&tokens::COMMA, Some(op_key(op)));
+                self.push_va_list(fd, arch, ap, op);
+                self.push_vn_ir(fd, arch, last, op);
+            }
+            None => self.push_va_list(fd, arch, ap, op),
+        }
         true
     }
 
@@ -6724,6 +6756,9 @@ impl PrintC {
             .unwrap_or(0);
         let nin = fd.obank().get(op).map(|o| o.num_input()).unwrap_or(0);
         if in0_off == crate::userop::BUILTIN_VAARG as u64 && nin == 3 && self.push_va_arg(fd, arch, op) {
+            return;
+        }
+        if in0_off == crate::userop::BUILTIN_VASTART as u64 && self.push_va_start(fd, arch, op) {
             return;
         }
         if display == 0 {
