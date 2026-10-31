@@ -396,6 +396,7 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
     // false), so a default run is byte-identical.
     if matches!(format, object::BinaryFormat::Elf | object::BinaryFormat::MachO) {
         passes.push(Box::new(crate::rtti::kuna_itaniumrtti::ItaniumRttiPass));
+        passes.push(Box::new(crate::rtti::kuna_vtabletypes::VtableTypesPass));
     }
 
     // S1 ELF GOT data imports (ElfGotImportPass): name each undefined-symbol

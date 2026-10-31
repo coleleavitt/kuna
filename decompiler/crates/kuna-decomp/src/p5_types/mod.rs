@@ -40,6 +40,7 @@ pub mod kuna_zextreturn; // (kuna) a return the convention zero-extends only whe
 pub mod kuna_ptrfromuse; // (kuna) type a dereferenced-only function input as a pointer
 pub mod kuna_libcfit; // (kuna) a libc aggregate vote declines where the caller reads past its end
 pub mod kuna_pebnames; // (kuna) type the Windows TEB segment base so PEB/TEB field reads are named
+pub mod kuna_vtabletypes; // (kuna) typed C++ vtables: a virtual call through a named slot of its class
 pub mod kuna_structmerge; // (kuna) merge a synthesized record with the claims of a sibling reader
 pub mod kuna_structheadless; // (kuna) a closed function's parameter read only past its start is a record
 pub mod kuna_fieldtype; // (kuna) a synthesized field some access holds as a pointer is declared as that pointer

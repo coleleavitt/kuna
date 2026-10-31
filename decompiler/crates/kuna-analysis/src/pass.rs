@@ -558,6 +558,9 @@ pub struct AnalysisOutput {
     /// (kuna `arm64evcall`) arm64e virtual call sites and the methods their
     /// vtable slot can hold. See [`crate::rtti::kuna_arm64evcall`].
     pub vcall_sites: Vec<crate::rtti::kuna_arm64evcall::VcallSite>,
+    /// (kuna `vtabletypes`) The recovered C++ vtables to type. See
+    /// [`crate::rtti::kuna_vtabletypes`].
+    pub cpp_vtables: crate::rtti::kuna_vtabletypes::VtableFacts,
     /// Detected NUL-terminated string literals (a typed `char[N]` per address).
     pub strings: Vec<StringFact>,
     /// (kuna `fatstr`) Length-BOUNDED string literals recovered from static
@@ -917,6 +920,8 @@ impl AnalysisOutput {
         self.externref.extend(other.externref);
         self.import_slot_names.extend(other.import_slot_names);
         self.vcall_sites.extend(other.vcall_sites);
+        self.cpp_vtables.classes.extend(other.cpp_vtables.classes);
+        self.cpp_vtables.slot_ranges.extend(other.cpp_vtables.slot_ranges);
         self.strings.extend(other.strings);
         self.bounded_strings.extend(other.bounded_strings);
         self.wide_strings.extend(other.wide_strings);

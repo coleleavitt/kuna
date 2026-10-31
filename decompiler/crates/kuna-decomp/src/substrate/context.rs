@@ -1149,6 +1149,9 @@ pub struct ArchContext {
     /// [`check_input_trial_use`](crate::funcdata_callsite::check_input_trial_use)
     /// through [`crate::p4_calls::kuna_calleedeadarg::trial_is_dead_in_callee`].
     pub callee_dead_arg: bool,
+    /// (kuna `vtabletypes`) A call made direct by an indirect-call override
+    /// does not take the register that carried its target as an argument.
+    pub vtable_types: bool,
     /// (kuna) veto a hidden-return register trial no callee could be returning
     /// through (`hiddenretarg`).  Read by
     /// [`crate::p4_calls::kuna_hiddenretarg::trial_is_not_hidden_return`].
@@ -2126,6 +2129,7 @@ impl ArchContext {
             // calleedeadarg only ever REMOVES an argument, and only against a
             // decoded callee body; the fixture seam carries the real default.
             callee_dead_arg: true,
+            vtable_types: false,
             hidden_ret_arg: true,
             callee_read_arg: true,       // calleereadarg (default-on)
             push_pad_read: true,         // pushpadread (default-on)

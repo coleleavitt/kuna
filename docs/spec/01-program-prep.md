@@ -4187,7 +4187,13 @@ every other binary's pass list is byte-identical to before the pass existed):
   remove. The relocation's offset *is* the typeinfo address and its symbol *is* the
   flavour, which fixes the object's layout past the `[vptr][name ptr]` prefix. A
   defined `_ZTI…` symbol is a second discovery source for the unstripped or
-  statically linked case, its flavour sniffed from the object's shape.
+  statically linked case, its flavour sniffed from the object's shape. A non-PIE
+  executable has no such relocation: its code refers to the three typeinfo
+  vtables by absolute address, so the linker copies each into the image
+  (`R_X86_64_COPY`) and every typeinfo's vptr word is a plain pointer two words
+  into a copy. The copies keep their `.dynsym` names through `strip`, so a scan
+  for words pointing two words into one finds the typeinfo objects of a stripped
+  non-PIE image (`kuna_itaniumrtti.rs (copied_abi_vtables)`).
 
   Each typeinfo's `_ZTS…` type-name string — the bare mangled-name component, which
   no demangler accepts alone — is recovered by wrapping it back into the `_ZTS`
@@ -4259,6 +4265,25 @@ every other binary's pass list is byte-identical to before the pass existed):
   (`loader/format/macho/dyldinfo.rs (resolve_dyld_info_binds)`), which carry
   no addend, so the anchor is accepted on the name alone. Pinned by
   `tests/stages/kuna-itaniumrtti-macho.xml` and its `-classic` twin.
+- **(kuna) Typed vtables** (`vtabletypes`, ELF and Mach-O, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/rtti/kuna_vtabletypes.rs`): the
+  facts chapter 05's vtable typing installs. The pass runs the Itanium recovery
+  above itself (`kuna_itaniumrtti.rs (recover)`), whether or not `itaniumrtti`
+  commits its symbols. Per polymorphic class it reports the primary vtable's
+  slots and, per slot, the function the class holds and every override: the same
+  slot of each derived class's sub-vtable for the class's subobject (the primary
+  one for a base at offset 0, the secondary one at the base's displacement
+  otherwise). A class the image never instantiates (an abstract base whose
+  constructor was inlined away) has no vtable of its own and gets the prefix all
+  its derived views share. A slot is named for the method its symbol demangles to;
+  a destructor slot is `dtor`, or `deleting_dtor` for the `D0` variant, and a
+  `this`-adjusting thunk (`_ZThn16_…`, `_ZTv0_n24_…`) names the method it
+  forwards to. The class's structure name is the one the demangled signatures
+  give `this`, the innermost component without template arguments; two classes
+  with the same such name are both skipped. It also reports every sub-vtable's
+  slot words. When the gate is on, a function a vtable holds is known to be a virtual member,
+  so its inferred-tier demangled declaration with `this` (`cppsig`) is applied as
+  if proven.
 - **Objective-C** (`objc`, Mach-O-only, default-off;
   `decompiler/crates/kuna-analysis/src/analyzers/objc/mod.rs`): walk
   `__objc_classlist` → `class_t` → `class_ro_t` → method lists (both absolute and

@@ -62,6 +62,7 @@
 
 pub mod kuna_arm64evcall;
 pub mod kuna_itaniumrtti;
+pub mod kuna_vtabletypes;
 pub mod models;
 pub mod refkind;
 pub mod vftable;
