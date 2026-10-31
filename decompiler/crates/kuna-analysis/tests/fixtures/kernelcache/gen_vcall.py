@@ -4,7 +4,8 @@
 An arm64 MH_FILESET with two entries sharing one DYLD_CHAINED_PTR_64_KERNEL_CACHE
 table. The kernel (MH_EXECUTE) has a vtable `{0, 0, Base_m0, Base_m1}` and two
 virtual call sites; the kext (MH_KEXT_BUNDLE) a vtable `{0, 0, Base_m0,
-Widget_m1}` that overrides slot 1. Every slot is signed key IA,
+Widget_m1}` that overrides slot 1. A `__PRELINK_INFO` plist with only
+`_PrelinkKCID` marks it a boot collection (cache level 0). Every slot is signed key IA,
 address-diversified: slot 0 with 0x1000, slot 1 with 0x2001.
 
     kernel_vcall_m0   ldr x8, [x16, #0]!          -> Base_m0 alone (both vtables)
@@ -134,17 +135,23 @@ def fileset_entry(addr, name):
     body = body.ljust((len(body) + 8 + 7) & ~7, b"\0")
     return u32(0x80000035, 8 + len(body)) + body
 
+PRELINK = (LINKEDIT + linkedit_size + PAGE - 1) & ~(PAGE - 1)
+prelink_plist = (b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0">\n<dict>\n'
+                 b'\t<key>_PrelinkInfoDictionary</key>\n\t<array/>\n'
+                 b'\t<key>_PrelinkKCID</key>\n\t<data>AAAAAAAAAAAAAAAAAAAAAA==</data>\n</dict>\n</plist>\n\0')
+
 top_cmds = [
     segment(b"__TEXT", 0, 0x3000, prot=1),
     segment(b"__TEXT_EXEC", KERNEL_TEXT, PAGE),
     segment(b"__DATA_CONST", KERNEL_CONST, PAGE, prot=1),
     segment(b"__LINKEDIT", LINKEDIT, linkedit_size, prot=1),
+    segment(b"__PRELINK_INFO", PRELINK, len(prelink_plist), prot=1),
     u32(0x80000034, 16, fixups_off, len(fixups)),
     fileset_entry(KERNEL_HDR, b"com.apple.kernel"),
     fileset_entry(KEXT_HDR, b"com.example.driver.Widget"),
 ]
 
-image = bytearray(LINKEDIT + linkedit_size)
+image = bytearray(PRELINK + len(prelink_plist))
 def place(off, blob): image[off:off + len(blob)] = blob
 place(0, header(0xC, top_cmds) + b"".join(top_cmds))
 place(KERNEL_HDR, header(0x2, kernel_cmds) + b"".join(kernel_cmds))
@@ -154,4 +161,5 @@ place(KEXT_TEXT, u32(*kext_code))
 for off, raw in fixups_at.items():
     place(off, u64(raw))
 place(LINKEDIT, linkedit)
+place(PRELINK, prelink_plist)
 open("fileset_vcall.macho", "wb").write(image)
