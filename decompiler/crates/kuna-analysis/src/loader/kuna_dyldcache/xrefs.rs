@@ -113,7 +113,10 @@ pub fn read_note(bytes: &[u8]) -> Vec<Xref> {
         };
         let (cmd, size) = (u32_at(c, 0), u32_at(c, 4) as usize);
         if cmd == super::extract::LC_NOTE && size >= 40 && cmds.get(at + 8..at + 24) == Some(NOTE_OWNER) {
-            let (off, len) = (u64_at(cmds, at + 24) as usize, u64_at(cmds, at + 32) as usize);
+            let Some(entry) = cmds.get(at..at + 40) else {
+                break;
+            };
+            let (off, len) = (u64_at(entry, 24) as usize, u64_at(entry, 32) as usize);
             return bytes.get(off..off.saturating_add(len)).map(decode).unwrap_or_default();
         }
         if size < 8 {
@@ -144,7 +147,7 @@ pub(super) fn collect<'v>(
             .iter()
             .flat_map(|s| &s.sections)
             .filter(|s| s.section_type() == S_SYMBOL_STUBS)
-            .map(|s| (s.addr, s.addr + s.size))
+            .map(|s| (s.addr, s.addr.saturating_add(s.size)))
             .collect()
     } else {
         Vec::new()
@@ -163,7 +166,7 @@ pub(super) fn collect<'v>(
                 for (i, w) in bytes.chunks_exact(4).enumerate() {
                     let w = u32_at(w, 0);
                     if w & 0x7C00_0000 == 0x1400_0000 {
-                        let pc = sec.addr + i as u64 * 4;
+                        let pc = sec.addr.wrapping_add(i as u64 * 4);
                         let target = pc.wrapping_add_signed(sign_extend(w & 0x03FF_FFFF, 26) << 2);
                         if !layout.holds(target) || stubs.iter().any(|&(lo, hi)| target >= lo && target < hi) {
                             targets.insert(target);
@@ -175,7 +178,7 @@ pub(super) fn collect<'v>(
                 for (i, p) in bytes.chunks_exact(ptr).enumerate() {
                     let value = if ptr == 8 { u64_at(p, 0) } else { u64::from(u32_at(p, 0)) };
                     if value != 0 && !layout.holds(value) {
-                        slots.push((sec.addr + (i * ptr) as u64, value));
+                        slots.push((sec.addr.wrapping_add((i * ptr) as u64), value));
                     }
                 }
             }
@@ -215,7 +218,7 @@ fn follow_stub(cache: &DyldCache, addr: u64) -> Option<u64> {
     let mut regs = [None::<u64>; 32];
     for (i, w) in code.chunks_exact(4).enumerate() {
         let w = u32_at(w, 0);
-        let pc = addr + i as u64 * 4;
+        let pc = addr.wrapping_add(i as u64 * 4);
         let rd = (w & 31) as usize;
         let rn = ((w >> 5) & 31) as usize;
         if w & 0x9F00_0000 == 0x9000_0000 {
@@ -276,7 +279,7 @@ impl<'a> Names<'a> {
                     .segments
                     .iter()
                     .filter(|s| s.name != "__LINKEDIT")
-                    .map(|s| (s.vmaddr, s.vmaddr + s.vmsize, i))
+                    .map(|s| (s.vmaddr, s.vmaddr.saturating_add(s.vmsize), i))
                     .collect::<Vec<_>>()
             })
             .collect();
@@ -321,23 +324,28 @@ impl<'a> Names<'a> {
     /// re-export followed to the dylib that defines it. `visited` holds the
     /// images this lookup already searched, so umbrella cycles and fan-out
     /// cost each image at most one search.
-    fn export_target(&self, index: usize, name: &str, depth: usize, visited: &mut std::collections::HashSet<usize>) -> Option<u64> {
+    fn export_target(
+        &self,
+        index: usize,
+        name: &str,
+        depth: usize,
+        visited: &mut std::collections::HashSet<(usize, String)>,
+    ) -> Option<u64> {
         const MH_NO_REEXPORTED_DYLIBS: u32 = 0x0010_0000;
         const LC_REEXPORT_DYLIB: u32 = 0x8000_001f;
-        if depth > MAX_REEXPORT_DEPTH || !visited.insert(index) {
+        if depth > MAX_REEXPORT_DEPTH || !visited.insert((index, name.to_string())) {
             return None;
         }
         let trie = self.trie(index);
         let layout = self.cache.image_layout(index).ok()?;
         let deps = || self.cache.image_dependencies(index).unwrap_or_default();
         match trie.get(name) {
-            Some(ExportTarget::Offset(offset)) => Some(layout.address + offset),
+            Some(ExportTarget::Offset(offset)) => Some(layout.address.wrapping_add(*offset)),
             Some(ExportTarget::Absolute(_)) => None,
             Some(ExportTarget::Reexport { ordinal, name: other }) => {
                 let deps = deps();
                 let (_, dep) = deps.get(usize::try_from(*ordinal).ok()?.checked_sub(1)?)?;
                 let dep = *self.by_path.get(dep.as_str())?;
-                visited.clear();
                 self.export_target(dep, other.as_deref().unwrap_or(name), depth + 1, visited)
             }
             None if layout.header_flags() & MH_NO_REEXPORTED_DYLIBS == 0 => deps()
@@ -420,7 +428,7 @@ impl<'a> Names<'a> {
             .segments
             .iter()
             .flat_map(|s| &s.sections)
-            .find(|s| s.section_type() == S_SYMBOL_STUBS && addr >= s.addr && addr < s.addr + s.size)?;
+            .find(|s| s.section_type() == S_SYMBOL_STUBS && addr >= s.addr && addr < s.addr.saturating_add(s.size))?;
         let stride = sec.reserved2 as u64;
         if stride == 0 || (addr - sec.addr) % stride != 0 {
             return None;
@@ -455,5 +463,19 @@ mod tests {
     fn adrp_immediates_decode_with_sign() {
         assert_eq!(sign_extend(0x1F_FFFF, 21), -1);
         assert_eq!(sign_extend(0x03FF_FFFF, 26) << 2, -4);
+    }
+
+    /// An `LC_NOTE` declaring 40 bytes inside a 24-byte command area is
+    /// ignored instead of read past the buffer.
+    #[test]
+    fn a_note_past_the_load_commands_is_ignored() {
+        let mut bytes = vec![0u8; 32 + 24];
+        bytes[0..4].copy_from_slice(&0xfeed_facfu32.to_le_bytes());
+        bytes[16..20].copy_from_slice(&1u32.to_le_bytes());
+        bytes[20..24].copy_from_slice(&24u32.to_le_bytes());
+        bytes[32..36].copy_from_slice(&super::super::extract::LC_NOTE.to_le_bytes());
+        bytes[36..40].copy_from_slice(&40u32.to_le_bytes());
+        bytes[40..56].copy_from_slice(NOTE_OWNER);
+        assert!(read_note(&bytes).is_empty());
     }
 }

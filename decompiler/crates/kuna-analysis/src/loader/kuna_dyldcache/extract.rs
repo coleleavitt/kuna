@@ -46,6 +46,50 @@ const N_PEXT: u8 = 0x10;
 const PAGE: u64 = 0x4000;
 /// The name the cache builder leaves on a local it moved to the local-symbols file.
 const REDACTED: &[u8] = b"<redacted>";
+const DYLIB_COMMANDS: [u32; 5] = [0xc, 0x8000_0018, 0x8000_001f, 0x20, 0x8000_0023];
+/// A cache image's load commands are far smaller than this; a larger
+/// `sizeofcmds` is a malformed header.
+const MAX_SIZEOFCMDS: usize = 1 << 20;
+
+/// Every load command lies inside `cmds` and holds the fields it is read for,
+/// so the fixed-offset reads and writes of the rebuild stay in bounds.
+fn validate_commands(cmds: &[u8], w: Width) -> Result<(), String> {
+    let mut at = 0usize;
+    while at < cmds.len() {
+        let (Some(cmd), Some(size)) = (cmds.get(at..at + 4), cmds.get(at + 4..at + 8)) else {
+            return Err("truncated load command".into());
+        };
+        let cmd = u32::from_le_bytes(cmd.try_into().unwrap());
+        let size = u32::from_le_bytes(size.try_into().unwrap()) as usize;
+        let need = match cmd {
+            c if c == w.seg_cmd => {
+                let nsects = cmds
+                    .get(at + w.seg[4]..at + w.seg[4] + 4)
+                    .map_or(usize::MAX, |s| u32::from_le_bytes(s.try_into().unwrap()) as usize);
+                w.sect0.saturating_add(nsects.saturating_mul(w.sect_size))
+            }
+            LC_SYMTAB => 24,
+            LC_DYSYMTAB => 80,
+            LC_DYLD_INFO | LC_DYLD_INFO_ONLY => 48,
+            c if LINKEDIT_DATA_COMMANDS.contains(&c) => 16,
+            c if DYLIB_COMMANDS.contains(&c) => 16,
+            _ => 8,
+        };
+        if size < need || size > cmds.len() - at {
+            return Err(format!("load command {cmd:#x} at offset {at:#x} is malformed"));
+        }
+        at += size;
+    }
+    Ok(())
+}
+
+/// Whether `[va, va + len)` lies inside the file-backed bytes of `s`.
+fn covers(s: &Segment, va: u64, len: usize) -> bool {
+    va >= s.vmaddr && (va - s.vmaddr).checked_add(len as u64).is_some_and(|end| end <= s.filesize)
+}
+
+#[cfg(test)]
+mod tests;
 
 /// The field layout of a 64-bit or 32-bit Mach-O: the header, segment and
 /// section commands and the nlist differ only in width and offsets.
@@ -139,7 +183,7 @@ pub struct Segment {
 
 impl Segment {
     pub fn contains(&self, va: u64) -> bool {
-        va >= self.vmaddr && va < self.vmaddr + self.vmsize
+        va >= self.vmaddr && va - self.vmaddr < self.vmsize
     }
 }
 
@@ -163,7 +207,7 @@ impl ImageLayout {
     /// The address a `__LINKEDIT` file offset of this image names.
     fn linkedit_va(&self, offset: u32) -> Option<u64> {
         let le = self.linkedit()?;
-        (offset as u64).checked_sub(le.fileoff).map(|d| le.vmaddr + d)
+        (offset as u64).checked_sub(le.fileoff).and_then(|d| le.vmaddr.checked_add(d))
     }
 
     pub(crate) fn header_flags(&self) -> u32 {
@@ -290,7 +334,13 @@ impl DyldCache {
                 _ => return Err(format!("image at {address:#x} is not a Mach-O")),
             };
             let header = self.read_va(address, width.header)?;
-            let cmds = self.read_va(address + width.header as u64, u32_at(&header, 20) as usize)?;
+            let sizeofcmds = u32_at(&header, 20) as usize;
+            if sizeofcmds > MAX_SIZEOFCMDS {
+                return Err(format!("image at {address:#x} declares {sizeofcmds} bytes of load commands"));
+            }
+            let cmds_at = address.checked_add(width.header as u64).ok_or("image header address overflows")?;
+            let cmds = self.read_va(cmds_at, sizeofcmds)?;
+            validate_commands(&cmds, width)?;
             Ok(parse_layout(address, width, header, cmds))
         };
         let layout = read().map(Rc::new);
@@ -312,7 +362,12 @@ impl DyldCache {
         let sym_va = layout.linkedit_va(symoff).ok_or("symbol table lies outside __LINKEDIT")?;
         let str_va = layout.linkedit_va(stroff).ok_or("string table lies outside __LINKEDIT")?;
         let raw = self.read_va(sym_va, nsyms * layout.width.nlist)?;
-        let pool = super::StringPool::read(&|off, len| self.read_va(str_va + off, len), layout.width.nlist, strsize, &raw)?;
+        let pool = super::StringPool::read(
+            &|off, len| self.read_va(str_va.checked_add(off).ok_or("string table offset overflows")?, len),
+            layout.width.nlist,
+            strsize,
+            &raw,
+        )?;
         Ok(Nlist::parse_all(&raw, layout.width.nlist, &pool))
     }
 
@@ -371,7 +426,6 @@ impl DyldCache {
 
     /// Image `index`'s dylib load commands in ordinal order: `(cmd, install name)`.
     pub(crate) fn image_dependencies(&self, index: usize) -> Result<Vec<(u32, String)>, String> {
-        const DYLIB_COMMANDS: [u32; 5] = [0xc, 0x8000_0018, 0x8000_001f, 0x20, 0x8000_0023];
         let layout = self.image_layout(index)?;
         Ok(layout
             .commands()
@@ -455,10 +509,7 @@ impl DyldCache {
 
         let mut xrefs = {
             let view = |va: u64, len: usize| -> Option<&[u8]> {
-                let (i, off) = placed.iter().find(|(i, _)| {
-                    let s = &layout.segments[*i];
-                    va >= s.vmaddr && va + len as u64 <= s.vmaddr + s.filesize
-                })?;
+                let (i, off) = placed.iter().find(|(i, _)| covers(&layout.segments[*i], va, len))?;
                 let start = (off + (va - layout.segments[*i].vmaddr)) as usize;
                 out.get(start..start + len)
             };
@@ -467,10 +518,7 @@ impl DyldCache {
 
         for ((c, l), segs) in companions.iter().zip(&companion_placed) {
             let view = |va: u64, len: usize| -> Option<&[u8]> {
-                let (i, off) = segs.iter().find(|(i, _)| {
-                    let s = &l.segments[*i];
-                    va >= s.vmaddr && va + len as u64 <= s.vmaddr + s.filesize
-                })?;
+                let (i, off) = segs.iter().find(|(i, _)| covers(&l.segments[*i], va, len))?;
                 let start = (off + (va - l.segments[*i].vmaddr)) as usize;
                 out.get(start..start + len)
             };
@@ -595,6 +643,9 @@ impl DyldCache {
                 self.images[index].path
             ));
         }
+        if out.len() < w.header + cmds.len() {
+            return Err(format!("{} is too short to hold its load commands", self.images[index].path));
+        }
         let mut header = layout.header.clone();
         put_u32(&mut header, 16, ncmds);
         put_u32(&mut header, 20, cmds.len() as u32);
@@ -619,7 +670,7 @@ impl DyldCache {
             }
             let [ilocal, nlocal, ..] = dysymtab;
             let locals = self.local_symbols(index)?;
-            let local_end = (ilocal + nlocal) as usize;
+            let local_end = ilocal.checked_add(nlocal).ok_or("local symbol range overflows")? as usize;
             let replace = !locals.is_empty() && local_end <= symbols.len();
             let added = if replace { locals.len() as i64 - nlocal as i64 } else { 0 };
             let remap = |old: u32| -> u32 {
@@ -646,18 +697,21 @@ impl DyldCache {
         }
 
         if !extra_symbols.is_empty() {
-            let at = if layout.dysymtab.is_some() { (dysymtab[0] + dysymtab[1]) as usize } else { symbols.len() };
+            let at = match layout.dysymtab {
+                Some(_) => dysymtab[0].checked_add(dysymtab[1]).ok_or("local symbol range overflows")? as usize,
+                None => symbols.len(),
+            };
             let at = at.min(symbols.len());
             let n = extra_symbols.len() as u32;
             symbols.splice(at..at, extra_symbols);
             if layout.dysymtab.is_some() {
-                dysymtab[1] += n;
-                dysymtab[2] += n;
-                dysymtab[4] += n;
+                for field in [1, 2, 4] {
+                    dysymtab[field] = dysymtab[field].checked_add(n).ok_or("symbol count overflows")?;
+                }
             }
             for v in indirect.iter_mut().filter(|v| **v & (INDIRECT_SYMBOL_LOCAL | INDIRECT_SYMBOL_ABS) == 0) {
                 if *v as usize >= at {
-                    *v += n;
+                    *v = v.checked_add(n).ok_or("indirect symbol index overflows")?;
                 }
             }
         }
