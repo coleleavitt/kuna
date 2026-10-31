@@ -3,7 +3,8 @@
 //! … — so a call through an import stub carries its arguments and result (an
 //! untyped stub drops them: `v = objc_retainAutoreleasedReturnValue();`), and for
 //! clang's outlined arm64 `objc_retain_x<N>` / `objc_release_x<N>`, which take
-//! and return the object in `x<N>` outside every calling convention.
+//! the object in `x<N>` and return a retain in `x0`, outside every calling
+//! convention.
 
 use std::rc::Rc;
 
@@ -124,16 +125,18 @@ pub fn outlined_register(name: &str) -> Option<&str> {
     (n <= 28).then_some(rest)
 }
 
-/// `id objc_retain_x<N>(id obj @ x<N>)` returning in `x<N>` too; a release has no
-/// result but reads the same register.
+/// `id objc_retain_x<N>(id obj @ x<N>)` returning the object in `x0`, while `x<N>`
+/// keeps it; a release has no result but reads the same register.
 fn outlined(name: &str, reg: &str, arch: &Architecture, tctx: &TypeCtx) -> Option<PrototypePieces> {
     let obj: Rc<Datatype> = decode_ivar_type("@", tctx)?;
-    let vn = arch.get_register_varnode(reg.as_bytes()).ok()?;
-    let space = vn.space?;
-    let storage = |ty: Rc<Datatype>| ParameterPieces {
-        addr: Address::new(Rc::clone(&space), vn.offset),
-        type_: Some(ty),
-        flags: parameter_pieces_flags::TYPELOCK | parameter_pieces_flags::NAMELOCK,
+    let storage = |register: &str| {
+        let vn = arch.get_register_varnode(register.as_bytes()).ok()?;
+        let space = vn.space?;
+        Some(ParameterPieces {
+            addr: Address::new(Rc::clone(&space), vn.offset),
+            type_: Some(Rc::clone(&obj)),
+            flags: parameter_pieces_flags::TYPELOCK | parameter_pieces_flags::NAMELOCK,
+        })
     };
     let retains = name.starts_with("objc_retain_");
     let mut p = PrototypePieces {
@@ -144,9 +147,9 @@ fn outlined(name: &str, reg: &str, arch: &Architecture, tctx: &TypeCtx) -> Optio
         first_var_arg_slot: -1,
         ..Default::default()
     };
-    p.input_storage.push((0, storage(Rc::clone(&obj))));
+    p.input_storage.push((0, storage(reg)?));
     if retains {
-        p.output_storage = Some(storage(obj));
+        p.output_storage = Some(storage("x0")?);
     }
     Some(p)
 }

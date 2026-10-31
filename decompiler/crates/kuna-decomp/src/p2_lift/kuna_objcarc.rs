@@ -10,8 +10,8 @@
 //! helper's body is `x0 = x0` marked an incidental copy (its result keeps the
 //! argument's variable), a release has no effect, and `objc_storeStrong` is the
 //! store `*slot = value` (the old value's release is bookkeeping). Clang's
-//! outlined `objc_retain_x<N>` / `objc_release_x<N>` (arm64, the object in and
-//! out of `x<N>`) get the same treatment per register.
+//! outlined `objc_retain_x<N>` / `objc_release_x<N>` (arm64, the object in
+//! `x<N>`, a retain's result in `x0`) get the same treatment per register.
 //!
 //! x86-64 `CALL` lifts as a push of the return address, so every x86-64 body
 //! starts with `RSP = RSP + 8` (the `alloca_probe` correction); arm64 `bl` only
@@ -63,11 +63,8 @@ pub fn payload_xml_aarch64() -> String {
     xml.push_str(&fixup("drop", &names(&DROPPED), "x0 = x0;"));
     xml.push_str(&fixup("store", &[STORE.to_string()], "*:8 x0 = x1;"));
     for n in 0..=MAX_OUTLINED_REG {
-        xml.push_str(&fixup(
-            &format!("x{n}"),
-            &[format!("objc_retain_x{n}"), format!("objc_release_x{n}")],
-            &format!("x{n} = x{n};"),
-        ));
+        xml.push_str(&fixup(&format!("retain_x{n}"), &[format!("objc_retain_x{n}")], &format!("x0 = x{n};")));
+        xml.push_str(&fixup(&format!("release_x{n}"), &[format!("objc_release_x{n}")], &format!("x{n} = x{n};")));
     }
     xml
 }
@@ -125,7 +122,7 @@ mod tests {
         assert!(xml.contains("<target name=\"objc_retain_x28\"/>"));
         assert!(xml.contains("<target name=\"objc_release_x19\"/>"));
         assert!(!xml.contains("objc_retain_x29"));
-        assert_eq!(xml.matches("<callfixup name=").count(), 3 + MAX_OUTLINED_REG as usize + 1);
+        assert_eq!(xml.matches("<callfixup name=").count(), 3 + 2 * (MAX_OUTLINED_REG as usize + 1));
     }
 
     #[test]
