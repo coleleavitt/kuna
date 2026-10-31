@@ -506,31 +506,23 @@ pub fn emit_catalog_json(live: impl Fn(&str) -> Option<Cow<'static, str>>) -> St
 }
 
 /// The `###` heading of an option's section, inline code included.
+/// An option's heading; a `<placeholder>` value is a code span so the
+/// renderer shows it rather than reading it as an HTML tag.
 fn option_heading(st: &KunaSettable) -> String {
     format!(
         "`{}` -- {}, default `{}`{}",
         st.option,
-        st.values.replace('|', " | "),
+        st.values.replace('|', " | ").replace('<', "`<").replace('>', ">`"),
         st.shipped,
         if st.destructive { " (destructive opt-in)" } else { "" },
     )
 }
 
-/// GitHub's anchor for a heading: the rendered text (code backticks and
-/// raw `<...>` spans gone) lowercased, punctuation dropped, spaces to hyphens.
+/// GitHub's anchor for a heading: the rendered text (code backticks gone)
+/// lowercased, punctuation dropped, spaces to hyphens.
 fn github_anchor(markdown_heading: &str) -> String {
-    let mut text = String::new();
-    let mut in_tag = false;
-    for ch in markdown_heading.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' if in_tag => in_tag = false,
-            _ if in_tag => {}
-            '`' => {}
-            _ => text.push(ch),
-        }
-    }
-    text.chars()
+    markdown_heading
+        .chars()
         .filter_map(|ch| match ch {
             ' ' => Some('-'),
             'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' => Some(ch.to_ascii_lowercase()),

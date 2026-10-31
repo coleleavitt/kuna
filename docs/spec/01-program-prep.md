@@ -4454,8 +4454,11 @@ every other binary's pass list is byte-identical to before the pass existed):
     getter is emitted as `Base * -[Holder inner](Holder *self, …)`, its setter
     takes `Base *arg1`, and the `objc_msgSend$inner` stub returns `Base *`. An
     IMP is typed with its *own* class's property spelling first, so two
-    classes whose `view` return different classes each keep theirs; only a
-    stub, which belongs to no class, takes the first spelling seen. Every
+    classes whose `view` return different classes each keep theirs. A stub,
+    which belongs to no class, and an IMP of a class with no property of its
+    own take the one class the declarations agree on; once two of them name
+    different classes the selector keeps its encoding with the class left out
+    (`@@:`), so neither class reaches the other's method. Every
     declaration — class, category and protocol — is recorded before any IMP is
     emitted. The
     decoder resolves `@"Base"` to the struct the layout built — a pointer built
@@ -4474,7 +4477,7 @@ every other binary's pass list is byte-identical to before the pass existed):
     names a directory to read **at load** (`KUNA_OBJCSDK`; nothing derived from
     it is written anywhere): an SDK root contributes the `Headers/` of every
     framework the image links (`LC_LOAD_DYLIB`, 73 on Toyota; ~0.1 s), any
-    other directory every `.h` under it. The reader takes the declaration
+    other directory every `.h` up to eight directories below it. The reader takes the declaration
     subset of the grammar — comments and preprocessor lines stripped,
     `@interface` / `@protocol` / category bodies with their ivar block skipped,
     `- (ret)sel:(T)a …;` methods, `@property (attrs) T name;` as a getter and
@@ -4487,7 +4490,8 @@ every other binary's pass list is byte-identical to before the pass existed):
     class (`@"UIView"`), a block is `@?`, an `id<P>` is `@`; a type the reader
     cannot encode (an unknown struct, a function pointer) makes the selector
     unusable rather than guessed, and a selector declared two ways across
-    classes is dropped (class names erased before comparing). By-value structs
+    classes is dropped (class names erased before comparing; two declarations
+    naming different classes keep the selector with neither). By-value structs
     follow AAPCS64 in the stub prototype: a homogeneous aggregate of up to four
     doubles (`CGRect`, `UIEdgeInsets`) is spread over `d` registers as
     `arg_x, arg_y, arg_width, arg_height`, `NSRange` over two `x` registers, a
@@ -4863,7 +4867,9 @@ every other binary's pass list is byte-identical to before the pass existed):
   `dat_<addr>`. The pass reads each entry, resolves its `char *` through the
   chained-fixup overlay (§1.2) on an arm64(e) image or as a raw word on a classic
   `LC_DYLD_INFO` image, and decodes the string (8-bit when the `flags` unicode bit
-  `0x10` is clear, UTF-16 otherwise). The commit seam then types the entry a
+  `0x10` of the 32-bit info word is clear, UTF-16 otherwise). An entry whose text
+  holds a NUL, which the printer would cut short, is left as its address, and the
+  bytes read for all entries together are capped at 64 MiB. The commit seam then types the entry a
   `char[N]` spanning the entry's own four words (never the string's length, which
   would overrun the next entry and hide it) and seeds the `StringManager` at the
   entry address with the resolved bytes, so a reference renders the literal (`NSLog("Reachability Flag Status: …")`)
