@@ -913,8 +913,12 @@ through to that suffix (`kuna_dedupitetail.rs (plan_suffix_merge)`).
 *Bounds/failure:* only flat leaves (never a nested if/loop, whose hoisting
 would change control flow), ≤ `kuna_dedupitetail.rs (MAX_HOISTED_LEAVES)` = 8
 leaves and ≤ `(MAX_LEAF_OPS)` = 64 ops per equivalence check, exact-or-decline
-on any mismatch, and a leaf carrying a label/goto is never hoisted. Flipped
-on by DIV-14.
+on any mismatch, and a leaf carrying a label/goto is never hoisted. An arm
+left with one component is replaced by that component, and every goto that
+targeted the arm (a `goto`, an if-goto, a multi-goto edge or a switch case goto)
+is pointed at the component instead
+(`decompiler/crates/kuna-decomp/src/substrate/block.rs (retarget_gotos)`): both
+share the arm's entry leaf, so the goto keeps its label. Flipped on by DIV-14.
 
 ### iteregion — `?:` recovery (angr `ITERegionConverter`)
 
