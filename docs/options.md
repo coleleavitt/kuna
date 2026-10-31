@@ -194,6 +194,8 @@ Three tiers:
 | a loop steps an offset by the element size and adds it to the base | [`indexrescale`](#indexrescale) |
 | a variadic function prints a dozen register copies, an if (al) block of XMM copies and gp_offset/fp_offset stores | [`vastart`](#vastart) |
 | a stripped printf-like function recovers 14 parameters | [`vastart`](#vastart) |
+| va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses | [`vaarg`](#vaarg) |
+| a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads | [`vaarg`](#vaarg) |
 | a string or buffer loop prints v = *p; p = &p[1]; instead of v = *p++; | [`postinc`](#postinc) |
 | if (n > 0) { i = 0; do { ... } while (i != n); } instead of a for loop | [`looprotate`](#looprotate) |
 | a while loop prints as an if around a do-while | [`looprotate`](#looprotate) |
@@ -2091,6 +2093,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On (default). Flip off to see the register save area spills and the four va_list field stores.
 - **Where / provenance:** P4/prototype-source · kuna · presentation-default · kuna-vastart
 - **Example:** `--option vastart off`
+
+### `vaarg` -- on | off, default `on`
+
+- **Symptoms:** va_arg diamond printed as gp_offset/fp_offset checks and register save area or overflow pointer accesses; a variadic function's loop over multiple int/long/double arguments prints as separate gp_offset-checked loads.
+- **What it does:** Print the x86-64 SysV va_arg expansion as va_arg(ap, T). A call to va_arg(ap, T) compiles to an offset test: the register arm reads reg_save_area + offset and steps the offset; the memory arm reads through overflow_arg_area and steps the pointer. kuna printed both arms. With this on, every read becomes a va_arg(ap, T) CALLOTHER and the memory arms go, whether the va_list is reached through a pointer, cached in a register, or a local that heritage promoted to SSA values (that one prints as ap, with a va_start(ap, last) added); the arms need not rejoin, as long as the path from the memory arm does what the path from the register arm does (gcc copies a loop tail into each arm).
+- **When to flip:** On (default). Flip off to see the register-save and overflow-pointer steps and the merged address load.
+- **Where / provenance:** P4/prototype-source · kuna · presentation-default · kuna-vaarg
+- **Example:** `--option vaarg off`
 
 ### `postinc` -- on | off, default `on`
 

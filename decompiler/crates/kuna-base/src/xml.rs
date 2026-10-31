@@ -2172,7 +2172,8 @@ mod tests {
         // and kuna-unmergecall / gcc -Os cross-jumped call tails
         // and kuna-prelinked / pre-fileset kernelcaches: threaded pointers rebased, a kext cut out
         // and kuna-dedupitetail-switchgoto / a switch case goto into an unwrapped if clause keeps its target
-        assert_eq!(count, 711, "corpus file count drifted");
+        // and kuna-vaarg-loop-gcc/-clang / va_arg in loops on a promoted va_list
+        assert_eq!(count, 715, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

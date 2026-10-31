@@ -170,6 +170,8 @@ pub const BUILTIN_CTZ: uint4 = 0x10000017;
 pub const BUILTIN_LABS: uint4 = 0x10000018;
 /// (kuna) Built-in id for `strcpy` (`helperroles`).
 pub const BUILTIN_STRCPY: uint4 = 0x10000019;
+/// (kuna) Built-in id for `va_arg` (`vaarg`).
+pub const BUILTIN_VAARG: uint4 = 0x1000001a;
 
 // ---------------------------------------------------------------------------
 // UserOpBase + UserPcodeOp hierarchy (userop.hh:47-318)
@@ -1095,6 +1097,7 @@ impl UserOpManage {
                 UserPcodeOp::new_datatype(name, i as int4, Some(Rc::clone(&int_type)), &[Some(int_type)])
             }
             BUILTIN_BITREV => UserPcodeOp::new_unspecialized(b"bitreverse", BUILTIN_BITREV as int4),
+            BUILTIN_VAARG => UserPcodeOp::new_unspecialized(b"va_arg", BUILTIN_VAARG as int4),
             BUILTIN_STRCPY => {
                 let ptr_size = types.get_size_of_pointer();
                 let word_size = types.get_default_data_space_word_size();

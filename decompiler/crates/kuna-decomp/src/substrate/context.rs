@@ -850,6 +850,8 @@ pub struct ArchContext {
     pub helper_roles: bool,
     /// (kuna `dynalloca`) Read by [`RuleDynAlloca`](crate::kuna_dynalloca::RuleDynAlloca).
     pub dyn_alloca: bool,
+    /// (kuna `vaarg`) The x86-64 va_arg expansion as va_arg(ap, T).
+    pub va_arg: bool,
     /// (kuna `indexrescale`) A byte offset into an array becomes an element index.
     pub index_rescale: bool,
     /// (kuna `looprotate`) A guarded do-while loop becomes a while loop.
@@ -2019,6 +2021,7 @@ impl ArchContext {
             bit_idioms: false,
             helper_roles: false,
             dyn_alloca: false,
+            va_arg: false,
             index_rescale: false,
             loop_rotate: false,
             post_increment: false,

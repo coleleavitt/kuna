@@ -56,13 +56,13 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_445() {
-    assert_eq!(kuna_num_settables(), 445);
-    assert_eq!(SETTABLE_TABLE.len(), 445);
+fn settable_count_is_446() {
+    assert_eq!(kuna_num_settables(), 446);
+    assert_eq!(SETTABLE_TABLE.len(), 446);
 }
 
 #[test]
-fn tier_counts_are_139_core_167_transform_139_analysis() {
+fn tier_counts_are_139_core_168_transform_139_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -74,7 +74,7 @@ fn tier_counts_are_139_core_167_transform_139_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (139, 167, 139));
+    assert_eq!((core, transform, analysis), (139, 168, 139));
 }
 
 #[test]
@@ -1038,7 +1038,8 @@ fn option_values_live_value_present_for_210() {
     // +1 for `dirtypool`.
     // +1 for `unmergecall`.
     // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`, +1 for `gortti`.
-    assert_eq!(with_live, 210);
+    // 195 -> 196: +1 for `vaarg` (live_field = va_arg).
+    assert_eq!(with_live, 211);
 }
 
 #[test]
@@ -1301,7 +1302,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `implweight`.
     // +1 for `dirtypool`.
     // +1 for `unmergecall`.
-    assert_eq!(json.matches("},\n").count(), 444);
+    // +1 for `vaarg`.
+    assert_eq!(json.matches("},\n").count(), 445);
 }
 
 #[test]

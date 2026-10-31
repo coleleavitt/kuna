@@ -64,6 +64,7 @@ pub mod kuna_calleevote; // (kuna) a callee parameter takes the type every calle
 pub mod kuna_callerptr; // (kuna) a parameter every caller passes a pointer is a pointer
 pub mod kuna_callpush; // (kuna) a call's own return-address push is part of the call
 pub mod kuna_vastart; // (kuna) the x86-64 va_start prologue as va_start(ap, last)
+pub mod kuna_vaarg; // (kuna) the x86-64 va_arg expansion as va_arg(ap, T)
 pub mod kuna_callrettype; // (kuna) a call returns the type its callee's recovery gave it
 pub mod kuna_condexeret; // (kuna) a return trial failed only on a path ActionConditionalExe removes gets one more pass
 pub mod kuna_condexeretuse; // (kuna) a use of a returned value on the branch a re-tested condition rules out does not compete
