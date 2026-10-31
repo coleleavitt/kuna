@@ -2107,6 +2107,22 @@ routing replay — still applies. The re-roll is installed through the same
 restart, so a switch installed for a function in a session stays if the option
 is turned off later in that session.
 
+### Binary-search cascades with fewer or more cases — `option treeswitch`, default off
+
+A compare tree (a range node on the switch variable with equality tests at the
+leaves) is what gcc at -O0 emits for a dense switch, with no jump table. The
+shipped rules take a tree of three to sixteen cases and reject the rest:
+`recover_cascade` rejects a tree below three cases and above sixteen (the cap
+keeps the structurer from marking case edges as unstructured gotos). `treeswitch N`
+(N from 2 to 64) moves the floor to N and the cap to 64, for a tree that has a
+range node only. A linear equality chain keeps the `linearswitch` rules. Every
+other check of the recovery — one shared default sink, `loweredswitchexact`'s
+routing replay, the labels rule — still applies. Measured on the switch corpus
+with `treeswitch 2`: gcc -O0 switches recover 223 case labels against 73 with
+the option off (exact functions 11 against 7); gcc -O2, clang -O0, clang -O2
+and aarch64 clang -O2 are unchanged. A tree of more than 64 cases and a switch
+variable kept in a non-register space are still declined.
+
 ### Restricting the re-roll to a locally computed selector — `option switchselector`, default off
 
 The re-rolled `switch` and the cascade it replaces read the same value, so which

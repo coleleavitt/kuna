@@ -318,6 +318,8 @@ Three tiers:
 | a three- or four-case switch renders as a chain of if (v != 3) { if (v != 2) ... } tests on one variable | [`linearswitch`](#linearswitch----off--3--4---default-off) |
 | loweredswitch recovers the binary-search cascade of a large switch but not the linear chain of a small one | [`linearswitch`](#linearswitch----off--3--4---default-off) |
 | nested != tests on one variable with shared tails where the source has a switch | [`linearswitch`](#linearswitch----off--3--4---default-off) |
+| a deep if/else tree on one variable with an equality test at every leaf | [`treeswitch`](#treeswitch----off--2--3---default-off) |
+| gcc -O0 compare tree for a dense switch of 17 or more cases printed as nested ifs | [`treeswitch`](#treeswitch----off--2--3---default-off) |
 | a tiny expression such as a0 + 1 read three times gets its own temporary | [`implweight`](#implweight----off---default-off) |
 | many one-use-looking temporaries for small expressions read in several places | [`implweight`](#implweight----off---default-off) |
 | want small shared expressions printed inline and large ones kept in a variable | [`implweight`](#implweight----off---default-off) |
@@ -2413,6 +2415,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Set `3` (or a larger count) when nested `if (v != 5) { if (v != 2) ... }` tests on one variable stand for a switch. Default off: re-rolling moves 4/675 datatest assertions (Copy trim #6-#8, Partial union #5). Measured at `3` over 4,072 x86-64 functions (gcc/clang -O2 and gcc -O0 Lua, bzip2; zlib, libexpat, libyaml): 13 functions change, switch 298 -> 309, if 20,327 -> 20,299, gotos unchanged in total (lua_compare +2, bzip2 compress and uncompress -1 each), lines +69. A switch installed in a session stays when the option is turned off later for the same function (the installed jump table is kept), so compare off before on.
 - **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-linearswitch
 - **Example:** `option linearswitch 3`
+
+### `treeswitch` -- off | 2 | 3 | <n>, default `off`
+
+- **Symptoms:** a deep if/else tree on one variable with an equality test at every leaf; gcc -O0 compare tree for a dense switch of 17 or more cases printed as nested ifs.
+- **What it does:** Let `loweredswitch` re-roll a binary-search compare tree on one variable into a switch from N cases instead of 3 to 16. A compiler at -O0 lowers a switch to a tree of `==` and `<` tests with no jump table. Detection already finds the tree, but the default rules reject a tree of fewer than 3 cases and one of more than 16. With `treeswitch N` the floor is N and the cap is 64, for a tree that has a range node only. Linear equality chains keep the `linearswitch` rules, and every other check of the cascade recovery still applies, the single shared default sink included.
+- **When to flip:** Set `2` on a gcc -O0 binary whose dense switch prints as a nested if/else tree. Measured on the switch corpus: gcc -O0 case labels 73 -> 223 (exact functions 7 -> 11); gcc -O2, clang -O0, clang -O2 and aarch64 clang -O2 unchanged. Default off.
+- **Where / provenance:** P2/switch-model · kuna · structure-recovery · kuna-treeswitch
+- **Example:** `option treeswitch 2`
 
 ### `implweight` -- off | <n>, default `off`
 

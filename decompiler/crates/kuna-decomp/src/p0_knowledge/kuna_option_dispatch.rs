@@ -710,6 +710,20 @@ kuna_options! { self, p1;
             _ => Err(KunaError::parse("Must specify off or a case count from 3 to 16")),
         }
     },
+    "treeswitch" => {
+        let field = p1.trim();
+        if field == "off" {
+            self.tree_switch = 0;
+            return Ok("Binary-search compare cascades re-roll into a switch from 3 to 16 cases".to_string());
+        }
+        match field.parse::<i32>() {
+            Ok(n) if (2..=64).contains(&n) => {
+                self.tree_switch = n;
+                Ok(format!("Binary-search compare cascades of {n} to 64 cases re-roll into a switch"))
+            }
+            _ => Err(KunaError::parse("Must specify off or a case count from 2 to 64")),
+        }
+    },
     "condstmts" => {
         let (val, msg) =
             crate::p8_structure::kuna_condstmts::OptionCondStmts.apply(p1)?;

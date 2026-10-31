@@ -1390,6 +1390,8 @@ pub struct ArchContext {
     /// (kuna) `linearswitch` — the fewest cases a linear equality chain needs to
     /// re-roll into a switch; 0 = off.
     pub linear_switch: int4,
+    /// (kuna) `treeswitch` — the case bounds for a binary-search cascade; 0 = the shipped 3 to 16.
+    pub tree_switch: int4,
     /// (kuna) `implweight` — terms times uses an expression may print inline; 0 = off.
     pub impl_weight: int4,
     /// (kuna) `rangefold` — fold comparisons and masks a dominating branch decides.
@@ -2182,6 +2184,7 @@ impl ArchContext {
             goto_sink: false, // gotosink (live value copied from the Architecture)
             cmp_merge: false, // cmpmerge (live value copied from the Architecture)
             linear_switch: 0, // linearswitch (live value copied from the Architecture)
+            tree_switch: 0, // treeswitch (live value copied from the Architecture)
             impl_weight: 0, // implweight (live value copied from the Architecture)
             range_fold: false, // rangefold (live value copied from the Architecture)
             pow2_select: false, // pow2select (live value copied from the Architecture)

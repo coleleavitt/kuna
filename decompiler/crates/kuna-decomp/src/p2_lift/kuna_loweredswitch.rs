@@ -928,13 +928,16 @@ fn recover_cascade(
         }
     }
 
-    // RULE3: need >= 3 cases
-    if cases.len() < 3 {
+    // RULE3: need >= 3 cases.  `treeswitch N` moves the floor to N and the cap to 64
+    // for a binary-search cascade only; a linear chain keeps its own rule.
+    let tree = data.get_arch().tree_switch;
+    let (floor, cap) = if saw_range && tree > 0 { (tree as usize, 64) } else { (3, 16) };
+    if cases.len() < floor {
         return None;
     }
     // Fail-safe cap: a very large synthesized switch can make the structurer
-    // mark some case edges as unstructured gotos and abort.  Cap at 16.
-    if cases.len() > 16 {
+    // mark some case edges as unstructured gotos and abort.  Cap at 16 by default.
+    if cases.len() > cap {
         return None;
     }
     if default_votes.is_empty() {
