@@ -2607,7 +2607,8 @@ impl BlockGraph {
     }
 
     /// (kuna) Point every `goto` that targets `old` at `new` instead: the
-    /// `BlockGoto`/`BlockIf` goto targets and `BlockMultiGoto` edges.  Used when a
+    /// `BlockGoto`/`BlockIf` goto targets, `BlockMultiGoto` edges and `BlockSwitch`
+    /// case blocks.  Used when a
     /// tree edit frees `old` in favour of `new`, which must share its front leaf so
     /// the goto still lands on the same label.
     fn retarget_gotos(&mut self, old: BlockId, new: BlockId) {
@@ -2621,6 +2622,11 @@ impl BlockGraph {
                 BlockKind::MultiGoto { gotoedges, .. } => {
                     for e in gotoedges.iter_mut().filter(|e| **e == old) {
                         *e = new;
+                    }
+                }
+                BlockKind::Switch { caseblocks, .. } => {
+                    for c in caseblocks.iter_mut().filter(|c| c.block == old) {
+                        c.block = new;
                     }
                 }
                 _ => {}
