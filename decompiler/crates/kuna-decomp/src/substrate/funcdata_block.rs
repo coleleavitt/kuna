@@ -40,7 +40,7 @@
 use kuna_base::address::Address;
 use kuna_base::error::{KunaError, KunaResult};
 use kuna_base::space::spacetype;
-use kuna_base::types::{int4, uintb};
+use kuna_base::types::{int4, uint4, uintb};
 
 use kuna_num::opcodes::OpCode;
 
@@ -2442,6 +2442,29 @@ impl Funcdata {
     /// through the return-address register (the jump-table `fail_return` mode).
     /// `glb.default_return_addr == None` (C++ `space == 0`, no standard return
     /// storage in the cspec) yields `false`, exactly as the C++ does.
+    pub fn is_userop_formed(&self, vn: VarnodeId, userop: uint4) -> bool {
+        let mut cur = vn;
+        while self.vbank().get(cur).map(|v| v.is_written()).unwrap_or(false) {
+            let Some(o) = self.vbank().get(cur).unwrap().get_def().and_then(|op| self.obank().get(op)) else {
+                return false;
+            };
+            match o.code() {
+                OpCode::CPUI_CALLOTHER => {
+                    return o
+                        .get_in(0)
+                        .and_then(|v| self.vbank().get(v))
+                        .is_some_and(|v| v.is_constant() && v.get_offset() == userop as u64);
+                }
+                OpCode::CPUI_INDIRECT | OpCode::CPUI_COPY => match o.get_in(0) {
+                    Some(v) => cur = v,
+                    None => return false,
+                },
+                _ => return false,
+            }
+        }
+        false
+    }
+
     pub fn test_for_return_address(&self, vn: VarnodeId) -> bool {
         let retaddr = match self.get_arch().default_return_addr.as_ref() {
             Some(rd) => rd,
@@ -2622,6 +2645,11 @@ impl Funcdata {
         let in0 = partial.obank().get(partop).unwrap().get_in(0).unwrap();
         if partial.test_for_return_address(in0) {
             return RecoveryMode::FailReturn;
+        }
+        if let Some(trap) = partial.get_arch().brk_userop {
+            if partial.is_userop_formed(in0, trap) {
+                return RecoveryMode::FailCallother;
+            }
         }
 
         // Recover addresses into the table (clone the table out, recover, store).

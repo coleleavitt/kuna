@@ -56,9 +56,9 @@ fn surface_count_is_120() {
 }
 
 #[test]
-fn settable_count_is_448() {
-    assert_eq!(kuna_num_settables(), 448);
-    assert_eq!(SETTABLE_TABLE.len(), 448);
+fn settable_count_is_449() {
+    assert_eq!(kuna_num_settables(), 449);
+    assert_eq!(SETTABLE_TABLE.len(), 449);
 }
 
 #[test]
@@ -74,7 +74,7 @@ fn tier_counts_are_139_core_170_transform_139_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (139, 170, 139));
+    assert_eq!((core, transform, analysis), (139, 171, 139));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_210() {
+fn option_values_live_value_present_for_213() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -1041,7 +1041,7 @@ fn option_values_live_value_present_for_210() {
     // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`, +1 for `gortti`.
     // 195 -> 196: +1 for `vaarg` (live_field = va_arg).
     // +1 for `vtabletypes` (live_field = analysis_vtabletypes).
-    assert_eq!(with_live, 212);
+    assert_eq!(with_live, 213);
 }
 
 #[test]
@@ -1307,7 +1307,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unmergecall`.
     // +1 for `vaarg`.
     // +1 for `vtabletypes`.
-    assert_eq!(json.matches("},\n").count(), 447);
+    assert_eq!(json.matches("},\n").count(), 448);
 }
 
 #[test]

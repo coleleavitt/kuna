@@ -3007,6 +3007,19 @@ the `x30` read lose their only reader and die to dead-code elimination.
 `tests/stages/kuna-ptrauthtrap.xml` (two passes over the `macho_arm64e_auth`
 fixture).
 
+**(kuna) `option callothernoreturn on|off`, default on,
+`decompiler/crates/kuna-decomp/src/substrate/funcdata_block.rs (is_userop_formed)`.**
+An AArch64 `brk` lifts to `pc = SoftwareBreakpoint(imm, next); goto [pc];`. The
+jump's target is a user-op result, so the flow cannot resolve it, and the jump
+falls back to an ordinary call with no no-return mark:
+`(*SoftwareBreakpoint(0xc471,..))() // jump-as-call`. A trap never returns. With
+the option on, a jump whose target the `SoftwareBreakpoint` user-op forms is a
+`fail_callother`: the call gets the artificial no-return halt, the flow ends at
+the trap, and the printer shows `// no-return`. Only that user-op is matched, so
+other user-op jumps (a `switchAssist` sparse switch) are unchanged. `off`
+restores the call fallback. Pinned by `tests/stages/kuna-brknoreturn.xml` (two
+passes over the `macho_arm64e_auth` fixture).
+
 ## 2.12 The Darwin stack probe
 
 **(kuna) `option chkstkdarwin on|off`, default on,

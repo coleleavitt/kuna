@@ -161,6 +161,7 @@ kuna_options! { self, p1;
     "v850indirectbranch" => on_off!(v850_indirect_branch, "V850 indirect-branch reclassification"),
     "fastfailnoreturn" => on_off!(fastfail_noreturn, "Windows int 0x29 (__fastfail) no-return"),
     "ptrauthtrap" => on_off!(ptrauth_trap, "arm64e pointer-auth failure-check removal"),
+    "callothernoreturn" => on_off!(calloter_noreturn, "CALLOTHER-formed indirect jump is no-return"),
     "relronoreturn" => on_off!(relro_noreturn, "Flow-time no-return call through a relocated read-only slot"),
     "chkstkdarwin" => on_off!(chkstk_darwin, "Darwin ___chkstk_darwin stack-probe removal"),
     "outlinedinline" => on_off!(outlined_inline, "MachineOutliner fragment inlining"),

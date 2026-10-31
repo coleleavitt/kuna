@@ -9231,6 +9231,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "callothernoreturn"
+values = "on|off"
+default = "on"
+destructive = true
+phase = "P2"
+subphase = "flow-classification"
+strength = "HARD"
+rewind = "P2"
+issue = "kuna-brk-noreturn"
+summary = "End the flow at an indirect jump whose target a CALLOTHER forms. An AArch64 brk lifts to `pc = SoftwareBreakpoint(imm, next); goto [pc];`: its trap is an indirect jump the flow cannot resolve. Without this option the jump falls back to an ordinary call (`(*SoftwareBreakpoint(0xc471,..))(...) // jump-as-call`), with no no-return mark on the callee. On: the jump is a fail_callother (the C++ FlowInfo::truncateIndirectJump mode the flow never reached), so the call becomes a no-return call with its artificial halt, and the flow ends at the trap. Off restores the plain call fallback."
+use_when = "On by default: a brk trap ends its path as a no-return call. Off keeps the jump-as-call form to audit where a trap sits."
+example = "option callothernoreturn off"
+source_decompiler = "kuna"
+inspiration = "C++ FlowInfo::truncateIndirectJump fail_callother mode; x86 trapaftercall (a call followed by ud2 ends its path)"
+change_kind = "structure-recovery"
+tier = "transform"
+symptoms = "(*SoftwareBreakpoint(0xc471,..))() // jump-as-call after a brk|a brk trap printed as a call to an unknown function|Treating indirect jump as call warning on a brk trap"
+live_field = "calloter_noreturn"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "chkstkdarwin"
 values = "on|off"
 default = "on"

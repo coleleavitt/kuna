@@ -797,6 +797,8 @@ pub struct ArchContext {
     /// (kuna) The `SoftwareBreakpoint` user-op id when `option ptrauthtrap`
     /// is on; read by [`crate::p2_lift::kuna_ptrauthtrap`].
     pub ptrauth_trap_userop: Option<kuna_base::types::uint4>,
+    /// (kuna) The `SoftwareBreakpoint` user-op id when `option callothernoreturn` is on.
+    pub brk_userop: Option<kuna_base::types::uint4>,
     /// (kuna) `option chkstkdarwin`; read by [`crate::p2_lift::kuna_chkstkdarwin`].
     pub chkstk_darwin: bool,
     /// (kuna) `option outlinedinline`; read by the inline flow in `flow.rs`.
@@ -1997,6 +1999,7 @@ impl ArchContext {
             // copied from the engine Architecture in `build_arch_handle`.
             go_write_barrier: 1,
             ptrauth_trap_userop: None,
+            brk_userop: None,
             chkstk_darwin: false,
             outlined_inline: false,
             // (kuna) `option reloadarg` default-on; the real value is copied

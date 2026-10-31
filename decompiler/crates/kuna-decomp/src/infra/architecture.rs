@@ -836,6 +836,8 @@ pub struct Architecture {
     /// (kuna) `option ptrauthtrap`: cut the branch into each arm64e
     /// pointer-auth failure trap.  Default on.
     pub ptrauth_trap: bool,
+    /// (kuna) `option callothernoreturn`: a jump whose target a CALLOTHER forms ends its path as no-return.
+    pub calloter_noreturn: bool,
     /// (kuna) `option chkstkdarwin`: delete the `___chkstk_darwin` stack-probe
     /// calls.  Default on.
     pub chkstk_darwin: bool,
@@ -3388,6 +3390,7 @@ impl Architecture {
             go_bool: 0, // (kuna) option gobool; reset_defaults sets the shipped default (auto)
             go_write_barrier: 0, // (kuna) option gowritebarrier; reset_defaults sets the shipped default (auto)
             ptrauth_trap: false,
+            calloter_noreturn: false,
             chkstk_darwin: false, // (kuna) option chkstkdarwin; reset_defaults sets the shipped default (on)
             outlined_inline: false, // (kuna) option outlinedinline; reset_defaults sets the shipped default (on) // (kuna) option ptrauthtrap; reset_defaults sets the shipped default (on)
             condexe_block_placement: false,
@@ -3914,6 +3917,7 @@ impl Architecture {
         self.go_morestack = crate::kuna_gomorestack::GoMorestackMode::Auto.as_u8(); // (kuna) fold the Go entry guard on Go images
         self.go_bool = crate::kuna_gobool::GoBoolMode::Auto.as_u8(); // (kuna) narrow Go boolean returns on Go images
         self.go_write_barrier = crate::kuna_gowritebarrier::GoWriteBarrierMode::Auto.as_u8(); // (kuna) fold the Go write barrier on Go images
+        self.calloter_noreturn = true;
         self.ptrauth_trap = true; // (kuna) drop arm64e pointer-auth failure checks; inert without a SoftwareBreakpoint brk #0xc47x trap, 0/675 datatests
         self.outlined_inline = true; // (kuna) inline OUTLINED_FUNCTION_<n> fragments; name-gated, 0/675 datatests
         self.chkstk_darwin = true; // (kuna) drop the Darwin stack probe; inert without a ___chkstk_darwin callee, 0/675 datatests
@@ -4880,6 +4884,11 @@ impl Architecture {
         ctx.go_bool = self.go_bool;
         ctx.go_write_barrier = self.go_write_barrier;
         ctx.chkstk_darwin = self.chkstk_darwin;
+        ctx.brk_userop = self
+            .calloter_noreturn
+            .then(|| self.userops.get_op_by_name(crate::kuna_ptrauthtrap::BREAKPOINT_USEROP))
+            .flatten()
+            .map(|u| u.get_index() as kuna_base::types::uint4);
         ctx.outlined_inline = self.outlined_inline;
         ctx.ptrauth_trap_userop = self
             .ptrauth_trap
