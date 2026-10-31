@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3238,
-    3238
+    3243,
+    3243
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -445,6 +445,11 @@
     "data:DEDUPGOTO #3: each pass prints the goto into the true arm",
     "data:DEDUPGOTO #4: each pass prints the label the goto names",
     "data:DEDUPGOTO #5: post() once per pass",
+    "data:DEDUPSWITCH #1: shared() twice with dedupitetail off, once with it on",
+    "data:DEDUPSWITCH #2: the on pass merges the if/else tail",
+    "data:DEDUPSWITCH #3: each pass prints case 1 as a goto into the true arm",
+    "data:DEDUPSWITCH #4: each pass prints the label on the cond_a() test",
+    "data:DEDUPSWITCH #5: post() once per pass",
     "data:DWARFVARIANTS #10: no variant name is ever synthesized",
     "data:DWARFVARIANTS #11: off, an overlaying Result payload is a raw byte offset",
     "data:DWARFVARIANTS #12: on, the overlaying Result keeps its recovered tag field",
