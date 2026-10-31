@@ -138,12 +138,14 @@ impl AnalysisPass for ObjcMetadataPass {
         // The layouts are built only under `objcivars` (its load-time half): off,
         // no class struct is interned and no offset variable reported constant.
         let objcivars = kuna_decomp::kuna_objcivars::objcivars_enabled();
-        // A Swift class's layout is left to `swifttypes` when that is on and the
-        // image carries field descriptors: they give the Swift names and types
-        // the ivar list encodes as nothing. The record is declared here (the
-        // typed `self`, the `@"…"` pointers) and completed there.
+        // A Swift class's layout is left to `swifttypes` when the image carries
+        // field descriptors and the Swift pass runs on it (the image reads as
+        // Swift): they give the Swift names and types the ivar list encodes as
+        // nothing. The record is declared here (the typed `self`, the `@"…"`
+        // pointers) and completed there. Otherwise the ivar list builds it.
         let swifttypes = ctx.arch.analysis_swifttypes
-            && ctx.file.section_by_name(super::swift::descriptors::MACHO_SECTIONS.fieldmd).is_some();
+            && ctx.file.section_by_name(super::swift::descriptors::MACHO_SECTIONS.fieldmd).is_some()
+            && crate::sourcelang::effective_compiler(ctx.file, ctx.bytes) == crate::sourcelang::Compiler::Swift;
         let layouts: HashMap<String, kuna_objcivars::Layout> = classes
             .iter()
             .filter(|_| objcivars)

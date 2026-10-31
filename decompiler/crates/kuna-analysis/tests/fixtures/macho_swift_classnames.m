@@ -21,4 +21,10 @@ __attribute__((objc_runtime_name("_TtC4main3Car")))
 @implementation Car
 - (double)loadPerSeat:(long)load { return (double)(load + wheels) / seats + [engine perCylinder]; }
 @end
+// `-DFIELDMD` builds `macho_swift_classnames_fieldmd_arm64`: the image
+// gains a `__swift5_fieldmd` section, so it reads as Swift, with no record
+// for these classes.
+#ifdef FIELDMD
+__attribute__((used, section("__TEXT,__swift5_fieldmd"))) static const int fieldmd[4];
+#endif
 int main(void) { return 0; }
