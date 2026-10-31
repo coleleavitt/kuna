@@ -2031,10 +2031,6 @@ pub struct Architecture {
     /// file`, upstream of `option`); this bool exists only for catalog visibility
     /// and the `phase catalog` live `current` field.
     pub analysis_relocrebase: bool,
-    /// (kuna) `kernelcache`: Apple firmware container unwrapping and the
-    /// `MH_FILESET` entry to load. The live gate is [`crate::kuna_kernelcache`]'s
-    /// env var; this field mirrors it for the catalog.
-    pub analysis_kernelcache: crate::kuna_kernelcache::KernelcacheChoice,
     /// (kuna) Gate the linked-image dynamic-relocation pass (`dynrelocs`);
     /// default **on** (DIV-84). A PIE / dynamically linked ELF leaves every
     /// `R_*_RELATIVE`/`GLOB_DAT`/`JUMP_SLOT` slot at 0 for the run-time loader, so
@@ -3211,7 +3207,6 @@ impl Architecture {
             analysis_i386_pie_plt: false,
             analysis_ifuncfpret: false, // (kuna) option ifuncfpret, default off (opt-in)
             analysis_relocrebase: false,
-            analysis_kernelcache: Default::default(),
             analysis_dynrelocs: false,
             analysis_pdatachained: false,
             analysis_rexthunk: false,
@@ -3656,7 +3651,6 @@ impl Architecture {
         self.analysis_entrythumbflow = true; // (kuna) entry-reachable Thumb context default-on; inert without a Thumb-bit entry
         self.analysis_mips_gp = true;
         self.analysis_i386_pie_plt = true; // (kuna) i386-PIE PLT decode default-on (angr)
-        self.analysis_kernelcache = Default::default();
         self.analysis_relocrebase = true; // (kuna) DIV-79 relocatable-object analysis rebase default-ON (GH-289)
         self.analysis_dynrelocs = true; // (kuna) DIV-84 linked-image dynamic relocations default-ON
         self.analysis_pdatachained = true; // (kuna) DIV-117 GH-403: a chained-UNWIND_INFO .pdata record is an interior chunk, not a function
