@@ -1666,6 +1666,21 @@ string longer than one entry"), `_get_after`@`0x100000550` → entry@`0x10000404
 ("after the long one"). With `--option cfstrings on` each getter returns its
 literal; off, it returns the bare entry address.
 
+`macho_cfstring_chained_arm64` (arm64, ~33 KB) is the chained-fixup counterpart,
+from `macho_cfstring_chained.c`: each entry's `char *` is a chained rebase.
+`kAscii`@`0x100004008` ("chained hello"), `kUtf16`@`0x100004028` (flags `0x7d0`,
+UTF-16 "café → ok" in `__TEXT,__ustring`), `kNul`@`0x100004048` (12 bytes with an
+embedded NUL, never rendered as a literal). Getters `_get_ascii`@`0x100000508`,
+`_get_utf16`@`0x100000514`, `_get_nul`@`0x100000520`; `_pass_greeting`@`0x10000052c`
+passes `kAscii` to the imported `consume`. Same recipe as `macho_objc_arm64`:
+
+```bash
+clang -target arm64-apple-macos11 -O1 -c macho_cfstring_chained.c -o cf.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_cfstring_chained_arm64 cf.o
+```
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate
