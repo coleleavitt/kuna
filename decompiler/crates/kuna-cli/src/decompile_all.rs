@@ -2993,7 +2993,7 @@ fn usage_functions() {
          \x20               [--filter REGEX] [--min-size N] [--max-size N] \\\n\
          \x20               [--reachable-from <name|0xaddr>] [--sort addr|size|name] [--limit N] \\\n\
          \x20               [--define-function S[-E][=N]|@FILE].. [--jobs N|auto] \\\n\
-         \x20               [--mode auto|reliable|aggressive|fast] [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]\n\
+         \x20               [--mode auto|reliable|aggressive|fast] [--option N V].. [--isa auto|arm|thumb] [--slice ARCH] [--target T] [--sleighpath D]\n\
          \x20               [--raw-image --target T --base VMA (--entry|--addr VMA)..]\n\
          \n\
          List every function kuna discovers in a binary as `<addr>\\t<name>` (or\n\
@@ -3019,6 +3019,10 @@ fn usage_functions() {
          (`auto` = this machine's parallelism, capped at 32). The inventory is the\n\
          serial one byte for byte; one stderr line says how many lanes ran, or why\n\
          it declined. There is no worker pool here -- nothing is decompiled.\n\
+         --option NAME VALUE (repeatable) flips one option for this run, as in\n\
+         decompile-all: the analysis passes that name or add functions (`objc`,\n\
+         `swiftmetadata`, `kernelcache`, ...) change the inventory. Explicit\n\
+         values win over the --mode preset.\n\
          Discovering no function at all exits 1 with the reason on stderr and in\n\
          the document's `error` field (a packed image is named as such)."
     );
