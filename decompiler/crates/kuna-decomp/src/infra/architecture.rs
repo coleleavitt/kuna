@@ -1288,6 +1288,9 @@ pub struct Architecture {
     /// for `loweredswitch` to re-roll it into a switch; 0 = only binary-search
     /// cascades re-roll (option `linearswitch`).
     pub linear_switch: int4,
+    /// (kuna) The fewest and most equality cases a binary-search cascade needs for
+    /// `loweredswitch` to re-roll it into a switch; 0 = the shipped 3 to 16 (option `treeswitch`).
+    pub tree_switch: int4,
     /// (kuna) An expression read more than `max_implied_ref` times still prints
     /// inline when its terms times its uses is at most this; 0 = off (option
     /// `implweight`).
@@ -3493,6 +3496,7 @@ impl Architecture {
             goto_sink: false, // (kuna) option gotosink; reset_defaults sets the shipped default
             cmp_merge: false, // (kuna) option cmpmerge; reset_defaults sets the shipped default
             linear_switch: 0, // (kuna) option linearswitch; reset_defaults sets the shipped default
+            tree_switch: 0, // (kuna) option treeswitch; reset_defaults sets the shipped default
             impl_weight: 0, // (kuna) option implweight; reset_defaults sets the shipped default
             range_fold: false, // (kuna) option rangefold; reset_defaults sets the shipped default
             pow2_select: false, // (kuna) option pow2select; reset_defaults sets the shipped default
@@ -4061,6 +4065,7 @@ impl Architecture {
         self.while_continue = true; // (kuna) option whilecontinue default-on: retags only a jump to a while-do condition or a bare do-while test as continue; 0/675 datatest assertions
         self.impl_weight = 0; // (kuna) option implweight
         self.linear_switch = 0; // (kuna) option linearswitch default off: re-rolling linear chains moves 4/675 datatest assertions (copytrim, partial union)
+        self.tree_switch = 0; // (kuna) option treeswitch default off
         self.cmp_merge = false; // (kuna) option cmpmerge default off: the merged comparisons move 5/675 datatest assertions (ccmp, bitfields, signed byte)
         self.goto_sink = true; // (kuna) option gotosink default-on: list edits around existing jumps only; 0/675 datatest assertions
         self.late_cse = false; // (kuna) option latecse
@@ -5048,6 +5053,7 @@ impl Architecture {
         ctx.goto_sink = self.goto_sink; // gotosink
         ctx.cmp_merge = self.cmp_merge; // cmpmerge
         ctx.linear_switch = self.linear_switch; // linearswitch
+        ctx.tree_switch = self.tree_switch; // treeswitch
         ctx.impl_weight = self.impl_weight; // implweight
         ctx.range_fold = self.range_fold; // rangefold
         ctx.pow2_select = self.pow2_select; // pow2select
