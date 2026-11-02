@@ -44,8 +44,13 @@ fn constant(data: &Funcdata, vn: VarnodeId) -> Option<u64> {
 
 fn signed(data: &Funcdata, vn: VarnodeId) -> Option<i64> {
     let v = data.vbank().get(vn).filter(|v| v.is_constant())?;
-    let bits = 64 - 8 * v.get_size() as u32;
-    Some(((v.get_offset() << bits) as i64) >> bits)
+    sign_extend(v.get_offset(), v.get_size())
+}
+
+/// `offset` read as a signed `size`-byte value; `None` past 8 bytes.
+fn sign_extend(offset: u64, size: int4) -> Option<i64> {
+    let bits = 64u32.checked_sub(8 * u32::try_from(size).ok()?).filter(|&b| b < 64)?;
+    Some(((offset << bits) as i64) >> bits)
 }
 
 /// Is `vn` the stack pointer: its entry value, or an earlier `alloca` result,
@@ -77,20 +82,23 @@ fn negated(data: &Funcdata, vn: VarnodeId) -> Option<VarnodeId> {
 
 /// An alignment mask `-a`, `a` a power of two from 4 to 64.
 fn align_mask(m: i64) -> bool {
-    m < 0 && (4..=64).contains(&(-m)) && ((-m) as u64).is_power_of_two()
+    (-64..=-4).contains(&m) && m.unsigned_abs().is_power_of_two()
 }
 
 /// A page mask `-p`, `p` a power of two of at least 4096: the part of a
 /// stack-clash allocation the probe loop moves the stack pointer by.
 fn page_mask(m: i64) -> bool {
-    m < 0 && (-m) >= 4096 && ((-m) as u64).is_power_of_two()
+    m <= -4096 && m.unsigned_abs().is_power_of_two()
 }
 
 /// The remainder mask `p - a` that a stack-clash allocation subtracts after
 /// its probe loop (`and $0xff0`).
 fn remainder_mask(m: i64) -> bool {
+    if m <= 0 {
+        return false;
+    }
     let low = m & -m;
-    m > 0 && (4..=64).contains(&low) && ((m + low) as u64).is_power_of_two() && m + low >= 4096
+    (4..=64).contains(&low) && m.checked_add(low).is_some_and(|s| s >= 4096 && (s as u64).is_power_of_two())
 }
 
 /// `(n + c) & -4096`: the page part a stack-clash probe loop allocates.
@@ -266,7 +274,7 @@ impl Rule for RuleAlloca {
         }
         if o.code() == OpCode::CPUI_INT_AND {
             // `(alloca(n) + 15) & -16`: the buffer alloca returns is aligned.
-            let aligned = signed(data, b).is_some_and(|m| m < 0 && ((-m) as u64).is_power_of_two())
+            let aligned = signed(data, b).is_some_and(|m| m < 0 && m.unsigned_abs().is_power_of_two())
                 && matches!(def(data, a), Some((OpCode::CPUI_INT_ADD, ins)) if ins.len() == 2 && is_alloca(data, ins[0]) && constant(data, ins[1]).is_some_and(|c| c < MAX_SLACK));
             if !aligned {
                 return 0;
@@ -459,5 +467,28 @@ impl Rule for RuleAllocaProbe {
             return 0;
         }
         1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wide_constants_do_not_sign_extend() {
+        assert_eq!(sign_extend(0xfff0, 2), Some(-16));
+        assert_eq!(sign_extend(0xffff_fff0, 8), Some(0xffff_fff0));
+        assert_eq!(sign_extend(1, 16), None);
+        assert_eq!(sign_extend(1, 0), None);
+    }
+
+    #[test]
+    fn masks_at_the_i64_extremes() {
+        for m in [i64::MIN, i64::MIN + 1, i64::MAX, i64::MAX - 0xf] {
+            assert!(!align_mask(m));
+            assert!(!remainder_mask(m));
+        }
+        assert!(page_mask(i64::MIN));
+        assert!(align_mask(-16) && page_mask(-4096) && remainder_mask(0xff0));
     }
 }

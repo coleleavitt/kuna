@@ -314,16 +314,17 @@ panic no-return lists, securitycheck, DWARF variants):
   `swift-demangle`; every crate alternative builds Apple's C++ demangler, which
   `kuna-wasm` cannot carry), `__swift5_*` metadata walker (**done**:
   `analyzers/swift`, option `swiftmetadata` names accessors, vtable slots,
-  witnesses and descriptors; its `swifttypes` arm lays out every fixed-layout
-  struct and class from the static type metadata, resolving the field
+  witnesses and descriptors; its `swifttypes` arm lays out each fixed-layout
+  struct and class whose static metadata it locates through the type's
+  accessor (the arm64 and x86-64 accessor shapes only), resolving the field
   descriptors' symbolic references, and pins getters' `self` to the
   `swiftself` register), Swift detection, `__swiftcall` models
   (**done**: option `swiftcall` binds them to methods, initializers,
   accessors and witnesses with an unlocked typed `self`, and gives a call
-  that zeroes the error register the throwing model; still open: the
-  indirect-result register (x8 / rax), up-to-four-register returns, the
-  async context register (x22 / r14), and `self` at indirect vtable and
-  witness calls that do not throw). Mach-O loading itself is already solid
+  that zeroes the error register the throwing model; the models also take
+  the indirect result in rax on x86-64, return up to four words, take an
+  `async` function's context in x22 / r14, and an indirect call through a
+  loaded vtable or witness slot passes `self` when it dispatches on it). Mach-O loading itself is already solid
   (fat binaries, stubs, issue-#666 underscore handling).
 - Idioms: `swift_retain/release/autorelease` elision
   (`CallStraightLine` → `DeleteCall`; **default-on within the pack** — ARC

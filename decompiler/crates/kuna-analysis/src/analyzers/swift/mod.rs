@@ -256,12 +256,45 @@ fn member_after_protocol(name: &str) -> Option<String> {
     Some(member.to_string())
 }
 
+/// Strings in order with each run of digits compared as a number, so
+/// `requirement#2` comes before `requirement#10`.
+fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+    let (mut a, mut b) = (a.as_bytes(), b.as_bytes());
+    loop {
+        match (a.first(), b.first()) {
+            (Some(x), Some(y)) if x.is_ascii_digit() && y.is_ascii_digit() => {
+                let run = |s: &[u8]| s.iter().take_while(|c| c.is_ascii_digit()).count();
+                let (na, nb) = (run(a), run(b));
+                let value = |s: &[u8]| s.iter().skip_while(|&&c| c == b'0').copied().collect::<Vec<u8>>();
+                let (va, vb) = (value(&a[..na]), value(&b[..nb]));
+                let ord = va.len().cmp(&vb.len()).then_with(|| va.cmp(&vb));
+                if ord.is_ne() {
+                    return ord;
+                }
+                (a, b) = (&a[na..], &b[nb..]);
+            }
+            (Some(x), Some(y)) if x == y => (a, b) = (&a[1..], &b[1..]),
+            (x, y) => return x.cmp(&y),
+        }
+    }
+}
+
+/// The type a claim comes from: a local context descriptor by address (two
+/// private types may print the same path), or an imported one by symbol.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Local(u64),
+    Imported(String),
+}
+
 /// One metadata record's claim on a function: the name it would give it,
 /// the owning type and, for a witness, the protocol member it implements.
 #[derive(Clone, Debug)]
 pub struct Claim {
-    pub name: String,
-    pub owner: String,
+    /// `None` when the record's type has no nameable path: the claim still
+    /// counts as a co-claimant, it just names nothing.
+    pub name: Option<String>,
+    pub owner: Owner,
     pub requirement: Option<(String, String)>,
     pub getter: bool,
 }
@@ -347,8 +380,8 @@ impl Namer<'_> {
     fn claim(
         &self,
         addr: u64,
-        name: String,
-        owner: &str,
+        name: Option<String>,
+        owner: &Owner,
         requirement: Option<(String, String)>,
         getter: bool,
     ) {
@@ -361,7 +394,7 @@ impl Namer<'_> {
             .or_default()
             .push(Claim {
                 name,
-                owner: owner.to_string(),
+                owner: owner.clone(),
                 requirement,
                 getter,
             });
@@ -394,72 +427,48 @@ impl Namer<'_> {
         let mut contexts: Vec<&Context> = self.md.contexts.values().collect();
         contexts.sort_by_key(|c| c.addr);
         for ctx in &contexts {
-            let Some(path) = self.path(ctx.addr, 0) else {
-                continue;
+            let path = self.path(ctx.addr, 0);
+            let owner = Owner::Local(ctx.addr);
+            let named = |suffix: &str| path.as_ref().map(|p| format!("{p}.{suffix}"));
+            let mut datum = |addr: u64, suffix: &str| {
+                if let Some(name) = named(suffix) {
+                    data.push(SymFact { addr, name, kind: SymKind::Data });
+                }
             };
             match ctx.kind {
-                ContextKind::Module => data.push(SymFact {
-                    addr: ctx.addr,
-                    name: format!("{path}.module_descriptor"),
-                    kind: SymKind::Data,
-                }),
+                ContextKind::Module => datum(ctx.addr, "module_descriptor"),
                 ContextKind::Protocol => {
-                    data.push(SymFact {
-                        addr: ctx.addr,
-                        name: format!("{path}.protocol_descriptor"),
-                        kind: SymKind::Data,
-                    });
+                    datum(ctx.addr, "protocol_descriptor");
                     for (k, (_, default_impl)) in ctx.requirements.iter().enumerate() {
                         if let Some(f) = default_impl {
-                            self.claim(
-                                *f,
-                                format!("{path}.requirement#{k}.default"),
-                                &path,
-                                None,
-                                false,
-                            );
+                            self.claim(*f, named(&format!("requirement#{k}.default")), &owner, None, false);
                         }
                     }
                 }
                 ContextKind::Class | ContextKind::Struct | ContextKind::Enum => {
-                    data.push(SymFact {
-                        addr: ctx.addr,
-                        name: format!("{path}.nominal_type_descriptor"),
-                        kind: SymKind::Data,
-                    });
+                    datum(ctx.addr, "nominal_type_descriptor");
                     if let Some(a) = ctx.accessor {
-                        self.claim(
-                            a,
-                            format!("{path}.type_metadata_accessor"),
-                            &path,
-                            None,
-                            false,
-                        );
+                        self.claim(a, named("type_metadata_accessor"), &owner, None, false);
                     }
                     if let Some(f) = ctx.fields {
-                        data.push(SymFact {
-                            addr: f,
-                            name: format!("{path}.reflection_field_descriptor"),
-                            kind: SymKind::Data,
-                        });
+                        datum(f, "reflection_field_descriptor");
                     }
                     for e in &ctx.vtable {
                         if let Some(f) = e.impl_addr {
                             let getter = e.kind == descriptors::MethodKind::Getter && e.instance;
-                            self.claim(
-                                f,
-                                format!("{path}.vtable#{}.{}", e.index, e.kind.tag()),
-                                &path,
-                                None,
-                                getter,
-                            );
+                            self.claim(f, named(&format!("vtable#{}.{}", e.index, e.kind.tag())), &owner, None, getter);
                         }
                     }
                     for o in &ctx.overrides {
                         let Some(f) = o.impl_addr else { continue };
-                        if let Some(name) = self.override_name(&path, o) {
-                            let getter = name.ends_with(".getter");
-                            self.claim(f, name, &path, None, getter);
+                        match &path {
+                            Some(p) => {
+                                if let Some(name) = self.override_name(p, o) {
+                                    let getter = name.ends_with(".getter");
+                                    self.claim(f, Some(name), &owner, None, getter);
+                                }
+                            }
+                            None => self.claim(f, None, &owner, None, false),
                         }
                     }
                 }
@@ -467,25 +476,33 @@ impl Namer<'_> {
             }
         }
         for c in &self.md.conformances {
-            let Some((ty, proto)) = self.conformance_parts(c) else {
-                continue;
+            let TypeRef::Descriptor(t) = c.type_ref else { continue };
+            let owner = match t {
+                Target::Direct(a) => Owner::Local(a),
+                Target::Slot(slot) => Owner::Imported(
+                    self.imports.get(&slot).cloned().unwrap_or_else(|| format!("slot#{slot:x}")),
+                ),
             };
-            let cn = format!("<{ty}:{proto}>");
-            data.push(SymFact {
-                addr: c.addr,
-                name: format!("{cn}.protocol_conformance_descriptor"),
-                kind: SymKind::Data,
-            });
-            if let Some(w) = c.witness_table {
+            let proto = self.target_path(c.protocol, "protocol_descriptor");
+            let cn = self.conformance_parts(c).map(|(ty, proto)| format!("<{ty}:{proto}>"));
+            if let Some(cn) = &cn {
                 data.push(SymFact {
-                    addr: w,
-                    name: format!("{cn}.protocol_witness_table"),
+                    addr: c.addr,
+                    name: format!("{cn}.protocol_conformance_descriptor"),
                     kind: SymKind::Data,
                 });
+                if let Some(w) = c.witness_table {
+                    data.push(SymFact {
+                        addr: w,
+                        name: format!("{cn}.protocol_witness_table"),
+                        kind: SymKind::Data,
+                    });
+                }
             }
             let witness = |addr: u64, member: String, getter: bool| {
-                let name = format!("{cn}.{member}");
-                self.claim(addr, name, &ty, Some((proto.clone(), member)), getter);
+                let name = cn.as_ref().map(|cn| format!("{cn}.{member}"));
+                let requirement = proto.clone().map(|p| (p, member));
+                self.claim(addr, name, &owner, requirement, getter);
             };
             // A local, non-resilient conformance's witness table is a plain
             // pointer table: the descriptor, then one word per requirement.
@@ -567,15 +584,21 @@ impl Namer<'_> {
             if dump.is_some() {
                 for c in claims {
                     dumped.push_str(&format!(
-                        "{addr:x}\t{}\t{}\t{}\n",
-                        c.name, c.owner, c.getter
+                        "{addr:x}\t{}\t{:?}\t{}\n",
+                        c.name.as_deref().unwrap_or("?"),
+                        c.owner,
+                        c.getter
                     ));
                 }
             }
-            let mut names: Vec<&str> = claims.iter().map(|c| c.name.as_str()).collect();
-            names.sort_unstable();
+            let mut names: Vec<&str> = claims.iter().filter_map(|c| c.name.as_deref()).collect();
+            if names.is_empty() {
+                continue;
+            }
+            names.sort_unstable_by(|a, b| natural_cmp(a, b));
             names.dedup();
-            let mut name = if names.len() == 1 {
+            let unnamed = claims.iter().any(|c| c.name.is_none());
+            let mut name = if names.len() == 1 && !unnamed {
                 names[0].to_string()
             } else if claims.iter().all(|c| c.owner == claims[0].owner) {
                 format!("{}.merged#{}", names[0], names.len())
@@ -636,67 +659,4 @@ impl Namer<'_> {
     }
 }
 
-/// Whether the body at `f` reads the register `reg` before it writes it:
-/// `Some(true)` on a read first (a `self` that arrives there), `Some(false)`
-/// on a write first (the register is scratch, so `self` came exploded), and
-/// `None` when the first sixty-four instructions leave it alone (so did
-/// `self`, which came exploded or not at all). The scan is linear, so a
-/// spill of the register in the prologue (a push or a `stp`, a store of it
-/// through the stack pointer) does not count as a read, nor its reload as
-/// a write. Decodes through `translate`, so its load image must be attached.
-pub fn self_first(
-    translate: &dyn kuna_sleigh::translate::Translate,
-    code_space: &std::rc::Rc<kuna_base::space::AddrSpace>,
-    reg: &str,
-    f: u64,
-) -> Option<bool> {
-    use kuna_base::address::Address;
-    use kuna_base::space::spacetype;
-    use kuna_num::opcodes::OpCode;
-    use kuna_num::pcoderaw::VarnodeData;
-    use kuna_sleigh::translate::PcodeEmit;
-    use std::rc::Rc;
-    struct Ops(Vec<(OpCode, Option<VarnodeData>, Vec<VarnodeData>)>);
-    impl PcodeEmit for Ops {
-        fn dump(&mut self, _: &Address, opc: OpCode, out: Option<&VarnodeData>, vars: &[VarnodeData]) {
-            self.0.push((opc, out.cloned(), vars.to_vec()));
-        }
-    }
-    let want = translate.get_register_data(reg).ok()?;
-    let sp = translate.get_register_data("RSP").or_else(|_| translate.get_register_data("sp")).ok();
-    let index = |v: &VarnodeData| v.space.as_ref().map(|s| s.get_index());
-    let same = |v: &VarnodeData| {
-        index(v) == index(&want)
-            && v.offset < want.offset + u64::from(want.size)
-            && want.offset < v.offset + u64::from(v.size)
-    };
-    let is_sp = |v: &VarnodeData| sp.as_ref().is_some_and(|sp| index(v) == index(sp) && v.offset == sp.offset);
-    let space = Rc::clone(code_space);
-    let mut vma = f;
-    for _ in 0..64 {
-        let mut ops = Ops(Vec::new());
-        let len = translate.one_instruction(&mut ops, &Address::new(Rc::clone(&space), vma)).ok()?;
-        for (opc, out, vars) in &ops.0 {
-            if *opc == OpCode::CPUI_RETURN {
-                return None;
-            }
-            let spill = *opc == OpCode::CPUI_STORE
-                && vars.get(2).is_some_and(same)
-                && vars.get(1).is_some_and(|p| {
-                    is_sp(p) || p.space.as_ref().is_some_and(|s| s.get_type() == spacetype::IPTR_INTERNAL)
-                });
-            let reload = *opc == OpCode::CPUI_LOAD && out.as_ref().is_some_and(same);
-            if spill || reload {
-                continue;
-            }
-            if vars.iter().any(same) {
-                return Some(true);
-            }
-            if out.as_ref().is_some_and(same) {
-                return Some(false);
-            }
-        }
-        vma += u64::try_from(len).ok()?;
-    }
-    None
-}
+pub use kuna_decomp::kuna_swiftcall::self_first;

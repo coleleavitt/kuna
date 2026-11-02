@@ -56,7 +56,9 @@ fn import_names_strip_their_descriptor_tag() {
 /// Several records claiming one function (code the linker folded): one
 /// type's claims keep the first member with the count served, one protocol
 /// member's claims from different types drop the type, anything else keeps
-/// the placeholder; a name already given to another address gets `.2`.
+/// the placeholder; a name already given to another address gets `.2`. A
+/// co-claimant with no nameable path still counts, and owners are told apart
+/// by descriptor, not by the path they print.
 #[test]
 fn folded_functions_are_named_without_a_false_owner() {
     let md = Metadata::default();
@@ -71,8 +73,8 @@ fn folded_functions_are_named_without_a_false_owner() {
     let claim = |addr: u64, name: &str, owner: &str, req: Option<(&str, &str)>, getter: bool| {
         namer.claim(
             addr,
-            name.to_string(),
-            owner,
+            Some(name.to_string()),
+            &Owner::Imported(owner.to_string()),
             req.map(|(p, m)| (p.to_string(), m.to_string())),
             getter,
         );
@@ -138,6 +140,15 @@ fn folded_functions_are_named_without_a_false_owner() {
     claim(0x1050, "M.E.vtable#1.getter", "M.E", None, true);
     claim(0x1050, "M.E.vtable#2.getter", "M.E", None, true);
     claim(0x3000, "M.F.vtable#0.getter", "M.F", None, true);
+    claim(0x1060, "M.G.vtable#10.getter", "M.G", None, true);
+    claim(0x1060, "M.G.vtable#2.getter", "M.G", None, true);
+    let local = |addr: u64, name: Option<&str>, owner: u64| {
+        namer.claim(addr, name.map(str::to_string), &Owner::Local(owner), None, true);
+    };
+    local(0x1070, Some("M.H.vtable#0.getter"), 0x10);
+    local(0x1070, None, 0x20);
+    local(0x1080, Some("M.I.vtable#0.getter"), 0x30);
+    local(0x1080, Some("M.I.vtable#0.getter"), 0x40);
     let mut out = AnalysisOutput::default();
     namer.resolve_claims(&mut out);
     let names: Vec<(u64, &str)> = out
@@ -153,6 +164,8 @@ fn folded_functions_are_named_without_a_false_owner() {
             (0x1020, "<*:Swift.Hashable>.hash(into:)"),
             (0x1030, "<*:Swift.Hashable>.hash(into:).2"),
             (0x1050, "M.E.vtable#1.getter.merged#2"),
+            (0x1060, "M.G.vtable#2.getter.merged#2"),
+            (0x1080, "M.I.vtable#0.getter"),
         ]
     );
     assert!(!namer.ambiguous_self(0x1000));
@@ -161,4 +174,6 @@ fn folded_functions_are_named_without_a_false_owner() {
     assert!(namer.ambiguous_self(0x1040));
     assert!(!namer.ambiguous_self(0x1050), "two getters of one class");
     assert!(!namer.ambiguous_self(0x3000), "not code: never claimed");
+    assert!(namer.ambiguous_self(0x1070), "a type with no nameable path shares the body");
+    assert!(namer.ambiguous_self(0x1080), "two private types print one path");
 }

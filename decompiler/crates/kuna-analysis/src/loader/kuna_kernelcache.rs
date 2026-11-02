@@ -183,8 +183,10 @@ impl<'a> Im4p<'a> {
                     if size.len() > 8 {
                         return Err("IM4P decoded size does not fit 64 bits".into());
                     }
-                    decoded_size =
-                        Some(size.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64) as usize);
+                    let size = size.iter().fold(0u64, |acc, &b| (acc << 8) | b as u64);
+                    decoded_size = Some(
+                        usize::try_from(size).map_err(|_| "IM4P decoded size does not fit this host's address space")?,
+                    );
                 }
                 _ => {}
             }

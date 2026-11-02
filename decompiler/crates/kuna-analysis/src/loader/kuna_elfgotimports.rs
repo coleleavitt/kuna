@@ -59,7 +59,7 @@ pub(crate) fn resolve(file: &object::File) -> Vec<(u64, Vec<u8>)> {
 /// The `[slot, slot + ptr)` ranges of [`resolve`]'s slots.
 pub(crate) fn slots(file: &object::File) -> Vec<(u64, u64)> {
     let width = if file.is_64() { 8 } else { 4 };
-    resolve(file).into_iter().map(|(slot, _)| (slot, slot + width)).collect()
+    resolve(file).into_iter().filter_map(|(slot, _)| Some((slot, slot.checked_add(width)?))).collect()
 }
 
 /// Names each undefined-symbol `GLOB_DAT` slot for its import (a symbol-table
@@ -83,7 +83,8 @@ impl AnalysisPass for ElfGotImportPass {
         let named: std::collections::HashSet<u64> =
             crate::loader::elf_plt::got_call_slot_ranges(ctx.file, ctx.bytes).into_iter().map(|(lo, _)| lo).collect();
         for (slot, name) in resolve(ctx.file) {
-            out.externref.push((slot, slot + width));
+            let Some(end) = slot.checked_add(width) else { continue };
+            out.externref.push((slot, end));
             if !named.contains(&slot) {
                 out.import_slot_names.push((slot, String::from_utf8_lossy(&name).into_owned()));
             }

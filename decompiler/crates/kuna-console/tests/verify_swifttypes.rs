@@ -13,7 +13,6 @@
 //! installed; on, every expected one is.
 
 use std::path::PathBuf;
-use std::rc::Rc;
 
 use kuna_base::address::Address;
 use kuna_console::engine::{ConsoleProgram, bootstrap_from_object};
@@ -99,11 +98,15 @@ fn repo_root() -> PathBuf {
 }
 
 fn load(types_on: bool) -> ConsoleProgram {
+    load_fixture(FIXTURE, types_on)
+}
+
+fn load_fixture(fixture: &str, types_on: bool) -> ConsoleProgram {
     let root = repo_root();
     let spec_roots = vec![root.join("specs").to_str().unwrap().to_string()];
     let bin = root
         .join("decompiler/crates/kuna-analysis/tests/fixtures")
-        .join(FIXTURE);
+        .join(fixture);
     assert!(bin.exists(), "missing fixture {bin:?}");
     let mut prog = bootstrap_from_object(bin.to_str().unwrap(), "", &spec_roots)
         .expect("bootstrap fixture with built processor specs");
@@ -223,4 +226,24 @@ fn swifttypes_off_installs_nothing() {
             });
         assert_ne!(found.as_deref(), Some(name), "no record at 0x{vma:x}");
     }
+}
+
+/// `swift_ext_types_elf`: `extension Int { struct Pair }` gives `Pair` an
+/// extension context as its parent; `Holder.pair`'s symbolic reference to it
+/// resolves through that context to the laid-out `Swift.Int.Pair`.
+#[test]
+fn a_type_nested_in_an_extension_is_a_field_type() {
+    let prog = load_fixture("swift_ext_types_elf", true);
+    let types = prog.arch().types();
+    let fields = |name: &str| {
+        let t = types.find_by_name(name).unwrap().unwrap_or_else(|| panic!("{name} is interned"));
+        let mut got = Vec::new();
+        while let Some(f) = t.get_field(got.len() as i32) {
+            got.push((f.name.clone(), f.offset, f.field_type.get_name().to_string()));
+        }
+        got
+    };
+    let row = |n: &str, o: i32, t: &str| (n.to_string(), o, t.to_string());
+    assert_eq!(fields("Swift.Int.Pair"), vec![row("lo", 0, "int8"), row("hi", 8, "int8")]);
+    assert_eq!(fields("extfix.Holder"), vec![row("pair", 0, "Swift.Int.Pair"), row("count", 16, "int8")]);
 }

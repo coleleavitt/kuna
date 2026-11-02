@@ -183,7 +183,7 @@ fn raw_image_flags_reach_single_function_engine_with_quoted_path() {
     );
     let expected = format!(
         "load raw ARM:LE:32:v4t:default 0x4000 0x4001 \"{}\"",
-        raw.display()
+        raw.canonicalize().unwrap().display()
     );
     let out = Command::new(env!("CARGO_BIN_EXE_kuna"))
         .env("KUNA_EXPECT_ARM_ISA", "thumb")

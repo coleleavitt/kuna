@@ -4672,9 +4672,14 @@ every other binary's pass list is byte-identical to before the pass existed):
   folds functions with identical bodies (identical code folding) and one
   address is then the target of records of unrelated types — on the Toyota
   app 2,350 of the 57,147 claimed functions, 2,037 of them claimed by more
-  than one type. Such a function is never named after one of its claimants:
-  when all claims come from one type it is named after the first member
-  (sorted) with the count of members it serves
+  than one type. A claimant is a type by its descriptor (a local one by
+  address, so two private types that print the same path are two claimants;
+  an imported one by symbol), and a type whose path cannot be named still
+  claims the functions it points at, it just offers no name. Such a function
+  is never named after one of its claimants: when all claims come from one
+  type it is named after the first member (in order, a number compared as a
+  number, so `requirement#2` comes before `requirement#10`) with the count of
+  members it serves
   (`<T:P>.requirement#0.merged#2`); when they are witnesses of one protocol
   member from different types it is named after the member alone
   (`<*:Swift.RawRepresentable>.init(rawValue:)`); any other mix (different
@@ -4716,7 +4721,11 @@ every other binary's pass list is byte-identical to before the pass existed):
   name and mangled type, whose symbolic references (`\x01` a direct, `\x02` an
   indirect context descriptor reference, with a 4-byte payload) the demangler
   resolves through a hook (`demangle_swift_type`, §1.3) that the pass answers
-  from its descriptor table or the import an indirect slot binds. The result
+  from its descriptor table or the import an indirect slot binds. A type
+  nested in an extension (`extension Int { struct Pair }`, whose descriptor's
+  parent is the extension context) resolves through the extension's
+  extended type, as its path does, so a `Holder.pair` field is the laid-out
+  `Swift.Int.Pair`. The result
   is one kuna struct per type under its dotted name — `metafix.Point { long x;
   long y; }`, a class as its object layout with a local superclass embedded as
   `super` at 0 and otherwise the `isa` word (and a Swift-native root's
@@ -5431,7 +5440,7 @@ signature. PE and Mach-O dispatch to their own oracles (`.pdata`/TLS/entry;
 a wrong entry is a garbage `sub_<addr>`; a missed one is invisible until a caller
 overruns into it (§1.7).
 
-(kuna) **`__unwind_info` is a stripping-proof function-start source for Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_unwindinfo.rs (UnwindInfoStartsPass)`, option `unwindstarts`, default-off). The linker folds each object's `__compact_unwind` records into one `__TEXT,__unwind_info` section whose second-level pages — regular `(functionOffset, encoding)` pairs, or compressed `u32`s whose low 24 bits are the offset from the page's first function — list, in ascending order, the start of every function the unwinder can describe (one per `.cfi_startproc`). Because the section lives in the mapped `__TEXT` segment it survives the `strip` that removes `LC_FUNCTION_STARTS` from `__LINKEDIT`, which is the whole of its value: on an App-Store app whose function starts were stripped, `LC_MAIN`, the exports, `__mod_init_func` and the thin symbol stream seed only a handful of entries, and arm64 has no always-on prologue sweep (oracle 5 is x86-64-only), so the gap between the few seeds is the entire text and nothing starts a function inside it. Measured on a decrypted 249 MB arm64 `Instagram.app` with no `LC_FUNCTION_STARTS`, the default inventory is 59,222 — of which only 23 are real `__text` functions, the rest `__got` slots and `__stubs` — while `__unwind_info` records 204,800 real starts; with the option on all 204,800 are recovered and each decodes to a normal function body. On an image that still carries `LC_FUNCTION_STARTS` the oracle is a strict no-op: every unwind start is already a function-starts entry — the linker folds runs of adjacent same-encoding functions into one page entry, so the set is in fact a *subset* (on the 84 MB Toyota app, 185,937 unwind entries against 296,775 function starts, discovery unchanged at 314,038). Only the function **starts** are read; the compact encodings (frame size, saved-register set, frameless stack size) are deliberately ignored, because kuna's S5/S7 frame analysis recovers the stack frame from the code — the same reason the `.eh_frame` oracle inherits CFI rather than rebuilding it. Output-changing (it adds entries), so default-off: a default run is byte-identical to before.
+(kuna) **`__unwind_info` is a stripping-proof function-start source for Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_unwindinfo.rs (UnwindInfoStartsPass)`, option `unwindstarts`, default-off). The linker folds each object's `__compact_unwind` records into one `__TEXT,__unwind_info` section whose second-level pages — regular `(functionOffset, encoding)` pairs, or compressed `u32`s whose low 24 bits are the offset from the page's first function — list, in ascending order, the start of each entry the unwinder looks up: a function start, though not one per function, since the linker folds a run of adjacent functions sharing one compact encoding into the entry of its first. Because the section lives in the mapped `__TEXT` segment it survives the `strip` that removes `LC_FUNCTION_STARTS` from `__LINKEDIT`, which is the whole of its value: on an App-Store app whose function starts were stripped, `LC_MAIN`, the exports, `__mod_init_func` and the thin symbol stream seed only a handful of entries, and arm64 has no always-on prologue sweep (oracle 5 is x86-64-only), so the gap between the few seeds is the entire text and nothing starts a function inside it. Measured on a decrypted 249 MB arm64 `Instagram.app` with no `LC_FUNCTION_STARTS`, the default inventory is 59,222 — of which only 23 are real `__text` functions, the rest `__got` slots and `__stubs` — while `__unwind_info` records 204,800 real starts; with the option on all 204,800 are recovered and each decodes to a normal function body. On an image that still carries `LC_FUNCTION_STARTS` the oracle is a strict no-op: every unwind start is already a function-starts entry — the linker folds runs of adjacent same-encoding functions into one page entry, so the set is in fact a *subset* (on the 84 MB Toyota app, 185,937 unwind entries against 296,775 function starts, discovery unchanged at 314,038). Only the function **starts** are read; the compact encodings (frame size, saved-register set, frameless stack size) are deliberately ignored, because kuna's S5/S7 frame analysis recovers the stack frame from the code — the same reason the `.eh_frame` oracle inherits CFI rather than rebuilding it. Output-changing (it adds entries), so default-off: a default run is byte-identical to before.
 
 (kuna) **`__eh_frame` FDE starts on Mach-O** (`decompiler/crates/kuna-analysis/src/analyzers/entry/kuna_machoehframe.rs (MachoEhFrameStartsPass)`, option `machoehframe`, default-on). A Mach-O describes most functions' unwinding in `__unwind_info` and falls back to a DWARF FDE in `__TEXT,__eh_frame` for a function the compact encoding cannot describe (a variable stack adjustment, an unusual register save). Each FDE's `pcBegin` is a function start, exactly as on ELF, where the always-on discovery already reads `.eh_frame` (oracle 3); the pass runs that same walk (`scan_eh_frame_starts`, now accepting a Mach-O's `__eh_frame`) and keeps the starts that lie in an executable section and carry no symbol. Like `__unwind_info` the section lives in `__TEXT` and survives the strip of `LC_FUNCTION_STARTS`; unlike it, every FDE is a real function start with no folding, and the pass is cheap, so it is on by default, as IDA's Mach-O loader runs its `eh_frame` parse on every load. On an image that keeps `LC_FUNCTION_STARTS` it adds nothing.
 

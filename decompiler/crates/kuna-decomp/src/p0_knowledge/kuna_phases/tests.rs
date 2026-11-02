@@ -31,6 +31,10 @@ fn github_anchor_matches_rendered_heading_text() {
             "`fooopt` -- off | 0 | 1 | `<n>`, default `2`",
             "fooopt----off--0--1--n-default-2",
         ),
+        (
+            "`fooopt` -- off | `<bundle-id>`[,...], default `off`",
+            "fooopt----off--bundle-id-default-off",
+        ),
     ];
     for (heading, anchor) in cases {
         assert_eq!(github_anchor(heading), anchor, "{heading}");
@@ -62,7 +66,7 @@ fn settable_count_is_449() {
 }
 
 #[test]
-fn tier_counts_are_139_core_170_transform_139_analysis() {
+fn tier_counts_are_139_core_171_transform_139_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
