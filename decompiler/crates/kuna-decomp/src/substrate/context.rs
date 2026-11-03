@@ -198,8 +198,6 @@ pub(crate) enum IndirectSlotType {
 #[derive(Debug, Clone)]
 struct GlobalSpaceIndex {
     space_index: int4,
-    entry_start: usize,
-    entry_end: usize,
     interval_order: Vec<usize>,
     max_last: Vec<u64>,
     leaf_base: usize,
@@ -227,8 +225,6 @@ impl GlobalSpaceIndex {
 
         Self {
             space_index,
-            entry_start,
-            entry_end,
             interval_order,
             max_last,
             leaf_base,
@@ -360,12 +356,28 @@ impl GlobalQuery {
             .filter(|index| index.space_index == space_index)
     }
 
-    /// Return only entries belonging to one address space.
+    #[cfg(test)]
     fn entries_for_space(&self, space_index: int4) -> &[GlobalEntry] {
-        let Some(index) = self.index_for_space(space_index) else {
-            return &[];
-        };
-        &self.entries[index.entry_start..index.entry_end]
+        let start = self.entries.partition_point(|entry| entry.space_index < space_index);
+        let end = self.entries.partition_point(|entry| entry.space_index <= space_index);
+        &self.entries[start..end]
+    }
+
+    /// The entries of one address space whose storage starts at `start`, in
+    /// snapshot order (the stable sort of `interval_order` keeps ties in entry
+    /// order), found by binary search instead of a scan of the whole space.
+    fn entries_starting_at(
+        &self,
+        space_index: int4,
+        start: u64,
+    ) -> impl DoubleEndedIterator<Item = &GlobalEntry> {
+        let order = self.index_for_space(space_index).map_or(&[][..], |index| {
+            let order = &index.interval_order[..];
+            let lo = order.partition_point(|&at| self.entries[at].first < start);
+            let hi = lo + order[lo..].partition_point(|&at| self.entries[at].first == start);
+            &order[lo..hi]
+        });
+        order.iter().map(|&at| &self.entries[at])
     }
 
     /// C++ `Database::getProperty(addr)` (`database.hh:949`): the boolean
@@ -495,15 +507,14 @@ impl GlobalQuery {
             }
         }
 
-        let entries = self.entries_for_space(space_index);
         let active = |entry: &GlobalEntry| {
             entry.addrtied
                 || (!usepoint.is_invalid() && entry.uselimit.in_range(usepoint, 1))
         };
-        if let Some(entry) = entries
-            .iter()
+        if let Some(entry) = self
+            .entries_starting_at(space_index, start)
             .rev()
-            .find(|entry| entry.first == start && !entry.is_function && active(entry))
+            .find(|entry| !entry.is_function && active(entry))
         {
             return Some(classify_data(entry));
         }
@@ -516,9 +527,8 @@ impl GlobalQuery {
             return Some(IndirectSlotType::Untyped);
         }
 
-        let entry = entries.iter().find(|entry| {
-            entry.first == start
-                && entry.symbol_offset == 0
+        let entry = self.entries_starting_at(space_index, start).find(|entry| {
+            entry.symbol_offset == 0
                 && entry.is_function
                 && active(entry)
                 && entry
@@ -2671,10 +2681,7 @@ impl ArchContext {
         let gq = self.effective_global_query(entry)?;
         let space_index = entry.get_space()?.get_index();
         let start = entry.get_offset();
-        for e in gq.entries_for_space(space_index) {
-            if e.first != start {
-                continue;
-            }
+        for e in gq.entries_starting_at(space_index, start) {
             if let Some(ct) = &e.symbol_type {
                 if let Some(proto) = ct.get_code_prototype() {
                     return Some(std::rc::Rc::clone(proto));
@@ -2754,10 +2761,7 @@ impl ArchContext {
         let space = entry.get_space()?;
         let space_index = space.get_index();
         let start = entry.get_offset();
-        for e in gq.entries_for_space(space_index) {
-            if e.first != start {
-                continue;
-            }
+        for e in gq.entries_starting_at(space_index, start) {
             // C++ `Scope::queryFunction(addr)` returns the `FunctionSymbol`'s
             // `Funcdata`, whose `getFuncProto()` is its recovered prototype — or,
             // for a bare loader symbol, the default (void, unlocked) proto.  A
