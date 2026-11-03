@@ -45,7 +45,7 @@ not emitted, an error that is silently swallowed, a flag that is missing. It liv
 `decompiler/crates/kuna-cli/`, `kuna-console/` or `kuna-analysis/`.
 
 **It does NOT change emitted C, so it does NOT need a `phases.toml` option row.** The rule in
-`docs/agents.md` is "anything that *can change emitted C* ships behind a named option" — a new
+`CLAUDE.md` is "anything that *can change emitted C* ships behind a named option" — a new
 subcommand cannot. Do not add an option. Do not touch `phases.toml`, `options.rs`,
 `docs/options.md`, `docs/history.md`, or any catalog counter. If you find yourself editing
 `kuna_phases/tests.rs`, stop: you are on the wrong track or doing something the need did not

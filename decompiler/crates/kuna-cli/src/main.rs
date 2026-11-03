@@ -247,7 +247,7 @@ fn usage_test() {
          test) or tests/stages (the kuna-owned issue cases, = make test-stages).\n\
          --baseline F compares against a recorded result; --save-baseline F re-records\n\
          one.  Re-recording docs/baseline.json to absorb a regression is never\n\
-         sanctioned -- see docs/agents.md.\n\
+         sanctioned -- see CLAUDE.md.\n\
          --json emits {{unit_footer,data_footer,passing,returncode,failures}}, plus\n\
          parity with --baseline."
     );

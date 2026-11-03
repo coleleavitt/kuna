@@ -116,7 +116,7 @@ The phases are described in the following files:
 ## Development
 
 The majority of code analysis and creation is expected to be done with frontier LLMs in an agentic framework like Codex or Claude Code.
-The agent-facing guidance lives in [`AGENTS.md`](AGENTS.md) (a symlink to `docs/agents.md`), which holds the enforced rules for contributing features and a doc map to everything else.
+The agent-facing guidance lives in [`CLAUDE.md`](CLAUDE.md) (`AGENTS.md` is a symlink to it), which holds the enforced rules for contributing features and a doc map to everything else.
 
 ### Building from Source
 You only need a **Rust toolchain** (`cargo`).

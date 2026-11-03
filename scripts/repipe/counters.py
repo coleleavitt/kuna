@@ -23,7 +23,7 @@ The counters, how each is measured, and where each is hard-coded:
                             -> kuna-base/src/xml.rs   "corpus file count drifted"
     next ElementId (4132)   max `ElementId::new(_, N)` for N >= 4000, plus one. No hard-coded
                             site: the convention is "grep for the current highest"
-                            (docs/agents.md, docs/improvement-pipeline.md).
+                            (CLAUDE.md, docs/improvement-pipeline.md).
 
 The test function NAMES are checked as sites in their own right. They encode the number, no
 compiler or test run disagrees with a stale one, and `settable_count_is_117` guarding an

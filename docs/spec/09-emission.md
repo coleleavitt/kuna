@@ -3277,7 +3277,7 @@ call follows as its own statement, as in upstream's output, unless Java's
 **(kuna) Three additive render surfaces** back the `kuna decompile-project`
 project export (the CLI driver is
 `decompiler/crates/kuna-cli/src/decompile_project.rs`; usage in
-`docs/agents.md`). All three are pure *readers* of finished state — they run
+`CLAUDE.md`). All three are pure *readers* of finished state — they run
 after analysis, insert no ops, flip no options, and change no byte of any
 existing render path (the datatest / stages / `decompile-all --json` outputs
 are untouched), which is why none carries a `phases.toml` row or a DIV entry.

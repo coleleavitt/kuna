@@ -7,7 +7,7 @@ CLI, and front-ends.
 
 The port's design decisions (IR arenas, ordered containers, integer semantics, error
 model, dispatch, stage registry, re-runability) are summarized in `../docs/history.md`;
-the full ADRs are in git history. Working conventions: `../docs/agents.md`.
+the full ADRs are in git history. Working conventions: `../CLAUDE.md`.
 
 ## Layout
 
@@ -28,7 +28,7 @@ the full ADRs are in git history. Working conventions: `../docs/agents.md`.
 ## Build & test
 
 From the repo root, `make binaries` / `make test` / `make rust-test` (see
-`../docs/agents.md`). Or directly:
+`../CLAUDE.md`). Or directly:
 
 ```bash
 cd decompiler

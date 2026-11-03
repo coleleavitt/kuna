@@ -50,10 +50,10 @@ pub const DOCS: &[Doc] = &[
     },
     Doc {
         topic: "agents",
-        title: "AGENTS.md — working in and with kuna",
+        title: "CLAUDE.md — working in and with kuna",
         summary: "The repo rulebook: what kuna is, how it is laid out, the build/test gates, and the doc map.",
-        path: "docs/agents.md",
-        body: include_str!("../../../../docs/agents.md"),
+        path: "CLAUDE.md",
+        body: include_str!("../../../../CLAUDE.md"),
     },
     Doc {
         topic: "phases",

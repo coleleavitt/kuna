@@ -3,7 +3,7 @@
 The user-facing commands are the single Rust binary `kuna`
 (`decompiler/crates/kuna-cli`, built to `decompiler/target/release/kuna` by
 `make binaries`). This is the full reference; the one-screen version is in
-`docs/agents.md`.
+`CLAUDE.md`.
 
 **Every subcommand describes itself.** `kuna <subcommand> -h|--help` prints that
 command's own usage block — its flags, what they take, and the shape of its `--json`
@@ -3637,7 +3637,7 @@ it needs to drive it.
 |---|---|---|
 | `cli` | `docs/cli.md` | every subcommand, flag, exit code and JSON schema |
 | `options` | `docs/options.md` | the generated option catalog with the symptom index — bad output → the flip that fixes it |
-| `agents` | `docs/agents.md` | the repo rulebook and the doc map |
+| `agents` | `CLAUDE.md` | the repo rulebook and the doc map |
 | `phases` | `docs/phases.md` | the P0–P9 model, for reasoning about *which* decision to flip |
 | `modes` | `docs/modes.md` | the `--mode` presets and the size thresholds `auto` selects on |
 
