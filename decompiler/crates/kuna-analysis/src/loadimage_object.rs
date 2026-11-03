@@ -533,6 +533,10 @@ pub struct ObjectLoadImage {
     ///
     /// Empty for a non-ELF linked image, and with both gates off.
     dynreloc_const: Vec<(u64, u64)>,
+    /// (kuna `dyldcrossrefs`) `[start, stop]` (inclusive) extents of the other
+    /// images' data symbols a dyld cache image takes the address of, from its
+    /// `kuna.dyld.xrefs` note. See [`ObjectLoadImage::interior_data_ranges`].
+    interior_data: Vec<(u64, u64)>,
     /// (kuna) The image's **import pointer slots** as half-open `[lo, hi)` VMA
     /// ranges — the PE Import Address Table words a run-time loader fills with a
     /// resolved import address. [`Self::funcsyms`] carries a `FunctionSymbol` at
@@ -969,7 +973,9 @@ impl ObjectLoadImage {
 
         // A dyld cache image's data references into other images, from its
         // `kuna.dyld.xrefs` note (`dyldcrossrefs`), named as the image's own.
+        let mut interior_data = Vec::new();
         if is_macho && kuna_decomp::kuna_dyldcache::dyldcrossrefs_enabled() {
+            interior_data = crate::loader::kuna_dyldcache::xrefs::interior_extents(bytes);
             for (addr, name, size) in crate::loader::kuna_dyldcache::xrefs::data_symbols(bytes) {
                 let name = match std::str::from_utf8(&name).ok().and_then(crate::demangle::demangle_name) {
                     Some(demangled) => demangled.into_bytes(),
@@ -1117,6 +1123,7 @@ impl ObjectLoadImage {
             data_objects: crate::loader::kuna_globalref::merged_ranges(data_object_rows),
             const_ranges,
             dynreloc_const,
+            interior_data,
             import_slots,
             plt_local,
             elfv1,
@@ -1290,6 +1297,7 @@ impl ObjectLoadImage {
                 .into_iter()
                 .chain(got_range.map(|(lo, hi)| (lo, hi - 1)))
                 .collect(),
+            interior_data: Vec::new(),
             // A pre-link object has no Import Address Table: its external calls
             // are relocations, resolved by the layout pass.
             import_slots: Vec::new(),
@@ -1377,6 +1385,15 @@ impl ObjectLoadImage {
     /// varnode inside one even when global propagation is off.
     pub fn dynreloc_const_ranges(&self) -> &[(u64, u64)] {
         &self.dynreloc_const
+    }
+
+    /// (kuna `dyldcrossrefs`) `[start, stop]` (inclusive) extents of the other
+    /// images' data symbols a dyld cache image takes the address of, from its
+    /// `kuna.dyld.xrefs` note. The engine carries them on
+    /// `Architecture::interior_data`, where an untyped constant inside one prints
+    /// relative to the symbol at its start. Empty for every other image.
+    pub fn interior_data_ranges(&self) -> &[(u64, u64)] {
+        &self.interior_data
     }
 
     /// (kuna `pltlocal`) `(stub, definition)` for each PLT stub the image's own
@@ -1712,6 +1729,10 @@ impl LoadImage for ObjectLoadImage {
             r.1 = r.1.wadd(badjust);
         }
         for r in &mut self.dynreloc_const {
+            r.0 = r.0.wadd(badjust);
+            r.1 = r.1.wadd(badjust);
+        }
+        for r in &mut self.interior_data {
             r.0 = r.0.wadd(badjust);
             r.1 = r.1.wadd(badjust);
         }

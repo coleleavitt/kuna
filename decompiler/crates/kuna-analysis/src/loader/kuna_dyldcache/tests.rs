@@ -57,7 +57,7 @@ fn rebuilt_image_is_a_mach_o_at_its_cache_addresses_with_slid_pointers() {
     assert!(!names.iter().any(|(n, _)| n == "<redacted>"));
     let exports: Vec<String> =
         file.exports().unwrap().iter().map(|e| String::from_utf8_lossy(e.name()).into_owned()).collect();
-    assert_eq!(exports, ["_caller_entry", "_caller_indirect", "_caller_table", "_caller_addr"]);
+    assert_eq!(exports, ["_caller_entry", "_caller_indirect", "_caller_table", "_caller_addr", "_caller_meta"]);
 }
 
 #[test]
@@ -71,8 +71,13 @@ fn cross_image_references_ride_in_the_note() {
             x(0x1_8000_8800, XrefKind::Call, b"_callee_add", 0),
             x(0x1_8001_0000, XrefKind::Bound, b"_callee_counter", 8),
             x(0x1_8001_0008, XrefKind::Slot, b"_callee_add", 0),
+            x(0x1_8001_0010, XrefKind::Bound, b"_callee_meta", 8),
             x(0x1_8001_0100, XrefKind::Data, b"_callee_counter", 8),
             x(0x1_8001_0110, XrefKind::Data, b"_callee_table", 0x10),
+            x(0x1_8001_0120, XrefKind::Data, b"_callee_meta", 8),
+            x(0x1_8001_0100, XrefKind::Extent, b"", 0x10),
+            x(0x1_8001_0110, XrefKind::Extent, b"", 0x10),
+            x(0x1_8001_0120, XrefKind::Extent, b"", 0x18),
         ]
     );
     assert!(read_note(&cache.extract(1).unwrap()).is_empty(), "the callee reaches no other image");
@@ -81,10 +86,18 @@ fn cross_image_references_ride_in_the_note() {
 #[test]
 fn a_bound_got_keeps_its_local_abs_entries_and_reads_back_as_constant() {
     let bytes = DyldCache::open(&fixture()).unwrap().extract(0).unwrap();
-    assert_eq!(xrefs::bound_slots(&bytes), [(0x1_8001_0000, 0x1_8001_0007)]);
+    assert_eq!(xrefs::bound_slots(&bytes), [(0x1_8001_0000, 0x1_8001_0007), (0x1_8001_0010, 0x1_8001_0017)]);
     assert_eq!(
         xrefs::data_symbols(&bytes),
-        [(0x1_8001_0100, b"_callee_counter".to_vec(), 8), (0x1_8001_0110, b"_callee_table".to_vec(), 0x10)]
+        [
+            (0x1_8001_0100, b"_callee_counter".to_vec(), 8),
+            (0x1_8001_0110, b"_callee_table".to_vec(), 0x10),
+            (0x1_8001_0120, b"_callee_meta".to_vec(), 8),
+        ]
+    );
+    assert_eq!(
+        xrefs::interior_extents(&bytes),
+        [(0x1_8001_0100, 0x1_8001_010f), (0x1_8001_0110, 0x1_8001_011f), (0x1_8001_0120, 0x1_8001_0137)]
     );
 }
 

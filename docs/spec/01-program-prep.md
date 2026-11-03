@@ -2063,8 +2063,18 @@ funcsym stream:
   code stays an import slot. A slot pointing at data is recorded as bound: the
   loader adds it to the constant-by-construction ranges (the `dynrelocs` fold),
   so a load through it folds to the target's address and renders as `&symbol`.
-  An interior target still prints as a number when the decompiler cannot type
-  the constant as a pointer: an untyped constant must hit a symbol's start.
+  When the image takes a data target's address (a bound slot, a data pointer,
+  an `adrp`/`add`) the note also records the holding symbol's whole extent
+  (kind `Extent`, written after every other entry), because code may offset
+  such a pointer: Swift adds 8 to a full type metadata record's address to
+  reach its address point, so `slot + 8` folds to a constant past the eight
+  bytes the data symbol covers. Constant pointer recovery names only an
+  untyped constant that hits a symbol's start, so the loader hands the
+  extents to the engine (`Architecture::interior_data`, empty off this path)
+  and the C printer spells a pointer-sized, non-pointer constant past the
+  start of one relative to the symbol there, `((unsigned char *)&sym + 0x8)`,
+  as `kuna_namedglobals` spells a pointer into a named object
+  (`decompiler/crates/kuna-decomp/src/p9_emit/kuna_interiorsym.rs`).
 
   The result rides in the rebuilt Mach-O as an
   `LC_NOTE` owned by `kuna.dyld.xrefs`, so `kuna unpack` writes it too, and the
@@ -2077,7 +2087,9 @@ funcsym stream:
   (iOS 16.4.1) `swift_getAssociatedTypeWitness(0xff,a3,a2,dat_1dc6827b8,...)`
   becomes `swift_getAssociatedTypeWitness(0xff,a3,a2,
   &_$s10Foundation12DataProtocolTL,...)`; the whole image's `dat_` references
-  drop from 2,029 to 1,438. Most of the rest are slots that keep a real
+  drop from 2,029 to 1,438, and its 76 references eight or more bytes into
+  Swift metadata (`swift_dynamicCast(&v2,v1,0x1dee7ee08,...)`) print
+  `((unsigned char *)&_$sypN + 0x8)`. Most of the rest are slots that keep a real
   indirect symbol (`___stack_chk_guard`), which the stub walk already names. On the iOS 16.4.1 cache, CoreFoundation's note names
   699 of its call targets and 65 GOT slots; `libobjc`'s `class_copyMethodList`
   calls `os_unfair_lock_lock_with_options` through an island on iOS 16 and

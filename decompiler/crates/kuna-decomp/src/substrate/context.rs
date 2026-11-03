@@ -1747,6 +1747,8 @@ pub struct ArchContext {
     /// every hand-built fixture and every XML `<binaryimage>` load, which is why
     /// the datatest parity oracle cannot see this field.
     pub dynreloc_const: Rc<Vec<(u64, u64)>>,
+    /// (kuna `dyldcrossrefs`) See `Architecture::interior_data`.
+    pub interior_data: Rc<Vec<(u64, u64)>>,
     /// (kuna `litpoolconst`) `[start, stop]` (inclusive) offsets of the image's
     /// executable, non-writable, file-backed regions — the instruction stream, and
     /// so the literal pools embedded in it. A read entirely inside one is foldable
@@ -2176,6 +2178,7 @@ impl ArchContext {
             // (kuna) No dynamic-relocation const slots until a real ELF load
             // installs them (see `Architecture::dynreloc_const`).
             dynreloc_const: Rc::new(Vec::new()),
+            interior_data: Rc::new(Vec::new()),
             // (kuna) No executable read-only ranges until a real object load
             // installs them (see `Architecture::litpool_const`).
             litpool_const: Rc::new(Vec::new()),
@@ -2276,6 +2279,14 @@ impl ArchContext {
             Err(0) => false,
             Err(i) => offset <= r[i - 1].1,
         }
+    }
+
+    /// (kuna `dyldcrossrefs`) The start of the [`Self::interior_data`] extent
+    /// holding `offset`.
+    pub fn interior_data_start(&self, offset: u64) -> Option<u64> {
+        let r = &self.interior_data;
+        let i = r.partition_point(|(lo, _)| *lo <= offset).checked_sub(1)?;
+        (offset <= r[i].1).then_some(r[i].0)
     }
 
     /// (kuna `litpoolconst`) Whether the `size`-byte read at `offset` lies

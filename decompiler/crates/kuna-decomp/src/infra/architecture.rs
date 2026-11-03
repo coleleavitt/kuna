@@ -287,6 +287,13 @@ pub struct Architecture {
     /// every per-function handle by `build_arch_handle`. Empty on every other
     /// path, so it is inert for the XML datatest oracle.
     pub dynreloc_const: Rc<Vec<(u64, u64)>>,
+    /// (kuna `dyldcrossrefs`) `[start, stop]` (inclusive) extents of the other
+    /// images' data symbols a dyld cache image takes the address of
+    /// (`ObjectLoadImage::interior_data_ranges`), sorted and disjoint. An untyped
+    /// pointer-sized constant inside one, past its start, is a pointer into that
+    /// object and prints relative to the symbol there. Empty on every other
+    /// path, so it is inert for the XML datatest oracle.
+    pub interior_data: Rc<Vec<(u64, u64)>>,
     /// (kuna `pltlocal`) `(stub, definition)` for each PLT stub the image's own
     /// dynamic relocations bind to a function it defines, ascending by stub
     /// (`ObjectLoadImage::plt_local_targets`). Installed by the ELF bootstrap;
@@ -3025,6 +3032,7 @@ impl Architecture {
             aggressive_ext_trim: false,
             readonlypropagate: false,
             dynreloc_const: Rc::new(Vec::new()),
+            interior_data: Rc::new(Vec::new()),
             plt_local: Rc::new(Vec::new()),
             litpool_const: Rc::new(Vec::new()),
             eh_sections: None,
@@ -4773,6 +4781,7 @@ impl Architecture {
         // slots so `ActionVarnodeProps` folds those loads with global read-only
         // propagation still off. `Rc` clone: the list is built once at load.
         ctx.dynreloc_const = Rc::clone(&self.dynreloc_const);
+        ctx.interior_data = Rc::clone(&self.interior_data);
         ctx.litpool_const = Rc::clone(&self.litpool_const);
         ctx.litpoolconst = self.litpoolconst; // litpoolconst (in-code literal-pool folding)
         // Carry the data-type-splitting toggle bits (C++ `glb->split_datatype_config`)

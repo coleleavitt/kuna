@@ -4545,6 +4545,7 @@ pub fn bootstrap_from_object_with_isa(
     // `ActionVarnodeProps` FOLD those particular reads without the program-wide
     // `option readonly`. Empty for a non-ELF, an `ET_REL` object, or the gate off.
     let dynreloc_const: Vec<(u64, u64)> = loader.dynreloc_const_ranges().to_vec();
+    let interior_data: Vec<(u64, u64)> = loader.interior_data_ranges().to_vec();
 
     // (kuna, RE-need `bulk-decompilation-decodes-pe`) The import pointer slots,
     // read off the same loader: `read_loader_symbols_generic` below installs a
@@ -4754,6 +4755,11 @@ pub fn bootstrap_from_object_with_isa(
         let mut ranges = dynreloc_const;
         ranges.sort_unstable();
         prog.arch_mut().dynreloc_const = std::rc::Rc::new(ranges);
+    }
+    {
+        let mut ranges = interior_data;
+        ranges.sort_unstable();
+        prog.arch_mut().interior_data = std::rc::Rc::new(ranges);
     }
     prog.arch_mut().plt_local = std::rc::Rc::new(plt_local);
 

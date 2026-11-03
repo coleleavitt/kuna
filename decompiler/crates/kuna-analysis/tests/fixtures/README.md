@@ -1008,9 +1008,11 @@ dyld shared cache, split the way iOS 16 splits one: `dyld_shared_cache_arm64e`
 through the island at `0x180008800` and through a `__got` slot. That `__got` is
 bound in place as iOS 16 leaves one (`S_NON_LAZY_SYMBOL_POINTERS`, its
 indirect-symbol entries `INDIRECT_SYMBOL_LOCAL|ABS`), and its v3 chain links a
-plain pointer (to `callee_counter`) to an authenticated one (to `callee_add`).
-`caller_table` reads `callee_table[1]` with `adrp`/`ldr` and `caller_addr` forms
-`&callee_table` with `adrp`/`add`. Its `helper_local` is a `<redacted>`
+plain pointer (to `callee_counter`) to an authenticated one (to `callee_add`)
+and on to a third plain one (to `callee_meta`).
+`caller_table` reads `callee_table[1]` with `adrp`/`ldr`, `caller_addr` forms
+`&callee_table` with `adrp`/`add`, and `caller_meta` returns the third slot's
+pointer plus 8, as Swift reaches a type metadata record's address point. Its `helper_local` is a `<redacted>`
 placeholder in its own symbol table, named only by `.symbols`. It drives the
 `kuna_dyldcache` unit tests, `tests/stages/kuna-dyldcrossrefs.xml` and
 `tests/stages/kuna-dyldcrossdata.xml`.

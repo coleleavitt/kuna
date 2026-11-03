@@ -47,6 +47,12 @@ pub enum XrefKind {
     /// A bound pointer slot of the image holding the address of another
     /// image's data: its `size` bytes are constant, so a load from it may fold.
     Bound,
+    /// The `size`-byte extent of the holding symbol at `addr` of a
+    /// [`XrefKind::Data`] symbol whose address the image takes (a bound slot, a
+    /// data pointer, an `adrp`/`add`): code may offset such a pointer, as Swift
+    /// does to reach a full type metadata record's address point. Unnamed, and
+    /// written after every other entry so an older reader stops before it.
+    Extent,
 }
 
 /// One named reference into another image.
@@ -56,7 +62,8 @@ pub struct Xref {
     pub kind: XrefKind,
     /// The raw symbol name, leading underscore included.
     pub name: Vec<u8>,
-    /// The extent of a [`XrefKind::Data`] symbol; 0 for the other kinds.
+    /// The extent of a [`XrefKind::Data`], [`XrefKind::Bound`] or
+    /// [`XrefKind::Extent`] entry; 0 for the other kinds.
     pub size: u64,
 }
 
@@ -97,6 +104,7 @@ pub fn decode(blob: &[u8]) -> Vec<Xref> {
                 1 => XrefKind::Slot,
                 2 => XrefKind::Data,
                 3 => XrefKind::Bound,
+                4 => XrefKind::Extent,
                 _ => return None,
             };
             let name = names.get(u32_at(e, 12) as usize..)?;
@@ -151,6 +159,16 @@ pub fn data_symbols(bytes: &[u8]) -> Vec<(u64, Vec<u8>, u64)> {
     read_note(bytes).into_iter().filter(|x| x.kind == XrefKind::Data).map(|x| (x.addr, x.name, x.size)).collect()
 }
 
+/// The `[start, stop]` (inclusive) extents of the other images' data a thin
+/// 64-bit Mach-O's `kuna.dyld.xrefs` note says the image takes the address of.
+pub fn interior_extents(bytes: &[u8]) -> Vec<(u64, u64)> {
+    read_note(bytes)
+        .into_iter()
+        .filter(|x| x.kind == XrefKind::Extent && x.size > 0)
+        .filter_map(|x| Some((x.addr, x.addr.checked_add(x.size - 1)?)))
+        .collect()
+}
+
 /// Collect image `index`'s references into other images; `layout` is its
 /// layout. `view(va, len)` reads the image's slid bytes. Branches and `adrp`
 /// pairs are decoded only for an arm64 image (`a64`); an x86_64 image gets its
@@ -165,7 +183,7 @@ pub(super) fn collect<'v>(
     const S_NON_LAZY_SYMBOL_POINTERS: u32 = 0x6;
     let mut targets = BTreeSet::new();
     let mut slots = Vec::new();
-    let mut data = BTreeSet::new();
+    let mut data: BTreeMap<u64, bool> = BTreeMap::new();
     let mut indirect = None;
     for seg in &layout.segments {
         for sec in &seg.sections {
@@ -187,9 +205,9 @@ pub(super) fn collect<'v>(
                         }
                     }
                 }
-                adrp_targets(sec.addr, bytes, &mut |t| {
+                adrp_targets(sec.addr, bytes, &mut |t, taken| {
                     if !layout.holds(t) {
-                        data.insert(t);
+                        *data.entry(t).or_default() |= taken;
                     }
                 });
             } else if got && matches!(sec.section_type(), 0 | S_NON_LAZY_SYMBOL_POINTERS) {
@@ -214,7 +232,7 @@ pub(super) fn collect<'v>(
                 for p in bytes.chunks_exact(8) {
                     let value = u64_at(p, 0);
                     if value != 0 && !layout.holds(value) {
-                        data.insert(value);
+                        data.insert(value, true);
                     }
                 }
             }
@@ -234,7 +252,7 @@ pub(super) fn collect<'v>(
         match names.image_at(value).and_then(|image| names.containing(image, value)) {
             Some(Held::Data { name, .. }) => {
                 out.push(Xref { addr, kind: XrefKind::Bound, name, size: 8 });
-                data.insert(value);
+                data.insert(value, true);
             }
             _ => {
                 if let Some(name) = names.at(value) {
@@ -243,24 +261,28 @@ pub(super) fn collect<'v>(
             }
         }
     }
-    let mut by_image: BTreeMap<usize, Vec<u64>> = BTreeMap::new();
-    for addr in data {
+    let mut by_image: BTreeMap<usize, Vec<(u64, bool)>> = BTreeMap::new();
+    for (addr, taken) in data {
         if let Some(image) = names.image_at(addr) {
-            by_image.entry(image).or_default().push(addr);
+            by_image.entry(image).or_default().push((addr, taken));
         }
     }
     let mut code = BTreeMap::new();
     let mut spans = BTreeMap::new();
+    let mut extents = BTreeMap::new();
     for (image, addrs) in by_image {
-        for addr in addrs {
+        for (addr, taken) in addrs {
             match names.containing(image, addr) {
                 Some(Held::Code(name)) if !targets.contains(&addr) => {
                     code.insert(addr, name);
                 }
                 Some(Held::Data { start, name, size }) => {
-                    let need = (addr - start).saturating_add(MIN_DATA_SIZE).max(MIN_DATA_SIZE);
+                    let need = (addr - start).saturating_add(MIN_DATA_SIZE);
                     let span = spans.entry(start).or_insert((name, 0));
                     span.1 = span.1.max(need.min(size));
+                    if taken {
+                        extents.insert(start, size);
+                    }
                 }
                 _ => {}
             }
@@ -268,6 +290,7 @@ pub(super) fn collect<'v>(
     }
     out.extend(code.into_iter().map(|(addr, name)| Xref { addr, kind: XrefKind::Call, name, size: 0 }));
     out.extend(spans.into_iter().map(|(addr, (name, size))| Xref { addr, kind: XrefKind::Data, name, size }));
+    out.extend(extents.into_iter().map(|(addr, size)| Xref { addr, kind: XrefKind::Extent, name: Vec::new(), size }));
     out
 }
 
@@ -275,14 +298,15 @@ pub(super) fn collect<'v>(
 const INDIRECT_LOCAL_OR_ABS: u32 = 0xC000_0000;
 
 /// Every address an `adrp` page plus a later `add` or unsigned-offset load or
-/// store immediate forms in `code` at `base`. The page is tracked per register
+/// store immediate forms in `code` at `base`, and whether it was an `add` (an
+/// address taken rather than accessed). The page is tracked per register
 /// in one linear pass: `b`, `br` and `ret` forget every page, `bl` the pages of
 /// the registers a call clobbers, conditional branches and system instructions
 /// none, and any other instruction the page of the register in its low five
 /// bits. An address formed
 /// through a page set in another block is missed, and one formed after an
 /// undecoded write of the base register is wrong; both only cost a name.
-fn adrp_targets(base: u64, code: &[u8], found: &mut dyn FnMut(u64)) {
+fn adrp_targets(base: u64, code: &[u8], found: &mut dyn FnMut(u64, bool)) {
     let mut pages = [None::<u64>; 32];
     for (i, w) in code.chunks_exact(4).enumerate() {
         let w = u32_at(w, 0);
@@ -308,13 +332,13 @@ fn adrp_targets(base: u64, code: &[u8], found: &mut dyn FnMut(u64)) {
         if w & 0xFF80_0000 == 0x9100_0000 {
             if let Some(page) = pages[rn] {
                 let shift = if w & (1 << 22) != 0 { 12 } else { 0 };
-                found(page.wrapping_add((((w >> 10) & 0xFFF) as u64) << shift));
+                found(page.wrapping_add((((w >> 10) & 0xFFF) as u64) << shift), true);
             }
         } else if w & 0x3B00_0000 == 0x3900_0000 {
             let simd = w & (1 << 26) != 0;
             if let Some(page) = pages[rn] {
                 let scale = if simd && w & (1 << 23) != 0 && w >> 30 == 0 { 4 } else { w >> 30 };
-                found(page.wrapping_add((((w >> 10) & 0xFFF) as u64) << scale));
+                found(page.wrapping_add((((w >> 10) & 0xFFF) as u64) << scale), false);
             }
             let load = w & (3 << 22) != 0;
             if simd || !load {
@@ -386,7 +410,7 @@ enum Held {
 const MAX_DATA_EXTENT: u64 = 0x1_0000;
 
 /// The extent a [`XrefKind::Data`] symbol takes past the last address the
-/// image references in it, as `macho_stubs::data_symbols` sizes a symbol
+/// image loads or stores in it, as `macho_stubs::data_symbols` sizes a symbol
 /// table's data: one 64-bit scalar or pointer.
 const MIN_DATA_SIZE: u64 = 8;
 
@@ -533,6 +557,7 @@ mod tests {
             Xref { addr: 0x1_8c99_b570, kind: XrefKind::Call, name: b"___stack_chk_fail".to_vec(), size: 0 },
             Xref { addr: 0x1_dc07_f118, kind: XrefKind::Slot, name: b"_objc_debug_isa_class_mask".to_vec(), size: 0 },
             Xref { addr: 0x1_dc68_1000, kind: XrefKind::Data, name: b"_$sSTTL".to_vec(), size: 0x18 },
+            Xref { addr: 0x1_dc68_1000, kind: XrefKind::Extent, name: Vec::new(), size: 0x40 },
         ];
         assert_eq!(decode(&encode(&xrefs)), xrefs);
         assert!(decode(&[1, 0]).is_empty());

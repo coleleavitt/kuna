@@ -3900,6 +3900,14 @@ stack objects, and function symbols. Project extraction includes these facts eve
 when synthetic address naming is disabled. Whole symbol types describe the
 object declaration, rather than the scalar type of a partial access.
 
+A dyld cache image's loader reports the extents of the other images' data the
+image takes the address of (`dyldcrossrefs`, chapter 1). A pointer-sized
+constant that is not typed as a pointer and lies past the start of one, where
+constant pointer recovery found no exact hit, prints relative to the symbol at
+that start in the same spelling, `((unsigned char *)&_$sypN + 0x8)`
+(`decompiler/crates/kuna-decomp/src/p9_emit/kuna_interiorsym.rs`). The list is
+empty for every other image, so nothing else changes.
+
 An integer `INT_ADD` of a constant and a non-pointer offset can still compute a
 pointer: a declared pointer member stores it, or a CAST or COPY consumes it at a
 pointer type. When types are printed (a project export or `structdefs`), the

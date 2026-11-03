@@ -188,7 +188,7 @@ where
         use super::kuna_dyldcache::xrefs::XrefKind;
         for xref in super::kuna_dyldcache::xrefs::read_note(bytes) {
             match xref.kind {
-                XrefKind::Data | XrefKind::Bound => continue,
+                XrefKind::Data | XrefKind::Bound | XrefKind::Extent => continue,
                 XrefKind::Slot => out.import_slots.push((xref.addr, xref.addr + 8)),
                 XrefKind::Call => {}
             }

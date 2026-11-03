@@ -10588,6 +10588,18 @@ impl PrintC {
                     return;
                 }
             }
+            if self.out_lang == crate::kuna_lang::OutLang::C {
+                if let Some(expression) = crate::kuna_interiorsym::expression(fd, arch, &ct, off) {
+                    self.push_atom(&Atom::with_op_vn(
+                        expression,
+                        TagType::VarToken,
+                        crate::printlanguage::SyntaxHighlight::var_color,
+                        op_key(op),
+                        vn_key(vn),
+                    ));
+                    return;
+                }
+            }
             // Pointer arm.  C++ `pushConstant` (printc.cc:1842-1854): a TYPE_PTR /
             // TYPE_PTRREL constant whose pointed-to type `isCharPrint()` is rendered
             // as a quoted string literal when the constant resolves to readonly
