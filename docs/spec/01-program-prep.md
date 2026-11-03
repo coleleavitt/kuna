@@ -4363,6 +4363,16 @@ every other binary's pass list is byte-identical to before the pass existed):
     kcm: 2,897 → 1,221 argument-less stub calls; Toyota sample: 32 → 4, 60 of
     265 stub calls change shape (`setTransitioningDelegate:(v3, delegate)`,
     `presentViewController:animated:completion:(vc, (UIViewController *)v10, 1, NULL)`).
+    A method declared with a trailing `, ...` (`+stringWithFormat:`,
+    `-initWithFormat:`) has no runtime spelling for its variable part, so the
+    reader appends `...` to its encoding (a type encoding never contains `.`)
+    and the stub prototype is variadic after its named arguments
+    (`first_var_arg_slot`). Without it the prototype closed after the format
+    and every argument the caller passed behind it was dropped; with it the
+    call's stack tail is recovered as for any declared variadic call
+    (`varargstackargs`, and on Apple `darwinvarargs` keeps the fixed arguments
+    in their registers): `stringWithFormat:(classRef_NSString, "UPDATE %@ SET
+    %@ = %@ + %lld WHERE %@", table, column, column, value, condition)`.
 
   Decoding every method's encoding asks the type factory for `objc_object *`
   once per argument, and the factory finds a type by name with a linear scan of

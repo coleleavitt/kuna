@@ -1,0 +1,59 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    Variadic Objective-C selectors from SDK headers (`option objcsdk <dir>`).
+
+    Issue: with the iPhoneOS SDK named, Toyota's
+    `-[APMSqliteStore increaseColumn:byValue:inTable:condition:parameterValues:error:]`
+    rendered `objc_msgSend$stringWithFormat:(classRef_NSString,(NSString *)"UPDATE
+    %@ SET %@ = %@ + %lld WHERE %@");` while the caller stores five arguments at
+    [sp]..[sp+32]. The header declares `+stringWithFormat:(NSString *)format,
+    ...`, and the reader dropped the `, ...`, so the stub prototype closed after
+    the format.
+
+    Stage / sub-stage: P1 external-refinement (`analyzers/objc/kuna_objcsdk.rs`
+    marks the encoding variadic, `kuna_objcrefs.rs (stub_prototype)` sets
+    `first_var_arg_slot`), then P4 active-input trial scoring recovers the
+    stack tail (`varargstackargs`, `darwinvarargs`).
+
+    P0 assertion: `option objcsdk <directory>|off` (env-bridged and load-time,
+    so set before the `load file` it applies to and cleared at the end).
+
+    The fixture is `macho_objc_sdk_varargs.m`: a root class `Fmt` declared and
+    never implemented, each send through a linker stub;
+    `tests/fixtures/objc_sdk_varargs/Fmt.h` is a hand-written header (no Apple
+    text) declaring `+stringWithFormat:` and `-logLevel:format:` variadic.
+
+    Pass 1 (`objc on`, no headers) reproduces the bug: neither call has its
+    format arguments.
+    Pass 2 (`objc on`, `objcsdk` at the header directory) is the fix: both calls
+    keep their fixed arguments and take the two stack-passed ones.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c0035fd6
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_objc_sdk_varargs_arm64</com>
+  <com>option objc on</com>
+  <com>read symbols</com>
+  <com>load function _describe</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option objcsdk decompiler/crates/kuna-analysis/tests/fixtures/objc_sdk_varargs</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/macho_objc_sdk_varargs_arm64</com>
+  <com>option objc on</com>
+  <com>read symbols</com>
+  <com>load function _describe</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>option objcsdk off</com>
+  <com>quit</com>
+</script>
+<stringmatch name="OBJCSDKVARARGS #1: without headers stringWithFormat: has no format arguments" min="1" max="1">objc_msgSend\$stringWithFormat:\(classRef_Fmt\);</stringmatch>
+<stringmatch name="OBJCSDKVARARGS #2: with headers stringWithFormat: keeps its format and takes both stack arguments" min="1" max="1">objc_msgSend\$stringWithFormat:\(classRef_Fmt,\(NSString \*\)"%s=%ld",a1,a2\);</stringmatch>
+<stringmatch name="OBJCSDKVARARGS #3: with headers logLevel:format: keeps its two fixed arguments and takes both stack arguments" min="1" max="1">objc_msgSend\$logLevel:format:\(a0,2,"%s has %ld",a1,a2\);</stringmatch>
+</decompilertest>

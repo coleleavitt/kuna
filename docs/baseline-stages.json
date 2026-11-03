@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3851,
-    3851
+    3854,
+    3854
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1506,6 +1506,9 @@
     "data:OBJCSDK #7: a CGRect argument is spread over its members",
     "data:OBJCSDK #8: a two-argument method keeps both",
     "data:OBJCSDK #9: the stub itself returns the struct",
+    "data:OBJCSDKVARARGS #1: without headers stringWithFormat: has no format arguments",
+    "data:OBJCSDKVARARGS #2: with headers stringWithFormat: keeps its format and takes both stack arguments",
+    "data:OBJCSDKVARARGS #3: with headers logLevel:format: keeps its two fixed arguments and takes both stack arguments",
     "data:OCTEON #1 low_sum retains ordinary addition",
     "data:OCTEON #2 bit branch retains the tested bit",
     "data:OCTEON #3 extension instructions have ordinary semantics",

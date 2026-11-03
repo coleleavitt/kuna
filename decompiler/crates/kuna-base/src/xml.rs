@@ -2160,7 +2160,8 @@ mod tests {
         // and kuna-objcmeta / ObjC categories, protocols and ivar structs (option objcivars)
         // and kuna-objcsdk / ObjC method signatures read from SDK headers (option objcsdk)
         // and kuna-darwinvarargs / an Apple arm64 callee running va_start is variadic (option darwinvarargs)
-        assert_eq!(count, 695, "corpus file count drifted");
+        // and kuna-objcsdkvarargs / a selector declared with `, ...` is variadic (option objcsdk)
+        assert_eq!(count, 696, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

@@ -236,6 +236,10 @@ fn stub_prototype(
         ),
         _ => return None,
     };
+    let (enc, variadic) = match enc.strip_suffix(super::kuna_objcsdk::VARIADIC) {
+        Some(fixed) => (fixed, true),
+        None => (enc, false),
+    };
     let (ret, args) = encoding::split_method(enc)?;
     if args.len() < 2 {
         return None;
@@ -304,6 +308,9 @@ fn stub_prototype(
         }
         let ty = encoding::decode_ivar_type(raw, tctx)?;
         push(&mut pieces, ty, pname)?;
+    }
+    if variadic {
+        pieces.first_var_arg_slot = pieces.intypes.len() as i32;
     }
     Some(pieces)
 }

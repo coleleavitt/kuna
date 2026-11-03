@@ -1269,6 +1269,32 @@ decompiler/crates/kuna-analysis/tests/fixtures/objc_sdk` it reads
 `objc_msgSend$setAlpha:(a1,a0);`, `v1 = objc_msgSend$frame(a1);` as a `CGRect` and
 `objc_msgSend$setFrame:(a1,v1.x,v1.y,v1.width + 10.0,v1.height);`.
 
+### `macho_objc_sdk_varargs_arm64` + `objc_sdk_varargs/Fmt.h` — variadic selectors
+
+`macho_objc_sdk_varargs_arm64` (arm64, ~50 KB, SHA-256
+`8ff5fa06da5a296adfef5532e1e39d7d5759ec2d272a0b82aa7267258af1d817`) is the fixture
+for variadic selectors in the `objcsdk` reader (stage test
+`tests/stages/kuna-objcsdkvarargs.xml`). Source `macho_objc_sdk_varargs.m`: a root
+class `Fmt` declared and never implemented, and one function `describe` that sends
+`logLevel:format:` and `+stringWithFormat:` with two variadic arguments each, which
+Apple's ABI stores at `[sp]` and `[sp+8]`. The `.s` beside it is the `clang -S`
+output with each selref load dropped and each `bl _objc_msgSend` replaced by
+`bl "_objc_msgSend$<sel>"`. `objc_sdk_varargs/Fmt.h` is a hand-written header (no
+Apple text) declaring both selectors with a trailing `, ...`.
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_sdk_varargs.m -o macho_objc_sdk_varargs_arm64.s
+# edit: route both sends through `_objc_msgSend$<sel>` (drop the selref loads)
+clang -target arm64-apple-macos11 -c macho_objc_sdk_varargs_arm64.s -o va.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_sdk_varargs_arm64 va.o
+```
+
+clang/LLD 22.1.8. With `objc on` alone `describe` reads
+`objc_msgSend$stringWithFormat:(classRef_Fmt);`; with `option objcsdk
+decompiler/crates/kuna-analysis/tests/fixtures/objc_sdk_varargs` it reads
+`objc_msgSend$stringWithFormat:(classRef_Fmt,(NSString *)"%s=%ld",a1,a2);`.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate

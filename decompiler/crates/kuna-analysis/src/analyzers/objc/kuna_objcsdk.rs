@@ -23,12 +23,22 @@
 //! selector unusable rather than guessed, and one selector declared with two
 //! different shapes across classes is dropped; a class-pointer argument keeps
 //! its class (`@"UIView"`) but classes do not count as a disagreement.
+//!
+//! A method declared with a trailing `, ...` (`+stringWithFormat:`) has no
+//! runtime encoding for its variable part, so its encoding carries the
+//! [`VARIADIC`] suffix and the stub prototype is variadic after its named
+//! arguments; without it the prototype closed after the format and every
+//! argument behind it was dropped.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use object::read::macho::{LoadCommandVariant, MachHeader};
 use object::FileKind;
+
+/// Appended to the encoding of a method declared with a trailing `, ...`. A
+/// type encoding never contains `.`, so the suffix cannot be mistaken for one.
+pub const VARIADIC: &str = "...";
 
 /// `selector → type encoding` for every declaration under `root` that this
 /// image's frameworks reach; `None` marks a selector declared two ways.
@@ -414,12 +424,16 @@ fn method(s: &str, types: &Types) -> Option<(String, Option<String>)> {
     if sel.is_empty() {
         return None;
     }
+    let variadic = sel.ends_with(':') && s[i..].trim_start().strip_prefix(',').is_some_and(|r| r.trim_start().starts_with("..."));
     // A declaration with a type this reader cannot spell still claims its
     // selector, so another class's spelling of it is not taken for this one.
     let Some(mut enc) = types.encode(&ret, 0) else { return Some((sel, None)) };
     for e in encs {
         let Some(e) = e else { return Some((sel, None)) };
         enc.push_str(&e);
+    }
+    if variadic {
+        enc.push_str(VARIADIC);
     }
     Some((sel, Some(enc)))
 }
@@ -676,6 +690,16 @@ mod tests {
         assert_eq!(get("setTitle:").as_deref(), Some("v@:@\"NSString\""), "a typed-enum string");
         assert_eq!(sigs.get("setOpaqueThing:"), Some(&None), "an unknown struct is not guessed");
         assert_eq!(get("convertRect:").as_deref(), Some("{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}"));
+    }
+
+    #[test]
+    fn a_trailing_ellipsis_marks_the_selector_variadic() {
+        let dir = fixture_dir().with_file_name("objc_sdk_varargs");
+        let sigs = signatures(&dir, &[]);
+        let get = |s: &str| sigs.get(s).cloned().flatten();
+        assert_eq!(get("stringWithFormat:").as_deref(), Some("@@:@\"NSString\"..."));
+        assert_eq!(get("logLevel:format:").as_deref(), Some("v@:q*..."));
+        assert_eq!(sigs.get("logLevel:format:arguments:"), Some(&None), "va_list is not spelled");
     }
 
     #[test]
