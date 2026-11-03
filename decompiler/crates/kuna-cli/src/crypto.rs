@@ -12,7 +12,7 @@
 //! `kuna xrefs` use — the functions that reference a table, or the function an
 //! immediate sits in. Read-only: nothing is committed, so no emitted C changes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use object::{Object, ObjectSection, ObjectSegment, SectionKind};
 
@@ -209,6 +209,7 @@ fn attribute(args: &CryptoArgs, file: &object::File, hits: Vec<Hit>) -> Result<V
         .map(|hit| {
             let mut xrefs_count = 0usize;
             let mut functions: Vec<(u64, String)> = Vec::new();
+            let mut seen = BTreeSet::new();
             let inline = hit.kind == Kind::Immediate && index.refs_to(hit.addr).is_empty();
             if inline {
                 if let Some(entry) = (1..=15u64).find_map(|k| index.function_containing(hit.addr.checked_sub(k)?)) {
@@ -221,7 +222,7 @@ fn attribute(args: &CryptoArgs, file: &object::File, hits: Vec<Hit>) -> Result<V
                         let Some(entry) = crate::function_info::owning_function(&prog, &index, r.from) else {
                             continue;
                         };
-                        if !functions.iter().any(|(e, _)| *e == entry) {
+                        if seen.insert(entry) {
                             functions.push((entry, name_of(entry)));
                         }
                     }

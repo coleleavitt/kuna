@@ -209,20 +209,21 @@ fn export(args: &Args, label: &str) -> Result<String, String> {
     // PE already inventories both halves of an import. ELF names its PLT veneer
     // but not the GOT slot, so materialize the missing half from the very same
     // decoded relation that supplies `forwardsTo` and the jump edge.
-    let mut known_entries: BTreeSet<u64> =
-        entries.iter().map(|entry| entry.addr.get_offset()).collect();
+    let mut known_entries: BTreeMap<u64, usize> = BTreeMap::new();
+    for (at, entry) in entries.iter().enumerate() {
+        known_entries.entry(entry.addr.get_offset()).or_insert(at);
+    }
     for (veneer, slot) in graph.forwarding_veneers() {
-        if known_entries.contains(&slot) {
+        if known_entries.contains_key(&slot) {
             continue;
         }
-        let Some(source) = entries.iter().find(|entry| entry.addr.get_offset() == veneer).cloned()
-        else {
+        let Some(source) = known_entries.get(&veneer).map(|&at| entries[at].clone()) else {
             continue;
         };
         let Some(space) = source.addr.get_space() else {
             continue;
         };
-        known_entries.insert(slot);
+        known_entries.insert(slot, entries.len());
         entries.push(FunctionEntry {
             name: source.name,
             addr: kuna_base::address::Address::new(std::rc::Rc::clone(space), slot),
