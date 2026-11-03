@@ -458,6 +458,9 @@ impl FixedRefs {
 /// analogue of [`ConsoleProgram::disassemble_at_into`], mirroring
 /// `kuna_analysis`'s `listing/decode.rs::OpCapture` — `in0` is all
 /// [`ConsoleProgram::lone_jump_target`]'s shape tests need).
+/// The most instructions [`ConsoleProgram::flow_reaches`] decodes.
+pub const FLOW_REACH_LIMIT: usize = 1 << 16;
+
 #[derive(Default)]
 struct OneShotPcodeEmit {
     ops: Vec<(OpCode, Option<VarnodeData>)>,
@@ -1288,6 +1291,11 @@ impl ConsoleProgram {
     /// not itself an entry: what a selection lands inside when discovery found
     /// no function starting there (`docs/cli.md`, `interior_to`). The inventory
     /// is enumerated once for the whole batch.
+    ///
+    /// The extent is the clip to the next entry, which on an inventory that
+    /// skipped discovery (an `--addr` run in fast mode) can span many
+    /// functions; an owner whose own flow provably never reaches the address
+    /// ([`Self::flow_reaches`]) does not hold it.
     pub fn entries_containing(&self, vmas: &[u64]) -> Vec<Option<FunctionEntry>> {
         let entries = self.function_entries_canonical();
         vmas.iter()
@@ -1296,9 +1304,82 @@ impl ConsoleProgram {
                 let below = entries.partition_point(|e| e.addr.get_offset() <= want);
                 let owner = entries.get(below.checked_sub(1)?)?;
                 let start = owner.addr.get_offset();
-                (start < want && want - start < owner.size).then(|| owner.clone())
+                let inside = start < want && want - start < owner.size;
+                (inside && self.flow_reaches(start, want, start.saturating_add(owner.size)) != Some(false))
+                    .then(|| owner.clone())
             })
             .collect()
+    }
+
+    /// Does the flow of the function entered at `entry`, kept inside `[entry,
+    /// end)`, reach the instruction at `want`? Falls through non-flow
+    /// instructions, conditional jumps and calls (but not a call to a
+    /// no-return function), follows direct jumps, and stops at returns.
+    /// `None` when it cannot tell: an indirect jump, an instruction that
+    /// does not decode, or more than [`FLOW_REACH_LIMIT`] instructions.
+    pub fn flow_reaches(&self, entry: u64, want: u64, end: u64) -> Option<bool> {
+        let code_space = Rc::clone(self.arch().manage().get_default_code_space()?);
+        let mut seen: std::collections::BTreeSet<u64> = std::collections::BTreeSet::new();
+        let mut work = vec![entry];
+        let mut unknown = false;
+        while let Some(at) = work.pop() {
+            if at == want {
+                return Some(true);
+            }
+            if at < entry || at >= end || !seen.insert(at) {
+                continue;
+            }
+            if seen.len() > FLOW_REACH_LIMIT {
+                return None;
+            }
+            let addr = Address::new(Rc::clone(&code_space), at);
+            let mut emit = OneShotPcodeEmit::default();
+            let decoded = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.arch().translate().one_instruction(&mut emit, &addr)
+            }));
+            let Ok(Ok(len)) = decoded else {
+                unknown = true;
+                continue;
+            };
+            let Some(next) = at.checked_add(len.max(1) as u64) else { continue };
+            let code_target = |in0: &Option<VarnodeData>| {
+                let v = in0.as_ref()?;
+                let space = v.space.as_ref()?;
+                (space.get_type() != kuna_base::space::spacetype::IPTR_CONSTANT).then_some(v.offset)
+            };
+            let mut falls = true;
+            for (opc, in0) in &emit.ops {
+                match opc {
+                    OpCode::CPUI_RETURN => falls = false,
+                    OpCode::CPUI_BRANCHIND => {
+                        unknown = true;
+                        falls = false;
+                    }
+                    OpCode::CPUI_BRANCH => {
+                        if let Some(t) = code_target(in0) {
+                            work.push(t);
+                            falls = false;
+                        }
+                    }
+                    OpCode::CPUI_CBRANCH => work.extend(code_target(in0)),
+                    OpCode::CPUI_CALL => {
+                        let stops = code_target(in0).is_some_and(|t| {
+                            self.arch()
+                                .symboltab
+                                .function_is_no_return_across_scopes(&Address::new(Rc::clone(&code_space), t))
+                        });
+                        if stops {
+                            falls = false;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            if falls {
+                work.push(next);
+            }
+        }
+        if unknown { None } else { Some(false) }
     }
 
     /// Resolve a selector without guessing between object-file coordinates.
@@ -5155,6 +5236,15 @@ fn commit_analysis_output(
     } else {
         (Vec::new(), Vec::new())
     };
+    // (kuna `iokitcxx`) The IOKit classes join the typed vtables.
+    let mut iokit = std::mem::take(&mut out.iokit_cxx);
+    if prog.arch().analysis_iokitcxx {
+        out.cpp_vtables.classes.extend(std::mem::take(&mut iokit.vtables.classes));
+        out.cpp_vtables.slot_ranges.extend(std::mem::take(&mut iokit.vtables.slot_ranges));
+    } else {
+        iokit = Default::default();
+    }
+    let (iokit_this, iokit_vtables) = (std::mem::take(&mut iokit.this_types), std::mem::take(&mut iokit.vtable_points));
     // (kuna `vtabletypes`) A function a vtable slot holds is a virtual member,
     // so its implicit `this` is certain: an inferred-tier declaration of one
     // that takes `this` is as good as a proven one.
@@ -5309,8 +5399,15 @@ fn commit_analysis_output(
 
     // 1--. (kuna `arm64evcall`) The methods each arm64e virtual call site's slot
     //      can hold; flow reads them when it builds the CALLIND.
+    let meta_slots: std::collections::HashMap<u64, &Vec<u64>> = iokit.meta_slots.iter().map(|(m, s)| (*m, s)).collect();
     for v in &out.vcall_sites {
-        let call = kuna_decomp::architecture::VcallTargets { register: v.register, targets: v.targets.clone() };
+        // (kuna `iokitcxx`) A call on a metaclass object calls its own slot.
+        let own = v
+            .object
+            .and_then(|(obj, word)| meta_slots.get(&obj)?.get(word as usize).copied())
+            .filter(|t| v.targets.contains(t));
+        let targets = own.map_or_else(|| v.targets.clone(), |t| vec![t]);
+        let call = kuna_decomp::architecture::VcallTargets { register: v.register, targets };
         Rc::make_mut(&mut prog.arch_mut().kuna_vcall_targets).insert(v.site, call);
     }
 
@@ -6170,6 +6267,67 @@ fn commit_analysis_output(
     //     above so a slot's function pointer carries the methods' signature.
     if prog.arch().analysis_vtabletypes {
         kuna_decomp::kuna_vtabletypes::install(prog.arch(), code_space, &out.cpp_vtables.classes)?;
+        // (kuna `iokitcxx`) Each member's `this` as an unlocked `x0` hint of
+        // its class's pointer type.
+        if let (false, Ok(loc)) = (iokit_this.is_empty(), prog.arch().get_register_varnode(b"x0")) {
+            if let Some(space) = loc.space.clone() {
+                let types = prog.arch().types();
+                let (ptr, ws) = (types.get_size_of_pointer(), code_space.get_word_size());
+                let mut pointers: std::collections::HashMap<String, Rc<kuna_decomp::dtype::Datatype>> =
+                    std::collections::HashMap::new();
+                let mut hints = std::collections::BTreeMap::new();
+                for (func, class) in &iokit_this {
+                    if !pointers.contains_key(class) {
+                        let Some(st) = types.find_by_name(class)?.filter(|t| !t.is_incomplete()) else { continue };
+                        pointers.insert(class.clone(), types.get_type_pointer(ptr, st, ws)?);
+                    }
+                    let Some(ct) = pointers.get(class) else { continue };
+                    let hint = kuna_decomp::kuna_inputhints::InputHint {
+                        addr: Address::new(Rc::clone(&space), loc.offset),
+                        size: loc.size as i32,
+                        name: "this".to_string(),
+                        ct: Some(Rc::clone(ct)),
+                    };
+                    hints.insert(Address::new(Rc::clone(code_space), *func), Rc::new(vec![hint]));
+                }
+                prog.arch_mut().kuna_this_hints = hints;
+            }
+        }
+        // (kuna `iokitcxx`) `X::MetaClass::alloc` returns a new `X`.
+        for (func, class) in &iokit.allocs {
+            let types = prog.arch().types();
+            let Some(st) = types.find_by_name(class)?.filter(|t| !t.is_incomplete()) else { continue };
+            let (ptr, ws) = (types.get_size_of_pointer(), code_space.get_word_size());
+            let pieces = kuna_decomp::fspec::PrototypePieces {
+                name: format!("{class}::MetaClass::alloc"),
+                outtype: Some(types.get_type_pointer(ptr, st, ws)?),
+                intypes: vec![types.get_type_pointer(ptr, types.get_type_void()?, ws)?],
+                innames: vec!["this".to_string()],
+                first_var_arg_slot: -1,
+                ..Default::default()
+            };
+            let addr = Address::new(Rc::clone(code_space), *func);
+            prog.arch_mut().merge_function_prototype_pieces_at(&addr, pieces);
+        }
+        // (kuna `iokitcxx`) Each typed vtable's slots, from the address point
+        // a constructor stores, as `C_vtable` of type `C_vtbl`.
+        for (point, class) in &iokit_vtables {
+            let addr = Address::new(Rc::clone(code_space), *point);
+            let arch = prog.arch_mut();
+            let Some(vtbl) = arch.types().find_by_name(&format!("{class}_vtbl"))?.filter(|t| !t.is_incomplete()) else {
+                continue;
+            };
+            let Some(global) = arch.symboltab.get_global_scope() else { break };
+            if arch.symboltab.find_container_matching(global, &addr, 1, &Address::new_invalid(), |_| true).is_some() {
+                continue;
+            }
+            let (sid, _) =
+                arch.symboltab.add_symbol_mapped(global, &format!("{class}_vtable"), vtbl, &addr, &Address::new_invalid())?;
+            arch.symboltab.set_attribute(
+                sid,
+                kuna_decomp::varnode::varnode_flags::typelock | kuna_decomp::varnode::varnode_flags::namelock,
+            );
+        }
     }
 
     // 5e. (kuna `importvote`) The call sites of every PLT import, read by the

@@ -20,6 +20,18 @@ incomplete and bitfield cases retain their existing paths, as do accesses
 through an explicit symbol. This corrects field extraction; it does not supply
 missing Rust signedness conversions in surrounding expressions.
 
+(kuna `ptrauthblend`, default on.) An arm64e signing of a pointer for an
+address-diversified slot blends a 16-bit constant into the top bits of the
+slot's address (`movk x8, #0xaea0, lsl #48` over `&slot`), and where that
+register is left as a call argument it folds to one 64-bit constant. The
+integer path of the constant printer asks
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_ptrauthblend.rs (blend)` about
+every 8-byte constant: one whose top 16 bits are neither all zeros nor all ones
+and whose low 48 bits, given the canonical top bits of a kernel address (all
+ones) or else of a user one (zero), land in a loaded data section prints as
+`ptrauth_blend_discriminator(&AKS_services::gAKS,0xaea0)`, the slot by the name
+of the global that starts there, else by address.
+
 Standalone C output qualifies whole function-address expressions through
 `decompiler/crates/kuna-decomp/src/p9_emit/kuna_funcptrnames.rs`. A named
 SPACEBASE reference must have code type and resolve to the exact function entry.

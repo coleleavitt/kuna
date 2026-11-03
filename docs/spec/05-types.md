@@ -3388,6 +3388,54 @@ to one) loads the slot from a constant address, the load folds to the method's
 entry, and `ActionDeindirect` makes the call direct (chapter 04):
 `(*dat_402268)(v3,a0)` becomes `Tri::area(v3,a0)`.
 
+### IOKit classes type the same way (`iokitcxx`)
+
+(kuna `iokitcxx`, default on, needs `iokitclasses` and `vtabletypes`.) An XNU
+kernel or kext has no RTTI: its classes are the ones `iokitclasses` (chapter 01)
+recovers from the `OSMetaClass` registrations. That pass also reports them as
+[`VtableClass`] records (`decompiler/crates/kuna-analysis/src/analyzers/iokit/cxx.rs (cxx_facts)`)
+that join the Itanium ones at the commit, each carrying the registered instance
+size. `install` lays a sized class out to that size
+(`kuna_vtabletypes.rs (install_class)`): the first field is `C_vtbl *vtable`
+(the name the `kalloc_type` layouts already give a class's first pointer), and
+the rest is one field per 8-byte granule of the class's `kalloc_type` view
+signature when a view of that name has that size
+(`decompiler/crates/kuna-decomp/src/p5_types/kuna_kalloctype.rs (granule_fields)`),
+else undefined words named `field_0x<off>`; the record is not variable-length.
+Because the view of the same name then finds a complete struct of its own size,
+a typed allocation's `<T> *` is the same `C *`. A class over 16 KiB keeps the
+variable-length `vptr` record. A slot is named after the method its function
+names (`release`; `dtor` and `deleting_dtor` for slots 0 and 1), inherited from
+the nearest ancestor that names it; a name an earlier slot already took is
+`<name>_<i>` (`OSMetaClassBase` declares two `release` overloads).
+
+Each vtable's slots, from its address point, become a data object `C_vtable` of
+type `C_vtbl` (`vtable for C` keeps the two header words), so a constructor's
+`a0->field_0x0 = 0xfffffff0079532b0` reads `this->vtable = &IOPMinformeeList_vtable`.
+A virtual member has no signature to give `this` a type without fixing its
+arity, so each function a class vtable holds, and each `C::C` / `C::~C` of a
+recovered class, gets an unlocked input hint instead (chapter 04,
+`kuna_inputhints.rs`): `x0` named `this` and typed `C *`, `C` the nearest class
+that is an ancestor of every class whose vtable holds the function. The hint
+applies only where no prototype does, so the member's other parameters are
+still recovered from its body. A non-virtual member that is neither is left
+alone: its name cannot say whether it is static (`IOService::nameMatching`
+takes a `const char *`).
+
+A virtual call whose vtable pointer the `arm64evcall` walk saw loaded from an
+`adrp`-addressed object that is a metaclass (`OSDictionary::gMetaClass`) calls
+the method that metaclass's own vtable holds, so its candidate list (2,615
+`alloc`s) narrows to one and the call is direct; `X::MetaClass::alloc` is
+declared returning `X *`, so the result of
+`a1 = OSDictionary::MetaClass::alloc(&gMetaClass)` is an `OSDictionary *` and
+its own virtual calls go through `a1->vtable`. A call left with several
+candidates whose named ones are all members sharing one method name is
+annotated `virtual call to release, one of 11 overrides` rather than with the
+list (`decompiler/crates/kuna-decomp/src/infra/decompile_drive.rs (shared_method)`).
+A call through a typed receiver stays indirect even when every override the
+image holds agrees: a subclass in another kext of the collection can override
+the slot.
+
 ## 5.3 Ranges & consume bits
 
 The rest of the S5 fact fabric (the framing derives from the study in

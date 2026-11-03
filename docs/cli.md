@@ -450,7 +450,11 @@ and an object's `.text+0xOFF` answer the same way, and so do `decompile-all` and
 `decompile-project` for each target selected by `--addr` or `--functions` — one
 note per record. With `--json` the record of such a
 target carries it as `interior_to`: `{name,address,address_hex,offset}`. No other
-record has the key, so every other document is byte-for-byte what it was.
+record has the key, so every other document is byte-for-byte what it was. The
+extent is only an upper bound (the clip to the next entry the run knows, and an
+`--addr` run in fast mode skips discovery), so the note is also checked against
+the owner's own flow: an address the owner provably never reaches, such as a
+function past its return, gets no note.
 
 **`--define-function <start[-end][=name] | @file>`** (repeatable) tells kuna where a
 function starts and ends. Every boundary kuna knows is otherwise *derived* —

@@ -5771,7 +5771,16 @@ every other binary's pass list is byte-identical to before the pass existed):
   is found at that symbol's address; method names are right or a class-right
   `vfn_` wherever no ancestor slot is named, except where an abstract class has
   no vtable in the image (AGXG12P: 627 of 1,979 methods are credited to the one
-  concrete subclass instead). The pass takes 13 ms on the kernel.
+  concrete subclass instead). The pass takes 13 ms on the kernel. Under
+  `iokitcxx` (chapter 05) it also reports the classes as typed vtables
+  (`decompiler/crates/kuna-analysis/src/analyzers/iokit/cxx.rs (cxx_facts)`):
+  per class its slots, each with the class's own function and every
+  descendant's override, the class of every vtable member's and named
+  constructor's `this`, each vtable's address point, each metaclass object's
+  vtable slots and each `X::MetaClass::alloc`; `vtable for X` then covers
+  only the two header words. The `arm64evcall` walk reports, beside a
+  relative slot, the object an `adrp` addressed when the vtable pointer was
+  loaded from one (`kuna_arm64evcall.rs (call_sites_with_objects)`).
 - **XNU data tables** (kuna, `xnutables`, the same XNU images, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/iokit/tables.rs`): three kinds
   of table that need no class knowledge to find. Each `__kalloc_type` record (a

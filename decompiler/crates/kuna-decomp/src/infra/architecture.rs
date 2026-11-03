@@ -332,6 +332,11 @@ pub struct Architecture {
     /// on every path without a section table, so it is inert for the XML
     /// datatest oracle.
     pub globalref_ranges: Rc<Vec<(u64, u64)>>,
+    /// (kuna `ptrauthblend`) Print an 8-byte constant that is an arm64e
+    /// blended discriminator over a data slot as
+    /// `ptrauth_blend_discriminator(&slot,0x<d>)`; see
+    /// [`crate::kuna_ptrauthblend`]. Default **on**.
+    pub ptrauth_blend: bool,
     /// (kuna) Fold a read from executable read-only memory to the constant it
     /// holds (`litpoolconst`); default **on** (DIV-136). An ARM immediate too
     /// wide for the instruction encoding is parked in a literal pool in `.text`
@@ -2820,6 +2825,14 @@ pub struct Architecture {
     /// field of that type, and fold a load of a vtable slot to the method it
     /// holds; see [`crate::kuna_vtabletypes`]. Default **on**.
     pub analysis_vtabletypes: bool,
+    /// (kuna `iokitcxx`) Type the IOKit classes `iokitclasses` recovers like
+    /// Itanium vtables (a sized `C` whose first field is `C_vtbl *vtable`),
+    /// give each virtual member, constructor and destructor a `C *this`
+    /// input hint, and name a virtual call whose candidates all override one
+    /// method by that method. Default **on**.
+    pub analysis_iokitcxx: bool,
+    /// (kuna `iokitcxx`) The `this` input hints, by function entry.
+    pub kuna_this_hints: std::collections::BTreeMap<Address, Rc<Vec<crate::kuna_inputhints::InputHint>>>,
     /// (kuna) Gate the Aggressive Instruction Finder gap-walk (`aif`), the third
     /// Listing/xref consumer; default **off**. The kuna analog of Ghidra's
     /// `AggressiveInstructionFinderAnalyzer` (which ships `setDefaultEnablement(false)`
@@ -3415,6 +3428,7 @@ impl Architecture {
             eh_sections: None,
             func_sizes: Rc::new(Vec::new()),
             globalref_ranges: Rc::new(Vec::new()),
+            ptrauth_blend: true,
             litpoolconst: false,
             infer_pointers: false,
             funcptr_align: 0,
@@ -3937,6 +3951,8 @@ impl Architecture {
             analysis_rtti: false,
             analysis_itaniumrtti: false,
             analysis_vtabletypes: true,
+            analysis_iokitcxx: true,
+            kuna_this_hints: std::collections::BTreeMap::new(),
             analysis_aif: false,
             analysis_aifstrict: false,
             analysis_aifcorroborate: false,
@@ -4538,6 +4554,7 @@ impl Architecture {
         self.analysis_rtti = false; // MSVC RTTI / vftable recovery default-off (PE-only, output-changing)
         self.analysis_itaniumrtti = false; // (kuna, NOVEL) Itanium RTTI / vtable recovery default-off (ELF-only, output-changing)
         self.analysis_vtabletypes = true;
+        self.analysis_iokitcxx = true;
         self.analysis_aif = false; // Aggressive Instruction Finder gap-walk default-off
         // (kuna, GH-299) AIF gap-cursor aligned slide — default-OFF (it REMOVES
         // entries), carried by the `aggressive` preset.

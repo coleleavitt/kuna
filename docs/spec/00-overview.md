@@ -2668,7 +2668,18 @@ immediately below it whose inventory size — the address-contiguous clip `kuna
 functions` reports, or a declared extent — reaches past it
 (`decompiler/crates/kuna-console/src/engine.rs (ConsoleProgram::entries_containing)`,
 which enumerates the inventory once for a whole batch of targets). An address
-that is itself an entry, or that no extent covers, has no answer. `kuna
+that is itself an entry, or that no extent covers, has no answer. The extent is
+the clip to the next entry the inventory knows, and an `--addr` run in fast mode
+skips discovery, so on a stripped kext that clip ran over dozens of functions
+discovery would have found (`0xfffffff009105f90 is interior to
+sub_fffffff0090fdec0 (+0x80d0)` for a function `kuna functions` lists at its own
+address). The owner is therefore also walked from its entry
+(`decompiler/crates/kuna-console/src/engine.rs (flow_reaches)`): fall-through,
+conditional and direct jumps and calls kept inside the clip, stopping at
+returns and at calls to a no-return function. An owner whose walk ends without
+reaching the address does not hold it; one the walk cannot settle (an indirect
+jump, an undecodable word, more than 65,536 instructions) keeps the clip's
+answer. `kuna
 decompile` asks the console with `function containing <selector>` before
 installing the selection's symbol and reads the answer off the transcript; the
 in-process surfaces (`decompile --json`, `decompile-all`, `decompile-project`)

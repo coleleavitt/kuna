@@ -2217,7 +2217,8 @@ mod tests {
         // and kuna-gottailcall / a one-destination jump through an extern's slot is a tail call
         // and kuna-persistcalls / a persistent global's guards next to its accesses (option persistcalls)
         // and kuna-segmentize-bios / a real-mode BIOS reset path through the segment op
-        assert_eq!(count, 818, "corpus file count drifted");
+        // and kuna-iokitcxx / typed IOKit classes, blended discriminators, flow-checked interiors
+        assert_eq!(count, 819, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

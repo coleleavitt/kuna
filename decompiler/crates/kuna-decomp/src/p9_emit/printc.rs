@@ -11279,6 +11279,18 @@ impl PrintC {
             // when present.  So: equate-Symbol format wins; otherwise the
             // read-facing type format (e.g. `force datatype octint4 oct` ->
             // `globaloct = 05555`).
+            if let Some(expression) = crate::kuna_ptrauthblend::blend(arch, off, sz)
+                .and_then(|(slot, disc)| crate::kuna_ptrauthblend::expression(fd, arch, slot, disc))
+            {
+                self.push_atom(&Atom::with_op_vn(
+                    expression,
+                    TagType::VarToken,
+                    crate::printlanguage::SyntaxHighlight::var_color,
+                    op_key(op),
+                    vn_key(vn),
+                ));
+                return;
+            }
             let mut lit = self.integer_literal(fd, arch, vn, &ct);
             if let Some(unsigned) = self.widen_suffix(fd, arch, vn, op) {
                 lit.suffix_as_long(arch, unsigned);

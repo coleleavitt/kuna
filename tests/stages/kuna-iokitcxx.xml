@@ -1,0 +1,64 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    Kuna `iokitcxx` (P5 type-propagation) and `ptrauthblend` (P9) options
+    on an XNU kext.
+
+    The fixture (gen_iokitcxx.py) is an arm64 MH_KEXT_BUNDLE whose
+    initializer registers Base and Derived (0x30 bytes, a site.Derived
+    kalloc_type view) through an unnamed OSMetaClass constructor. Derived's
+    vtable holds an unnamed override of Base::m2 that reads the field at 0x10;
+    Derived::Derived stores the vtable's address point and a field;
+    blend_user passes an arm64e blended discriminator over gSlot
+    (movk #0xaea0, lsl #48).
+
+    Pass 1 (both options off) is the bug: the override's this is void *a0
+    read by index, the constructor stores a raw constant into field_0x0, and
+    the discriminator prints as one 64-bit number. Pass 2 (both on) types
+    this as Derived *, the store as this->vtable = &Derived_vtable, and the
+    discriminator as ptrauth_blend_discriminator(&_gSlot,0xaea0).
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">c0035fd6</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/iokitcxx_kext.macho</com>
+  <com>option iokitcxx off</com>
+  <com>option ptrauthblend off</com>
+  <com>read symbols</com>
+  <com>load addr 0xfffffff007b04170</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function Derived::Derived</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function blend_user</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/iokitcxx_kext.macho</com>
+  <com>option iokitcxx on</com>
+  <com>option ptrauthblend on</com>
+  <com>read symbols</com>
+  <com>load addr 0xfffffff007b04170</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function Derived::Derived</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function blend_user</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="IOKITCXX #1: off leaves the override's this untyped" min="1" max="1">^unsigned long Derived::m2\(void \*a0\)</stringmatch>
+<stringmatch name="IOKITCXX #2: off reads the field by index" min="1" max="1">return \(\(unsigned long \*\)a0\)\[2\];</stringmatch>
+<stringmatch name="IOKITCXX #3: off stores the vtable as a raw constant" min="1" max="1">a0->field_0x0 = 0xfffffff007b05150;</stringmatch>
+<stringmatch name="IOKITCXX #4: on types the override's this as its class" min="1" max="1">Derived::m2\(Derived \*this\)</stringmatch>
+<stringmatch name="IOKITCXX #5: on reads the field of the class's kalloc_type layout" min="1" max="1">return this->field_0x10;</stringmatch>
+<stringmatch name="IOKITCXX #6: on the constructor's this is its class" min="1" max="1">^void Derived::Derived\(Derived \*this\)</stringmatch>
+<stringmatch name="IOKITCXX #7: on the vtable store names the typed vtable" min="1" max="1">this->vtable = &amp;Derived_vtable;</stringmatch>
+<stringmatch name="PTRAUTHBLEND #1: off prints the blended discriminator as a number" min="1" max="1">take_ptr\(0xaea0fff007b06080\);</stringmatch>
+<stringmatch name="PTRAUTHBLEND #2: on prints the slot and the constant" min="1" max="1">take_ptr\(ptrauth_blend_discriminator\(&amp;_gSlot,0xaea0\)\);</stringmatch>
+</decompilertest>

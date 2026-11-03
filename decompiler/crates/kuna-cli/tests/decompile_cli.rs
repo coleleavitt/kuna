@@ -1015,6 +1015,29 @@ fn a_prototype_address_that_starts_no_function_is_rejected() {
     );
 }
 
+/// An inventory that skipped discovery (an `--addr` run) clips an entry's
+/// extent at the next entry it knows, which can span functions it never
+/// found. The interior note is only made when the owner's own flow can reach
+/// the address: `orphan` sits past `leaf`'s return in `iokitcxx_kext.macho`
+/// and is no fragment of it, while an address inside `leaf` is.
+#[test]
+fn an_address_past_a_returning_neighbour_is_not_interior_to_it() {
+    let bin = repo_root()
+        .join("decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/iokitcxx_kext.macho")
+        .to_str()
+        .unwrap()
+        .to_string();
+    let out = Command::new(env!("CARGO_BIN_EXE_kuna"))
+        .args(["decompile-all", &bin, "--addr", "0xfffffff007b041d0", "--addr", "0xfffffff007b041c4"])
+        .args(["--sleighpath", specs().as_str()])
+        .output()
+        .expect("failed to spawn the kuna binary");
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    assert_eq!(out.status.code(), Some(0), "{stderr}");
+    assert!(!stderr.contains("0xfffffff007b041d0 is interior"), "{stderr}");
+    assert!(stderr.contains("0xfffffff007b041c4 is interior to leaf (0xfffffff007b041c0+0x4)"), "{stderr}");
+}
+
 /// `--addr` inside a function discovery found (issue #1039 section 3) still
 /// decompiles from where it points, but no longer silently: stderr names the
 /// containing function and the offset, and the `--json` record carries the

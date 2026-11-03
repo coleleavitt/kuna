@@ -9575,6 +9575,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "ptrauthblend"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P9"
+subphase = "naming-policy"
+strength = "HARD"
+rewind = "P9"
+issue = "kuna-ptrauthblend"
+summary = "Print an arm64e blended pointer-auth discriminator as the expression that made it. Signing a pointer for an address-diversified slot moves a 16-bit constant into the top bits of the slot's address (movk x8, #d, lsl #48 over &slot, <ptrauth.h>'s ptrauth_blend_discriminator(&slot, d)); when that register is left as a call argument it folds to one 64-bit constant such as 0xaea0fff00a64e488. An 8-byte integer constant whose top 16 bits are neither all zeros nor all ones and whose low 48 bits, given the image's canonical top bits (all ones for a kernel address, else zero), land in a loaded data section prints as ptrauth_blend_discriminator(&gAKS,0xaea0), the slot by its global's name when one starts there, else by address."
+use_when = "Leave on: an arm64e kernel's or app's OSCompareAndSwapPtr(0xaea0fff00a64e488,...) reads as OSCompareAndSwapPtr(ptrauth_blend_discriminator(&AKS_services::gAKS,0xaea0),...). Flip off to see the raw 64-bit constant. Inert where no such constant lands in a data section."
+example = "option ptrauthblend off"
+source_decompiler = "kuna"
+inspiration = "iOS 16.4.1 AppleMobileFileIntegrity; clang <ptrauth.h> ptrauth_blend_discriminator"
+change_kind = "naming"
+tier = "transform"
+symptoms = "a 64-bit constant like 0xaea0fff00a64e488 passed to a call in an arm64e image|a pointer constant with nonzero top 16 bits next to a pacda"
+live_field = "ptrauth_blend"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "callothernoreturn"
 values = "on|off"
 default = "on"
@@ -9977,6 +9999,28 @@ change_kind = "new-analysis"
 tier = "analysis"
 symptoms = "a user client's external methods are sub_<addr> with no selector numbers|an IOExternalMethodDispatch table renders as dat_<addr>|a kalloc_type_impl call passes dat_<addr> instead of a named view|a typed allocation returns a long that is cast at every store|a got slot in a stripped kext has no name"
 
+
+[[settable]]
+option = "iokitcxx"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P5"
+subphase = "type-propagation"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-iokitcxx"
+summary = "Type the IOKit classes iokitclasses recovers on an arm64 XNU kernel or kext as C++ classes, through the vtabletypes machinery. Each class with a vtable becomes a structure C laid out to its OSMetaClass instance size, its first field C_vtbl *vtable and the rest one field per 8-byte granule of the class's kalloc_type view signature (xnutables) when the view has the class's size, else undefined words named field_0x<off>; C_vtbl has one method pointer per slot, named after the method the slot's function names (release; dtor and deleting_dtor for slots 0 and 1), inherited from the nearest ancestor that names it, an overload of a name an earlier slot took spelled <name>_<i>, else vfn_<i>. The slot words are foldable constants, and the slots from each vtable's address point are a data object C_vtable of type C_vtbl (vtable for C keeps the two header words), so a constructor's store reads this->vtable = &C_vtable. Every function a class vtable holds, and every C::C / C::~C of a recovered class, gets an unlocked x0 input hint this of type C * (C the nearest class that is an ancestor of every class whose vtable holds it), so the member's own parameters are still recovered from its body. A virtual call whose vtable pointer was loaded from a metaclass object (X::gMetaClass, found by arm64evcall's backward walk) calls the method X::MetaClass's own vtable holds, and X::MetaClass::alloc is declared to return X *, so OSDictionary::gMetaClass.alloc() reads a1 = OSDictionary::MetaClass::alloc(&gMetaClass) with a1 an OSDictionary *. A virtual call with several candidates whose named candidates are all members sharing one method name is annotated virtual call to <method>, one of <n> overrides instead of the candidate list. LOSS: a non-virtual member that is not a constructor or destructor keeps an untyped first parameter (its name cannot tell a static member from one taking this); a typed receiver's call is still indirect, since a subclass in another image can override the slot."
+use_when = "On (default) on a kernelcache or kext: IOKit methods read this->field_0x18 and (*this->vtable->release_5)(this) instead of ((unsigned long *)a0)[3] and (**(void **)(*a0 + 0x28))(a0), a metaclass alloc is a direct call returning the class, and a virtual call's comment names the method rather than listing thousands of overrides. Flip off to see the iokitclasses names alone, or to rule the typing out when a slot or field name looks wrong. Needs iokitclasses and vtabletypes on."
+example = "option iokitcxx off"
+source_decompiler = "kuna"
+inspiration = "IDA 9.5 kcu.so IOKit class typing (C_vtbl / __vftable members, this typed in virtual methods); XNU libkern OSDefineMetaClassAndStructors"
+change_kind = "type-inference"
+tier = "transform"
+symptoms = "an iokit method's this is void *a0 or unsigned long a0|a constructor stores a raw constant into field_0x0 instead of the vtable|virtual call to one of 2615 methods: OSMetaClassMeta::alloc|a virtual call comment lists 11 release overrides|OSDictionary::gMetaClass + 0x68 called through a cast"
+live_field = "analysis_iokitcxx"
+live_true = "on"
+live_false = "off"
 
 [[settable]]
 option = "osclassinfo"

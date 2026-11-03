@@ -586,6 +586,8 @@ Three tiers:
 | (*SoftwareBreakpoint(0xc471,..))() // jump-as-call | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
 | a stack - 0x8  | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
 |  x30 variable declared only for a pointer-auth check | [`ptrauthtrap`](#ptrauthtrap----on--off-default-on-destructive-opt-in) |
+| a 64-bit constant like 0xaea0fff00a64e488 passed to a call in an arm64e image | [`ptrauthblend`](#ptrauthblend----on--off-default-on) |
+| a pointer constant with nonzero top 16 bits next to a pacda | [`ptrauthblend`](#ptrauthblend----on--off-default-on) |
 | (*SoftwareBreakpoint(0xc471,..))() // jump-as-call after a brk | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
 | a brk trap printed as a call to an unknown function | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
 | Treating indirect jump as call warning on a brk trap | [`callothernoreturn`](#callothernoreturn----on--off-default-on-destructive-opt-in) |
@@ -602,6 +604,11 @@ Three tiers:
 | an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
 | self is objc_object * in every -[Class sel] although the class declares ivars | [`objcivars`](#objcivars----on--off-default-on) |
 | objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
+| an iokit method's this is void *a0 or unsigned long a0 | [`iokitcxx`](#iokitcxx----on--off-default-on) |
+| a constructor stores a raw constant into field_0x0 instead of the vtable | [`iokitcxx`](#iokitcxx----on--off-default-on) |
+| virtual call to one of 2615 methods: OSMetaClassMeta::alloc | [`iokitcxx`](#iokitcxx----on--off-default-on) |
+| a virtual call comment lists 11 release overrides | [`iokitcxx`](#iokitcxx----on--off-default-on) |
+| OSDictionary::gMetaClass + 0x68 called through a cast | [`iokitcxx`](#iokitcxx----on--off-default-on) |
 | the same value is assigned to one variable twice in a row with nothing in between | [`hideshadow`](#hideshadow----on--off-default-on) |
 | a comma-expression condition repeats an assignment: (v3 = a2, v4 = a0, v4 = a0, ...) | [`hideshadow`](#hideshadow----on--off-default-on) |
 | a repeated vN = dat_XXXX; around a conditional goto | [`hideshadow`](#hideshadow----on--off-default-on) |
@@ -3120,6 +3127,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-apple-ptrauthtrap
 - **Example:** `option ptrauthtrap off`
 
+### `ptrauthblend` -- on | off, default `on`
+
+- **Symptoms:** a 64-bit constant like 0xaea0fff00a64e488 passed to a call in an arm64e image; a pointer constant with nonzero top 16 bits next to a pacda.
+- **What it does:** Print an arm64e blended pointer-auth discriminator as the expression that made it. Signing a pointer for an address-diversified slot moves a 16-bit constant into the top bits of the slot's address (movk x8, #d, lsl #48 over &slot, <ptrauth.h>'s ptrauth_blend_discriminator(&slot, d)); when that register is left as a call argument it folds to one 64-bit constant such as 0xaea0fff00a64e488. An 8-byte integer constant whose top 16 bits are neither all zeros nor all ones and whose low 48 bits, given the image's canonical top bits (all ones for a kernel address, else zero), land in a loaded data section prints as ptrauth_blend_discriminator(&gAKS,0xaea0), the slot by its global's name when one starts there, else by address.
+- **When to flip:** Leave on: an arm64e kernel's or app's OSCompareAndSwapPtr(0xaea0fff00a64e488,...) reads as OSCompareAndSwapPtr(ptrauth_blend_discriminator(&AKS_services::gAKS,0xaea0),...). Flip off to see the raw 64-bit constant. Inert where no such constant lands in a data section.
+- **Where / provenance:** P9/naming-policy · kuna · naming · kuna-ptrauthblend
+- **Example:** `option ptrauthblend off`
+
 ### `callothernoreturn` -- on | off, default `on` (destructive opt-in)
 
 - **Symptoms:** (*SoftwareBreakpoint(0xc471,..))() // jump-as-call after a brk; a brk trap printed as a call to an unknown function; Treating indirect jump as call warning on a brk trap.
@@ -3167,6 +3182,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: the layout is the one the compiler emitted and IDA renders the same `self->_ivar`. Flip off when a superclass from another image may have grown since the binary was built (then the runtime slides the offsets and the static layout is stale) or to read the offset-variable loads themselves.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-objc
 - **Example:** `option objcivars off`
+
+### `iokitcxx` -- on | off, default `on`
+
+- **Symptoms:** an iokit method's this is void *a0 or unsigned long a0; a constructor stores a raw constant into field_0x0 instead of the vtable; virtual call to one of 2615 methods: OSMetaClassMeta::alloc; a virtual call comment lists 11 release overrides; OSDictionary::gMetaClass + 0x68 called through a cast.
+- **What it does:** Type the IOKit classes iokitclasses recovers on an arm64 XNU kernel or kext as C++ classes, through the vtabletypes machinery. Each class with a vtable becomes a structure C laid out to its OSMetaClass instance size, its first field C_vtbl *vtable and the rest one field per 8-byte granule of the class's kalloc_type view signature (xnutables) when the view has the class's size, else undefined words named field_0x<off>; C_vtbl has one method pointer per slot, named after the method the slot's function names (release; dtor and deleting_dtor for slots 0 and 1), inherited from the nearest ancestor that names it, an overload of a name an earlier slot took spelled <name>_<i>, else vfn_<i>. The slot words are foldable constants, and the slots from each vtable's address point are a data object C_vtable of type C_vtbl (vtable for C keeps the two header words), so a constructor's store reads this->vtable = &C_vtable. Every function a class vtable holds, and every C::C / C::~C of a recovered class, gets an unlocked x0 input hint this of type C * (C the nearest class that is an ancestor of every class whose vtable holds it), so the member's own parameters are still recovered from its body. A virtual call whose vtable pointer was loaded from a metaclass object (X::gMetaClass, found by arm64evcall's backward walk) calls the method X::MetaClass's own vtable holds, and X::MetaClass::alloc is declared to return X *, so OSDictionary::gMetaClass.alloc() reads a1 = OSDictionary::MetaClass::alloc(&gMetaClass) with a1 an OSDictionary *. A virtual call with several candidates whose named candidates are all members sharing one method name is annotated virtual call to <method>, one of <n> overrides instead of the candidate list. LOSS: a non-virtual member that is not a constructor or destructor keeps an untyped first parameter (its name cannot tell a static member from one taking this); a typed receiver's call is still indirect, since a subclass in another image can override the slot.
+- **When to flip:** On (default) on a kernelcache or kext: IOKit methods read this->field_0x18 and (*this->vtable->release_5)(this) instead of ((unsigned long *)a0)[3] and (**(void **)(*a0 + 0x28))(a0), a metaclass alloc is a direct call returning the class, and a virtual call's comment names the method rather than listing thousands of overrides. Flip off to see the iokitclasses names alone, or to rule the typing out when a slot or field name looks wrong. Needs iokitclasses and vtabletypes on.
+- **Where / provenance:** P5/type-propagation · kuna · type-inference · kuna-iokitcxx
+- **Example:** `option iokitcxx off`
 
 ### `hideshadow` -- on | off, default `on`
 

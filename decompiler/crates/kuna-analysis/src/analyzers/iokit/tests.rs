@@ -205,3 +205,31 @@ fn real_kernelcache_tables() {
     eprintln!("{entry}: {} of {got} pointer slots named, e.g. {:?}", out.data_objects.len(),
         out.data_objects.iter().take(4).map(|d| d.name.clone()).collect::<Vec<_>>());
 }
+
+/// (kuna `iokitcxx`) `iokitcxx_kext.macho`: Derived's vtable is typed with
+/// slots named from the inherited method names, sized to its registration,
+/// and every vtable member and the constructor take their class's `this`.
+#[test]
+fn cxx_facts_type_the_classes_and_their_members() {
+    const C: u64 = 0xffff_fff0_07b0_0000;
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/kernelcache/iokitcxx_kext.macho");
+    let bytes = std::fs::read(path).unwrap();
+    let file = object::File::parse(&*bytes).unwrap();
+    let img = MachoImage::with_fixups(&file, resolve_chained_fixups(&file, &bytes));
+    let rec = recover(&file, &img);
+    let facts = rec.cxx_facts(&rec.known_names());
+    let derived = facts.vtables.classes.iter().find(|c| c.class == "Derived").unwrap();
+    let names: Vec<&str> = derived.slots.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["dtor", "deleting_dtor", "getMetaClass", "release", "m2"]);
+    assert_eq!(derived.size, 0x30);
+    assert_eq!(derived.slots[4].targets, vec![C + 0x4170]);
+    let base = facts.vtables.classes.iter().find(|c| c.class == "Base").unwrap();
+    assert_eq!(base.slots[4].targets, vec![C + 0x40f0, C + 0x4170], "own first, then the override");
+    let this: HashMap<u64, &str> = facts.this_types.iter().map(|(f, c)| (*f, c.as_str())).collect();
+    assert_eq!(this.get(&(C + 0x4170)), Some(&"Derived"), "the override");
+    assert_eq!(this.get(&(C + 0x40e0)), Some(&"Base"), "the inherited method");
+    assert_eq!(this.get(&(C + 0x4180)), Some(&"Derived"), "the named constructor");
+    assert_eq!(this.get(&(C + 0x41c0)), None, "a free function");
+    assert_eq!(facts.vtable_points, vec![(C + 0x5110, "Base".to_string()), (C + 0x5150, "Derived".to_string())]);
+    assert_eq!(facts.allocs, vec![(C + 0x4120, "Base".to_string()), (C + 0x4150, "Derived".to_string())]);
+}

@@ -481,6 +481,11 @@ impl FlowEnvironment for ArchFlowEnv {
             }
             named += 1;
         }
+        if arch.analysis_iokitcxx {
+            if let Some(method) = shared_method(targets.iter().map(|&t| arch.symboltab.function_display_name_across_scopes(&at(t)))) {
+                return (None, Some(format!("virtual call to {method}, one of {} overrides", targets.len())));
+            }
+        }
         let more = match targets.len() - named {
             0 => String::new(),
             n => format!(" and {n} more"),
@@ -750,6 +755,29 @@ impl kuna_sleigh::translate::PcodeEmit for RawOpCollector {
 /// A decode failure ends the run rather than propagating: this is a *probe* at
 /// an address the flow follower has not committed to, and an address whose bytes
 /// do not disassemble is simply not a trampoline.
+/// (kuna `iokitcxx`) The method every named candidate of a virtual call
+/// overrides: the one unqualified name all their `Class::method` names
+/// share. `None` when a named candidate is not a class member, two disagree,
+/// or none is named.
+fn shared_method(names: impl Iterator<Item = Option<String>>) -> Option<String> {
+    let mut shared: Option<String> = None;
+    for name in names.flatten() {
+        if name.starts_with("sub_") || name.starts_with("FUN_") {
+            continue;
+        }
+        let (_, method) = name.rsplit_once("::")?;
+        if method.is_empty() || method.starts_with('~') {
+            return None;
+        }
+        match &shared {
+            None => shared = Some(method.to_string()),
+            Some(m) if m == method => {}
+            Some(_) => return None,
+        }
+    }
+    shared
+}
+
 fn decode_raw_run(
     arch: &Architecture,
     entry: &Address,
@@ -2054,6 +2082,13 @@ fn decompile_func_full_with_objects_inner(
             proto.set_model(Some(model));
             proto.set_model_lock(true);
             fd.kuna_set_input_hints(input_hints.clone());
+        }
+        // (kuna `iokitcxx`) A class member's `this`, typed without locking
+        // the signature it is the only known part of.
+        if combined_proto.is_none() && mapped_params.is_empty() && fd.kuna_input_hints().is_none() {
+            if let Some(hints) = arch.kuna_this_hints.get(&entry_addr) {
+                fd.kuna_set_input_hints(Some(Rc::clone(hints)));
+            }
         }
         if let Some(expop) = arch.symboltab.function_extra_pop_across_scopes(&entry_addr) {
             fd.get_func_proto_mut().set_extra_pop(expop);

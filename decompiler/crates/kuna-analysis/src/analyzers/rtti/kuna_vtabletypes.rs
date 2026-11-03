@@ -133,7 +133,7 @@ fn facts(rec: &Recovery, names: &HashMap<u64, String>) -> VtableFacts {
             .filter_map(|&(b, disp)| by_addr.get(&b).map(|bt| (struct_name(&bt.demangled), disp)))
             .filter(|(name, _)| !name.is_empty() && leaf_count.get(name) == Some(&1))
             .collect();
-        classes.push(VtableClass { class, slots, bases });
+        classes.push(VtableClass { class, slots, bases, size: 0 });
     }
     VtableFacts { classes, slot_ranges }
 }

@@ -1522,6 +1522,8 @@ kuna_options! { self, p1;
         on_off!(analysis_itaniumrtti, "Itanium (GCC/Clang) RTTI / vtable recovery pass")
     },
     "vtabletypes" => on_off!(analysis_vtabletypes, "typed C++ vtables and vtable slot folding"),
+    "ptrauthblend" => on_off!(ptrauth_blend, "arm64e blended discriminators printed as ptrauth_blend_discriminator"),
+    "iokitcxx" => on_off!(analysis_iokitcxx, "typed IOKit classes, this hints and virtual-call method names"),
     "aif" => {
         on_off!(analysis_aif, "Aggressive Instruction Finder gap-walk Listing consumer")
     },
