@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3853,
-    3853
+    3859,
+    3859
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1051,7 +1051,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 380 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 381 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1896,6 +1896,12 @@
     "data:STRUCTSYNTH-UNCLAIMED #1: each reader loads the word into a local ahead of its store",
     "data:STRUCTSYNTH-UNCLAIMED #2: no reader spells the load through the writer's byte member",
     "data:STRUCTSYNTH-UNCLAIMED #3: only the writer names the writer's structure",
+    "data:SWIFTINFER #1: off: the closure reads an uninitialised r13",
+    "data:SWIFTINFER #2: off: the pair is a 128-bit integer split apart",
+    "data:SWIFTINFER #3: on: the closure takes its context as swiftself",
+    "data:SWIFTINFER #4: on: the context is read through swiftself",
+    "data:SWIFTINFER #5: on: the two-word result is a swift.pair",
+    "data:SWIFTINFER #6: on: its words are read as fields",
     "data:SWITCHGUARDRELOAD #1: the five legal rows of the reloaded-byte switch are recovered once each",
     "data:SWITCHGUARDRELOAD #2: the switch closes after row 4, the last row the guard allows",
     "data:SWITCHGUARDRELOAD #3: no row past the guard sends flow into an instruction interior",

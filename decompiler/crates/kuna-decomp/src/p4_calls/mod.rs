@@ -89,6 +89,7 @@ pub mod kuna_x87emptyreturn;
 pub(crate) mod kuna_inputstorage;
 pub mod kuna_inputhints; // (kuna) unlocked names and types for recovered inputs
 pub mod kuna_swiftcall; // (kuna) Swift calls that may throw, and stale swiftself arguments
+pub mod kuna_swiftinfer; // (kuna) the Swift convention of unbound functions, read off their code
 pub mod kuna_floatregister;
 pub mod kuna_x87free;
 

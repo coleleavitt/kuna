@@ -8002,6 +8002,28 @@ tier = "analysis"
 symptoms = "swift methods named by swiftmetadata read self from an unnamed x20 or r13|calls to swift methods drop the self they pass|a try? error path or a do/catch after a throwing call folds away|swift struct mutating methods write through an untyped register"
 
 [[settable]]
+option = "swiftinfer"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P4"
+subphase = "prototype-recovery"
+strength = "HARD"
+rewind = "P4"
+issue = "kuna-swift-infer"
+summary = "The Swift calling convention of the functions the swiftcall arm did not bind (closures, partial-apply forwarders, thunks, free functions, stripped methods), read off what their code does with the Swift registers, in an image where the metadata pass bound the convention. Every other convention preserves swiftself (x20 / r13) and swifterror (x21 / r12), so a C or Objective-C function never reads either before writing it except to save it. A function whose body reads swiftself on entry for anything else (a decode of each path from the entry to its first call, return or write of the register, an AArch64 stp or x86 push that only saves it not counted) decompiles under __swiftcall with that input named swiftself, and a direct call to it passes the register: `long sub_1026d1d80(void *swiftself)` reading `((long *)swiftself)[7]` where `long v3; // x20` was read uninitialised. A call after which the caller reads swifterror while the register still holds the caller's own entry value (no write of it on any path from the entry to the call) takes __swiftcall_throws, so the test reads the error the call returns rather than an input the C model calls preserved. A two-word call result joined from the first two return registers, every reader of which takes one whole word and both words read, is typed as the structure swift.pair { _0, _1 } (a String, an Array buffer and count, a closure and its context) instead of a 128-bit integer: `v11 = sub_101854258(...); _bridgeToObjectiveC()(v11._0,v11._1)` where `SUB168(v11,0),SUB168(v11,8)` printed. Default-ON because it is inert unless swiftmetadata (default-off) binds the convention, so the XML corpus never reaches it (0/675)."
+use_when = "On (default) with swiftmetadata on: closures name their context swiftself, calls pass it, and two-word Swift results print as swift.pair fields. Off to see unbound Swift functions under the C model."
+example = "option swiftinfer off"
+source_decompiler = "kuna"
+inspiration = "The Swift calling convention (swift/docs/ABI/CallingConventionSummary.rst: swiftself and swifterror are callee-saved under every other convention; small aggregates return in up to four registers)"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "a swift closure reads an uninitialised x20 or r13 (long v3; // x20)|a call to a swift closure drops the context it passes|unsigned __int128 v8; // x1:x0 with SUB168(v8,0) and SUB168(v8,8) after a swift call|a witness tests x21 after a call as if nothing set it"
+live_field = "swift_infer"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "pdb"
 values = "on|off"
 default = "on"

@@ -900,6 +900,10 @@ Three tiers:
 | calls to swift methods drop the self they pass | [`swiftcall`](#swiftcall) |
 | a try? error path or a do/catch after a throwing call folds away | [`swiftcall`](#swiftcall) |
 | swift struct mutating methods write through an untyped register | [`swiftcall`](#swiftcall) |
+| a swift closure reads an uninitialised x20 or r13 (long v3; // x20) | [`swiftinfer`](#swiftinfer) |
+| a call to a swift closure drops the context it passes | [`swiftinfer`](#swiftinfer) |
+| unsigned __int128 v8; // x1:x0 with SUB168(v8,0) and SUB168(v8,8) after a swift call | [`swiftinfer`](#swiftinfer) |
+| a witness tests x21 after a call as if nothing set it | [`swiftinfer`](#swiftinfer) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
 | pdb symbol names not applied to a pe | [`pdb`](#pdb) |
 | a .pdb beside the exe is ignored | [`pdb`](#pdb) |
@@ -3404,6 +3408,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off to see a swiftmetadata-named binary under the C model: methods without self, calls without the self they pass, and try? error paths folded away. On (default) when swiftmetadata is on: self typed in methods, initializers, accessors and witnesses, passed at direct calls, and the error a throwing call returns tested where the binary tests it.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftcall
 - **Example:** `option swiftcall off`
+
+### `swiftinfer` -- on | off, default `on`
+
+- **Symptoms:** a swift closure reads an uninitialised x20 or r13 (long v3; // x20); a call to a swift closure drops the context it passes; unsigned __int128 v8; // x1:x0 with SUB168(v8,0) and SUB168(v8,8) after a swift call; a witness tests x21 after a call as if nothing set it.
+- **What it does:** The Swift calling convention of the functions the swiftcall arm did not bind (closures, partial-apply forwarders, thunks, free functions, stripped methods), read off what their code does with the Swift registers, in an image where the metadata pass bound the convention. Every other convention preserves swiftself (x20 / r13) and swifterror (x21 / r12), so a C or Objective-C function never reads either before writing it except to save it. A function whose body reads swiftself on entry for anything else (a decode of each path from the entry to its first call, return or write of the register, an AArch64 stp or x86 push that only saves it not counted) decompiles under __swiftcall with that input named swiftself, and a direct call to it passes the register: `long sub_1026d1d80(void *swiftself)` reading `((long *)swiftself)[7]` where `long v3; // x20` was read uninitialised. A call after which the caller reads swifterror while the register still holds the caller's own entry value (no write of it on any path from the entry to the call) takes __swiftcall_throws, so the test reads the error the call returns rather than an input the C model calls preserved. A two-word call result joined from the first two return registers, every reader of which takes one whole word and both words read, is typed as the structure swift.pair { _0, _1 } (a String, an Array buffer and count, a closure and its context) instead of a 128-bit integer: `v11 = sub_101854258(...); _bridgeToObjectiveC()(v11._0,v11._1)` where `SUB168(v11,0),SUB168(v11,8)` printed. Default-ON because it is inert unless swiftmetadata (default-off) binds the convention, so the XML corpus never reaches it (0/675).
+- **When to flip:** On (default) with swiftmetadata on: closures name their context swiftself, calls pass it, and two-word Swift results print as swift.pair fields. Off to see unbound Swift functions under the C model.
+- **Where / provenance:** P4/prototype-recovery · kuna · analysis-enablement · kuna-swift-infer
+- **Example:** `option swiftinfer off`
 
 ### `pdb` -- on | off, default `on`
 

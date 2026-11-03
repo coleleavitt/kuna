@@ -1721,6 +1721,9 @@ pub struct Architecture {
         (int4, uintb),
         std::rc::Rc<crate::kuna_calleedeadarg::CalleeEntryDead>,
     >,
+    /// (kuna `swiftinfer`) Whether the body at an entry reads `swiftself`
+    /// before writing it, by `(space index, entry offset)`.
+    pub kuna_swift_self_reads: std::collections::BTreeMap<(int4, uintb), bool>,
     pub kuna_callee_memory_cache: std::collections::HashMap<
         (int4, uintb),
         std::rc::Rc<crate::kuna_calleememory::CalleeMemory>,
@@ -2698,6 +2701,10 @@ pub struct Architecture {
     /// (kuna `swiftcall`) The Swift registers and the throwing model
     /// ([`crate::kuna_swiftcall`]).
     pub loader_swift_abi: Option<Rc<crate::kuna_swiftcall::SwiftAbi>>,
+    /// (kuna `swiftinfer`) The Swift convention of functions the metadata did
+    /// not bind, read off their code ([`crate::kuna_swiftinfer`]). Default on;
+    /// inert unless the image binds the convention.
+    pub swift_infer: bool,
     /// (kuna) Gate the PE PDB metadata recovery pass (`pdb`); default **off**. The
     /// kuna analog of Ghidra's `PdbUniversalAnalyzer` (the pure-Java PDB analyzer;
     /// the MS-DIA `PdbAnalyzer` is Windows-native and out of scope) — the
@@ -3372,6 +3379,7 @@ impl Architecture {
             kuna_wide: crate::kuna_bejoin::WideCache::default(),
             kuna_callwide: crate::p4_calls::kuna_callwide::ProofSlot::default(),
             kuna_callee_dead_cache: std::collections::HashMap::new(),
+            kuna_swift_self_reads: std::collections::BTreeMap::new(),
             kuna_callee_memory_cache: std::collections::HashMap::new(),
             kuna_callee_forward_cache: std::collections::HashMap::new(),
             kuna_protoorder_types: std::collections::HashMap::new(),
@@ -3512,6 +3520,7 @@ impl Architecture {
             loader_proto_models: Rc::default(),
             loader_input_hints: std::collections::BTreeMap::new(),
             loader_swift_abi: None,
+            swift_infer: false,
             analysis_pdb: true,
             macho_arm64e: false,
 
@@ -4003,6 +4012,7 @@ impl Architecture {
         self.analysis_swiftmetadata = false; // Swift runtime-metadata recovery default-off (inert without swift5_* sections)
         self.analysis_swifttypes = true; // Swift type layouts default-on, inert unless swiftmetadata is on
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
+        self.swift_infer = true; // (kuna) default-on: unbound Swift functions by their code; inert unless the image binds the convention, 0/675 datatests
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
         self.macho_arm64e = false; // arm64e Apple-Silicon spec selection default-off (opt-in)
     }
@@ -4861,6 +4871,7 @@ impl Architecture {
             };
         ctx.bound_proto_models = Rc::clone(&self.loader_proto_models);
         ctx.swift_abi = self.loader_swift_abi.clone();
+        ctx.swift_infer = self.swift_infer;
         // Carry the constant-pointer-inference config (C++ `glb->infer_pointers` /
         // `infer_funcentry`) and the ordered inferable-pointer spaces (C++
         // `glb->inferPtrSpaces`, built by cacheAddrSpaceProperties) so

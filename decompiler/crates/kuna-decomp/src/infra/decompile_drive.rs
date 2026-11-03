@@ -1844,6 +1844,9 @@ fn decompile_func_full_with_objects_inner(
         // global-only lookup never finds the prototype the DWARF C++ arm parked on
         // `Account::deposit`. Inert for every prototype parked by NAME (that path
         // resolves through the global scope, so it can only reach global symbols).
+        // (kuna `swiftinfer`) Which direct callees, and whether this function,
+        // read `swiftself` on entry.
+        let swift_own = crate::kuna_swiftinfer::seed(arch, &mut fd);
         let recovered_proto = if pending_proto.is_none() {
             arch.symboltab.function_proto_pieces_across_scopes(&entry_addr).cloned()
         } else {
@@ -1887,6 +1890,12 @@ fn decompile_func_full_with_objects_inner(
             proto.set_model(Some(model));
             proto.set_model_lock(true);
             fd.kuna_set_input_hints(input_hints.clone());
+        } else if let Some(model) = swift_own.clone().filter(|_| mapped_params.is_empty()) {
+            // (kuna `swiftinfer`) An unbound function whose body reads `swiftself`.
+            let proto = fd.get_func_proto_mut();
+            proto.set_model(Some(model));
+            proto.set_model_lock(true);
+            fd.kuna_set_input_hints(crate::kuna_swiftinfer::self_hint(arch).map(|h| Rc::new(vec![h])));
         }
         // Re-seed any console `map param <i> <addr> <typedecl>` storage locks (lost
         // when the IR is rebuilt, like `pending_proto`/`mapped_symbols`).  This makes

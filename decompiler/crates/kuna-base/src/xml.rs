@@ -2159,7 +2159,7 @@ mod tests {
         // and kuna-swiftdemangle / Swift symbols and ObjC runtime class names demangle
         // and kuna-swiftmetadata / stripped Swift functions named from the swift5_* metadata
         // and kuna-swiftcall / Swift methods take self and throwing calls keep their error
-        assert_eq!(count, 695, "corpus file count drifted");
+        assert_eq!(count, 696, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

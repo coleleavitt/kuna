@@ -38,13 +38,13 @@ fn surface_count_is_121() {
 }
 
 #[test]
-fn settable_count_is_380() {
-    assert_eq!(kuna_num_settables(), 380);
-    assert_eq!(SETTABLE_TABLE.len(), 380);
+fn settable_count_is_381() {
+    assert_eq!(kuna_num_settables(), 381);
+    assert_eq!(SETTABLE_TABLE.len(), 381);
 }
 
 #[test]
-fn tier_counts_are_130_core_153_transform_97_analysis() {
+fn tier_counts_are_130_core_153_transform_98_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_153_transform_97_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 153, 97));
+    assert_eq!((core, transform, analysis), (130, 153, 98));
 }
 
 #[test]
@@ -246,7 +246,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_178() {
+fn option_values_live_value_present_for_179() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -950,7 +950,7 @@ fn option_values_live_value_present_for_178() {
     // 175 -> 176: +1 for `highsliceguard` (highslice_guard).
     // 176 -> 177: +1 for `mipsunaligned` (mips_unaligned).
     // 177 -> 178: +1 for `gottailcall` (got_tail_call).
-    assert_eq!(with_live, 178);
+    assert_eq!(with_live, 179);
 }
 
 #[test]
@@ -1179,7 +1179,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `swiftmetadata`; its P1 row sits beside `objc`.
     // +1 for `swifttypes`, beside it.
     // +1 for `swiftcall`, beside that.
-    assert_eq!(json.matches("},\n").count(), 379);
+    assert_eq!(json.matches("},\n").count(), 380);
 }
 
 #[test]
