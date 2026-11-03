@@ -783,8 +783,13 @@ fn descend(
     // this can prove. Detected before the walk because the base a function
     // *inherits* is established in a different function's prologue -- see
     // `kuna_picbase`. `None` (every non-PIC target, every image with no GOT)
-    // leaves the walk below byte-identical to the pre-feature one.
-    let picbase: Option<(PicCtx, PicBase)> = if arch.analysis_picbase && !mapped.is_empty() {
+    // leaves the walk below byte-identical to the pre-feature one. A 64-bit
+    // image forms PC-relative addresses directly (RIP-relative, ADRP), so only
+    // a 32-bit one pays for probing every seed's prologue.
+    let picbase: Option<(PicCtx, PicBase)> = if arch.analysis_picbase
+        && !file.is_64()
+        && !mapped.is_empty()
+    {
         PicCtx::new(arch, data_space.as_ref()).and_then(|ctx| {
             kuna_picbase::detect(file, translate, &code_space, &ctx, &seed_set).map(|b| (ctx, b))
         })
