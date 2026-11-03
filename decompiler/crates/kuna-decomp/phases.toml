@@ -3754,6 +3754,25 @@ tier = "core"
 symptoms = "scanf rendered with only its format string and no destination pointer|printf with a %s conversion and no corresponding argument|a variadic call on arm64 keeps only the arguments that fit in registers before the first empty one|a stack local is compared or printed but never assigned after a scanf call|Apple arm64 variadic arguments missing from the call"
 
 [[settable]]
+option = "darwinvarargs"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P4"
+subphase = "active-input-trial-scoring"
+strength = "HARD"
+rewind = "P4"
+issue = "darwin-variadic-callee-stack-args"
+summary = "Treat a callee whose own body runs Apple's va_start as variadic at its call sites on an Apple AArch64 image. Apple's arm64 ABI passes every variadic argument on the stack from [sp], never in x1-x7, and `varargstackargs` already scores such a call's stack tail as its own fillinMap section -- but only when the callee's prototype says `...`. A callee nothing declares (XNU's panic or IOLog, a program's own logger) keeps an unlocked prototype, so `stp x8, x9, [sp]; adrp x0, fmt; bl _panic` rendered `panic(\"... @%s:%d\");` with both arguments dropped. Before the pipeline, a straight-line decode of each direct callee's entry block (at most 24 instructions, cached per run) follows the values that are the entry stack pointer plus a constant; one at or above the entry stack pointer that is stored, or left in a register at the first call or branch, is Apple's va_list (`add x8, x29, #0x10; str x8, [sp, #8]`), and a call to that callee is split as a declared `...` call is. Each stack argument still needs the caller's store to its outgoing slot, so the count is what the caller wrote and nothing is invented. On the same targets a DECLARED variadic call keeps its fixed parameters in the registers its prototype names and takes no other register as an argument: a locked `...` prototype reopens trial recovery over every register, and at an `objc_msgSend$<sel>` stub the caller's stale x1 was scored as an argument while the format in x2 was dropped. Applies only when the loader identified the image as Apple on AArch64, or the Apple-silicon SLEIGH variant is loaded; AAPCS64 ELF, which passes varargs in registers, is untouched."
+use_when = "On by default: 0/675 datatest assertions move (the corpus has no Apple AArch64 image). Keep it on when an arm64 Mach-O or kernelcache call to a logger or panic shows only its format string while the disassembly stores the remaining arguments at [sp], [sp+8], ... right before the call. Turn it off to compare against the unlocked recovery, which drops the stack arguments of every undeclared variadic callee."
+example = "option darwinvarargs off"
+source_decompiler = "kuna"
+inspiration = "iOS 16.4.1 kernelcache vnode_initialize: panic(\"NULL vnode passed to vnode_initialize @%s:%d\") with `stp x8, x9, [sp]` before the call; Apple 'Writing ARM64 code for Apple platforms' variadic rule"
+change_kind = "correctness-fix"
+tier = "core"
+symptoms = "panic or IOLog on an arm64 kernelcache shows only its format string|an arm64 Mach-O call to the program's own variadic logger drops its %s and %d arguments|the caller stores values at [sp] and [sp+8] right before a call that renders with one argument|Apple arm64 variadic arguments missing from a call to an undeclared function"
+
+[[settable]]
 option = "varargforward"
 values = "on|off"
 default = "on"

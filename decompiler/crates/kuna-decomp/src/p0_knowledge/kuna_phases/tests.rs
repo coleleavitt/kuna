@@ -38,13 +38,13 @@ fn surface_count_is_121() {
 }
 
 #[test]
-fn settable_count_is_380() {
-    assert_eq!(kuna_num_settables(), 380);
-    assert_eq!(SETTABLE_TABLE.len(), 380);
+fn settable_count_is_381() {
+    assert_eq!(kuna_num_settables(), 381);
+    assert_eq!(SETTABLE_TABLE.len(), 381);
 }
 
 #[test]
-fn tier_counts_are_130_core_155_transform_95_analysis() {
+fn tier_counts_are_131_core_155_transform_95_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -56,7 +56,7 @@ fn tier_counts_are_130_core_155_transform_95_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (130, 155, 95));
+    assert_eq!((core, transform, analysis), (131, 155, 95));
 }
 
 #[test]
@@ -740,6 +740,7 @@ fn option_values_live_value_present_for_178() {
                             | "callsitestackargs"
                             | "protoranges"
                             | "varargstackargs"
+                            | "darwinvarargs"
                             | "varargforward"
                             | "calleearity"
                             | "calleearityfwd"
@@ -1182,7 +1183,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `objcrefconst`; its P1 row sits beside `objc`.
     // +1 for `objcivars`; its P1 row sits beside `objcrefconst`.
     // +1 for `objcsdk`; its P1 row sits beside `objcivars`.
-    assert_eq!(json.matches("},\n").count(), 379);
+    // +1 for `darwinvarargs`; its P4 row sits after `varargstackargs`.
+    assert_eq!(json.matches("},\n").count(), 380);
 }
 
 #[test]

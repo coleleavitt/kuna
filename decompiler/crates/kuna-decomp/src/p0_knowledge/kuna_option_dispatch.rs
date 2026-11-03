@@ -602,6 +602,12 @@ kuna_options! { self, p1;
         self.vararg_stack_args = val;
         Ok(msg)
     },
+    "darwinvarargs" => {
+        let (val, msg) =
+            crate::p4_calls::kuna_darwinvarargs::OptionDarwinVarargs.apply(p1)?;
+        self.darwin_varargs = val;
+        Ok(msg)
+    },
     "varargforward" => {
         let (val, msg) =
             crate::p4_calls::kuna_varargforward::OptionVarargForward.apply(p1)?;

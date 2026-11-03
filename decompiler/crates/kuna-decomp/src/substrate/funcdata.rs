@@ -496,6 +496,10 @@ pub struct Funcdata {
     /// the input-trial scoring seam
     /// ([`crate::kuna_calleedeadarg::trial_is_dead_in_callee`]).  Empty unless
     /// `option calleedeadarg` is live for this function.
+    /// (kuna `darwinvarargs`) The direct-call callees whose body runs Apple's
+    /// `va_start`, by `(space index, entry offset)`; `None` when the target does
+    /// not pass variadic arguments the Apple way or the option is off.
+    kuna_darwin_variadic: Option<std::collections::BTreeSet<(int4, kuna_base::types::uintb)>>,
     kuna_callee_entry_dead: std::collections::HashMap<
         (int4, kuna_base::types::uintb),
         std::rc::Rc<crate::kuna_calleedeadarg::CalleeEntryDead>,
@@ -846,6 +850,7 @@ impl Funcdata {
             kuna_wide: None,
             kuna_callwide: None,
             kuna_callee_entry_dead: std::collections::HashMap::new(),
+            kuna_darwin_variadic: None,
             kuna_hiddenret_vetoed: std::collections::HashSet::new(),
             kuna_own_entry_dead: None,
             kuna_callee_entry_through: std::collections::HashMap::new(),
@@ -1185,6 +1190,20 @@ impl Funcdata {
     ) -> Option<&crate::kuna_rustabi::CalleeReturnWrites> {
         let sp = entry.get_space()?;
         self.kuna_callee_ret_writes.get(&(sp.get_index(), entry.get_offset())).map(|r| r.as_ref())
+    }
+
+    /// (kuna `darwinvarargs`) Record the callees seen running Apple's `va_start`.
+    pub fn kuna_set_darwin_variadic(
+        &mut self,
+        found: Option<std::collections::BTreeSet<(int4, kuna_base::types::uintb)>>,
+    ) {
+        self.kuna_darwin_variadic = found;
+    }
+
+    /// (kuna `darwinvarargs`) The callees seen running Apple's `va_start`, or
+    /// `None` when the rule does not apply to this function's target.
+    pub fn kuna_darwin_variadic(&self) -> Option<&std::collections::BTreeSet<(int4, kuna_base::types::uintb)>> {
+        self.kuna_darwin_variadic.as_ref()
     }
 
     /// (kuna `calleedeadarg`) Record what a probe of `entry`'s body proved about
