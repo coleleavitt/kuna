@@ -13,6 +13,7 @@
 //! (`-[Runner maker:]_block_invoke`) and types it from the descriptor's
 //! signature, the way Hex-Rays reads the creator's microcode for the same stores.
 
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use kuna_decomp::dtype::{type_metatype, Datatype, TypeFactory, TypeField};
@@ -21,7 +22,7 @@ use object::read::{Object, ObjectSection};
 
 use super::encoding::{decode_ivar_type, split_method, TypeCtx};
 use super::sections::MachoImage;
-use crate::pass::{AnalysisOutput, FidMatch, LocalFact, SymFact, SymKind, TypedDataFact};
+use crate::pass::{AnalysisOutput, ConstGate, ConstRange, FidMatch, LocalFact, SymFact, SymKind, TypedDataFact};
 
 /// `Block_layout.flags` bit: the descriptor has copy/dispose helpers.
 const BLOCK_HAS_COPY_DISPOSE: u32 = 1 << 25;
@@ -30,7 +31,7 @@ const BLOCK_HAS_SIGNATURE: u32 = 1 << 30;
 
 /// The `Block_layout` struct, interned once: `isa`, `flags`, `reserved`,
 /// `invoke`, `descriptor`.
-fn block_layout(tctx: &TypeCtx) -> Option<Rc<Datatype>> {
+pub(super) fn block_layout(tctx: &TypeCtx) -> Option<Rc<Datatype>> {
     let types: &dyn TypeFactory = tctx.types;
     if let Some(t) = types.find_by_name("Block_layout").ok().flatten() {
         return (t.get_metatype() == type_metatype::TYPE_STRUCT).then_some(t);
@@ -39,14 +40,42 @@ fn block_layout(tctx: &TypeCtx) -> Option<Rc<Datatype>> {
     let shell = types.kuna_declare_record("Block_layout", false).ok()?;
     let voidp = decode_ivar_type("^v", tctx)?;
     let int = decode_ivar_type("i", tctx)?;
+    let flags = if tctx.blocks { decode_ivar_type("I", tctx)? } else { Rc::clone(&int) };
     let fields = vec![
         TypeField::new(0, 0, "isa".to_string(), Rc::clone(&voidp)),
-        TypeField::new(ps, ps, "flags".to_string(), Rc::clone(&int)),
+        TypeField::new(ps, ps, "flags".to_string(), flags),
         TypeField::new(ps + 4, ps + 4, "reserved".to_string(), int),
         TypeField::new(2 * ps, 2 * ps, "invoke".to_string(), Rc::clone(&voidp)),
         TypeField::new(3 * ps, 3 * ps, "descriptor".to_string(), voidp),
     ];
     types.set_fields_struct_raw(&shell, fields, Vec::new(), 4 * ps, ps, 0).ok()
+}
+
+/// A block descriptor: `reserved`, `size`, the copy/dispose helpers when the
+/// flags say so (`Block_descriptor`), then the signature (`Block_descriptor_basic`
+/// without helpers). Interned once per shape.
+fn descriptor_layout(tctx: &TypeCtx, helpers: bool) -> Option<Rc<Datatype>> {
+    let types: &dyn TypeFactory = tctx.types;
+    let name = if helpers { "Block_descriptor" } else { "Block_descriptor_basic" };
+    if let Some(t) = types.find_by_name(name).ok().flatten() {
+        return (t.get_metatype() == type_metatype::TYPE_STRUCT).then_some(t);
+    }
+    let ps = tctx.ptr_size;
+    let shell = types.kuna_declare_record(name, false).ok()?;
+    let word = decode_ivar_type("Q", tctx)?;
+    let voidp = decode_ivar_type("^v", tctx)?;
+    let mut fields = vec![
+        TypeField::new(0, 0, "reserved".to_string(), Rc::clone(&word)),
+        TypeField::new(ps, ps, "size".to_string(), word),
+    ];
+    let mut at = 2 * ps;
+    if helpers {
+        fields.push(TypeField::new(at, at, "copy".to_string(), Rc::clone(&voidp)));
+        fields.push(TypeField::new(at + ps, at + ps, "dispose".to_string(), voidp));
+        at += 2 * ps;
+    }
+    fields.push(TypeField::new(at, at, "signature".to_string(), decode_ivar_type("*", tctx)?));
+    types.set_fields_struct_raw(&shell, fields, Vec::new(), at + ps, ps, 0).ok()
 }
 
 /// What an arm64 register holds while a function is scanned.
@@ -74,15 +103,19 @@ struct Store {
 /// A block literal a function builds on its frame.
 #[derive(Clone, Debug, PartialEq)]
 struct Site {
-    /// The pc of the isa store, the pc of the last `ret` before it.
+    /// The pc of the isa store, the pc of the last `ret` before it, and the
+    /// function start (`LC_FUNCTION_STARTS`) the scan last passed.
     pc: u64,
     last_ret: u64,
+    start: Option<u64>,
     /// The literal's frame offset (from `sp`), and how far `sp` was below the
     /// entry `sp` there, so `frame - depth` is the stack-space offset.
     frame: u64,
     depth: u64,
     invoke: u64,
     descriptor: Option<u64>,
+    /// The pool word the flags were loaded from, when a `d` register stored them.
+    flags_at: Option<u64>,
     /// Every store into the literal past its header, by frame offset.
     captures: Vec<Store>,
 }
@@ -101,8 +134,10 @@ struct ByrefCell {
 /// The register state of one function scan.
 struct Scan<'a> {
     regs: [Option<Held>; 32],
-    /// The `d` registers: only a pooled constant is ever known.
+    /// The `d` registers: only a pooled constant is ever known, and where it
+    /// was loaded from.
     fregs: [Option<Held>; 32],
+    fsrc: [Option<u64>; 32],
     /// Frame offset → the store there (the last one wins).
     stores: Vec<Store>,
     /// The block literals being built: each store after an isa store fills in
@@ -115,9 +150,16 @@ struct Scan<'a> {
     /// How far `sp` is below the entry `sp`.
     depth: u64,
     last_ret: u64,
+    start: Option<u64>,
     /// The pointer-sized word at an address of the image (literal pools).
     read_ptr: &'a dyn Fn(u64) -> Option<u64>,
+    /// Whether an address is code: an invoke is, a descriptor is not.
+    is_code: &'a dyn Fn(u64) -> bool,
     isa_slots: &'a [u64],
+    /// The global block literals (sorted), and each materialized reference to
+    /// one: `(literal, pc, last_ret, start)`.
+    globals: &'a [u64],
+    global_refs: Vec<(u64, u64, u64, Option<u64>)>,
 }
 
 impl Scan<'_> {
@@ -130,6 +172,12 @@ impl Scan<'_> {
         match self.held(rn) {
             Some(Held::Stack(b)) => Some(b.wrapping_add(imm as u64)),
             _ => None,
+        }
+    }
+
+    fn global_ref(&mut self, pc: u64, a: u64) {
+        if self.globals.binary_search(&a).is_ok() {
+            self.global_refs.push((a, pc, self.last_ret, self.start));
         }
     }
 
@@ -146,17 +194,22 @@ impl Scan<'_> {
                 self.pending = rest;
                 // Captures the creator stored before the isa are already in place.
                 let captures: Vec<Store> = self.stores.iter().filter(|s| (32..0x400).contains(&s.off.wrapping_sub(off))).copied().collect();
-                self.pending.push(Site { pc, last_ret: self.last_ret, frame: off, depth: self.depth, invoke: 0, descriptor: None, captures });
+                self.pending.push(Site { pc, last_ret: self.last_ret, start: self.start, frame: off, depth: self.depth, invoke: 0, descriptor: None, flags_at: None, captures });
             }
             Some(Held::Stack(cell)) if width == 8 && off == cell.wrapping_add(8) => self.cells.push((cell, pc, self.depth)),
             _ => {}
         }
+        // The first code address at +16 is the invoke and the first data
+        // address at +24 the descriptor; a capture is the first store to its
+        // slot once the header is there. A later store to the same frame bytes
+        // is the frame reused, not the literal rebuilt.
         for site in &mut self.pending {
             let rel = off.wrapping_sub(site.frame);
             match (rel, held) {
-                (16, Some(Held::Addr(a))) => site.invoke = a,
-                (24, Some(Held::Addr(a))) => site.descriptor = Some(a),
-                (32..=0x3FF, _) => {
+                (16, Some(Held::Addr(a))) if site.invoke == 0 && (self.is_code)(a) => site.invoke = a,
+                (24, Some(Held::Addr(a))) if site.descriptor.is_none() && !(self.is_code)(a) => site.descriptor = Some(a),
+                (8, _) if float && width == 8 && site.invoke == 0 => site.flags_at = self.fsrc[rt],
+                (32..=0x3FF, _) if site.invoke == 0 || !site.captures.iter().any(|s| s.off == off) => {
                     site.captures.retain(|s| s.off != off);
                     site.captures.push(store);
                 }
@@ -178,13 +231,31 @@ impl Scan<'_> {
         if w & 0x9F00_0000 == 0x9000_0000 {
             self.regs[rd] = Some(Held::Page((pc & !0xFFF).wrapping_add((adr_imm as i64 as u64) << 12)));
         } else if w & 0x9F00_0000 == 0x1000_0000 {
-            self.regs[rd] = Some(Held::Addr(pc.wrapping_add(adr_imm as i64 as u64)));
+            let a = pc.wrapping_add(adr_imm as i64 as u64);
+            self.regs[rd] = Some(Held::Addr(a));
+            self.global_ref(pc, a);
         } else if w & 0xFF00_0000 == 0x5800_0000 {
             // `ldr x, <literal>`: the GOT slot's isa, or a constant.
             self.regs[rd] = if self.isa_slots.contains(&lit) { Some(Held::Isa) } else { (self.read_ptr)(lit).map(Held::Imm) };
         } else if w & 0xFF00_0000 == 0x5C00_0000 {
             // `ldr d, <literal>`: a constant the compiler pooled (flags words).
             self.fregs[rd] = (self.read_ptr)(lit).map(Held::Imm);
+            self.fsrc[rd] = Some(lit);
+        } else if w & 0xFFC0_0000 == 0xFD40_0000 {
+            // `ldr d, [xn, #imm]` off a page: a pooled constant (flags words).
+            let at = match self.held(rn) {
+                Some(Held::Page(p)) if rn != 31 => Some(p.wrapping_add(imm12 * 8)),
+                _ => None,
+            };
+            self.fregs[rd] = at.and_then(|a| (self.read_ptr)(a)).map(Held::Imm);
+            self.fsrc[rd] = at;
+        } else if w & 0xFC00_0000 == 0x9400_0000 || w & 0xFEFF_F000 == 0xD63F_0000 {
+            // `bl` / `blr` / `blraa`: the caller-saved registers are the callee's.
+            self.regs[..19].fill(None);
+            self.fregs[..8].fill(None);
+            self.fregs[16..].fill(None);
+            self.fsrc[..8].fill(None);
+            self.fsrc[16..].fill(None);
         } else if w & 0xFF80_0000 == 0x9100_0000 || w & 0xFF80_0000 == 0xD100_0000 {
             // `add`/`sub xd, xn, #imm`
             let imm = if w & (1 << 22) != 0 { imm12 << 12 } else { imm12 };
@@ -198,6 +269,9 @@ impl Scan<'_> {
                 Some(Held::Stack(b)) => Some(Held::Stack(b.wrapping_add(imm))),
                 _ => None,
             };
+            if let Some(Held::Addr(a)) = self.regs[rd] {
+                self.global_ref(pc, a);
+            }
         } else if w & 0xFF80_0000 == 0x5280_0000 {
             // `movz wd, #imm16, lsl #hw`
             let hw = ((w >> 21) & 3) * 16;
@@ -270,23 +344,52 @@ impl Scan<'_> {
     }
 }
 
-/// The stack blocks and `__block` cells of every arm64 function.
-fn stack_block_sites(read_ptr: &dyn Fn(u64) -> Option<u64>, text: &[(u64, &[u8])], isa_slots: &[u64]) -> (Vec<Site>, Vec<ByrefCell>) {
+/// What one scan of the text finds: the stack blocks, the `__block` cells and
+/// the references to global block literals `(literal, pc, last_ret, start)`.
+struct Found {
+    sites: Vec<Site>,
+    cells: Vec<ByrefCell>,
+    global_refs: Vec<(u64, u64, u64, Option<u64>)>,
+}
+
+/// `ret`, `retaa`, `retab`.
+fn is_ret(w: u32) -> bool {
+    matches!(w, 0xD65F_03C0 | 0xD65F_0BFF | 0xD65F_0FFF)
+}
+
+/// The stack blocks and `__block` cells of every arm64 function. The scan
+/// starts over at each `ret` and at each function start in `starts` (sorted),
+/// so a function that ends in a tail call does not hand its frame to the next.
+fn stack_block_sites(
+    read_ptr: &dyn Fn(u64) -> Option<u64>,
+    is_code: &dyn Fn(u64) -> bool,
+    text: &[(u64, &[u8])],
+    isa_slots: &[u64],
+    globals: &[u64],
+    starts: &[u64],
+) -> Found {
     let mut sites = Vec::new();
     let mut cells = Vec::new();
+    let mut global_refs = Vec::new();
     for &(base, data) in text {
         let mut scan = Scan {
             regs: [None; 32],
             fregs: [None; 32],
+            fsrc: [None; 32],
             stores: Vec::new(),
             pending: Vec::new(),
             done: Vec::new(),
             cells: Vec::new(),
             depth: 0,
             last_ret: 0,
+            start: None,
             read_ptr,
+            is_code,
             isa_slots,
+            globals,
+            global_refs: Vec::new(),
         };
+        let mut next_start = starts.partition_point(|&a| a < base);
         let flush = |scan: &mut Scan, sites: &mut Vec<Site>, cells: &mut Vec<ByrefCell>| {
             let finished = scan.done.drain(..).chain(scan.pending.drain(..));
             for mut site in finished {
@@ -310,12 +413,21 @@ fn stack_block_sites(read_ptr: &dyn Fn(u64) -> Option<u64>, text: &[(u64, &[u8])
             scan.stores.clear();
             scan.regs = [None; 32];
             scan.fregs = [None; 32];
+            scan.fsrc = [None; 32];
             scan.depth = 0;
         };
         for (i, c) in data.chunks_exact(4).enumerate() {
             let w = u32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-            let pc = base + 4 * i as u64;
-            if w == 0xD65F_03C0 {
+            let pc = base.wrapping_add(4 * i as u64);
+            while starts.get(next_start).is_some_and(|&a| a < pc) {
+                next_start += 1;
+            }
+            if starts.get(next_start) == Some(&pc) {
+                flush(&mut scan, &mut sites, &mut cells);
+                scan.start = Some(pc);
+                next_start += 1;
+            }
+            if is_ret(w) {
                 flush(&mut scan, &mut sites, &mut cells);
                 scan.last_ret = pc;
             } else {
@@ -323,14 +435,15 @@ fn stack_block_sites(read_ptr: &dyn Fn(u64) -> Option<u64>, text: &[(u64, &[u8])
             }
         }
         flush(&mut scan, &mut sites, &mut cells);
+        global_refs.append(&mut scan.global_refs);
     }
-    (sites, cells)
+    Found { sites, cells, global_refs }
 }
 
 /// What a copy helper says each capture is: `(offset, kind)` with the kind the
 /// `_Block_object_assign` flags (3 object, 7 block, 8 byref, 16 weak), or 3 for
 /// a capture the helper retains itself (`objc_retain`), 7 for `objc_retainBlock`.
-fn copy_helper_kinds(img: &MachoImage, helper: u64, runtime: &std::collections::HashMap<u64, String>) -> Vec<(u64, u32)> {
+fn copy_helper_kinds(img: &MachoImage, helper: u64, runtime: &HashMap<u64, String>) -> Vec<(u64, u32)> {
     let mut out = Vec::new();
     let mut last_ldr: [Option<u64>; 32] = [None; 32];
     let mut imm: [Option<u32>; 32] = [None; 32];
@@ -506,10 +619,20 @@ fn invoke_prototype(name: &str, signature: &str, tctx: &TypeCtx, layout: &Rc<Dat
     Some(p)
 }
 
-/// Name every global block literal of `file` and its invoke function.
-pub fn emit(img: &MachoImage, file: &object::File, tctx: &TypeCtx, out: &mut AnalysisOutput) {
+/// A global block literal and its invoke function.
+pub struct GlobalBlock {
+    pub literal: u64,
+    pub invoke: u64,
+}
+
+/// Type every global block literal of `file` and its invoke function. Under
+/// `objcblocks` the invoke is named by [`stack_blocks`], after the function
+/// that references the literal; off, here, `block_invoke_<addr>`.
+pub fn emit(img: &MachoImage, file: &object::File, tctx: &TypeCtx, out: &mut AnalysisOutput) -> Vec<GlobalBlock> {
     let ps = img.ptr_size();
+    let clang = kuna_decomp::kuna_objcblocks::objcblocks_enabled();
     let mut layout = None;
+    let mut found = Vec::new();
     for sec in file.sections() {
         if sec.name().ok() != Some("__const") {
             continue;
@@ -520,15 +643,18 @@ pub fn emit(img: &MachoImage, file: &object::File, tctx: &TypeCtx, out: &mut Ana
                 continue;
             }
             let Some(invoke) = img.rebase_ptr(va + 2 * ps) else { continue };
-            let Some(layout) = layout.get_or_insert_with(|| block_layout(tctx)).as_ref() else { return };
+            let Some(layout) = layout.get_or_insert_with(|| block_layout(tctx)).as_ref() else { return found };
             out.typed_data.push(TypedDataFact {
                 addr: va,
                 name: format!("block_literal_{va:x}"),
                 type_: Rc::clone(layout),
             });
+            found.push(GlobalBlock { literal: va, invoke });
             let label = format!("block_invoke_{invoke:x}");
-            out.symbols.push(SymFact { addr: invoke, name: label.clone(), kind: SymKind::Function });
-            out.fid_names.push(FidMatch { addr: invoke, name: label.clone() });
+            if !clang {
+                out.symbols.push(SymFact { addr: invoke, name: label.clone(), kind: SymKind::Function });
+                out.fid_names.push(FidMatch { addr: invoke, name: label.clone() });
+            }
             let Some(desc) = img.rebase_ptr(va + 3 * ps) else { continue };
             let Some((sig, _)) = descriptor_signature(img, desc) else { continue };
             if let Some(p) = invoke_prototype(&label, &sig, tctx, layout) {
@@ -536,15 +662,76 @@ pub fn emit(img: &MachoImage, file: &object::File, tctx: &TypeCtx, out: &mut Ana
             }
         }
     }
+    found.sort_by_key(|g| g.literal);
+    found
+}
+
+/// The prefix Clang names a block's invoke from: `__` and the creator, an
+/// Objective-C method with its length first (`__16-[A b:]`), or the creator's
+/// own prefix when the creator is itself an invoke (`__f_block_invoke_2` → `__f`:
+/// a nested block counts on under the outermost function).
+fn block_base(creator: &str) -> String {
+    if let Some(i) = creator.find("_block_invoke") {
+        if creator.starts_with("__") && i > 2 {
+            return creator[..i].to_string();
+        }
+    }
+    if creator.starts_with("-[") || creator.starts_with("+[") {
+        format!("__{}{}", creator.len(), creator)
+    } else {
+        format!("__{creator}")
+    }
+}
+
+/// The next invoke name under `base`: `<base>_block_invoke`, then `_2`, `_3`,
+/// skipping a name the image already has (`clang`); off, `<base>_block_invoke_<n>`
+/// counted per creator.
+fn next_label(base: &str, clang: bool, counters: &mut HashMap<String, u32>, taken: &mut HashSet<String>) -> String {
+    let n = counters.entry(base.to_string()).or_default();
+    loop {
+        *n = n.saturating_add(1);
+        let label = if *n == 1 { format!("{base}_block_invoke") } else { format!("{base}_block_invoke_{n}") };
+        if !clang || taken.insert(label.clone()) || *n == u32::MAX {
+            return label;
+        }
+    }
+}
+
+/// One block whose invoke gets a name: a stack literal (its index in the
+/// sites) or a global literal's first reference.
+enum Built {
+    Stack(usize),
+    Global { invoke: u64, pc: u64, last_ret: u64, start: Option<u64> },
 }
 
 /// Name every stack block's invoke function after the function that builds it
 /// and type it from the block descriptor's signature, its captures from the
 /// copy helper and the creator's stores, a `__block` cell from the frame it
-/// was built on.
-pub fn stack_blocks(img: &MachoImage, file: &object::File, bytes: &[u8], tctx: &TypeCtx, creators: &[(u64, String)], out: &mut AnalysisOutput) {
+/// was built on. Under `objcblocks` a global block's invoke is named after the
+/// first function that references the literal, every name follows Clang's
+/// (`__<len><creator>_block_invoke_<n>`), and an invoke the image already
+/// names keeps its name.
+pub fn stack_blocks(
+    img: &MachoImage,
+    file: &object::File,
+    bytes: &[u8],
+    tctx: &TypeCtx,
+    creators: &[(u64, String)],
+    globals: &[GlobalBlock],
+    out: &mut AnalysisOutput,
+) {
+    let clang = kuna_decomp::kuna_objcblocks::objcblocks_enabled();
+    let symbolized: HashSet<u64> = creators.iter().map(|(a, _)| *a).collect();
+    let mut named: HashSet<u64> = HashSet::new();
+    let fallback = |globals: &[GlobalBlock], named: &HashSet<u64>, out: &mut AnalysisOutput| {
+        for g in globals.iter().filter(|g| clang && !symbolized.contains(&g.invoke) && !named.contains(&g.invoke)) {
+            let label = format!("block_invoke_{:x}", g.invoke);
+            out.symbols.push(SymFact { addr: g.invoke, name: label.clone(), kind: SymKind::Function });
+            out.fid_names.push(FidMatch { addr: g.invoke, name: label });
+        }
+    };
     if file.architecture() != object::Architecture::Aarch64 {
-        return;
+        return fallback(globals, &named, out);
     }
     let ps = img.ptr_size();
     let mut isa_slots = Vec::new();
@@ -556,61 +743,120 @@ pub fn stack_blocks(img: &MachoImage, file: &object::File, bytes: &[u8], tctx: &
             let va = sec.address() + i * ps;
             if img.bind_name(va).map(|n| n.trim_start_matches('_')) == Some("NSConcreteStackBlock") {
                 isa_slots.push(va);
+                if let Some(voidp) = decode_ivar_type("^v", tctx).filter(|_| clang) {
+                    out.typed_data.push(TypedDataFact { addr: va, name: "NSConcreteStackBlock_ptr".to_string(), type_: voidp });
+                }
             }
         }
     }
-    if isa_slots.is_empty() {
-        return;
+    let global_lits: Vec<u64> = if clang { globals.iter().map(|g| g.literal).collect() } else { Vec::new() };
+    if isa_slots.is_empty() && global_lits.is_empty() {
+        return fallback(globals, &named, out);
     }
     let text: Vec<(u64, &[u8])> = file
         .sections()
         .filter(|s| s.name().ok() == Some("__text"))
         .filter_map(|s| Some((s.address(), s.data().ok()?)))
         .collect();
-    let runtime: std::collections::HashMap<u64, String> = crate::loader::macho_stubs::resolve_macho_imports(file, bytes)
+    let runtime: HashMap<u64, String> = crate::loader::macho_stubs::resolve_macho_imports(file, bytes)
         .into_iter()
         .filter_map(|i| Some((i.addr, String::from_utf8(i.name).ok()?)))
         .collect();
-    let mut creators: Vec<(u64, String)> = creators.to_vec();
+    let mut starts = crate::analyzers::entry::macho_function_starts(file, bytes);
+    starts.sort_unstable();
+    starts.dedup();
+    let mut creators: Vec<(u64, String)> = creators
+        .iter()
+        .map(|(a, n)| (*a, if clang { n.clone() } else { n.trim_start_matches('_').to_string() }))
+        .collect();
     creators.sort();
+    let mut taken: HashSet<String> = creators.iter().map(|(_, n)| n.clone()).collect();
     let read_ptr = |va: u64| img.read_ptr(va);
-    let (mut sites, cells) = stack_block_sites(&read_ptr, &text, &isa_slots);
-    sites.sort_by_key(|s| s.pc);
-    let mut layout = None;
-    let mut per_creator: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-    let mut named: std::collections::HashSet<u64> = std::collections::HashSet::new();
-    let mut locals: Vec<LocalFact> = Vec::new();
     let in_text = |a: u64| text.iter().any(|(base, data)| a >= *base && a < base + data.len() as u64);
-    for site in &mut sites {
-        // The invoke is code and the descriptor is not; a site that reads
-        // otherwise was built from stale registers. The linker folds identical
-        // invoke bodies: the first creator names it.
-        if !in_text(site.invoke) || site.descriptor.is_some_and(in_text) || !named.insert(site.invoke) {
+    let read_only: Vec<(u64, u64)> = file
+        .sections()
+        .filter(|s| s.segment_name().ok().flatten() == Some("__TEXT"))
+        .map(|s| (s.address(), s.address().saturating_add(s.size())))
+        .collect();
+    let mut pools: Vec<u64> = Vec::new();
+    let found = stack_block_sites(&read_ptr, &in_text, &text, &isa_slots, &global_lits, &starts);
+    let (mut sites, cells) = (found.sites, found.cells);
+    sites.sort_by_key(|s| s.pc);
+    let mut built: Vec<(u64, Built)> = sites.iter().enumerate().map(|(i, s)| (s.pc, Built::Stack(i))).collect();
+    let mut refs = found.global_refs;
+    refs.sort_unstable_by_key(|r| (r.1, r.0));
+    let mut seen_lit: HashSet<u64> = HashSet::new();
+    for (lit, pc, last_ret, start) in refs {
+        let Ok(at) = globals.binary_search_by_key(&lit, |g| g.literal) else { continue };
+        if seen_lit.insert(lit) {
+            built.push((pc, Built::Global { invoke: globals[at].invoke, pc, last_ret, start }));
+        }
+    }
+    built.sort_by_key(|(pc, b)| (*pc, matches!(b, Built::Global { .. })));
+    let mut layout = None;
+    let mut counters: HashMap<String, u32> = HashMap::new();
+    let mut per_func: HashMap<u64, u32> = HashMap::new();
+    let mut descriptors: HashSet<u64> = HashSet::new();
+    let mut locals: Vec<LocalFact> = Vec::new();
+    for (_, b) in built {
+        let (invoke, pc, last_ret, start) = match b {
+            Built::Stack(i) => (sites[i].invoke, sites[i].pc, sites[i].last_ret, sites[i].start),
+            Built::Global { invoke, pc, last_ret, start } => (invoke, pc, last_ret, start),
+        };
+        if let Built::Stack(i) = b {
+            // The invoke is code and the descriptor is not; a site that reads
+            // otherwise was built from stale registers.
+            let site = &sites[i];
+            if !in_text(site.invoke) || site.descriptor.is_some_and(in_text) {
+                continue;
+            }
+            // A flags word loaded from a read-only pool is a constant: folded,
+            // the literal reads `flags = 0xc2000000` and not a load of the pool.
+            // The refcount half of a literal's flags is always zero.
+            if let Some(at) = site.flags_at.filter(|_| clang) {
+                let ro = read_only.iter().any(|&(lo, hi)| at >= lo && at.saturating_add(8) <= hi);
+                if ro && img.read_ptr(at).is_some_and(|v| v & 0xFFFF == 0) {
+                    pools.push(at);
+                }
+            }
+        }
+        // The linker folds identical invoke bodies: the first creator names it.
+        if !named.insert(invoke) {
             continue;
         }
+        // The creator is the nearest label at or before the store, unless a
+        // `ret` or a function start lies between them: then the store is in an
+        // unlabelled function, `sub_<start>` when its start is known.
+        let (creator, creator_start) = match creators.iter().rev().find(|(s, _)| *s <= pc) {
+            Some((s, name)) if *s > last_ret && start.is_none_or(|f| *s >= f) => (name.clone(), Some(*s)),
+            _ => match start {
+                Some(f) if clang => (format!("sub_{f:x}"), Some(f)),
+                _ => (format!("block_{invoke:x}"), None),
+            },
+        };
+        let label = if clang && symbolized.contains(&invoke) {
+            creators.iter().find(|(a, _)| *a == invoke).map(|(_, n)| n.clone()).unwrap_or_default()
+        } else {
+            let base = if clang { block_base(&creator) } else { creator.clone() };
+            let label = next_label(&base, clang, &mut counters, &mut taken);
+            out.symbols.push(SymFact { addr: invoke, name: label.clone(), kind: SymKind::Function });
+            out.fid_names.push(FidMatch { addr: invoke, name: label.clone() });
+            label
+        };
+        // The invoke is a function of its own: a block built inside it is its
+        // block (`…_block_invoke_2`), not the outer creator's.
+        if let Err(at) = creators.binary_search_by_key(&invoke, |(a, _)| *a) {
+            creators.insert(at, (invoke, label.clone()));
+        }
+        let Built::Stack(i) = b else { continue };
+        let site = &mut sites[i];
         // The literal ends where its descriptor says; what the creator stored
         // past that is its own (a `__block` cell, another local).
         if let Some(size) = site.descriptor.and_then(|d| img.read_ptr(d.wrapping_add(8))) {
             let frame = site.frame;
             site.captures.retain(|s| s.off.wrapping_sub(frame) < size);
         }
-        let site = &*site;
-        // The creator is the nearest label at or before the store, unless a
-        // `ret` lies between them: then the store is in an unlabelled function.
-        let (creator, creator_start) = match creators.iter().rev().find(|(start, _)| *start <= site.pc) {
-            Some((start, name)) if *start > site.last_ret => (name.clone(), Some(*start)),
-            _ => (format!("block_{:x}", site.invoke), None),
-        };
-        let n = per_creator.entry(creator.clone()).or_default();
-        *n += 1;
-        let label = if *n == 1 { format!("{creator}_block_invoke") } else { format!("{creator}_block_invoke_{n}") };
-        out.symbols.push(SymFact { addr: site.invoke, name: label.clone(), kind: SymKind::Function });
-        out.fid_names.push(FidMatch { addr: site.invoke, name: label.clone() });
-        // The invoke is a function of its own: a block built inside it is its
-        // block (`…_block_invoke_block_invoke`), not the outer creator's.
-        if let Err(at) = creators.binary_search_by_key(&site.invoke, |(a, _)| *a) {
-            creators.insert(at, (site.invoke, label.clone()));
-        }
+        let site = &sites[i];
         let Some((sig, helpers)) = site.descriptor.and_then(|d| descriptor_signature(img, d)) else { continue };
         let Some(layout) = layout.get_or_insert_with(|| block_layout(tctx)).as_ref() else { return };
         let kinds = match (helpers, site.descriptor.and_then(|d| img.rebase_ptr(d.wrapping_add(16)))) {
@@ -618,13 +864,34 @@ pub fn stack_blocks(img: &MachoImage, file: &object::File, bytes: &[u8], tctx: &
             _ => Vec::new(),
         };
         let this = captured_layout(img, site, &kinds, &cells, tctx, layout);
+        // Blocks of one shape share a descriptor: it is named by its address.
+        if let Some(desc) = site.descriptor.filter(|d| clang && descriptors.insert(*d)) {
+            if let Some(ty) = descriptor_layout(tctx, helpers) {
+                out.typed_data.push(TypedDataFact { addr: desc, name: format!("block_descriptor_{desc:x}"), type_: ty });
+            }
+        }
         if let Some(p) = invoke_prototype(&label, &sig, tctx, &this) {
             out.prototypes_at.push((site.invoke, p));
+        }
+        // The copy and dispose helpers, named after the invoke.
+        if clang && helpers {
+            for (at, what) in [(16u64, "copy_helper"), (24, "dispose_helper")] {
+                let Some(h) = site.descriptor.and_then(|d| img.rebase_ptr(d.wrapping_add(at))) else { continue };
+                if in_text(h) && !symbolized.contains(&h) && named.insert(h) {
+                    let name = format!("{label}_{what}");
+                    out.symbols.push(SymFact { addr: h, name: name.clone(), kind: SymKind::Function });
+                    out.fid_names.push(FidMatch { addr: h, name });
+                }
+            }
         }
         // The creator's frame: the literal and each `__block` cell it captures
         // are typed locals, so the build reads as field stores.
         let Some(func_addr) = creator_start else { continue };
-        let blocks_here = *n;
+        let blocks_here = {
+            let n = per_func.entry(func_addr).or_default();
+            *n += 1;
+            *n
+        };
         let local = |name: String, type_: Rc<Datatype>, frame: u64, depth: u64| LocalFact {
             func_addr,
             name,
@@ -640,6 +907,10 @@ pub fn stack_blocks(img: &MachoImage, file: &object::File, bytes: &[u8], tctx: &
             locals.push(local(name, ty, cell.frame, cell.depth));
         }
     }
+    fallback(globals, &named, out);
+    pools.sort_unstable();
+    pools.dedup();
+    out.const_ranges.extend(pools.into_iter().map(|first| ConstRange { first, last_open: first + 8, gate: ConstGate::ObjcBlocks }));
     // A frame slot one creator reuses for two literals cannot be two locals;
     // neither is declared, the invokes keep their types.
     let overlaps = |a: &LocalFact, b: &LocalFact| {
@@ -686,16 +957,63 @@ mod tests {
             0xD503_201F, // nop
         ];
         let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
-        let (sites, cells) = stack_block_sites(&|_| None, &[(0x1000, &bytes)], &[0x1010]);
+        let code = |a: u64| (0x1000..0x2000).contains(&a);
+        let found = stack_block_sites(&|_| None, &code, &[(0x1000, &bytes)], &[0x1010], &[], &[]);
+        let (sites, cells) = (found.sites, found.cells);
         assert_eq!(sites.len(), 1);
         let s = &sites[0];
-        assert_eq!((s.pc, s.frame, s.invoke, s.descriptor, s.last_ret), (0x1008, 8, 0x1020, Some(0x1040), 0));
+        assert_eq!((s.pc, s.frame, s.invoke, s.descriptor, s.last_ret), (0x1008, 8, 0x1020, None, 0), "0x1040 is code, not a descriptor");
         let caps: Vec<(u64, u8, bool, Option<Held>)> = s.captures.iter().map(|c| (c.off - s.frame, c.width, c.float, c.held)).collect();
         assert_eq!(caps[0], (32, 8, true, None), "the double at +32");
         assert_eq!(caps[1], (40, 4, false, None), "the int at +40");
         assert_eq!(caps[2], (48, 8, false, Some(Held::Stack(64))), "the cell's address at +48");
         assert_eq!(cells, vec![ByrefCell { frame: 64, depth: 0, flags: 0, size: 32, value: Some(Store { off: 88, width: 8, float: false, held: Some(Held::Imm(0)) }) }]);
-        assert!(stack_block_sites(&|_| None, &[(0x1000, &bytes)], &[0x9999]).0.is_empty(), "another slot is not the isa");
+        assert!(stack_block_sites(&|_| None, &code, &[(0x1000, &bytes)], &[0x9999], &[], &[]).sites.is_empty(), "another slot is not the isa");
+    }
+
+    /// A function ending in a tail call (`b`) does not hand its frame depth to
+    /// the next function start; an arm64e `retab` ends a function; a later
+    /// store over the literal's invoke slot (the frame reused) keeps the first.
+    #[test]
+    fn function_starts_bound_the_scan_and_the_first_invoke_wins() {
+        let words: [u32; 14] = [
+            0xD101_03FF, // sub sp, sp, #0x40
+            0x1400_0000, // b . (tail call)
+            0xD100_83FF, // sub sp, sp, #0x20      <- the next function at 0x1008
+            0x9000_0009, // adrp x9, page
+            0xF940_0929, // ldr x9, [x9, #0x10]   (the isa slot)
+            0xF900_03E9, // str x9, [sp]
+            0x9000_0009, // adrp x9, page
+            0x9101_0129, // add x9, x9, #0x40     (the invoke, code)
+            0x9000_000A, // adrp x10, page
+            0x9108_014A, // add x10, x10, #0x200  (the descriptor, data)
+            0xA901_2BE9, // stp x9, x10, [sp, #16]
+            0x9100_2129, // add x9, x9, #0x8
+            0xA901_2BE9, // stp x9, x10, [sp, #16]
+            0xD65F_0FFF, // retab
+        ];
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        let code = |a: u64| (0x1000..0x1100).contains(&a);
+        let found = stack_block_sites(&|_| None, &code, &[(0x1000, &bytes)], &[0x1010], &[], &[0x1000, 0x1008]);
+        assert_eq!(found.sites.len(), 1);
+        let s = &found.sites[0];
+        assert_eq!((s.start, s.depth, s.frame, s.invoke, s.descriptor), (Some(0x1008), 0x20, 0, 0x1040, Some(0x1200)));
+        let unbounded = stack_block_sites(&|_| None, &code, &[(0x1000, &bytes)], &[0x1010], &[], &[]);
+        assert_eq!(unbounded.sites[0].depth, 0x60, "without the start the frames add up");
+        assert!(is_ret(0xD65F_03C0) && is_ret(0xD65F_0BFF) && is_ret(0xD65F_0FFF));
+    }
+
+    /// Clang's invoke names: `__<len><method>`, `__<function>`, a nested
+    /// block on under the outermost function, a taken name skipped.
+    #[test]
+    fn invoke_names_follow_clang() {
+        assert_eq!(block_base("-[Chain build:]"), "__15-[Chain build:]");
+        assert_eq!(block_base("sum"), "__sum");
+        assert_eq!(block_base("__sum_block_invoke"), "__sum");
+        assert_eq!(block_base("__15-[Chain build:]_block_invoke_3"), "__15-[Chain build:]");
+        let (mut counters, mut taken) = (HashMap::new(), HashSet::from(["__f_block_invoke_2".to_string()]));
+        let names: Vec<String> = (0..3).map(|_| next_label("__f", true, &mut counters, &mut taken)).collect();
+        assert_eq!(names, ["__f_block_invoke", "__f_block_invoke_3", "__f_block_invoke_4"]);
     }
 
     #[test]

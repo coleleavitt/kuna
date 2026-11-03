@@ -5230,6 +5230,7 @@ fn commit_analysis_output(
     let const_on = |gate: kuna_analysis::pass::ConstGate| match gate {
         kuna_analysis::pass::ConstGate::ObjcRefs => refs_on,
         kuna_analysis::pass::ConstGate::ObjcIvars => ivars_on,
+        kuna_analysis::pass::ConstGate::ObjcBlocks => kuna_decomp::kuna_objcblocks::objcblocks_enabled(),
     };
     if out.const_ranges.iter().any(|r| const_on(r.gate)) {
         let mut ranges = prog.arch().dynreloc_const.as_ref().clone();

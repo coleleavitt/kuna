@@ -60,9 +60,9 @@ fn surface_count_is_121() {
 }
 
 #[test]
-fn settable_count_is_485() {
-    assert_eq!(kuna_num_settables(), 485);
-    assert_eq!(SETTABLE_TABLE.len(), 485);
+fn settable_count_is_486() {
+    assert_eq!(kuna_num_settables(), 486);
+    assert_eq!(SETTABLE_TABLE.len(), 486);
 }
 
 #[test]
@@ -580,6 +580,9 @@ fn option_values_live_value_present_for_237() {
         "objcrefconst",
         // (kuna) Objective-C instance layouts — same commit-side gate as `objcrefconst`.
         "objcivars",
+        // (kuna) Objective-C block naming and typing — a load-time env bridge
+        // (`KUNA_OBJCBLOCKS`, the objcivars pattern); no codegen live reader.
+        "objcblocks",
         // (kuna) The Objective-C SDK header directory — a load-time env bridge
         // (`KUNA_OBJCSDK`, the sourcelang pattern); no codegen live reader.
         "objcsdk",
@@ -1343,6 +1346,7 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `importvote`.
     // +1 for `fdeflowbound`.
     // +1 for `ehnote`.
+    // +1 for `objcblocks`; its P1 row sits beside `objcivars`.
     // +1 for `linearswitch`.
     // +1 for `treeswitch`.
     // +1 for `cmpmerge`.

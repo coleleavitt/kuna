@@ -602,6 +602,10 @@ Three tiers:
 | an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
 | self is objc_object * in every -[Class sel] although the class declares ivars | [`objcivars`](#objcivars----on--off-default-on) |
 | objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar | [`objcivars`](#objcivars----on--off-default-on) |
+| a block invoke function is sub_<addr> or <creator>_block_invoke instead of Clang's __<creator>_block_invoke | [`objcblocks`](#objcblocks----on--off-default-on) |
+| a block parameter is void * and its call reads (*((void **)arg)[2])(arg, ...) | [`objcblocks`](#objcblocks----on--off-default-on) |
+| a block literal's flags read as a load of dat_<addr>, or stores to that pool appear in the creator | [`objcblocks`](#objcblocks----on--off-default-on) |
+| the _NSConcreteStackBlock slot reads dat_<addr> | [`objcblocks`](#objcblocks----on--off-default-on) |
 | the same value is assigned to one variable twice in a row with nothing in between | [`hideshadow`](#hideshadow----on--off-default-on) |
 | a comma-expression condition repeats an assignment: (v3 = a2, v4 = a0, v4 = a0, ...) | [`hideshadow`](#hideshadow----on--off-default-on) |
 | a repeated vN = dat_XXXX; around a conditional goto | [`hideshadow`](#hideshadow----on--off-default-on) |
@@ -3167,6 +3171,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default: the layout is the one the compiler emitted and IDA renders the same `self->_ivar`. Flip off when a superclass from another image may have grown since the binary was built (then the runtime slides the offsets and the static layout is stale) or to read the offset-variable loads themselves.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-objc
 - **Example:** `option objcivars off`
+
+### `objcblocks` -- on | off, default `on`
+
+- **Symptoms:** a block invoke function is sub_<addr> or <creator>_block_invoke instead of Clang's __<creator>_block_invoke; a block parameter is void * and its call reads (*((void **)arg)[2])(arg, ...); a block literal's flags read as a load of dat_<addr>, or stores to that pool appear in the creator; the _NSConcreteStackBlock slot reads dat_<addr>.
+- **What it does:** Name and type Objective-C blocks the way the compiler wrote them. A block's invoke function is named with Clang's own mangling: `__<creator>_block_invoke`, `_2`, `_3` for the creator's later blocks, an Objective-C method creator spelled with its length first (`__15-[Chain build:]_block_invoke`), a block built inside an invoke numbered on under the outermost function (`__sum_block_invoke_2`), an unnamed creator as `sub_<addr>`; an invoke the image already names keeps its name and is only typed. A global block (`_NSConcreteGlobalBlock` in `__const`) is named after the first function that materializes its address. The copy and dispose helpers are named `<invoke>_copy_helper` / `<invoke>_dispose_helper`, each descriptor is typed data `block_descriptor_<addr>` (`Block_descriptor` with helpers, `Block_descriptor_basic` without: reserved, size, helpers, signature), the `_NSConcreteStackBlock` GOT slot is `NSConcreteStackBlock_ptr`, and a flags word the creator loads from a read-only `__TEXT` pool (a `d` register at -O2, reused across calls) is folded as a constant, so the literal reads `block.block.flags = 0xc2000000` instead of a load of the pool split across two fields. `Block_layout.flags` is unsigned. The `@?` type encoding (a block argument or return in a method signature, a block capture) decodes to `Block_layout *` instead of `void *`, so calling a block parameter reads `(*(long (*)(Block_layout *,long))arg2->invoke)(arg2,arg1)`. Off: invokes are named `<creator>_block_invoke` (`block_invoke_<addr>` for a global block), `@?` is `void *`, the flags pool is a plain load. The stack-block scan itself (the literals, their typed captures, the creator's typed frame) is part of `objc` and runs either way. Inert unless `objc` is on; a structural no-op on every non-Mach-O image. Load-time, env-bridged (KUNA_OBJCBLOCKS): set it before the `load file` it should apply to.
+- **When to flip:** On by default: the names are the symbols Clang emits (what a symbolized build, a crash log and IDA show) and a block parameter is a block. Flip off for the shorter `<creator>_block_invoke` names, or to see block-typed parameters as `void *`.
+- **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-objc
+- **Example:** `option objcblocks off`
 
 ### `hideshadow` -- on | off, default `on`
 

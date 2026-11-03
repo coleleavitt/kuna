@@ -418,6 +418,9 @@ pub enum ConstGate {
     ObjcRefs,
     /// `objcivars`: the ObjC ivar offset variables in `__objc_ivar`.
     ObjcIvars,
+    /// `objcblocks`: the read-only pool words a block literal's flags are
+    /// loaded from.
+    ObjcBlocks,
 }
 
 /// A `[first, last_open)` byte range whose contents the engine may fold.

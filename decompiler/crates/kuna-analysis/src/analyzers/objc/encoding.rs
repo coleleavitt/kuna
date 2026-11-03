@@ -238,6 +238,8 @@ pub struct TypeCtx<'a> {
     opaque: RefCell<HashMap<String, Rc<Datatype>>>,
     /// The by-value structs [`struct_type`] built, by name.
     structs: RefCell<HashMap<String, Rc<Datatype>>>,
+    /// (kuna `objcblocks`) A block (`@?`) is a `Block_layout *`, else `void *`.
+    pub blocks: bool,
 }
 
 impl<'a> TypeCtx<'a> {
@@ -248,7 +250,19 @@ impl<'a> TypeCtx<'a> {
             word_size,
             opaque: RefCell::new(HashMap::new()),
             structs: RefCell::new(HashMap::new()),
+            blocks: false,
         }
+    }
+
+    /// `Block_layout *`, built once.
+    fn block_ptr(&self) -> Option<Rc<Datatype>> {
+        if let Some(t) = self.opaque.borrow().get("@?") {
+            return Some(Rc::clone(t));
+        }
+        let layout = super::kuna_objcblocks::block_layout(self)?;
+        let ptr = self.types.get_type_pointer(self.ptr_size, layout, self.word_size).ok()?;
+        self.opaque.borrow_mut().insert("@?".to_string(), Rc::clone(&ptr));
+        Some(ptr)
     }
 
     /// A pointer to the named struct (`objc_object*` for `id`, `objc_class*` for
@@ -375,12 +389,22 @@ impl<'a> Parser<'a> {
             }
             // `@` = id (object pointer) → an opaque `objc_object*`; an ivar's
             // `@"NSString"` names the class, so the pointee is that opaque type;
-            // `@?` is a block, modelled as `void*`.
+            // `@?` is a block: `Block_layout *` under `objcblocks`, else `void*`.
             b'@' => {
                 if self.peek() == Some(b'?') {
                     self.pos += 1;
-                    let v = types.get_type_void().ok()?;
-                    types.get_type_pointer(ptr_size, v, word_size).ok()?
+                    // A block encoding may spell its own signature: `@?<v@?@>`.
+                    if self.peek() == Some(b'<') {
+                        self.pos += 1;
+                        self.skip_balanced(b'<', b'>');
+                    }
+                    match tctx.blocks.then(|| tctx.block_ptr()).flatten() {
+                        Some(t) => t,
+                        None => {
+                            let v = types.get_type_void().ok()?;
+                            types.get_type_pointer(ptr_size, v, word_size).ok()?
+                        }
+                    }
                 } else {
                     match self.quoted_class_name() {
                         Some(class) => tctx.opaque_ptr(&class)?,
@@ -486,6 +510,10 @@ impl<'a> Parser<'a> {
             b'@' => {
                 if self.quoted_class_name().is_none() && self.peek() == Some(b'?') {
                     self.pos += 1;
+                    if self.peek() == Some(b'<') {
+                        self.pos += 1;
+                        self.skip_balanced(b'<', b'>');
+                    }
                 }
             }
             b'c' | b'C' | b's' | b'S' | b'i' | b'I' | b'l' | b'L' | b'q' | b'Q' | b'f' | b'd' | b'B' | b'v'
@@ -627,6 +655,23 @@ mod tests {
         let deep = format!("{}i", "^".repeat(MAX_POINTER_DEPTH + 1));
         assert!(decode_ivar_type(&deep, &tctx).is_none());
         assert!(decode_ivar_type("^^i", &tctx).is_some());
+    }
+
+    /// (kuna `objcblocks`) A block is a `Block_layout *`; an extended encoding's
+    /// spelled block signature (`@?<v@?q>`) is part of the one type.
+    #[test]
+    fn blocks_are_block_layouts_under_objcblocks() {
+        let f = factory();
+        let mut tctx = TypeCtx::new(&f, 8, 1);
+        assert_eq!(decode_ivar_type("@?", &tctx).unwrap().get_ptr_to().unwrap().get_metatype(), type_metatype::TYPE_VOID);
+        tctx.blocks = true;
+        let t = decode_ivar_type("@?", &tctx).unwrap();
+        assert_eq!(t.get_ptr_to().unwrap().get_name(), "Block_layout");
+        let p = decode_method("-[C a:]", "v24@0:8@?<v@?q>16", &tctx, None).unwrap();
+        assert_eq!(p.intypes.len(), 3);
+        assert_eq!(p.intypes[2].get_ptr_to().unwrap().get_name(), "Block_layout");
+        let (_, args) = split_method("v24@0:8@?<v@?q>16").unwrap();
+        assert_eq!(args, ["@", ":", "@?<v@?q>"]);
     }
 
     /// A struct by value is the struct the encoding spells; an array is an array;

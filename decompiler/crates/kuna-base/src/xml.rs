@@ -2158,6 +2158,7 @@ mod tests {
         // and kuna-objcresolve / a message send typed and resolved by its receiver
         // and kuna-objcstructs / by-value aggregates in ObjC encodings and global blocks
         // and kuna-objcblocks / a stack block's invoke named after its creator and typed
+        // and kuna-objcblocks2 / block invokes named the Clang way, flags folded, block parameters typed (option objcblocks)
         // and kuna-calleeretpurge / a callee's `ret imm16` is the call's extrapop
         // and kuna-switchtrim / an unguarded jump table is read until its layout ends
         // and kuna-tailcontract / a tail-calling thunk sees its callee's prototype in a single decompile
@@ -2217,7 +2218,7 @@ mod tests {
         // and kuna-gottailcall / a one-destination jump through an extern's slot is a tail call
         // and kuna-persistcalls / a persistent global's guards next to its accesses (option persistcalls)
         // and kuna-segmentize-bios / a real-mode BIOS reset path through the segment op
-        assert_eq!(count, 818, "corpus file count drifted");
+        assert_eq!(count, 819, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

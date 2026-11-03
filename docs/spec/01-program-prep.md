@@ -5411,6 +5411,61 @@ every other binary's pass list is byte-identical to before the pass existed):
     `tests/stages/kuna-objcstructs.xml` and `tests/stages/kuna-objcblocks.xml`
     run `macho_objc_structs_arm64` and `macho_objc_blocks_arm64`.
 
+    The scan (a strict fix, no option) starts over at every function start
+    the image declares (`LC_FUNCTION_STARTS`, the exports, the entry) as well
+    as at `ret`, `retaa` and `retab`: a function that ends in a tail call
+    otherwise handed its frame depth and its unfinished literals to the next
+    one, whose stores then overwrote the earlier literal's invoke slot, and
+    an arm64e function never ended at all. A literal keeps the first code
+    address stored at +16 and the first data address at +24, and a capture
+    the first store to its slot once the header is there, so a frame reused
+    after the call keeps the literal it held. A `bl`/`blr`/`blraa` clears the
+    caller-saved registers (`x0`-`x18`, `d0`-`d7`, `d16`-`d31`), and `ldr d,
+    [xn, #imm]` off an `adrp` page reads its pool word like the literal form.
+    The creator of a literal in a function with no label is that function's
+    start; a pointer-authenticated isa (`pacda`) and invoke (`pacia`) keep the
+    value they sign.
+
+  - **Block naming and typing**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcblocks.rs (stack_blocks)`,
+    `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_objcblocks.rs`,
+    kuna, option `objcblocks`, default on, load-time through
+    `KUNA_OBJCBLOCKS`): the invoke is named the way Clang mangles it
+    (`MangleContext::mangleBlock`): `__<creator>_block_invoke`, then `_2`,
+    `_3` for the creator's later blocks in address order, an Objective-C
+    method spelled with its byte length first (`__15-[Chain build:]_block_invoke`),
+    a block built inside an invoke counted on under the outermost function
+    (`__sum_block_invoke_2`, the creator's own `__sum` prefix), a creator with
+    no name `sub_<addr>`, and a name the image already uses skipped. An
+    invoke the symbol table names keeps that name and is only typed. A global
+    block's invoke is named after the first function that materializes the
+    literal's address (`adrp; add` or `adr`), in the same numbering as that
+    function's stack blocks; one nothing references stays `block_invoke_<addr>`.
+    With `BLOCK_HAS_COPY_DISPOSE` the descriptor's helpers are named
+    `<invoke>_copy_helper` and `<invoke>_dispose_helper`. Each descriptor a
+    literal stores is typed data `block_descriptor_<addr>`: `Block_descriptor`
+    (`reserved`, `size`, `copy`, `dispose`, `signature`) or, without helpers,
+    `Block_descriptor_basic` (`reserved`, `size`, `signature`), so the store
+    reads `block.block.descriptor = &block_descriptor_100004028`. The
+    `_NSConcreteStackBlock` GOT slot is typed data `NSConcreteStackBlock_ptr`.
+    At -O2 a creator that builds several blocks loads the shared flags word
+    once into a callee-saved `d` register from a read-only `__TEXT` pool and
+    stores it into each literal; that word (when its refcount half is zero)
+    is reported as a `ConstGate::ObjcBlocks` range, the `objcrefconst`
+    mechanism, so it folds and the split store reads `block_2.block.flags =
+    0xc0000000; block_2.block.reserved = 0;` rather than a load of the pool
+    (on a large app the split otherwise wrote the pieces back to the pool).
+    `Block_layout.flags` is `unsigned int`. The `@?` type encoding (with an
+    extended encoding's spelled signature `@?<v@?q>` read as part of it)
+    decodes to `Block_layout *` instead of `void *`, so a method's block
+    parameter is a block and calling it reads `(*arg2->invoke)(arg2,arg1)`.
+    Off: `<creator>_block_invoke` names (the creator's leading underscores
+    dropped, a nested block `<invoke>_block_invoke`, a global block
+    `block_invoke_<addr>`), no descriptor or slot names, the pool a load, `@?`
+    a `void *`. `tests/stages/kuna-objcblocks2.xml` runs
+    `macho_objc_blocks2_arm64` both ways. A literal stored in a join block
+    reached by a branch is not followed (13 of 3,005 sites in an 84 MB app).
+
   - **A dyld shared cache image**
     (`decompiler/crates/kuna-analysis/src/loader/kuna_dyldcache.rs (objc_selector_base)`,
     `decompiler/crates/kuna-analysis/src/analyzers/objc/sections.rs (MachoImage::with_cache)`,

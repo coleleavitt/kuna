@@ -36,6 +36,7 @@ pub mod kuna_sourcelang;
 // (kuna) Swift symbol demangling gate (load-time, env-bridged).
 pub mod kuna_swiftdemangle;
 // (kuna) The Objective-C instance-layout gate's load-time half (env-bridged).
+pub mod kuna_objcblocks;
 pub mod kuna_objcivars;
 // (kuna) The Objective-C SDK header directory (`objcsdk`, load-time, env-bridged).
 pub mod kuna_objcsdk;

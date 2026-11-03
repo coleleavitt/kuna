@@ -1610,6 +1610,11 @@ kuna_options! { self, p1;
         crate::kuna_objcivars::set_objcivars_env(val);
         Ok(format!("Objective-C instance layouts turned {}", if val { "on" } else { "off" }))
     },
+    "objcblocks" => {
+        let val = on_or_off(p1)?;
+        crate::kuna_objcblocks::set_objcblocks_env(val);
+        Ok(format!("Objective-C block refinements turned {}", if val { "on" } else { "off" }))
+    },
     "objcsdk" => {
         let path = crate::kuna_objcsdk::parse_option_value(p1).map_err(KunaError::parse)?;
         crate::kuna_objcsdk::set_objcsdk_env(path.as_deref().and_then(|p| p.to_str()));

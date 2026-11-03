@@ -1653,6 +1653,34 @@ over `struct Block_layout_100000930 { Block_layout block; objc_object *capture_0
 reading `block->capture_1->forwarding->value`; the creator shows
 `block.block.invoke = …`, `block.capture_1 = &cell_1`, `cell_1.forwarding = block.capture_1`.
 
+### `macho_objc_blocks2_arm64` — block naming, the flags pool, block parameters
+
+`macho_objc_blocks2_arm64` (arm64, ~50 KB) is the fixture for
+`tests/stages/kuna-objcblocks2.xml` (`objcblocks`): `macho_objc_blocks2.m` has
+a root class `Chain` whose `-build:` builds three stack blocks, sending each
+to `-call:with:` before building the next, so the flags word the first two
+share stays in `d8` (loaded once from a `__text` literal pool) across the
+calls; the third captures `self` (copy/dispose helpers). `-call:with:` calls
+its block parameter. The C function `sum` builds a block whose invoke builds
+a nested one, and `pick` passes a global block (`_NSConcreteGlobalBlock`).
+Same recipe as `macho_objc_blocks_arm64`:
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O2 -c macho_objc_blocks2.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_objc_blocks2_arm64 m.o
+```
+
+**Pinned VMAs:** `-[Chain call:with:]`@`0x100000780`, `-[Chain build:]`@`0x1000007b4`
+(invokes @`0x1000008a0`, `0x1000008ac`, `0x1000008b8`; copy helper @`0x1000008c4`),
+`_sum`@`0x1000008d4` (invoke @`0x100000924`, nested @`0x100000978`), `_pick`@`0x100000988`
+(global invoke @`0x100000994`), flags pool @`0x1000009e0`, `_NSConcreteStackBlock`
+slot @`0x100004008`. With `objc on` the invokes are `__15-[Chain build:]_block_invoke`,
+`_2`, `_3`, `__sum_block_invoke`, `__sum_block_invoke_2`, `__pick_block_invoke`;
+`objcblocks off` gives `-[Chain build:]_block_invoke`, `sum_block_invoke_block_invoke`
+and `block_invoke_100000994`.
+
 ### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
 
 `swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture

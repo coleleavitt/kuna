@@ -130,7 +130,8 @@ impl AnalysisPass for ObjcMetadataPass {
 
         // The type-mapping context for IMP/ivar prototypes (PR-O2).
         let (ptr_size, word_size) = ctx.arch.data_org();
-        let tctx = TypeCtx::new(ctx.arch.types(), ptr_size, word_size);
+        let mut tctx = TypeCtx::new(ctx.arch.types(), ptr_size, word_size);
+        tctx.blocks = kuna_decomp::kuna_objcblocks::objcblocks_enabled();
         let sdk = match kuna_decomp::kuna_objcsdk::sdk_path_from_env() {
             Some(root) => kuna_objcsdk::signatures(&root, &kuna_objcsdk::linked_frameworks(ctx.file, ctx.bytes)),
             None => HashMap::new(),
@@ -263,14 +264,15 @@ impl AnalysisPass for ObjcMetadataPass {
             }
         }
         let refs = kuna_objcrefs::emit(&img, ctx.file, ctx.arch, &tctx, &mut selectors, &mut out);
-        kuna_objcblocks::emit(&img, ctx.file, &tctx, &mut out);
+        let globals = kuna_objcblocks::emit(&img, ctx.file, &tctx, &mut out);
         {
             use object::ObjectSymbol;
             let mut creators: Vec<(u64, String)> = out.fid_names.iter().map(|f| (f.addr, f.name.clone())).collect();
             creators.extend(ctx.file.symbols().filter(|s| s.kind() == object::SymbolKind::Text && s.address() != 0).filter_map(|s| {
-                Some((s.address(), s.name().ok()?.trim_start_matches('_').to_string()))
+                let name = s.name().ok()?;
+                Some((s.address(), name.strip_prefix('_').unwrap_or(name).to_string()))
             }));
-            kuna_objcblocks::stack_blocks(&img, ctx.file, ctx.bytes, &tctx, &creators, &mut out);
+            kuna_objcblocks::stack_blocks(&img, ctx.file, ctx.bytes, &tctx, &creators, &globals, &mut out);
         }
         if let Some(table) = out.objc_classes.as_mut() {
             table.selector_at.extend(selectors.strings.iter().map(|(va, s)| (*va, s.clone())));
