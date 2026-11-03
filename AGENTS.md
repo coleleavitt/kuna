@@ -1,1 +1,1 @@
-docs/agents.md
+CLAUDE.md
