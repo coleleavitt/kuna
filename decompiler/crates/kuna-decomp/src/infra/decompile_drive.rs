@@ -2124,9 +2124,11 @@ fn decompile_func_full_with_objects_inner(
         // (kuna `importvote`) An undeclared import a tail call reaches takes
         // what its other call sites pass.
         crate::p4_calls::kuna_importvote::seed(arch, &fd);
-        // (kuna `tailcontract`) A single-function drive has no callee-first run
-        // behind it, so it states the prototype of each tail-called callee first.
-        if purpose == DrivePurpose::SingleFunction && CONTRACT_DEPTH.with(|d| d.get()) == 0 {
+        // (kuna `tailcontract`) A drive with no callee-first run behind it states
+        // the prototype of each tail-called callee first.
+        if (purpose == DrivePurpose::SingleFunction || arch.kuna_tail_contract_batch)
+            && CONTRACT_DEPTH.with(|d| d.get()) == 0
+        {
             bootstrap_tail_callees(arch, &fd);
         }
         // (kuna `protoorder types`) The parameter types callees decompiled earlier stated.

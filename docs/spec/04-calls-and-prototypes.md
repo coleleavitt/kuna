@@ -3897,6 +3897,18 @@ nested drives do not recurse, and declared or already-stated callees are
 skipped. `option tailcontract off`, or `protoorder off`, decompiles the thunk
 from its own body alone.
 
+A `decompile-all` that selects part of the binary (`--addr`, `--functions`,
+`--filter`, `--limit` and the other triage flags) and `kuna decompile --json`
+have no callee-first order behind them either: `callee_first_decision` takes
+that order only for a whole-program run, and only a callee inside the batch can
+state anything. They ran their batch drive without this bootstrap, so a tail
+call to a callee with no declaration lost every argument it forwards: on an
+AArch64 forwarder `ldr x8,[x3]; cbz x8,L; b target` the selected function
+printed `target(); // tail-call` while `kuna decompile` printed
+`target(a0,a1,a2,a3,a4)`. Their batch now arms the same bootstrap for each
+function (`Architecture::kuna_tail_contract_batch`, set around the loop by
+`decompile_entries`); a whole-program run, callee-first or not, does not.
+
 ### (kuna) `importvote` — an undeclared import takes what its callers pass
 
 A tail jump to an import (`add esi,1; jmp ext3@plt`) forwards every argument

@@ -1,0 +1,43 @@
+{
+  "schema": "re-probe/1",
+  "kind": "cli",
+  "cmd": [
+    "{{KUNA}}",
+    "decompile-all",
+    "{{BIN}}",
+    "--addr",
+    "0x21015c",
+    "--option",
+    "tailcontract",
+    "off"
+  ],
+  "cwd": "{{WORK}}",
+  "env": {
+    "SLEIGHHOME": "{{SPECS}}"
+  },
+  "stdin": null,
+  "timeout_s": 120,
+  "repeat": 1,
+  "target": {
+    "binary_rel": "decompiler/crates/kuna-analysis/tests/fixtures/tailcontract_fwd_aarch64",
+    "binary_sha256": "973aa3daff55a6fb9d02fd8cbf9cb4fdcfd3123ae601c64225bdd76c24adb8af",
+    "binary_size": 1344,
+    "binary_source": "in-repo",
+    "in_repo_path": "decompiler/crates/kuna-analysis/tests/fixtures/tailcontract_fwd_aarch64",
+    "selector": "0x21015c",
+    "selector_kind": "addr"
+  },
+  "expect": {
+    "exit_code": {
+      "eq": 0
+    },
+    "stdout_matches": [
+      "target\\(\\);"
+    ],
+    "stdout_absent": [
+      "target\\(a0"
+    ]
+  },
+  "notes": "The same selection with tailcontract off: nothing states target's prototype, the unchanged input registers are no realistic trials, and the tail call forwards nothing, so the probe above measures the option.",
+  "probe_id": "p-75bf4196d3e1"
+}

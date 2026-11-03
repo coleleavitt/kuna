@@ -1352,7 +1352,7 @@ fn decompile_all(args: &Args, filters: &Filters) -> Result<AllRun, String> {
     let funcs = if callee_first {
         decompile_entries_callee_first(&mut prog, args, targets, explicit)
     } else {
-        decompile_entries(&mut prog, args, targets, /* pointer_arguments= */ true)
+        decompile_entries(&mut prog, args, targets, /* pointer_arguments= */ true, !whole)
     };
     Ok(AllRun { funcs, discovered, assertions: prog.assertion_outcomes(), interior, declared })
 }
@@ -1401,12 +1401,16 @@ pub(crate) fn parse_max_fn_memory(v: &str) -> Result<u64, String> {
 /// instead of hanging the whole batch.
 ///
 /// `pointer_arguments` is whether the returned batch reconciles scalar
-/// addresses with the parameter declarations printed in it.
+/// addresses with the parameter declarations printed in it.  `tail_contracts`
+/// (a selection with no callee-first order behind it) has each function state
+/// its tail callees' prototypes first, as `kuna decompile` does (option
+/// `tailcontract`).
 pub(crate) fn decompile_entries(
     prog: &mut ConsoleProgram,
     args: &Args,
     targets: Vec<FunctionEntry>,
     pointer_arguments: bool,
+    tail_contracts: bool,
 ) -> Vec<FuncResult> {
     arm_fn_budgets(prog, args);
     let opts = DecompileOptions {
@@ -1416,7 +1420,10 @@ pub(crate) fn decompile_entries(
         want_pointer_arguments: pointer_arguments,
         ..DecompileOptions::default()
     };
-    kuna_console::project::decompile_targets_with(prog, targets, &opts)
+    prog.arch_mut().kuna_tail_contract_batch = tail_contracts;
+    let funcs = kuna_console::project::decompile_targets_with(prog, targets, &opts);
+    prog.arch_mut().kuna_tail_contract_batch = false;
+    funcs
 }
 
 /// (kuna `protoorder`) Whether this run takes the callee-first order, and

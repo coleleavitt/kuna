@@ -1151,6 +1151,11 @@ pub struct Architecture {
     /// (kuna) A single-function drive states each tail-called callee's prototype
     /// first (option `tailcontract`).
     pub tail_contract: bool,
+    /// (kuna `tailcontract`) A batch drive with no callee-first order behind
+    /// it (a narrowed `decompile-all`, `kuna decompile --json`) states its tail
+    /// callees first as a single-function drive does.  Driver state, not an
+    /// option: the front-end sets it around such a batch.
+    pub kuna_tail_contract_batch: bool,
     /// (kuna) Tie each return's stack pointer to the entry one in the stack
     /// solver (option `stackexitanchor`).
     pub stack_exit_anchor: bool,
@@ -3636,6 +3641,7 @@ impl Architecture {
             callee_preserves: true,
             callee_ret_purge: true,
             tail_contract: true,
+            kuna_tail_contract_batch: false,
             stack_exit_anchor: true,
             fde_flow_bound: true,
             kuna_fde_extents: Rc::new(Vec::new()),
