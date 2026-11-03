@@ -10,7 +10,8 @@
 //!   [`crate::loader::elf_plt::resolve_imports_with_got_slots`] as
 //!   [`ImportSym`]s: the PLT stubs, then the `.got` slots of imports no stub
 //!   fronts, which [`ElfFormat::import_slots`] also reports as ranges.
-//! - [`ElfFormat::const_ranges`] is `elf_plt::mips_got_const_ranges`.
+//! - [`ElfFormat::const_ranges`] is `elf_plt::mips_got_const_ranges`, plus the
+//!   defined-address MIPS GOT slots of `kuna_mipsgot`.
 //!
 //! The existing ELF fixtures + the 675 datatests are the proof this is
 //! byte-identical (see the module doc on [`super`]).
@@ -146,8 +147,14 @@ impl ObjectFormat for ElfFormat {
         slots
     }
 
+    fn local_import_targets(&self, file: &object::File, bytes: &[u8]) -> Vec<(u64, u64)> {
+        crate::loader::kuna_pltlocal::bind(file, &crate::loader::elf_plt::resolve_plt_imports(file, bytes))
+    }
+
     fn const_ranges(&self, file: &object::File, _bytes: &[u8]) -> Vec<(u64, u64)> {
-        crate::loader::elf_plt::mips_got_const_ranges(file)
+        let mut ranges = crate::loader::elf_plt::mips_got_const_ranges(file);
+        ranges.extend(crate::loader::kuna_mipsgot::const_ranges(file));
+        ranges
     }
 
     /// An `ET_REL` object carries no program headers, so `file.segments()` is

@@ -114,7 +114,9 @@ writeup, not here.
 
 | `gh1243-8051-addc.xml` | [GH-1243](https://github.com/NationalSecurityAgency/ghidra/issues/1243) | S2 pcode-lift (8051 spec-fix, no option) | SLEIGH ADDC carry-in computed in a 2-byte temp (`do_addc`) so the carry-out survives |
 
-| `gh7418-x86-call-rel16-mask.xml` | [GH-7418](https://github.com/NationalSecurityAgency/ghidra/issues/7418) | S1 decode / S2 p-code lift (x86 spec-fix, no option) | SLEIGH `rel16` masks tempEIP to low 16 bits (32/16-bit) |
+| `gh7418-x86-call-rel16-mask.xml` | [GH-7418](https://github.com/NationalSecurityAgency/ghidra/issues/7418) | S1 decode / S2 p-code lift (x86 spec-fix, no option) | SLEIGH `rel16` masks tempEIP to low 16 bits (32-bit code, 0x66 prefix; 16-bit code: kuna-x86-16-real-rel16.xml) |
+| `kuna-x86-16-real-rel16.xml` | kuna [#1288](https://github.com/Noelo-Lab/kuna/issues/1288) (a DOS program loaded at segment 0x1000: the GH-7418 mask sent every real-mode `CALL rel16` above linear 0x10000 into the first 64 KiB, so discovery found 12 of 330 functions) | S1 decode / S2 p-code lift (x86-16 spec, no option) | x86-16.sla keeps the code segment `realCS` in the decode context: a near branch wraps IP inside its segment and passes `realCS` on, a far CALL states its target's, every CALL pushes IP in its own segment, and code outside the segment takes the linear sum |
+| `kuna-x86-16-protected-rel16.xml` | kuna [#1288](https://github.com/Noelo-Lab/kuna/issues/1288) (companion: a 16-bit protected-mode branch lost its selector to the same mask) | S1 decode / S2 p-code lift (x86-16 spec, no option) | SLEIGH `rel16` keeps the selector and wraps the offset in 16-bit protected mode |
 
 | `gh7139-x86-16-disp16-signed.xml` | [GH-7139](https://github.com/NationalSecurityAgency/ghidra/issues/7139) | S1 decode / operand rendering (x86 spec-fix, no option) | SLEIGH 16-bit disp16 (modrm mod=2) uses signed `simm16` |
 
@@ -192,6 +194,9 @@ writeup, not here.
 | `kuna-loweredswitchexact.xml` | GH-468 finding 4 (install soundness) | P2 switch model (every case value keeps its label; a switch that differs from its compare tree is declined) | `option loweredswitchexact on\|off` |
 | `kuna-loweredswitchheads.xml` | GH-468 finding 4 | P2 switch model (a cascade behind a later head on the switch variable is re-rolled) | `option loweredswitchheads on\|off` |
 | `kuna-switchguardreload.xml` | [Kuna #1028](https://github.com/Noelo-Lab/kuna/issues/1028) | P2 switch model (a guard on a byte in memory bounds the index read by a second load of the same address; the adjacent table is not read) | default correctness fix (no option) |
+| `kuna-lanedivide-terminator.xml` | [Kuna #1157](https://github.com/Noelo-Lab/kuna/issues/1157) | P3 laned-register split (a SUBPIECE narrower than a lane, read from a piece holding only upper lanes, terminates in the lane its byte offset reaches from the start of the whole register; upstream GP-7434) | default correctness fix (no option) |
+| `kuna-duplabels.xml` | kuna (a block cloned by return splitting printed `label_<addr>:` once per copy in liblua5.3, libsqlite3, e2fsck, bash, ssh) | P9 emission (label naming: copies of one block that are all goto targets print `label_<addr>`, `label_<addr>_2`, ..., and each goto names its own copy) | default correctness fix (no option) |
+| `kuna-retcopyclone.xml` | [Kuna #1355](https://github.com/Noelo-Lab/kuna/issues/1355) (a store before a `cmp; cmov; ret`, or before a shared `leave; ret`, printed a second time on one return path) | P8 structure (a return block cloned per predecessor keeps each global's `return_copy` guard flag, and a phi on address-tied storage leaves no `g = g` copy, so neither is rewritten into a second store; the order the split prints stores its phis absorbed) | default correctness fix (no option) + `option clonephiorder on\|off` |
 | `kuna-switchunrolledsense.xml` | [Kuna #1028](https://github.com/Noelo-Lab/kuna/issues/1028) | P2 switch model (copies of the bound check on each predecessor of the dispatch, with opposite branch senses, bound the merged index) | `option switchmultipred on\|off` |
 
 | `gh8017-stackprobeloop.xml` | [GH-8017](https://github.com/NationalSecurityAgency/ghidra/issues/8017) | S2 stack-pointer normalization (stack-probe loop) | `option stackprobeloop on\|off` |
@@ -305,6 +310,7 @@ readability defaults measured on the angr `fmt` corpus binary, DIV-34+ in
 | `kuna-importdata.xml` | a data import read through its `__got` slot prints as a dereference of the anonymous slot (`*dat_100004000`; 921 such reads on the A13 trustd, `*dat_1041cc6c8` for the stack guard on Toyota) although the slot is named for the import and painted externref | P9 naming-policy (`PrintC::op_load` resolves a LOAD through an externref import slot as `ActionDeindirect` resolves a call through it) | `option importdata on\|off` (new kuna settable, default off; carried by `--mode aggressive`) |
 | `kuna-elfgotimports.xml` | an ELF `-fPIC` read of data another object defines (`stdout`, `environ`, a library global) loads a `GLOB_DAT` GOT slot and then loads through it, and printed as `*dat_<slot>`: PE/Mach-O import slots were painted externref but an ELF GOT slot never was | P1 environment-binding (`kuna_elfgotimports`: the undefined-symbol `GLOB_DAT` slots are import slots, named and painted externref) + P9 naming-policy (`importdata`) | `option importdata on\|off` (default off); x86-64 and AArch64 shared objects, with a defined-symbol control |
 | `kuna-cfstrings.xml` | a Mach-O `__cfstring` constant prints as its entry address (`NSLog(0x1044376b0)` on the Toyota iOS app): code references the CFString struct, and the constant-string route reads the bytes at that address | P1 external-refinement (the Mach-O `cfstrings` analysis pass; the commit types the entry `char[N]` and seeds the StringManager with its resolved string); `option cfstrings on\|off` (new kuna settable, default off; carried by `--mode aggressive`) |
+| `kuna-stacksolver-unsolved.xml` | kuna [#1288](https://github.com/Noelo-Lab/kuna/issues/1288) (a PKLITE-packed DOS executable decompiled as a raw real-mode image grew memory without bound: `DEC SP` in its packed body solved a stack variable to 65535, the `StackSolver` sentinel for "unsolved", and two such variables re-pushed each other forever; where the solve did finish, the genuine 65535 still read as unsolved and the function kept a raw stack-pointer local) | P6 variables, `ActionStackPtrFlow` extra-pop solve | none (strict fix): the solve terminates and the loop around the call is emitted; `h` reads its return address at entry + 2 with no raw stack-pointer local |
 
 `kuna-storecopyeffects.xml` pins the AArch64 address-spill store across calls,
 repeated stores, a load between calls, and a truly dead-store control. The
@@ -411,3 +417,59 @@ on: a `kalloc_type` view and an `IOExternalMethodDispatch` handler gain names.
 `kuna-osclassinfo.xml` decompiles a synthetic DriverKit executable
 (`gen_dext.py`) with `osclassinfo` off and on: its metaclass global and `New`
 function take their class's name.
+`kuna-ppc32picimports.xml` changes the live option off/on/off after loading one
+PPC32 ELF. Only the enabled pass names its proved terminal call and removes the
+unreachable continuation. The shared stub remains anonymous. The CLI companion
+covers both byte orders, both stub forms, direct and indirect calls, entry
+contexts, returning callers and unproved memory or control flow.
+
+`kuna-ppc32picimports-indirect.xml` checks an indirect caller selecting a returning
+slot through the same stub as a terminal direct caller. Its return is preserved.
+
+`kuna-ppc32picimports-runtime.xml` loads images with different relocations in one
+process. Each caller uses its own image's metadata; returning callers keep their
+original calls and continuations. Other PPC32 stages exercise callback entries,
+spills, computed transfers, packed pointers and executable mapping boundaries.
+All retained ELF fixtures are generated by `ppc32_import_fixture.rs` and checked
+byte-for-byte by the CLI integration suite.
+
+`kuna-ppc32picimports-reversed-save.xml` preserves the returning continuation
+when an unaligned reversed store overlaps the saved PIC base. Its CLI companion
+covers both byte orders and a neighboring-store control that still recovers
+the terminal import.
+
+`kuna-ppc32picimports-slot-clobber.xml` retains a return after an imported copy
+overwrites a writable relocation slot, across off/on/off option toggles.
+
+- `kuna-ppc32picimports-abi.xml`, `kuna-ppc32picimports-abi-indirect.xml`, and
+  `kuna-ppc32picimports-driver.xml` exercise explicit `ppc32picimports abi`
+  recovery, including ordinary returning callers and compiler start files.
+
+`ghangr-godwarfsig.xml` checks opt-in Go DWARF scalar/pointer signatures,
+compressed cross-unit references, result roles, caller propagation and a wrong-register
+control. Its console companion executes hermetic and native recovered Go bodies.
+
+`ghangr-go-pair-results.xml` checks opt-in paired 64-bit Go integer results,
+ordinary local struct storage, destructuring calls and nested result selection.
+Its console companion covers both option gates, malformed cross-unit DWARF,
+metadata collisions, indirect calls and complete emitted native Go bodies.
+
+`ghangr-go-string-pointers.xml` exercises internal byte-string arguments in C and
+Go output, including escapes, UTF-8 and the data-pointer conversion. Its emitted
+Go bodies also compile and execute against a byte-checking sink.
+
+`kuna-ppc32picimports-runtime.xml` covers both caller-local `on` bindings and
+ABI-mode reloads of images whose legacy fingerprints collide, plus a TAR helper
+whose skipped assignment must not become a no-return import contract.
+
+`ghangr-joined-callback-return.xml` covers late typed callbacks returning an
+integer pair: either component, a narrowed high component, both components,
+whole forwarding, and scalar and void callback controls.
+
+`ghangr-integer-field-extract.xml` checks narrow, narrow-then-widen, and shifted
+integer fields in C, Go and Rust. Native CLI tests execute the complete emitted
+callers against boundary values and check that each helper is called once.
+
+`ghangr-go-store-value.xml` checks Go integer destination conversions for fields,
+plain/indexed pointers and a side-effectful call, with all integer widths and
+complete native bodies covered by the CLI integration fixture.

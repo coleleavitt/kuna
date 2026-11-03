@@ -2174,7 +2174,50 @@ mod tests {
         // and kuna-dedupitetail-switchgoto / a switch case goto into an unwrapped if clause keeps its target
         // and kuna-vaarg-loop-gcc/-clang / va_arg in loops on a promoted va_list
         // and kuna-vtabletypes / C++ virtual calls through typed vtable slots
-        assert_eq!(count, 719, "corpus file count drifted");
+        // and kuna-stacksolver-unsolved / a 16-bit stack solution of 65535 is solved once
+        // and kuna-bejoin-evidence-pairs / a long long loaded or carried across a call joins
+        // high word first (option bejoin off = swapped)
+        // and kuna-prunedssa / heritage markers only where a range is live (options prunedssa, readonlycalls)
+        // and kuna-lanedivide-terminator / a terminating SUBPIECE of an upper-lane piece
+        // and kuna-x86-16-real-rel16 + kuna-x86-16-protected-rel16 / 16-bit near branches keep their segment
+        // and kuna-segmentize / x86 real-mode accesses go through the segment op (option segmentize)
+        // and kuna-calleepop-x86-16 / a near call is credited the two bytes it stores (option calleepop)
+        // and kuna-returnglobal-sparc / a global in %o1 is not joined into an int's return
+        // and kuna-segmentize-z80 / a Z80 table with a row outside the image is still followed
+        // and kuna-loadguardreads / LOAD guards read while renaming (option loadguardreads)
+        // and kuna-dedup-goto-arm / a goto into an arm unwrapped by a suffix hoist keeps a live target
+        // and kuna-bejoin-callers / a long long whose callers read both registers joins
+        // high word first (option bejoin evidence = swapped)
+        // and kuna-x86-16-fpuemu / the 8087 emulator's INT 34h-3Dh decode as x87 (option fpuemu)
+        // and kuna-retsplitlimit / a return block too costly to clone keeps its gotos (option retsplitlimit)
+        // and kuna-deadwaves / a pass after a removal-only pass visits only what it touched (option deadwaves)
+        // and kuna-earlyrestart / a pass stops at a dead-code delay bump and restarts at once (option earlyrestart)
+        // and kuna-duplabels / two copies of one block print distinct labels
+        // and kuna-pltlocal / a call through a bound PLT stub takes the definition's prototype (option pltlocal)
+        // and kuna-floatstore / a float stored into unknown bytes is a float store
+        // and kuna-haltloopguard / a store before a loop the function never leaves is kept (option haltloopguard)
+        // and kuna-lanedivide-freefanout / a lane split giving a free varnode two readers is refused, not fatal
+        // and kuna-octeon-core / explicit Octeon integer variants
+        // and kuna-truncptrflow / pointer flow on a truncated address space (option truncptrflow)
+        // and kuna-retcopyclone / a cloned return block does not store a global a second time
+        // and kuna-switchrunon / an unguarded jump table stops where its rows leave the function (option switchrunon)
+        // and kuna-revisitrefine / refining a range a later heritage pass revisited
+        // and kuna-wrapsplit + kuna-wrapsplit-be / accesses that run past the top of their space
+        // and kuna-relocobj-ppc-mips / PowerPC and MIPS relocatable objects' calls and addresses
+        // and kuna-bejoin-mipspic / MIPS PIC callers and unaligned loads (option bejoin callers)
+        // and kuna-funcstart-symbolextent / no pattern or gap start inside a sized function symbol
+        // and kuna-relocrebase-be / a big-endian object's analysis facts at its load addresses
+        // and kuna-bejoin-mipsclang / a proven pair whose low word feeds its high word stays whole
+        // and kuna-mipsgot-local / MIPS GOT slots of what the image defines (option dynrelocs)
+        // and kuna-funcstart-symbolextent / no pattern or gap start inside a sized function symbol
+        // and kuna-mipsunaligned / a MIPS unaligned pair lifts as one access (option mipsunaligned)
+        // and ghangr-rust-null-pointer / Rust null-constructor expressions
+        // and ghangr-joined-callback-return / a callback's joined return components
+        // and kuna-bejoinpass / a big-endian pair a call hands back is one value (option bejoinpass)
+        // and kuna-gottailcall / a one-destination jump through an extern's slot is a tail call
+        // and kuna-persistcalls / a persistent global's guards next to its accesses (option persistcalls)
+        // and kuna-segmentize-bios / a real-mode BIOS reset path through the segment op
+        assert_eq!(count, 817, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

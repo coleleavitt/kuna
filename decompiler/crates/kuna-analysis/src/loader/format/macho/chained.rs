@@ -40,8 +40,15 @@
 //!   whose runtime address is unknown statically, so it is never entered into
 //!   the pointer overlay (a consumer reading that slot misses and falls back,
 //!   never reads a wrong address). Its import **name** and **addend** are kept
-//!   instead ([`ChainedFixups::bind`]), resolved through the blob's imports
-//!   table; the addend is the import record's plus the entry's own.
+//!   instead ([`ChainedFixups::bind`], [`ChainedFixups::bind_at`]), resolved
+//!   through the blob's imports table, with its weak-import flag; the addend is
+//!   the import record's plus the entry's own. A bind whose ordinal is out of
+//!   range or whose name cannot be read is still kept, unnamed. The `dynrelocs`
+//!   loader writes a zero into every bind slot, the word other formats leave
+//!   in an import slot.
+//! - **Bounded on hostile input**: the walk spends one hop budget per image
+//!   (the file's length) and one page-start budget (one per 2-byte entry of
+//!   the blob), so a malformed header cannot hang the load.
 //! - **`SG_READ_ONLY` segments** are recorded ([`ChainedFixups::in_readonly_segment`])
 //!   so a loader can treat the rebased slots dyld freezes as constant, the
 //!   Mach-O twin of the ELF `PT_GNU_RELRO` rule in `kuna_dynrelocs`.
@@ -55,8 +62,8 @@
 //! strict no-op on a non-chained-fixup image, and the consumer's behavior there is
 //! byte-identical to before this resolver existed.
 
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::collections::{BTreeMap, HashMap};
+use std::sync::Arc;
 
 use object::read::macho::{LoadCommandVariant, MachHeader, Segment};
 use object::FileKind;
@@ -142,13 +149,15 @@ pub struct ChainedFixups {
     /// be read as a pointer.
     chained: bool,
     /// `slot_vma → resolved_pointer` for every plain/auth **rebase** fixup.
-    rebases: HashMap<u64, u64>,
+    rebases: BTreeMap<u64, u64>,
     /// `slot_vma → (import symbol name, addend)` for every **bind** fixup whose
     /// ordinal names an entry of the imports table (`_OBJC_CLASS_$_NSObject`,
     /// `_malloc`), the name shared by every slot bound to the same import. The
     /// run-time address is unknown statically, so a bind slot is never in
     /// [`Self::rebases`]; this is what a consumer can still say about it.
-    binds: HashMap<u64, (Rc<str>, i64)>,
+    /// A bind whose ordinal is out of range, or whose name cannot be read, is
+    /// kept with an empty name.
+    binds: BTreeMap<u64, ChainedBind>,
     /// `[vmaddr, vmaddr + vmsize)` of every segment flagged `SG_READ_ONLY`.
     readonly_segments: Vec<(u64, u64)>,
     /// Kernel-collection rebases as `(slot_vma, cache_level, target_offset)`,
@@ -157,10 +166,29 @@ pub struct ChainedFixups {
     kernel_cache: Vec<(u64, u8, u64)>,
     /// `slot_vma → signing context` for every authenticated arm64e entry,
     /// rebase or bind.
-    auth: HashMap<u64, AuthContext>,
+    auth: BTreeMap<u64, AuthContext>,
     /// Chain hops walked so far, across every chain of the image. A valid
     /// chain visits each slot once, so the file's length bounds the total.
     hops: usize,
+    /// Page starts read so far, across every segment; bounded by the blob's
+    /// size, since each start is one 2-byte entry of it.
+    starts: usize,
+    /// The slot width of the image's pointer format (4 for the 32-bit formats),
+    /// 0 until a chain is walked.
+    width: u8,
+}
+
+/// One bind fixup: the import a slot is bound to at load time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChainedBind {
+    /// The imported symbol's name as the image spells it (`_printf`), shared
+    /// by every bind of that import; empty when the ordinal is out of range,
+    /// the names are compressed or the name is not terminated in the pool.
+    pub name: Arc<[u8]>,
+    /// The bind's addend plus its import record's.
+    pub addend: i64,
+    /// A weak import: dyld leaves the slot 0 when no image defines it.
+    pub weak: bool,
 }
 
 /// How dyld signs an authenticated chained pointer at load: the key, whether
@@ -180,7 +208,7 @@ impl ChainedFixups {
     /// An overlay from another loader's resolved pointer slots (an ELF's
     /// `R_*_RELATIVE` addends), so a reader works the same on both formats.
     pub fn from_rebases(rebases: HashMap<u64, u64>) -> ChainedFixups {
-        ChainedFixups { rebases, ..ChainedFixups::default() }
+        ChainedFixups { rebases: rebases.into_iter().collect(), ..ChainedFixups::default() }
     }
 
     /// Whether this image carried any chained-fixup rebases (`false` ⇒ the
@@ -202,12 +230,12 @@ impl ChainedFixups {
         self.rebases.get(&va).copied()
     }
 
-    /// Every resolved rebase target, in no particular order.
+    /// Every resolved rebase target, in slot order.
     pub fn targets(&self) -> impl Iterator<Item = u64> + '_ {
         self.rebases.values().copied()
     }
 
-    /// Every `(slot_vma, resolved_pointer)` rebase, in no particular order.
+    /// Every `(slot_vma, resolved_pointer)` rebase, in slot order.
     pub fn rebases(&self) -> impl Iterator<Item = (u64, u64)> + '_ {
         self.rebases.iter().map(|(&va, &target)| (va, target))
     }
@@ -217,8 +245,7 @@ impl ChainedFixups {
         self.auth.get(&va).copied()
     }
 
-    /// Every `(slot_vma, signing context)` authenticated entry, in no particular
-    /// order.
+    /// Every `(slot_vma, signing context)` authenticated entry, in slot order.
     pub fn auth_slots(&self) -> impl Iterator<Item = (u64, AuthContext)> + '_ {
         self.auth.iter().map(|(&va, &ctx)| (va, ctx))
     }
@@ -232,12 +259,29 @@ impl ChainedFixups {
     /// The import symbol and addend of the bind fixup at slot `va`: the slot
     /// holds `&symbol + addend` at run time.
     pub fn bind(&self, va: u64) -> Option<(&str, i64)> {
-        self.binds.get(&va).map(|(name, addend)| (&**name, *addend))
+        let bind = self.binds.get(&va)?;
+        let name = std::str::from_utf8(&bind.name).ok().filter(|n| !n.is_empty())?;
+        Some((name, bind.addend))
     }
 
-    /// Every `(slot_vma, import name)` bind, in no particular order.
-    pub fn binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
-        self.binds.iter().map(|(&va, (name, _))| (va, &**name))
+    /// Every `(slot_vma, import name)` bind whose import is named, in slot order.
+    pub fn named_binds(&self) -> impl Iterator<Item = (u64, &str)> + '_ {
+        self.binds.keys().filter_map(|&va| self.bind_name(va).map(|name| (va, name)))
+    }
+
+    /// Every bind as `(slot, import)`, in slot order, unnamed ones included.
+    pub fn binds(&self) -> impl Iterator<Item = (u64, &ChainedBind)> + '_ {
+        self.binds.iter().map(|(&va, bind)| (va, bind))
+    }
+
+    /// The import bound at slot `va`, if `va` is a bind fixup.
+    pub fn bind_at(&self, va: u64) -> Option<&ChainedBind> {
+        self.binds.get(&va)
+    }
+
+    /// The width in bytes of every fixup slot this image carries.
+    pub fn slot_width(&self) -> u8 {
+        if self.width == 0 { 8 } else { self.width }
     }
 
     /// Whether `va` lies in a segment dyld maps read-only after fixups
@@ -354,7 +398,7 @@ where
 /// names in the uncompressed symbol pool at `symbols_offset`). Empty for a
 /// compressed symbol pool (`symbols_format != 0`) or an unknown record format,
 /// which leaves every bind slot unnamed (the inert path).
-fn read_imports(blob: &[u8]) -> Vec<(Rc<str>, i64)> {
+fn read_imports(blob: &[u8]) -> Vec<ChainedBind> {
     let (Some(imports_offset), Some(symbols_offset), Some(count), Some(format), Some(symbols_format)) =
         (rd_u32(blob, 8), rd_u32(blob, 12), rd_u32(blob, 16), rd_u32(blob, 20), rd_u32(blob, 24))
     else {
@@ -371,26 +415,26 @@ fn read_imports(blob: &[u8]) -> Vec<(Rc<str>, i64)> {
     };
     let count = (count as usize).min(blob.len() / record);
     let mut imports = Vec::with_capacity(count);
-    let mut by_offset: HashMap<usize, Rc<str>> = HashMap::new();
-    let empty: Rc<str> = Rc::from("");
+    let mut by_offset: HashMap<usize, Arc<[u8]>> = HashMap::new();
+    let empty: Arc<[u8]> = Arc::from(&b""[..]);
     for i in 0..count {
         let at = imports_offset as usize + i * record;
         let (name_offset, addend) = match record {
-            4 => (rd_u32(blob, at).map(|v| (v >> 9) as usize), Some(0)),
-            8 => (rd_u32(blob, at).map(|v| (v >> 9) as usize), rd_u32(blob, at + 4).map(|a| a as i32 as i64)),
-            _ => (rd_u64(blob, at).map(|v| (v >> 32) as usize), rd_u64(blob, at + 8).map(|a| a as i64)),
+            4 => (rd_u32(blob, at).map(|v| ((v >> 9) as usize, v & 0x100 != 0)), Some(0)),
+            8 => (rd_u32(blob, at).map(|v| ((v >> 9) as usize, v & 0x100 != 0)), rd_u32(blob, at + 4).map(|a| a as i32 as i64)),
+            _ => (rd_u64(blob, at).map(|v| ((v >> 32) as usize, v & 0x1_0000 != 0)), rd_u64(blob, at + 8).map(|a| a as i64)),
         };
-        let (Some(off), Some(addend)) = (name_offset, addend) else {
-            imports.push((Rc::clone(&empty), 0));
+        let (Some((off, weak)), Some(addend)) = (name_offset, addend) else {
+            imports.push(ChainedBind { name: Arc::clone(&empty), addend: 0, weak: false });
             continue;
         };
         let name = by_offset.entry(off).or_insert_with(|| {
             blob.get(symbols_offset as usize + off..)
                 .and_then(|tail| tail.split(|&b| b == 0).next())
-                .map(|s| Rc::from(String::from_utf8_lossy(s).as_ref()))
-                .unwrap_or_else(|| Rc::clone(&empty))
+                .map(Arc::from)
+                .unwrap_or_else(|| Arc::clone(&empty))
         });
-        imports.push((Rc::clone(name), addend));
+        imports.push(ChainedBind { name: Arc::clone(name), addend, weak });
     }
     imports
 }
@@ -464,7 +508,7 @@ fn walk_fixups(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[(Rc<str>, i64)],
+    imports: &[ChainedBind],
     out: &mut ChainedFixups,
 ) {
     // dyld_chained_fixups_header { fixups_version, starts_offset, imports_offset,
@@ -492,7 +536,7 @@ fn walk_segment(
     segs: &[SegInfo],
     imagebase: u64,
     file: &[u8],
-    imports: &[(Rc<str>, i64)],
+    imports: &[ChainedBind],
     out: &mut ChainedFixups,
 ) {
     // struct dyld_chained_starts_in_segment {
@@ -510,6 +554,8 @@ fn walk_segment(
 
     // An unhandled format: leave its chains unresolved (the inert path).
     let Some(stride) = chain_stride(pointer_format) else { return };
+    out.width = if matches!(pointer_format, ptr_format::PTR_32 | ptr_format::PTR_32_FIRMWARE) { 4 } else { 8 };
+    let start_budget = blob.len() / 2;
 
     // dyld computes the chain head from the **mach_header** pointer, not the
     // per-segment base: `chain = mh + segment_offset + pageIndex*page_size +
@@ -520,6 +566,10 @@ fn walk_segment(
     // fileoff, so the chain head lands at the segment's first fixup byte.)
     let page_starts = p + 22;
     for pi in 0..page_count as usize {
+        if out.starts >= start_budget {
+            return;
+        }
+        out.starts += 1;
         let Some(page_start) = rd_u16(blob, page_starts + 2 * pi) else { continue };
         if page_start == PTR_START_NONE {
             continue;
@@ -533,6 +583,10 @@ fn walk_segment(
         // that follows `page_start[]`, its last entry flagged PTR_START_LAST.
         let mut j = (page_start & !PTR_START_MULTI) as usize;
         for _ in 0..0x8000u32 {
+            if out.starts >= start_budget {
+                return;
+            }
+            out.starts += 1;
             let Some(start) = rd_u16(blob, page_starts + 2 * j) else { break };
             let offset = (start & !PTR_START_LAST) as u64;
             walk_chain(file, segs, page_va.wrapping_add(offset), stride, Format { id: pointer_format, imagebase, max_valid }, imports, out, PAGE_CHAIN_HOPS);
@@ -616,7 +670,7 @@ fn walk_chain(
     first_va: u64,
     stride: u64,
     format: Format,
-    imports: &[(Rc<str>, i64)],
+    imports: &[ChainedBind],
     out: &mut ChainedFixups,
     max_hops: usize,
 ) {
@@ -645,9 +699,11 @@ fn walk_chain(
             if let Some(target) = decoded {
                 out.rebases.insert(va, target);
             } else if let Some((ordinal, addend)) = bind_entry(raw, format.id) {
-                if let Some((name, import_addend)) = imports.get(ordinal).filter(|(n, _)| !n.is_empty()) {
-                    out.binds.insert(va, (Rc::clone(name), import_addend.wrapping_add(addend)));
-                }
+                let bind = match imports.get(ordinal) {
+                    Some(import) => ChainedBind { addend: import.addend.wrapping_add(addend), ..import.clone() },
+                    None => ChainedBind { name: Arc::from(&b""[..]), addend, weak: false },
+                };
+                out.binds.insert(va, bind);
             }
             next
         };
@@ -1096,7 +1152,7 @@ mod tests {
         blob.extend_from_slice(&((4u32 << 9) | 1).to_le_bytes()); // name_offset 4
         blob.extend_from_slice(b"_ab\0_OBJC_CLASS_$_X\0");
         let imports = read_imports(&blob);
-        let entries: Vec<(&str, i64)> = imports.iter().map(|(n, a)| (&**n, *a)).collect();
+        let entries: Vec<(&str, i64)> = imports.iter().map(|i| (std::str::from_utf8(&i.name).unwrap(), i.addend)).collect();
         assert_eq!(entries, [("_ab", 0), ("_OBJC_CLASS_$_X", 0)]);
         blob[24..28].copy_from_slice(&1u32.to_le_bytes()); // a compressed pool is left alone
         assert!(read_imports(&blob).is_empty());
@@ -1117,7 +1173,7 @@ mod tests {
         blob.extend_from_slice(&(-8i32).to_le_bytes());
         blob.extend_from_slice(b"_a\0_b\0");
         let imports = read_imports(&blob);
-        let entries: Vec<(&str, i64)> = imports.iter().map(|(n, a)| (&**n, *a)).collect();
+        let entries: Vec<(&str, i64)> = imports.iter().map(|i| (std::str::from_utf8(&i.name).unwrap(), i.addend)).collect();
         assert_eq!(entries, [("_a", 16), ("_b", -8)]);
     }
 
@@ -1248,5 +1304,49 @@ mod tests {
             walk_chain(&file, &segs, imagebase, 4, format, &[], &mut out, PAGE_CHAIN_HOPS);
         }
         assert!(out.hops <= file.len());
+    }
+
+    /// The fixture's chains: two rebases, and one bind named through the
+    /// imports table, in both on-disk layouts.
+    #[test]
+    fn fixture_rebases_and_binds() {
+        for name in ["macho_ptrslots_arm64", "macho_ptrslots_offset_arm64"] {
+            let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+            let bytes = std::fs::read(&path).expect("fixture");
+            let file = object::File::parse(&bytes[..]).expect("parse");
+            let fixups = resolve_chained_fixups(&file, &bytes);
+            let rebases: Vec<(u64, u64)> = fixups.rebases().collect();
+            assert_eq!(rebases, vec![(0x100004000, 0x100000440), (0x100004008, 0x1000003c8)], "{name}");
+            let binds: Vec<(u64, &ChainedBind)> = fixups.binds().collect();
+            let want = ChainedBind { name: Arc::from(&b"_audit_imported"[..]), addend: 0, weak: false };
+            assert_eq!(binds, vec![(0x100004010, &want)], "{name}");
+            assert_eq!(fixups.slot_width(), 8);
+        }
+    }
+
+    /// A hostile header: 4096 segments sharing one table of 65535 page
+    /// starts. The walk reads at most one start per 2-byte entry of the blob,
+    /// not 4096 * 65535 of them.
+    #[test]
+    fn segments_sharing_a_start_table_stop_at_the_blob_size() {
+        let segs = [SegInfo { vmaddr: 0x1_0000_0000, fileoff: 0, filesize: 0 }];
+        let mut blob = vec![0u8; 32];
+        blob[4..8].copy_from_slice(&28u32.to_le_bytes());
+        let seg_count = 4096u32;
+        blob[28..32].copy_from_slice(&seg_count.to_le_bytes());
+        let table = 4 + 4 * seg_count;
+        for _ in 0..seg_count {
+            blob.extend_from_slice(&table.to_le_bytes());
+        }
+        let mut seg = vec![0u8; 22 + 2 * 0xFFFF];
+        seg[4..6].copy_from_slice(&0x4000u16.to_le_bytes());
+        seg[6..8].copy_from_slice(&ptr_format::PTR_64.to_le_bytes());
+        seg[20..22].copy_from_slice(&0xFFFFu16.to_le_bytes());
+        blob.extend_from_slice(&seg);
+        let file = blob.clone();
+        let mut out = ChainedFixups::default();
+        walk_fixups(&blob, &segs, 0x1_0000_0000, &file, &[], &mut out);
+        assert!(out.starts <= blob.len() / 2, "the shared table spends the blob's starts");
+        assert!(out.rebases.is_empty());
     }
 }

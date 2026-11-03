@@ -101,6 +101,9 @@ pub fn check_input_trial_use(idx: int4, data: &mut Funcdata, aliascheck: &mut Al
     let format_arguments = crate::p4_calls::kuna_varargformat::arguments(data, data.get_call_specs(idx));
     let num_trials = data.get_call_specs_mut(idx).get_active_input().get_num_trials();
     for i in 0..num_trials {
+        if crate::decompile_drive::deadline_passed_in("action activeparam") {
+            return;
+        }
         if data.get_call_specs(idx).active_input().get_trial(i).is_checked() {
             if !data.get_call_specs(idx).active_input().get_trial(i).is_active() {
                 crate::p4_calls::kuna_varargformat::activate_trial(data, idx, i, &format_arguments);
@@ -650,6 +653,7 @@ pub fn build_output_from_trials(
         // that render as locals the function never assigns.
         let entry = fc.get_entry_address().clone();
         let order = crate::kuna_bejoin::call_join_order(data, fc.get_active_output(), Some(&entry));
+        let order = crate::p4_calls::kuna_bejoinpass::call_order(data, fc.get_active_output(), trialvn, order);
         if crate::kuna_rustabi::build_call_output_pair(
             op,
             data,

@@ -25,7 +25,7 @@
     chained-fixup resolver unpacks under `dynrelocs`.
 
     Pass 1 (`option authptrcall off`) reproduces the BUG: the call reads
-    `(*dat_100004018)()`.
+    `(*_slot_ext)()`, the slot's own data symbol.
     Pass 2 (`option authptrcall on`, the shipped default) is the FIX:
     `ext_func()`. `_call_table` calls `_helper` in both passes.
     Pass 1 also turns `machobinds` off: that pass names the same bound
@@ -60,7 +60,7 @@ c0035fd6
   <com>print C</com>
   <com>quit</com>
 </script>
-<stringmatch name="AUTHPTRCALL #1: off calls through the anonymous __auth_ptr slot" min="1" max="1">\(\*dat_100004018\)\(\);</stringmatch>
+<stringmatch name="AUTHPTRCALL #1: off calls through the __auth_ptr slot, not the import" min="1" max="1">\(\*_slot_ext\)\(\);</stringmatch>
 <stringmatch name="AUTHPTRCALL #2: on names the import the slot binds" min="1" max="1">  ext_func\(\);</stringmatch>
 <stringmatch name="AUTHPTRCALL #3: the authenticated rebase resolves the blraa target in both passes" min="2" max="2">  _helper\(\);</stringmatch>
 </decompilertest>

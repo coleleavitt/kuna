@@ -35,8 +35,13 @@
 //!    absolute, relative, PLT-relative, and image-offset fields support
 //!    8/16/32/64-bit widths in the object's byte order. [`super::reloc_apply`]
 //!    additionally decodes ARM branch/data fields, AArch64 branch/page/low-12
-//!    fields, PowerPC64 `REL24`/TOC fields, and 32-bit SPARC call, `sethi`/`or`
-//!    split-immediate, and `DISP32` fields without overwriting opcode bits.
+//!    fields, PowerPC branch, 16-bit half and TOC fields, and 32-bit SPARC
+//!    call, `sethi`/`or` split-immediate, and `DISP32` fields without
+//!    overwriting opcode bits. MIPS fields, with o32's paired `HI16`/`LO16`
+//!    addends and the `$gp`-relative and GOT forms against a synthetic `_gp`
+//!    and GOT laid out between the other sections and the small data, are
+//!    [`super::kuna_mipsreloc`]'s. A PowerPC64 ELFv1 function symbol names an
+//!    `.opd` descriptor; it is registered, and called, at the descriptor's code.
 //!    `A` is the entry's addend for a RELA table and the in-place field value for
 //!    a REL-style one (COFF, 32-bit ELF). Entries that cannot be applied are left
 //!    untouched and grouped by architecture, relocation type, and failure
@@ -63,6 +68,7 @@ use object::{
 };
 
 use super::format::ObjectFormat;
+use super::kuna_mipsreloc;
 use super::reloc_apply::{self, RelocationFailure};
 
 /// Synthetic load base for the first `SHF_ALLOC` section (angr's CLE default for
@@ -223,6 +229,9 @@ pub struct RelocLayout {
     /// VMA plus each external call target.  Feeds `ObjectLoadImage::funcsyms`
     /// (demangle + dedup happen there, as on the linked path).
     pub funcsyms: Vec<(u64, Vec<u8>)>,
+    /// `(addr, size)` of each defined function symbol whose symbol table
+    /// states a size, the largest when two share an address.
+    pub funcsizes: Vec<(u64, u64)>,
     /// Non-fatal relocation diagnostics, aggregated with bounded samples. The
     /// caller prints one report for the load; analysis-side layout reuse stays
     /// silent.
@@ -244,8 +253,14 @@ pub struct RelocLayout {
     pub extern_range: Option<(u64, u64)>,
     /// Half-open extent of allocated ELF COMMON storage, separate from extern slots.
     pub common_range: Option<(u64, u64)>,
-    /// Half-open extent of the synthesized GOT, whose slots are read-only.
+    /// Half-open extent of the synthetic GOT — a MIPS object's `$gp`-relative
+    /// one, or the read-only slots synthesized for other architectures'
+    /// GOT-addressing relocations: its entries hold what the relocations put
+    /// there and nothing else writes them.
     pub got_range: Option<(u64, u64)>,
+    /// A PowerPC64 ELFv1 object's function descriptors: `(descriptor, entry,
+    /// TOC)`, sorted by descriptor address.
+    pub opd: Vec<(u64, u64, Option<u64>)>,
     /// Public object-coordinate map for selectors and machine-readable output.
     pub section_info: Vec<RelocSectionInfo>,
     /// Defined and undefined callable symbols with their original provenance.
@@ -290,17 +305,38 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
     let mut vma_of: HashMap<SectionIndex, u64> = HashMap::new();
     let mut section_info: Vec<RelocSectionInfo> = Vec::new();
     let mut cursor = RELOC_BASE;
-    for sec in file.sections() {
-        if !fmt.is_alloc_section(sec.kind(), sec.flags()) {
-            continue; // not mapped at run time (.rela.*, .symtab, .debug_*, …)
+    // Not mapped at run time: .rela.*, .symtab, .debug_*, … An empty section
+    // occupies no memory; laying it out would alias the next section's VMA (a
+    // COFF object carries empty `.text`/`.data`/`.bss` placeholders ahead of its
+    // per-function COMDATs) for no gain.
+    let mut alloc: Vec<_> = file
+        .sections()
+        .filter(|sec| fmt.is_alloc_section(sec.kind(), sec.flags()) && sec.size() != 0)
+        .collect();
+    // MIPS: the linker's `$gp` and GOT, which sit between the other sections
+    // and the small data `$gp` reaches.
+    let mips = matches!(
+        architecture,
+        Architecture::Mips | Architecture::Mips64 | Architecture::Mips64_N32
+    ) && file.format() == object::BinaryFormat::Elf;
+    let mut gp: Option<kuna_mipsreloc::Gp> = None;
+    let mut got_entries = 0;
+    if mips {
+        alloc.sort_by_key(|sec| kuna_mipsreloc::is_small_data(sec.name().unwrap_or("")));
+        let sized: Vec<(SectionIndex, u64)> = alloc.iter().map(|s| (s.index(), s.size())).collect();
+        got_entries = kuna_mipsreloc::entry_bound(file, &sized);
+    }
+    let small = alloc
+        .iter()
+        .position(|sec| mips && kuna_mipsreloc::is_small_data(sec.name().unwrap_or("")))
+        .unwrap_or(alloc.len());
+    for (i, sec) in alloc.iter().enumerate() {
+        if mips && i == small {
+            let g = kuna_mipsreloc::Gp::new(align_up(cursor, 16), if file.is_64() { 8 } else { 4 }, got_entries, little_endian);
+            cursor = align_up(cursor, 16).wrapping_add(g.size());
+            gp = Some(g);
         }
         let size = sec.size();
-        if size == 0 {
-            // An empty section occupies no memory; laying it out would alias the
-            // next section's VMA (a COFF object carries empty `.text`/`.data`/`.bss`
-            // placeholders ahead of its per-function COMDATs) for no gain.
-            continue;
-        }
         let align = sec.align().max(1);
         let vma = align_up(cursor, align);
         // PROGBITS bytes verbatim; NOBITS (.bss) zero-filled to its RAM size.
@@ -335,13 +371,20 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         });
         cursor = vma.wrapping_add(size);
     }
+    if mips && gp.is_none() {
+        let g = kuna_mipsreloc::Gp::new(align_up(cursor, 16), if file.is_64() { 8 } else { 4 }, got_entries, little_endian);
+        cursor = align_up(cursor, 16).wrapping_add(g.size());
+        gp = Some(g);
+    }
+    let got_base = gp.as_ref().map(|g| g.gp().wrapping_sub(kuna_mipsreloc::GP_BIAS));
 
     // A synthesized GOT for the relocations that address a symbol's GOT slot
     // (`GOTPCREL*`, `ADR_GOT_PAGE`, `GOT_HI20`, ...): a pre-link object has none.
     // One read-only slot per target holds its address, so a load through the
-    // slot folds to the target. Sized by the number of such relocations.
+    // slot folds to the target. Sized by the number of such relocations. MIPS
+    // takes its own `$gp`-relative GOT above instead.
     let pointer = if file.is_64() { 8u64 } else { 4 };
-    let got_relocs = laid
+    let synth_got_relocs = laid
         .iter()
         .filter_map(|l| file.section_by_index(l.index).ok())
         .flat_map(|sec| sec.relocations().collect::<Vec<_>>())
@@ -349,27 +392,12 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
             reloc_apply::classify(architecture, reloc).is_ok_and(|spec| spec.is_some_and(|s| s.via_got()))
         })
         .count() as u64;
-    let got_base = align_up(cursor, 16);
-    if got_relocs != 0 {
-        cursor = got_base + got_relocs * pointer;
+    let synth_got_base = align_up(cursor, 16);
+    if synth_got_relocs != 0 {
+        cursor = synth_got_base + synth_got_relocs * pointer;
     }
-    let mut got_slots: HashMap<u64, u64> = HashMap::new();
-    let mut got_order: Vec<u64> = Vec::new();
-    // MIPS addresses its GOT from `_gp`, conventionally 0x7ff0 past the GOT's
-    // start; `_gp_disp` is `_gp` relative to the `lui` that loads it.
-    let mips = matches!(architecture, Architecture::Mips | Architecture::Mips64);
-    let gp = got_base + 0x7ff0;
-    let gp_disp = |reloc: &object::Relocation| match reloc.target() {
-        RelocationTarget::Symbol(idx) => {
-            file.symbol_by_index(idx).ok().and_then(|s| s.name().ok()) == Some("_gp_disp")
-        }
-        _ => false,
-    };
-    let local_target = |reloc: &object::Relocation| match reloc.target() {
-        RelocationTarget::Symbol(idx) => file.symbol_by_index(idx).is_ok_and(|s| s.is_local()),
-        RelocationTarget::Section(_) => true,
-        _ => false,
-    };
+    let mut synth_got_slots: HashMap<u64, u64> = HashMap::new();
+    let mut synth_got_order: Vec<u64> = Vec::new();
 
     // Externs (undefined referenced symbols) live in a synthetic area above the
     // laid-out sections — the angr extern-object analog.  Allocated on demand.
@@ -392,13 +420,21 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
     let mut code_externs: std::collections::HashSet<SymbolIndex> = std::collections::HashSet::new();
 
     // ELFv2 defines `.TOC.` as `.toc + 0x8000`. Split TOC relocations use that
-    // base rather than the target section's own VMA.
+    // base rather than the target section's own VMA. An object with no `.toc`
+    // (medium-model code reaching its data directly) still has a TOC: the
+    // linker's `.got`, 256-aligned after the other sections.
     let toc = file
         .sections()
         .find(|section| section.name().ok() == Some(".toc"))
         .and_then(|section| vma_of.get(&section.index()).copied())
+        .or_else(|| (architecture == Architecture::PowerPc64).then(|| align_up(cursor, 256)))
         .map(|base| base.wrapping_add(0x8000));
-    let toc = if mips { Some(gp) } else { toc };
+    let opd = (architecture == Architecture::PowerPc64)
+        .then(|| file.section_by_name(".opd"))
+        .flatten()
+        .filter(|section| vma_of.contains_key(&section.index()));
+    let opd_entries = opd.as_ref().map(|s| descriptor_entries(file, s, &vma_of)).unwrap_or_default();
+    let opd_index = opd.as_ref().map(|s| s.index());
 
     // --- Pass 2: apply relocations, patching each laid-out section's bytes.
     for li in 0..laid.len() {
@@ -409,6 +445,11 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         };
         // Collect first so the `laid` buffer can be borrowed mutably below.
         let relocs: Vec<(u64, object::Relocation)> = sec.relocations().collect();
+        let lo_halves = if mips {
+            kuna_mipsreloc::lo_halves(&relocs, sec.data().unwrap_or(&[]), little_endian)
+        } else {
+            Vec::new()
+        };
         if matches!(architecture, Architecture::Sparc | Architecture::Sparc32Plus)
             && sec.kind() == SectionKind::Text
         {
@@ -419,11 +460,9 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
             ));
         }
         // RISC-V `PCREL_HI20` values by place, for the `PCREL_LO12_*` that name
-        // their label; MIPS REL `HI16`s waiting for the `LO16` that completes
-        // their addend.
+        // their label.
         let mut riscv_hi: HashMap<u64, i128> = HashMap::new();
-        let mut mips_hi: Vec<(usize, object::Relocation, u64)> = Vec::new();
-        for (offset, reloc) in relocs {
+        for (ri, (offset, reloc)) in relocs.into_iter().enumerate() {
             let r_type = match reloc.flags() {
                 RelocationFlags::Elf { r_type } => Some(r_type),
                 _ => None,
@@ -458,8 +497,48 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 continue;
             }
             let spec = spec.refine_call_from_field(&laid[li].data[off..end], little_endian);
+            let special = match (&gp, reloc.target()) {
+                (Some(g), RelocationTarget::Symbol(idx)) => {
+                    kuna_mipsreloc::special_symbol(file, idx, g.gp())
+                }
+                // `.TOC.`, which ELFv2 code reaches `r2` through, is the linker's.
+                (None, RelocationTarget::Symbol(idx)) if architecture == Architecture::PowerPc64 => toc
+                    .filter(|_| {
+                        file.symbol_by_index(idx)
+                            .is_ok_and(|sym| sym.is_undefined() && sym.name() == Ok(".TOC."))
+                    })
+                    .map(Some),
+                _ => None,
+            };
+            // A call to a static function names `.opd` plus the descriptor's
+            // offset; the branch reaches that descriptor's code, so `S` is the
+            // entry less the addend the encoder adds back.
+            let descriptor = match (opd_index, reloc.target()) {
+                (Some(opd), target) if spec.targets_code() => match target {
+                    RelocationTarget::Symbol(idx) => file
+                        .symbol_by_index(idx)
+                        .ok()
+                        .filter(|sym| sym.section() == SymbolSection::Section(opd))
+                        .map(|sym| sym.address()),
+                    RelocationTarget::Section(index) if index == opd => Some(0),
+                    _ => None,
+                }
+                .and_then(|at| opd_entries.get(&at.wrapping_add(reloc.addend() as u64)).copied())
+                .map(|entry| entry.wrapping_sub(reloc.addend() as u64)),
+                _ => None,
+            };
             // S — the resolved value of the relocation's target.
-            let target = if !spec.requires_symbol() {
+            let target = if let Some(address) = descriptor {
+                Some(ResolvedRelocationTarget {
+                    address,
+                    thumb: None,
+                })
+            } else if let Some(address) = special {
+                Some(ResolvedRelocationTarget {
+                    address: address.unwrap_or(0),
+                    thumb: None,
+                })
+            } else if !spec.requires_symbol() {
                 Some(ResolvedRelocationTarget {
                     address: 0,
                     thumb: None,
@@ -469,9 +548,7 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                     RelocationTarget::Symbol(sym_idx) => {
                         // Instruction branches mark even STT_NOTYPE undefined symbols
                         // as callable externs, including r_types object leaves Unknown.
-                        if spec.targets_code()
-                            || (mips && r_type == Some(object::elf::R_MIPS_CALL16))
-                        {
+                        if spec.targets_code() {
                             code_externs.insert(sym_idx);
                         }
                         resolve_symbol(
@@ -505,52 +582,19 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 continue;
             };
             let place = sec_vma.wrapping_add(offset);
-            let is_gp_disp = mips && gp_disp(&reloc);
-            // `_gp_disp` is `_gp - P` of the HI16 and `_gp - P + 4` of the LO16.
-            let target = if is_gp_disp {
-                let address = if spec.is_mips_lo16() { gp.wrapping_sub(place).wrapping_add(4) } else { gp.wrapping_sub(place) };
-                ResolvedRelocationTarget { address, thumb: None }
-            } else {
-                target
-            };
-            let local_got16 = spec.is_mips_got16() && r_type == Some(object::elf::R_MIPS_GOT16) && local_target(&reloc);
-            if (spec.is_mips_hi16() || local_got16) && reloc.has_implicit_addend() {
-                mips_hi.push((off, reloc, target.address));
-                continue;
-            }
-            if spec.is_mips_lo16() && reloc.has_implicit_addend() {
-                let (paired, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut mips_hi)
-                    .into_iter()
-                    .partition(|(_, hi, address)| {
-                        hi.target() == reloc.target() && (is_gp_disp || *address == target.address)
-                    });
-                mips_hi = rest;
-                let lo_field = laid[li].data[off..end].to_vec();
-                for (hi_off, hi, address) in paired {
-                    let hi_field = &mut laid[li].data[hi_off..hi_off + 4];
-                    let result = if matches!(hi.flags(), RelocationFlags::Elf { r_type: object::elf::R_MIPS_GOT16 }) {
-                        // A local GOT16 loads the 64 KiB page of `S + AHL`; its
-                        // LO16 adds the rest.
-                        let page = ((address as i128 + reloc_apply::mips_ahl(hi_field, &lo_field, little_endian) + 0x8000)
-                            & !0xffff) as u64;
-                        let slot = *got_slots.entry(page).or_insert_with(|| {
-                            got_order.push(page);
-                            got_base + (got_order.len() as u64 - 1) * pointer
-                        });
-                        let value = slot as i128 - gp as i128;
-                        if (-0x8000..0x8000).contains(&value) {
-                            reloc_apply::mips_set_imm16(hi_field, little_endian, value);
-                            Ok(())
-                        } else {
-                            Err(RelocationFailure::OutOfRange)
-                        }
-                    } else {
-                        reloc_apply::mips_hi16_with_lo(&hi, hi_field, &lo_field, little_endian, address)
-                    };
-                    if let Err(reason) = result {
-                        diagnostics.record(architecture, r_type, reason, sec_vma, hi_off as u64);
-                    }
+            if let (Some(mips_type), Some(g)) = (spec.mips_type(), gp.as_mut()) {
+                let target = kuna_mipsreloc::Target {
+                    address: target.address,
+                    local: kuna_mipsreloc::is_local(file, reloc.target()),
+                    gp_disp: special == Some(None),
+                };
+                let lo = lo_halves.get(ri).copied().flatten();
+                if let Err(reason) =
+                    g.apply(mips_type, &reloc, &mut laid[li].data[off..end], target, place, lo)
+                {
+                    diagnostics.record(architecture, r_type, reason, sec_vma, offset);
                 }
+                continue;
             }
             let symbol = if spec.is_riscv_pcrel_lo() {
                 match riscv_hi.get(&target.address) {
@@ -567,9 +611,9 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                     }
                 }
             } else if spec.via_got() {
-                *got_slots.entry(target.address).or_insert_with(|| {
-                    got_order.push(target.address);
-                    got_base + (got_order.len() as u64 - 1) * pointer
+                *synth_got_slots.entry(target.address).or_insert_with(|| {
+                    synth_got_order.push(target.address);
+                    synth_got_base + (synth_got_order.len() as u64 - 1) * pointer
                 })
             } else {
                 target.address
@@ -589,20 +633,13 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
                 riscv_hi.insert(place, reloc_apply::riscv_pcrel_hi_value(&reloc, symbol, place));
             }
         }
-        for (hi_off, _, _) in mips_hi {
-            diagnostics.record(
-                architecture,
-                None,
-                RelocationFailure::UnresolvedTarget,
-                sec_vma,
-                hi_off as u64,
-            );
-        }
     }
 
     // --- Function symbols: defined (rebased) + extern call targets.
     let mut funcsyms: Vec<(u64, Vec<u8>)> = Vec::new();
+    let mut funcsizes: Vec<(u64, u64)> = Vec::new();
     let mut symbol_info: Vec<RelocSymbolInfo> = Vec::new();
+    let mut opd_descriptors: Vec<(u64, u64)> = Vec::new();
     for sym in file.symbols() {
         if sym.kind() != SymbolKind::Text {
             continue;
@@ -617,7 +654,18 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
             Ok(n) if !n.is_empty() => n.to_vec(),
             _ => continue,
         };
-        let vma = base.wrapping_add(sym.address());
+        // An ELFv1 function symbol names its descriptor; the function is the
+        // code the descriptor points at.
+        let (vma, sec_idx, offset) = if Some(sec_idx) == opd_index {
+            let Some(&entry) = opd_entries.get(&sym.address()) else { continue };
+            let Some(code) = laid.iter().find(|l| l.vma <= entry && entry < l.vma + l.size) else {
+                continue;
+            };
+            opd_descriptors.push((base.wrapping_add(sym.address()), entry));
+            (entry, code.index, entry - code.vma)
+        } else {
+            (base.wrapping_add(sym.address()), sec_idx, sym.address())
+        };
         let section_name = file
             .section_by_index(sec_idx)
             .ok()
@@ -629,12 +677,17 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
             vma,
             section_index: Some(sec_idx.0),
             section_name: Some(section_name),
-            section_offset: Some(sym.address()),
+            section_offset: Some(offset),
             binding: symbol_binding(&sym),
             undefined: false,
         });
         funcsyms.push((vma, name));
+        if sym.size() > 0 {
+            funcsizes.push((vma, sym.size()));
+        }
     }
+    funcsizes.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    funcsizes.dedup_by_key(|s| s.0);
     // Extern functions: name each external *code target* at its synthetic slot
     // so `call ext` renders by name instead of a bare address. A code target is
     // an undefined symbol reached through a PLT-relative reloc (reliable even for
@@ -666,9 +719,9 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         }
     }
 
-    let got_range = (!got_order.is_empty()).then(|| {
-        let mut data = Vec::with_capacity(got_order.len() * pointer as usize);
-        for target in &got_order {
+    let synth_got_range = (!synth_got_order.is_empty()).then(|| {
+        let mut data = Vec::with_capacity(synth_got_order.len() * pointer as usize);
+        for target in &synth_got_order {
             let bytes = if little_endian { target.to_le_bytes() } else { target.to_be_bytes() };
             if little_endian {
                 data.extend_from_slice(&bytes[..pointer as usize]);
@@ -679,15 +732,33 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         let size = data.len() as u64;
         laid.push(LaidSection {
             index: SectionIndex(0),
-            vma: got_base,
+            vma: synth_got_base,
             size,
             flags: kuna_sleigh::loadimage::section_flags::DATA | kuna_sleigh::loadimage::section_flags::READONLY,
             data,
         });
-        (got_base, got_base + size)
+        (synth_got_base, synth_got_base + size)
     });
-    let segments = laid.iter().map(|l| (l.vma, l.data.clone())).collect();
-    let sections = laid.iter().map(|l| (l.vma, l.size, l.flags)).collect();
+    let mut segments: Vec<(u64, Vec<u8>)> = laid.iter().map(|l| (l.vma, l.data.clone())).collect();
+    let mut sections: Vec<(u64, u64, u32)> = laid.iter().map(|l| (l.vma, l.size, l.flags)).collect();
+    let got_range = match (&gp, got_base) {
+        (Some(g), Some(base)) if g.size() != 0 => {
+            segments.push((base, g.bytes()));
+            sections.push((
+                base,
+                g.size(),
+                fmt.section_bits(
+                    ".got",
+                    SectionKind::Data,
+                    object::SectionFlags::Elf { sh_flags: u64::from(object::elf::SHF_ALLOC | object::elf::SHF_WRITE) },
+                ),
+            ));
+            segments.sort_by_key(|s| s.0);
+            sections.sort_by_key(|s| s.0);
+            Some((base, base + g.size()))
+        }
+        _ => synth_got_range,
+    };
     let extern_range = extern_order
         .iter()
         .map(|(_, a)| *a)
@@ -697,12 +768,21 @@ pub fn layout_relocatable(file: &object::File, fmt: &dyn ObjectFormat) -> RelocL
         segments,
         sections,
         funcsyms,
+        funcsizes,
         diagnostics,
         section_vma: vma_of,
         extern_addr: extern_of,
         extern_range,
         common_range: common_allocator.range(),
         got_range,
+        opd: {
+            opd_descriptors.sort_unstable();
+            opd_descriptors.dedup();
+            opd_descriptors
+                .into_iter()
+                .map(|(address, entry)| (address, entry, toc))
+                .collect()
+        },
         section_info,
         symbol_info,
     }
@@ -781,6 +861,33 @@ fn resolve_symbol(
         }),
         _ => None,
     }
+}
+
+/// Each ELFv1 descriptor's entry, by its offset in `.opd`: the target of the
+/// `R_PPC64_ADDR64` that fills its first doubleword.
+fn descriptor_entries(
+    file: &object::File,
+    opd: &object::Section,
+    vma_of: &HashMap<SectionIndex, u64>,
+) -> HashMap<u64, u64> {
+    let mut out = HashMap::new();
+    for (offset, reloc) in opd.relocations() {
+        if reloc.flags() != (RelocationFlags::Elf { r_type: object::elf::R_PPC64_ADDR64 }) {
+            continue;
+        }
+        let base = match reloc.target() {
+            RelocationTarget::Section(index) => vma_of.get(&index).copied(),
+            RelocationTarget::Symbol(index) => file.symbol_by_index(index).ok().and_then(|sym| match sym.section() {
+                SymbolSection::Section(sec) => vma_of.get(&sec).map(|v| v.wrapping_add(sym.address())),
+                _ => None,
+            }),
+            _ => None,
+        };
+        if let Some(base) = base {
+            out.insert(offset, base.wrapping_add(reloc.addend() as u64));
+        }
+    }
+    out
 }
 
 /// Whether this object is one the loader lays out synthetically — i.e. whether
@@ -1844,5 +1951,241 @@ mod tests {
         assert!(!lines
             .iter()
             .any(|line| line.contains("(8)") || line.contains("(9)")));
+    }
+
+    fn word_at(layout: &RelocLayout, address: u64, width: usize) -> u64 {
+        let (base, data) = layout
+            .segments
+            .iter()
+            .find(|(vma, data)| *vma <= address && address < vma + data.len() as u64)
+            .expect("address in a laid-out segment");
+        let at = (address - base) as usize;
+        data[at..at + width].iter().fold(0, |acc, b| (acc << 8) | u64::from(*b))
+    }
+
+    fn half(layout: &RelocLayout, insn: u64) -> i64 {
+        i64::from(word_at(layout, insn, 4) as u16 as i16)
+    }
+
+    /// An o32 PIC prologue, a call through the GOT, a direct `jal`, a
+    /// `%hi`/`%lo` address and a `$gp`-relative load: each resolves against the
+    /// synthetic `_gp` and GOT the layout makes.
+    #[test]
+    fn mips_object_gets_a_gp_a_got_and_its_calls_and_addresses() {
+        let mut object = write::Object::new(BinaryFormat::Elf, Architecture::Mips, Endianness::Big);
+        let text = object.section_id(write::StandardSection::Text);
+        let data = object.section_id(write::StandardSection::Data);
+        let sdata = object.add_section(Vec::new(), b".sdata".to_vec(), SectionKind::Data);
+        let words: [u32; 13] = [
+            0x3c1c_0000, // lui gp, %hi(_gp_disp)
+            0x279c_0000, // addiu gp, gp, %lo(_gp_disp)
+            0x0399_e021, // addu gp, gp, t9
+            0x8f99_0000, // lw t9, %call16(ext)(gp)
+            0x0320_f809, // jalr t9
+            0x0000_0000,
+            0x0c00_0000, // jal local_f
+            0x0000_0000,
+            0x3c02_0000, // lui v0, %hi(datum)
+            0x8c42_0004, // lw v0, %lo(datum+4)(v0)
+            0x8f83_0000, // lw v1, %gp_rel(small)(gp)
+            0x03e0_0008, // local_f: jr ra
+            0x0000_0000,
+        ];
+        let code: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        object.append_section_data(text, &code, 4);
+        object.append_section_data(data, &[0; 16], 4);
+        object.append_section_data(sdata, &[0; 8], 4);
+        let gp_disp = add_symbol(&mut object, b"_gp_disp", write::SymbolSection::Undefined, 0, SymbolKind::Unknown);
+        let ext = add_symbol(&mut object, b"ext", write::SymbolSection::Undefined, 0, SymbolKind::Unknown);
+        let local_f = add_symbol(&mut object, b"local_f", write::SymbolSection::Section(text), 0x2c, SymbolKind::Text);
+        let datum = add_symbol(&mut object, b"datum", write::SymbolSection::Section(data), 8, SymbolKind::Data);
+        let small = add_symbol(&mut object, b"small", write::SymbolSection::Section(sdata), 4, SymbolKind::Data);
+        add_elf_relocation(&mut object, text, 0, gp_disp, object::elf::R_MIPS_HI16);
+        add_elf_relocation(&mut object, text, 4, gp_disp, object::elf::R_MIPS_LO16);
+        add_elf_relocation(&mut object, text, 12, ext, object::elf::R_MIPS_CALL16);
+        add_elf_relocation(&mut object, text, 16, ext, object::elf::R_MIPS_JALR);
+        add_elf_relocation(&mut object, text, 24, local_f, object::elf::R_MIPS_26);
+        add_elf_relocation(&mut object, text, 32, datum, object::elf::R_MIPS_HI16);
+        add_elf_relocation(&mut object, text, 36, datum, object::elf::R_MIPS_LO16);
+        add_elf_relocation(&mut object, text, 40, small, object::elf::R_MIPS_GPREL16);
+
+        let bytes = object.write().expect("write synthetic MIPS ET_REL");
+        let file = object::File::parse(&*bytes).expect("parse synthetic MIPS ET_REL");
+        let layout = layout_relocatable(&file, &ElfFormat);
+        assert!(layout.diagnostics.is_empty(), "{:?}", layout.diagnostics.report_lines());
+        let vma = |name: &str| layout.section_info.iter().find(|s| s.name == name).unwrap().vma;
+        let (text, data, sdata) = (vma(".text"), vma(".data"), vma(".sdata"));
+        let (got, got_end) = layout.got_range.expect("a GOT");
+        let gp = got + 0x7ff0;
+        assert!(got > data && sdata >= got_end, "the GOT sits before the small data");
+
+        let rebuilt = ((word_at(&layout, text, 4) as i64 & 0xffff) << 16) + half(&layout, text + 4) + text as i64;
+        assert_eq!(rebuilt as u64, gp, "the prologue rebuilds _gp from t9");
+        let slot = (gp as i64 + half(&layout, text + 12)) as u64;
+        assert!(got <= slot && slot < got_end);
+        let ext_at = layout.funcsyms.iter().find(|(_, n)| n == b"ext").expect("ext is a function").0;
+        assert_eq!(word_at(&layout, slot, 4), ext_at, "ext's GOT entry");
+        assert_eq!(word_at(&layout, text + 16, 4), 0x0320_f809, "JALR is a hint");
+        assert_eq!(word_at(&layout, text + 24, 4), 0x0c00_0000 | ((text + 0x2c) >> 2));
+        let hi = (word_at(&layout, text + 32, 4) as i64 & 0xffff) << 16;
+        assert_eq!((hi + half(&layout, text + 36)) as u64, data + 8 + 4);
+        assert_eq!((gp as i64 + half(&layout, text + 40)) as u64, sdata + 4);
+    }
+
+    /// PowerPC32 calls: `REL24` to a local function, and the `PLTREL24` of a
+    /// `-fPIC` object, whose addend is no part of the target; `@ha`/`@l`
+    /// address halves.
+    #[test]
+    fn ppc32_object_calls_and_address_halves_apply() {
+        let mut object = write::Object::new(BinaryFormat::Elf, Architecture::PowerPc, Endianness::Big);
+        let text = object.section_id(write::StandardSection::Text);
+        let data = object.section_id(write::StandardSection::Data);
+        let words: [u32; 5] = [
+            0x4800_0001, // bl local_f
+            0x4800_0001, // bl ext@plt
+            0x3d20_0000, // lis r9, datum@ha
+            0x8069_0000, // lwz r3, datum@l(r9)
+            0x4e80_0020, // local_f: blr
+        ];
+        let code: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        object.append_section_data(text, &code, 4);
+        object.append_section_data(data, &[0; 0x9000], 4);
+        let local_f = add_symbol(&mut object, b"local_f", write::SymbolSection::Section(text), 16, SymbolKind::Text);
+        let ext = add_symbol(&mut object, b"ext", write::SymbolSection::Undefined, 0, SymbolKind::Unknown);
+        let datum = add_symbol(&mut object, b"datum", write::SymbolSection::Section(data), 0x8ff0, SymbolKind::Data);
+        add_elf_relocation(&mut object, text, 0, local_f, object::elf::R_PPC_REL24);
+        object
+            .add_relocation(
+                text,
+                write::Relocation {
+                    offset: 4,
+                    symbol: ext,
+                    addend: 0x8000,
+                    flags: RelocationFlags::Elf { r_type: object::elf::R_PPC_PLTREL24 },
+                },
+            )
+            .unwrap();
+        add_elf_relocation(&mut object, text, 10, datum, object::elf::R_PPC_ADDR16_HA);
+        add_elf_relocation(&mut object, text, 14, datum, object::elf::R_PPC_ADDR16_LO);
+
+        let bytes = object.write().expect("write synthetic PPC32 ET_REL");
+        let file = object::File::parse(&*bytes).expect("parse synthetic PPC32 ET_REL");
+        let layout = layout_relocatable(&file, &ElfFormat);
+        assert!(layout.diagnostics.is_empty(), "{:?}", layout.diagnostics.report_lines());
+        let vma = |name: &str| layout.section_info.iter().find(|s| s.name == name).unwrap().vma;
+        let (text, data) = (vma(".text"), vma(".data"));
+        assert_eq!(word_at(&layout, text, 4), 0x4800_0011);
+        let ext_at = layout.funcsyms.iter().find(|(_, n)| n == b"ext").expect("ext is a function").0;
+        assert_eq!(word_at(&layout, text + 4, 4), 0x4800_0001 | (ext_at - (text + 4)));
+        let hi = (word_at(&layout, text + 8, 4) as i64 & 0xffff) << 16;
+        assert_eq!((hi + half(&layout, text + 12)) as u64, data + 0x8ff0);
+        assert!(layout.got_range.is_none());
+    }
+
+    /// A PowerPC64 ELFv1 object names each function by its `.opd`
+    /// descriptor. The function is the code the descriptor points at, and a
+    /// call to the descriptor's symbol branches there.
+    #[test]
+    fn ppc64_elfv1_descriptors_name_and_receive_calls_at_their_code() {
+        let mut object = write::Object::new(BinaryFormat::Elf, Architecture::PowerPc64, Endianness::Big);
+        let text = object.section_id(write::StandardSection::Text);
+        let opd = object.add_section(Vec::new(), b".opd".to_vec(), SectionKind::Data);
+        let toc = object.add_section(Vec::new(), b".toc".to_vec(), SectionKind::Data);
+        let words: [u32; 4] = [0x4800_0001, 0x4800_0001, 0x4e80_0020, 0x4e80_0020];
+        let code: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        object.append_section_data(text, &code, 4);
+        object.append_section_data(opd, &[0; 48], 8);
+        let opd_sym = object.section_symbol(opd);
+        object.append_section_data(toc, &[0; 8], 8);
+        let text_sym = object.section_symbol(text);
+        let f = add_symbol(&mut object, b"f", write::SymbolSection::Section(opd), 0, SymbolKind::Text);
+        let g = add_symbol(&mut object, b"g", write::SymbolSection::Section(opd), 24, SymbolKind::Text);
+        let _ = f;
+        add_elf_relocation(&mut object, text, 0, g, object::elf::R_PPC64_REL24);
+        // A call to a static function: `.opd` plus its descriptor's offset.
+        object
+            .add_relocation(
+                text,
+                write::Relocation {
+                    offset: 4,
+                    symbol: opd_sym,
+                    addend: 24,
+                    flags: RelocationFlags::Elf { r_type: object::elf::R_PPC64_REL24 },
+                },
+            )
+            .unwrap();
+        for (offset, addend) in [(0u64, 0i64), (24, 12)] {
+            object
+                .add_relocation(
+                    opd,
+                    write::Relocation {
+                        offset,
+                        symbol: text_sym,
+                        addend,
+                        flags: RelocationFlags::Elf { r_type: object::elf::R_PPC64_ADDR64 },
+                    },
+                )
+                .unwrap();
+        }
+
+        let bytes = object.write().expect("write synthetic PPC64 ELFv1 ET_REL");
+        let file = object::File::parse(&*bytes).expect("parse synthetic PPC64 ELFv1 ET_REL");
+        let layout = layout_relocatable(&file, &ElfFormat);
+        assert!(layout.diagnostics.is_empty(), "{:?}", layout.diagnostics.report_lines());
+        let vma = |name: &str| layout.section_info.iter().find(|s| s.name == name).unwrap().vma;
+        let (text, opd) = (vma(".text"), vma(".opd"));
+        let at = |name: &[u8]| layout.funcsyms.iter().find(|(_, n)| n == name).map(|f| f.0);
+        assert_eq!(at(b"f"), Some(text));
+        assert_eq!(at(b"g"), Some(text + 12));
+        assert_eq!(word_at(&layout, text, 4), 0x4800_000d, "bl g reaches g's code");
+        assert_eq!(word_at(&layout, text + 4, 4), 0x4800_0009, "bl .opd+24 reaches g's code");
+        let descriptors: Vec<(u64, u64)> = layout.opd.iter().map(|d| (d.0, d.1)).collect();
+        assert_eq!(descriptors, vec![(opd, text), (opd + 24, text + 12)]);
+        assert!(layout.opd.iter().all(|d| d.2 == Some(vma(".toc") + 0x8000)));
+    }
+
+    /// Medium-model code with no `.toc` reaches its data as `@toc@ha`/`@toc@l`
+    /// halves; the TOC the linker would make still resolves them, and its
+    /// base is the descriptor's TOC.
+    #[test]
+    fn ppc64_object_without_a_toc_section_still_has_a_toc() {
+        let mut object = write::Object::new(BinaryFormat::Elf, Architecture::PowerPc64, Endianness::Big);
+        let text = object.section_id(write::StandardSection::Text);
+        let data = object.section_id(write::StandardSection::Data);
+        let opd = object.add_section(Vec::new(), b".opd".to_vec(), SectionKind::Data);
+        let words: [u32; 3] = [0x3d22_0000, 0x3869_0000, 0x4e80_0020]; // addis r9,r2; addi r3,r9; blr
+        let code: Vec<u8> = words.iter().flat_map(|w| w.to_be_bytes()).collect();
+        object.append_section_data(text, &code, 4);
+        object.append_section_data(data, &[0; 0x100], 8);
+        object.append_section_data(opd, &[0; 24], 8);
+        let text_sym = object.section_symbol(text);
+        let datum = add_symbol(&mut object, b"datum", write::SymbolSection::Section(data), 0x40, SymbolKind::Data);
+        add_symbol(&mut object, b"f", write::SymbolSection::Section(opd), 0, SymbolKind::Text);
+        for (section, offset, symbol, r_type, addend) in [
+            (text, 2u64, datum, object::elf::R_PPC64_TOC16_HA, 0i64),
+            (text, 6, datum, object::elf::R_PPC64_TOC16_LO, 0),
+            (opd, 0, text_sym, object::elf::R_PPC64_ADDR64, 0),
+        ] {
+            object
+                .add_relocation(section, write::Relocation { offset, symbol, addend, flags: RelocationFlags::Elf { r_type } })
+                .unwrap();
+        }
+        let toc_word = write::Relocation {
+            offset: 8,
+            symbol: object.section_symbol(opd),
+            addend: 0,
+            flags: RelocationFlags::Elf { r_type: object::elf::R_PPC64_TOC },
+        };
+        object.add_relocation(opd, toc_word).unwrap();
+
+        let bytes = object.write().expect("write synthetic PPC64 ET_REL without .toc");
+        let file = object::File::parse(&*bytes).expect("parse synthetic PPC64 ET_REL without .toc");
+        let layout = layout_relocatable(&file, &ElfFormat);
+        assert!(layout.diagnostics.is_empty(), "{:?}", layout.diagnostics.report_lines());
+        let vma = |name: &str| layout.section_info.iter().find(|s| s.name == name).unwrap().vma;
+        let toc = layout.opd.first().and_then(|d| d.2).expect("the descriptor's TOC");
+        assert_eq!(word_at(&layout, vma(".opd") + 8, 8), toc);
+        let reached = toc as i64 + (half(&layout, vma(".text")) << 16) + half(&layout, vma(".text") + 4);
+        assert_eq!(reached as u64, vma(".data") + 0x40);
     }
 }

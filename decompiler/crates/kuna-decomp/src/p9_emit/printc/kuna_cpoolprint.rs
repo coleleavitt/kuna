@@ -108,7 +108,7 @@ impl PrintC {
                         while let Some(to) = Some(&dt).filter(|t| t.get_metatype() == type_metatype::TYPE_PTR).and_then(|t| t.get_ptr_to()) {
                             dt = to;
                         }
-                        let (front, back) = super::declarator_parts(&dt, self.rt_ctx);
+                        let (front, back) = super::declarator_parts(&dt, self.rt_ctx.clone());
                         format!("{front}{back}")
                     }
                 };

@@ -305,7 +305,7 @@ impl Funcdata {
                 TypeOp::new(
                     opcode,
                     pcodeop_flags::binary | pcodeop_flags::commutative,
-                    "+".to_string(),
+                    "+",
                 ),
             );
             // for i: opSetInput(newop, op->getIn(i), i);
@@ -503,7 +503,9 @@ impl Funcdata {
                     Some(o) => o,
                     None => continue,
                 };
-                if o.code() != OpCode::CPUI_COPY {
+                if o.code() != OpCode::CPUI_COPY
+                    || o.get_addlflags() & crate::op::pcodeop_addlflags::kuna_rustprobe_spill != 0
+                {
                     continue;
                 }
                 let outvn = match o.get_out() {

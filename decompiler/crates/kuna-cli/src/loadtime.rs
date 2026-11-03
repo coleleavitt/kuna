@@ -28,12 +28,14 @@ enum Encoding {
     LibcTypes,
     Kernelcache,
     SourceLang,
+    Ppc32Pic,
 }
 
 fn binding(name: &str) -> Option<(&'static str, Encoding)> {
     use Encoding::*;
     Some(match name {
         "relocobjects" => (RELOC_OBJECTS_ENV, RelocObjects),
+        "ppc32picimports" => (kuna_decomp::kuna_ppc32picimports::ENV, Ppc32Pic),
         "i386_pie_plt" => (kuna_i386_pie_plt::I386_PIE_PLT_ENV, DefaultOn),
         "ifuncfpret" => (kuna_ifuncfpret::IFUNCFPRET_ENV, DefaultOff),
         "relocrebase" => (kuna_relocrebase::RELOCREBASE_ENV, DefaultOn),
@@ -89,6 +91,9 @@ impl Encoding {
                 .unwrap_or_default()
                 .as_str()
                 .into(),
+            Self::Ppc32Pic => kuna_decomp::kuna_ppc32picimports::Mode::from_env_value(value)
+                .as_str()
+                .into(),
             Self::Trimmed => value.trim().into(),
             Self::Kernelcache => {
                 kuna_kernelcache::KernelcacheChoice::parse(value).unwrap_or_default().as_str().into()
@@ -126,6 +131,11 @@ pub(crate) fn last_option_value<'a>(
         .map(|(_, value)| value.as_str())
 }
 
+pub(crate) fn explicit_output_language(options: &[(String, String)]) -> Option<&str> {
+    options.iter().rev().find(|(name, _)| matches!(name.as_str(), "setlanguage" | "outlang"))
+        .map(|(_, value)| value.as_str())
+}
+
 fn settings(
     options: &[(String, String)],
     slice: Option<&str>,
@@ -137,7 +147,7 @@ fn settings(
             values.insert(key, encoding.encode(value));
         }
     }
-    if last_option_value(options, "setlanguage").is_some_and(|l| l.starts_with("rust")) {
+    if explicit_output_language(options).is_some_and(|l| l.starts_with("rust")) {
         values.insert(kuna_calltargettype::CALLTARGETTYPE_ENV, Some("off".into()));
     }
     if let Some(slice) = slice.filter(|s| !s.trim().is_empty()) {
@@ -211,6 +221,10 @@ mod tests {
     #[test]
     fn loader_value_vocabularies_are_preserved() {
         for (name, cases) in [
+            ("ppc32picimports", vec![("off", Some("off")), ("on", Some("on")),
+                (" ABI ", Some("abi")), (" TRUE ", Some("on")), ("1", Some("on")),
+                ("", Some("on")), ("0", Some("off")), ("yes", Some("off")),
+                ("invalid", Some("off"))]),
             (
                 "typedepth",
                 vec![

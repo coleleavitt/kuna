@@ -272,6 +272,16 @@ pub struct Funcdata {
     /// (kuna `condstmts`) Block start addresses the final structure folded into a
     /// condition operand over the cap.
     kuna_condstmts_hits: std::collections::BTreeSet<Address>,
+    /// (kuna `earlyrestart`) Set when heritage bumped a space's dead-code delay
+    /// in this pass: the analysis is about to be thrown away and redone.
+    kuna_restart_now: bool,
+    /// (kuna `deadwaves`) While a rule pool's pass records it, every op
+    /// dead-op removal took out and the Varnodes it read
+    /// (`infra/action.rs (ActionPool::apply_wave)`).
+    dead_wave_log: Option<(Vec<OpId>, Vec<VarnodeId>)>,
+    /// (kuna decompile-all watchdog) What was left of the per-function budget
+    /// when the drive handed this function back; rendering it may use no more.
+    render_budget: Option<std::time::Duration>,
     /// List of jump-tables for this function (C++ `jumpvec`).
     ///
     /// The real `JumpTable` (`jumptable.{hh,cc}`) now lives here: the recovery
@@ -319,6 +329,8 @@ pub struct Funcdata {
     /// *is* that pointer; here the entries live inline and the offset is the
     /// vector index (the faithful equivalent — see `newVarnodeCallSpecs`).
     qlst: Vec<FuncCallSpecs>,
+    /// Proofs belong to this entry's flow only, and are rebuilt after clear/restart.
+    pub(crate) ppc32_pic_calls: std::collections::BTreeMap<u64, crate::kuna_ppc32piccalls::CallBinding>,
     /// HighVariable merging engine (C++ `Merge covermerge`, `funcdata.hh:91`).
     ///
     /// The C++ `Funcdata` owns a single `Merge` whose `copyTrims` accumulator
@@ -331,6 +343,9 @@ pub struct Funcdata {
     /// [`Self::ensure_covermerge`].  `pub(crate)` so the `funcdata_merge` bridge
     /// module can take/replace it.
     pub(crate) covermerge: Option<crate::merge::Merge>,
+    /// (kuna perf) The block table every Cover walk shares while a merge pass
+    /// runs ([`Self::with_covermerge`]), which edits ops but never blocks.
+    pub(crate) cover_blocks: Option<BlockTable>,
     /// Revision of the call/store set and its basic-block positions.
     affecting_ops_revision: u64,
     /// Overrides of data-flow, prototypes, etc. that are local to \b this function
@@ -421,6 +436,9 @@ pub struct Funcdata {
     /// failed, and why, instead of blaming structuring (`PrintC::emit_function_document`).
     kuna_pipeline_failure: Option<String>,
     pub(crate) kuna_call_mechanisms: crate::kuna_callmechanisms::State,
+    /// The \e fspec handles this function's call-spec annotations registered
+    /// in the fspec-space side table, released when the function is dropped.
+    pub(crate) kuna_fspec_handles: Vec<kuna_base::types::uintb>,
     /// (kuna) The flow overrides `FlowInfo::process` asked for and
     /// [`Self::override_flow`] refused, as `(instruction, flow type, reason)`.
     ///
@@ -691,6 +709,16 @@ pub struct Funcdata {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct JumpTableId(pub u32);
 
+/// Releases the fspec-space entries the function's call specs registered: the
+/// handles are process-unique, so nothing else names them once it is gone.
+impl Drop for Funcdata {
+    fn drop(&mut self) {
+        for handle in self.kuna_fspec_handles.drain(..) {
+            kuna_base::space::fspec_unregister(handle);
+        }
+    }
+}
+
 impl Funcdata {
     /// C++ `Funcdata::Funcdata` (`funcdata.cc:34`).
     ///
@@ -789,6 +817,9 @@ impl Funcdata {
             stack_byte_copy_ops: Default::default(),
             kuna_condstmts_seed: std::collections::BTreeSet::new(),
             kuna_condstmts_hits: std::collections::BTreeSet::new(),
+            kuna_restart_now: false,
+            dead_wave_log: None,
+            render_budget: None,
             jumpvec: Vec::new(),
             vbank,
             kuna_storage_sources: Default::default(),
@@ -803,7 +834,9 @@ impl Funcdata {
             high_bank: crate::variable::HighVariableBank::new(),
             heritage: crate::heritage::Heritage::new(),
             qlst: Vec::new(),
+            ppc32_pic_calls: Default::default(),
             covermerge: None,
+            cover_blocks: None,
             affecting_ops_revision: 0,
             localoverride: crate::overrides::Override::new(),
             union_map: std::collections::BTreeMap::new(),
@@ -824,6 +857,7 @@ impl Funcdata {
             kuna_field_calls: Vec::new(),
             kuna_pipeline_failure: None,
             kuna_call_mechanisms: Default::default(),
+            kuna_fspec_handles: Vec::new(),
             kuna_rejected_flow: Vec::new(),
             kuna_directive_symbols: Vec::new(),
             kuna_prior_names: Default::default(),
@@ -983,6 +1017,17 @@ impl Funcdata {
     /// Discard the buffered comments of any type in `types`.
     pub fn drop_pending_comments(&mut self, types: kuna_base::types::uint4) {
         self.pending_comments.retain(|(tp, _, _)| tp & types == 0);
+    }
+
+    /// How many analysis comments are buffered (a mark for
+    /// [`Self::truncate_pending_comments`]).
+    pub fn pending_comment_count(&self) -> usize {
+        self.pending_comments.len()
+    }
+
+    /// Drop the comments buffered after `mark`: a discarded flow's statements.
+    pub fn truncate_pending_comments(&mut self, mark: usize) {
+        self.pending_comments.truncate(mark);
     }
 
     /// Read-only view of the buffered analysis comments (the
@@ -2122,6 +2167,11 @@ impl Funcdata {
         &self.qlst[i as usize]
     }
 
+    /// Every call specification, in `qlst` order.
+    pub(crate) fn call_specs(&self) -> &[FuncCallSpecs] {
+        &self.qlst
+    }
+
     /// Get the i-th call specification mutably (the recovery actions need to
     /// mutate the `ParamActive` trials in place).
     pub fn get_call_specs_mut(&mut self, i: int4) -> &mut FuncCallSpecs {
@@ -2553,6 +2603,64 @@ impl Funcdata {
     /// (kuna `condstmts`) Block starts the final structure folded over the cap.
     pub fn condstmts_hits(&self) -> &std::collections::BTreeSet<Address> {
         &self.kuna_condstmts_hits
+    }
+
+    /// (kuna `earlyrestart`) Did heritage bump a dead-code delay this pass?
+    pub fn kuna_restart_now(&self) -> bool {
+        self.kuna_restart_now
+    }
+
+    /// (kuna `earlyrestart`) Record that heritage bumped a dead-code delay.
+    pub fn kuna_set_restart_now(&mut self) {
+        self.kuna_restart_now = true;
+    }
+
+    /// (kuna `deadwaves`) Start recording dead-op removals for a pool pass.
+    pub(crate) fn start_dead_wave_log(&mut self) {
+        self.dead_wave_log = Some((Vec::new(), Vec::new()));
+    }
+
+    /// (kuna `deadwaves`) Stop recording and hand back what was recorded.
+    pub(crate) fn take_dead_wave_log(&mut self) -> (Vec<OpId>, Vec<VarnodeId>) {
+        self.dead_wave_log.take().unwrap_or_default()
+    }
+
+    /// (kuna `deadwaves`) Where the running log ends, for
+    /// [`dead_wave_log_since`](Funcdata::dead_wave_log_since).
+    pub(crate) fn dead_wave_log_mark(&self) -> (usize, usize) {
+        self.dead_wave_log.as_ref().map_or((0, 0), |log| (log.0.len(), log.1.len()))
+    }
+
+    /// (kuna `deadwaves`) The removals logged after `mark`, and the Varnodes
+    /// they read.
+    pub(crate) fn dead_wave_log_since(&self, mark: (usize, usize)) -> (&[OpId], &[VarnodeId]) {
+        match self.dead_wave_log.as_ref() {
+            Some(log) => (log.0.get(mark.0..).unwrap_or(&[]), log.1.get(mark.1..).unwrap_or(&[])),
+            None => (&[], &[]),
+        }
+    }
+
+    /// (kuna `deadwaves`) Record that dead-op removal is taking out `op`, and
+    /// the Varnodes it reads, before it is destroyed.
+    pub(crate) fn note_dead_removal(&mut self, op: OpId) {
+        let Some(log) = self.dead_wave_log.as_mut() else {
+            return;
+        };
+        let Some(o) = self.obank.get(op) else {
+            return;
+        };
+        log.0.push(op);
+        log.1.extend((0..o.num_input()).filter_map(|k| o.get_in(k)));
+    }
+
+    /// (kuna decompile-all watchdog) What the drive left of the budget for rendering.
+    pub fn render_budget(&self) -> Option<std::time::Duration> {
+        self.render_budget
+    }
+
+    /// (kuna decompile-all watchdog) Record what the drive left of the budget.
+    pub fn set_render_budget(&mut self, left: Option<std::time::Duration>) {
+        self.render_budget = left;
     }
 
     /// (kuna `condstmts`) Record a block start folded over the cap.
@@ -4204,20 +4312,25 @@ impl Funcdata {
             self.obank.get_mut(op).expect("bb_set_order").set_order(count);
             cur = self.obank.get(op).expect("bb_set_order").basic_neighbours().1;
         }
-        let mut affected = std::collections::HashSet::new();
-        for op in self.bb_ops(bl) {
+        let mut cur = self.bb_op_head(bl);
+        while let Some(op) = cur {
             let operation = self.obank.get(op).expect("bb_set_order");
-            if let Some(output) = operation.get_out() {
-                affected.insert(output);
+            cur = operation.basic_neighbours().1;
+            let mut vns: smallvec::SmallVec<[VarnodeId; 4]> = smallvec::SmallVec::new();
+            if let Some(out) = operation.get_out() {
+                vns.push(out);
             }
-            for slot in 0..operation.num_input() {
-                if let Some(input) = operation.get_in(slot) {
-                    affected.insert(input);
+            for i in 0..operation.num_input() {
+                if let Some(vn) = operation.get_in(i) {
+                    vns.push(vn);
                 }
             }
-        }
-        for vn in affected {
-            crate::p6_variables::merge::MergeContext::vn_set_cover_dirty(self, vn);
+            for vn in vns {
+                let marked = self.vbank.get(vn).is_none_or(|v| v.is_cover_dirty_flag() && v.get_high().is_none());
+                if !marked {
+                    crate::p6_variables::merge::MergeContext::vn_set_cover_dirty(self, vn);
+                }
+            }
         }
     }
 
@@ -4295,6 +4408,11 @@ impl Funcdata {
     // clear / printRaw (W3-portable / seam-noted)
     // -----------------------------------------------------------------------
 
+    /// The caller-local PPC32 import calls this entry's flow applied.
+    pub fn ppc32_import_calls(&self) -> impl Iterator<Item = &crate::kuna_ppc32piccalls::CallBinding> {
+        self.ppc32_pic_calls.values()
+    }
+
     /// Clear everything associated with decompilation analysis
     /// (C++ `Funcdata::clear`, `funcdata.cc:84`).
     ///
@@ -4302,8 +4420,10 @@ impl Funcdata {
     /// `clearActiveOutput`, `unionMap`, `clearCallSpecs`, `clearJumpTables`,
     /// `heritage.clear`, `covermerge.clear`) are seam-noted; the W3 IR clears
     /// (`clearBlocks`, `obank.clear`, `vbank.clear`) and the flag/index reset are
-    /// faithful.
+    /// faithful. Buffered comments survive, as C++ comments already in the
+    /// database survive a restart.
     pub fn clear(&mut self) {
+        self.ppc32_pic_calls.clear();
         self.kuna_regnarrow_runs = 0;
         self.kuna_regnarrow_values.clear();
         self.kuna_regnarrow_failed.clear();
@@ -4329,6 +4449,7 @@ impl Funcdata {
         self.min_laned_size = self.glb.get_minimum_laned_register_size();
         self.kuna_hiddenret_vetoed.clear();
         self.kuna_condstmts_hits.clear();
+        self.kuna_restart_now = false;
 
         // localmap->clearUnlocked(); localmap->resetLocalWindow();  -- STUB(W4)
         // clearActiveOutput() (funcdata.cc): drop the output-trial state.
@@ -4363,6 +4484,9 @@ impl Funcdata {
         // `new HighVariable`s are freed); the W7 high bank is cleared here to
         // mirror that lifecycle.
         self.high_bank.clear();
+        if let Some(merge) = self.covermerge.as_mut() {
+            merge.clear();
+        }
         // (kuna, ghidra Phase 4) The wire symbols are keyed by HighVariableId,
         // so they MUST die with the arena that issued those ids — a restart
         // would otherwise let a rebuilt high inherit another variable's symbol
@@ -4723,7 +4847,7 @@ impl Funcdata {
     /// Cover stores for a def/ref).
     fn op_cover_point(&self, op: OpId) -> CoverPoint {
         let (uindex, code) = self.op_uindex_code(op);
-        CoverPoint::Op { id: op, uindex, code }
+        CoverPoint::Op { uindex, multiequal: code == OpCode::CPUI_MULTIEQUAL }
     }
 
     // -----------------------------------------------------------------------
@@ -5253,6 +5377,7 @@ impl Funcdata {
     /// `high_bank` <-> `vbank`/`obank` field split (the bridge cannot destructure
     /// private fields from another module).  `which` selects tied (`false`) vs
     /// input (`true`).
+    #[inline]
     pub(crate) fn high_tied_or_input_varnode(
         &self,
         high: crate::context::HighVariableId,
@@ -5431,9 +5556,7 @@ impl Funcdata {
                 a_cover.add_def_point(def, is_input);
                 let descend: Vec<OpId> =
                     self.vbank.get(out_vn).map(|v| v.descend_iter().collect()).unwrap_or_default();
-                for refop in descend {
-                    a_cover.add_ref_point_for(&ctx, refop, out_vn);
-                }
+                a_cover.add_ref_points_for(&ctx, &descend, out_vn);
             }
             if b_cover.intersect(&a_cover) > 1 {
                 count -= 1;
@@ -5566,7 +5689,7 @@ pub(crate) type BlockTable = std::cell::OnceCell<Vec<Option<BlockId>>>;
 
 impl<'a> FuncdataCoverCtx<'a> {
     pub(crate) fn new(fd: &'a Funcdata) -> Self {
-        FuncdataCoverCtx { fd, own: BlockTable::new(), shared: None }
+        FuncdataCoverCtx { fd, own: BlockTable::new(), shared: fd.cover_blocks.as_ref() }
     }
 
     /// A view keeping its block table in `table`, for a run of Cover walks over
@@ -6075,8 +6198,11 @@ impl<'a> HighContext for HighReadView<'a> {
             create_index: v.get_create_index(),
         }
     }
-    fn vn_cover(&self, vn: VarnodeId) -> Option<Cover> {
-        self.vbank.get(vn).and_then(|v| v.cover().cloned())
+    fn vn_flags(&self, vn: VarnodeId) -> uint4 {
+        self.vbank.get(vn).expect("vn_flags: stale vn").get_flags()
+    }
+    fn vn_cover(&self, vn: VarnodeId) -> Option<&Cover> {
+        self.vbank.get(vn).and_then(|v| v.cover())
     }
     fn vn_has_cover(&self, vn: VarnodeId) -> bool {
         self.vbank.get(vn).map(|v| v.has_cover()).unwrap_or(false)

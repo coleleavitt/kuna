@@ -319,6 +319,18 @@ pass with inference live.
    only if it is **strictly more specific** than the target's current temporary
    (`0 > type_order`), and each Varnode is expanded at most once per walk (a
    mark bit), so a single pass is linear-ish and cannot ping-pong.
+   *(kuna perf)* The walk enters a reading op at one input and steps through
+   every other slot of it. At a `MULTIEQUAL` or `INDIRECT`, whose transfer
+   function refuses every input-to-input edge, the walk skips the remaining
+   input slots of that op at once
+   (`decompiler/crates/kuna-decomp/src/p5_types/coreaction_infertypes.rs
+   (joins_only_output)`). It skips only while the entering input's type needs
+   no resolution: resolving a union records the field choice, so those edges are
+   still taken one by one. A skipped edge would change nothing and push
+   nothing, so the walk's order and result are upstream's. On a dispatch loop a
+   join has one input per dispatch site, about 190 in CPython 3.11's
+   `_PyEval_EvalFrameDefault`. Each walk into one of its inputs used to try
+   every other input.
 3. **Returns** (`propagate_across_returns`): unless the output prototype is
    locked, the most specific temporary among all `RETURN` value inputs is
    re-seeded onto the other returns, so one well-typed exit types them all.
@@ -2053,6 +2065,13 @@ answered with (`docs/features/fieldtype/default-on-evaluation.md`).
 merged number as controls, and the compiled round trip in `decompile_all_cli.rs`
 checks the printed C computes what the binary does.
 
+A function's accepted bases ask the ledger for their layouts in the order
+their Varnodes were created (`kuna_structsynth.rs (by_creation)`); with
+`locals` on, the widest layout asks first and ties keep that order. The order
+of the asks is the order of the names they mint, and a Varnode's id is only the
+arena slot it reused, so an unrelated change to when the function frees
+Varnodes would otherwise swap two structures' numbers.
+
 Names are program-wide `struct_N`, minted and handed out by the **layout
 ledger** (`decompiler/crates/kuna-decomp/src/p5_types/kuna_structsynth/ledger.rs`),
 which is the set of `struct_N` the program's `TypeFactory` already holds: the
@@ -2060,6 +2079,13 @@ ledger probes `find_by_name` from `struct_0` up to the first free name, reads
 each one's layout back, and declines any whose members are not all named
 `field_0x<hex>` — that name is held by a type from somewhere else (DWARF, a
 parsed header) and is never handed out as the answer to an access pattern.
+A lookup therefore makes up to 1,024 name probes. Each probe is a binary search
+of the factory's name index, which is kept sorted by (name, id) as the C++
+`nametree` set is (`decompiler/crates/kuna-decomp/src/substrate/dtype.rs
+(find_by_id_local)`). The port used to scan the whole index on every probe. A
+lookup then cost the full ledger times every named type the program holds, and
+once a whole-image MSVC run filled the ledger, that cost grew to half of each
+later function's decompile.
 Every mint declines on an error rather than propagating one: `find_add` rejects
 a second, different definition of a held name.
 
@@ -2361,7 +2387,8 @@ can take it without a factory: it scans the `struct_<n>` slots as the ledger
 does, skipping a name another type holds, calls the same `best_of` and
 `keeps_unclaimed`, and mints at the first free slot. A `--jobs` worker records
 each lookup a function makes, with a recipe for every field type (a named type
-by name and id, a pointer or byte array around its rebuilt element), and the
+by name and id, a pointer or byte array around its rebuilt element, and the
+unnamed unknown a Varnode starts with built afresh), and the
 answer its own ledger gave, with the lookup that minted that structure in the
 worker. The parent replays the records in target order. A structure is its
 members, so when a function's own answers and the serial ones name structures
@@ -2379,7 +2406,18 @@ type gets a recipe only if the worker's load created it
 (`decompiler/crates/kuna-decomp/src/p5_types/kuna_structsynth/shard.rs (AtLoad)`): a pass
 that interns a type the first time a function needs it, as `pebnames` does
 `PEB` and `TEB`, leaves it in some workers and not in others, so a structure
-with such a field is named by one ordered worker instead. The parent also
+with such a field is named by one ordered worker instead. The unnamed unknown
+is different. No factory holds it: it is the `Datatype::new(size,
+TYPE_UNKNOWN)` skeleton that stands in for `getBase` where no factory is
+consulted. A pointer to it still reaches a field type, so every process builds
+it identically
+(`decompiler/crates/kuna-decomp/src/substrate/dtype.rs
+(Datatype::is_unknown_placeholder)`), and it travels as itself. A type that
+differs from that skeleton in any property, the interned `undefined8`
+included, does not pass for it. Without that recipe, one onnxruntime.dll
+function whose structure held a pointer to a pointer to the placeholder sent all 5,241
+of the image's synthesizing functions to the one ordered worker. In
+dxcompiler.dll, nine functions sent 8,989. The parent also
 answers the sweep: a structure still answers every layout it answered once, so
 the sweep's lookups never mint, and the ones whose answer changes are renamed
 or decompiled in the same pool. The synthesized structures of a sharded run are

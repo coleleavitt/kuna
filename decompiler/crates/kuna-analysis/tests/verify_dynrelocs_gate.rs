@@ -12,10 +12,14 @@
 use kuna_analysis::loader::kuna_dynrelocs::resolve;
 use kuna_decomp::kuna_dynrelocs::DYNRELOCS_ENV;
 
+/// Serializes the tests below: each flips the one process-global gate.
+static GATE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// `off` yields nothing at all (the pre-fix bytes); unset yields the PIE's three
 /// `R_X86_64_RELATIVE` writes and the two `PT_GNU_RELRO`-covered const slots.
 #[test]
 fn gate_off_is_inert_and_default_on_applies() {
+    let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
     let path = format!("{}/tests/fixtures/cet_pie_x86_64", env!("CARGO_MANIFEST_DIR"));
     let bytes = std::fs::read(&path).expect("PIE fixture");
     let file = object::File::parse(&bytes[..]).expect("parse");
@@ -54,4 +58,49 @@ fn gate_covers_macho_chained_fixups() {
     assert!(on.writes.iter().any(|w| w.vma == 0x1000081f8 && w.value == 0x100000948), "the first selref unpacked");
     assert!(on.const_ranges.contains(&(0x100004010, 0x100004017)), "__objc_classlist[0] in __DATA_CONST");
     assert!(!on.const_ranges.iter().any(|&(lo, _)| lo == 0x1000081f8), "a __DATA selref is not RELRO");
+}
+
+/// The Mach-O arm: `off` leaves the chained-fixup words as the linker wrote them;
+/// on, each rebase is its target and the bind a zero, in Apple's
+/// `DYLD_CHAINED_PTR_64_OFFSET` layout as in `ld64.lld`'s `DYLD_CHAINED_PTR_64`.
+#[test]
+fn macho_chained_fixups_follow_the_gate() {
+    let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    for name in ["macho_ptrslots_arm64", "macho_ptrslots_offset_arm64"] {
+        let path = format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"));
+        let bytes = std::fs::read(&path).expect("Mach-O fixture");
+        let file = object::File::parse(&bytes[..]).expect("parse");
+
+        std::env::set_var(DYNRELOCS_ENV, "off");
+        let off = resolve(&file, &bytes);
+        std::env::remove_var(DYNRELOCS_ENV);
+        assert!(off.writes.is_empty(), "{name}: off must apply nothing");
+
+        let on: Vec<(u64, u64, u8)> =
+            resolve(&file, &bytes).writes.iter().map(|w| (w.vma, w.value, w.width)).collect();
+        assert_eq!(
+            on,
+            vec![(0x100004000, 0x100000440, 8), (0x100004008, 0x1000003c8, 8), (0x100004010, 0, 8)],
+            "{name}: two rebases and a zeroed bind"
+        );
+    }
+}
+
+/// The MIPS primary GOT, which the dynamic linker relocates with no relocation
+/// records, follows the same gate: `off` reports none of its defined-address
+/// slots constant; on, the local entries after the module pointer and the
+/// defined symbols' global entries are.
+#[test]
+fn mips_got_slots_follow_the_gate() {
+    let _gate = GATE.lock().unwrap_or_else(|e| e.into_inner());
+    let path = format!("{}/tests/fixtures/mipsgot_gcc_be.so", env!("CARGO_MANIFEST_DIR"));
+    let bytes = std::fs::read(&path).expect("MIPS fixture");
+    let file = object::File::parse(&bytes[..]).expect("parse");
+
+    std::env::set_var(DYNRELOCS_ENV, "off");
+    let off = kuna_analysis::loader::kuna_mipsgot::const_ranges(&file);
+    std::env::remove_var(DYNRELOCS_ENV);
+    assert!(off.is_empty(), "off must declare nothing constant: {off:x?}");
+
+    assert_eq!(kuna_analysis::loader::kuna_mipsgot::const_ranges(&file), vec![(0x10428u64, 0x10443u64)]);
 }

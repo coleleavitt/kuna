@@ -22,9 +22,10 @@
     `macho_trieonly_arm64`, whose symbol table was emptied so only its
     trie names `trie_scale` and `trie_entry`.
 
-    Pass 1 (exporttrie off, the BUG): the island call is `callee_add()` and
-    the stripped dylib lists `sub_298`. Pass 2 (on, the FIX): `callee_entry()`
-    and `trie_scale`.
+    Pass 1 (exporttrie off, the BUG): the island call is `callee_add()`.
+    Pass 2 (on, the FIX): `callee_entry()`. The stripped dylib lists
+    `_trie_scale` in both passes: the Mach-O loader reads every export-trie
+    name the symbol table lacks on its own (`macho_stubs::named_exports`).
 -->
 <bytechunk space="ram" offset="0x100000" readonly="true">
 c0035fd6
@@ -58,7 +59,7 @@ c0035fd6
   <com>quit</com>
 </script>
 <stringmatch name="exporttrie #1: off names the island after the target's own symbol" min="1" max="1">v1 = callee_add\(\);</stringmatch>
-<stringmatch name="exporttrie #2: off leaves the stripped dylib's export unnamed" min="1" max="1">0x298 sub_298</stringmatch>
+<stringmatch name="exporttrie #2: the loader names the stripped dylib's export from its trie in both passes" min="2" max="2">0x298 _trie_scale</stringmatch>
 <stringmatch name="exporttrie #3: on names the island after the import, through the re-export" min="1" max="1">v1 = callee_entry\(\);</stringmatch>
-<stringmatch name="exporttrie #4: on names the stripped dylib's export from its trie" min="1" max="1">0x298 trie_scale</stringmatch>
+<stringmatch name="exporttrie #4: no pass leaves the export unnamed" min="0" max="0">sub_298</stringmatch>
 </decompilertest>

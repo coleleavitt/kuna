@@ -5,6 +5,41 @@ Anchors:
   - decompiler/crates/kuna-decomp/src/p9_emit
 ```
 
+An integer SUBPIECE of an implied struct value preserves the extracted width
+when rendered as a field access (`kuna_fieldextract.rs`). If the field is wider
+than the result, the emitter converts the field to the operation's integer type
+before surrounding expressions can widen it again. Thus narrowing a 64-bit
+field to signed 32 bits and then returning 64 bits keeps both conversions.
+The same extraction uses C casts, Go conversions, or Rust `as` expressions;
+the diagnostic `nocastprinting` setting still suppresses those conversions.
+An interior slice shifts the field first; its shift follows the input storage's
+byte order, so offset zero within a big-endian field denotes its high bytes.
+The field expression is evaluated once. Complete integer fields of the same
+type retain their existing spelling. Enum, float, pointer, boolean, volatile,
+incomplete and bitfield cases retain their existing paths, as do accesses
+through an explicit symbol. This corrects field extraction; it does not supply
+missing Rust signedness conversions in surrounding expressions.
+
+Standalone C output qualifies whole function-address expressions through
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_funcptrnames.rs`. A named
+SPACEBASE reference must have code type and resolve to the exact function entry.
+The recovered global symbol and live function database must agree on its leaf
+name and complete namespace path at the instruction's use point. This preserves
+explicit high-variable renames and declines conflicting aliases, data objects,
+interior addresses and remote-provider contexts.
+The shared `kuna_namespaces.rs (plain_scope)` spelling check also guards P1
+DWARF alias reconciliation. Every namespace component must be a plain ASCII
+C++ identifier rather than a keyword. Rust reference/pointer type names, template spellings, anonymous scopes
+and other unspellable paths retain their previous expression: prefixing `fmt`
+with a raw `*mut T::` or `char::` would not name a C++ function.
+The existing `namespacestrategy` policy controls the prefix: `minimal` uses the
+caller namespace and local-name collisions, `all` includes every named namespace
+and any global root needed to disambiguate a local, and `none` emits the bare
+name. Local scopes belong to the function's detached database; namespace lookup
+uses only scope identities from the live architecture database. Scope tokens
+precede the existing symbol atom, preserving its instruction and varnode tags.
+Rust and Go output retain their own existing function-value spelling.
+
 Typed byte-copy stores explicitly convert a pointer initializer to its declared
 pointer type when the rendered operand is not already a pointer that type accepts
 implicitly. The operand may carry the pointer bits through an unsigned integer
@@ -555,6 +590,25 @@ needs resolution and for the high's declared storage symbol when that symbol
 is a union but the high's preferred type is scalar. The operand then prints as
 `storage.integer` rather than a cast of the whole `storage` union, which C
 rejects. Only an existing selection is copied; no field is chosen anew.
+
+**A float stored into unknown bytes (kuna).** `cast_standard` needs no cast
+into `TYPE_UNKNOWN`, so upstream prints a float stored through a pointer to
+unknown bytes as `*puVar1 = fVar2`, a bit copy into an `undefined4`. kuna's C
+declares unknown bytes as an integer, and the same assignment is C's numeric
+float-to-integer conversion: a pointer whose other stores are integer bit
+patterns (clang stores a `1.0f` constant as `0x3f800000` from an integer
+register) printed its `vstr`, `movss` or `str s0` store as `v1[2] = a0 * a1 +
+0.5f;` beside `unsigned int *v1`. At the STORE's pointer slot, when the
+pointee (through typedefs and qualifiers) is unknown bytes and the stored value
+is a float of the same size, `get_input_cast_store` asks for a pointer to the
+value's type with the pointee's qualifiers (`kuna_floatstore.rs (pointer)`),
+and the store prints as `*(float *)&v1[2] = a0 * a1 + 0.5f;`; the value slot
+then matches its pointee and takes no cast. It applies only while unknown bytes
+print as an integer (`realtypes` on, or an output language with no
+unknown-bytes type, such as Rust's `*mut u32`): with `realtypes` off in C the
+pointee prints as `xunknown4`, upstream's bit copy, and the store keeps
+upstream's text. A float narrower than C's `float` (a half float) has no C type
+to point at and is left alone. This is a correctness fix with no option.
 
 **A signed read of an unsigned-printing expression (kuna).** The `U` suffix
 `mark_explicit_unsigned` gives a constant makes its whole C expression
@@ -1378,6 +1432,30 @@ The whole-document entry is `printc.rs (PrintC::doc_function_full)`, driven by
 `decompiler/crates/kuna-decomp/src/infra/decompile_drive.rs` after analysis
 completes.
 
+**A render that panics.** The architecture owns the printer, and a render needs
+the printer mutably while it reads the rest of the architecture, so every render
+runs inside `decompiler/crates/kuna-decomp/src/infra/architecture.rs
+(Architecture::with_print)`, which lends the printer out and moves it back. It
+moves back on every exit, a panic included: the printer is first cleared of the
+partial document by `printc.rs (PrintC::clear)` (the emitter's indent and paren
+levels and pending brace, the RPN stacks, the pushed mods and scopes, the scoped
+`Funcdata` pointer, unflushed end-of-line warnings, the declared locals and
+pointer-argument record, and a markup back-end, which returns to plain text),
+keeping every option; its printing modifiers go back to the ones in force when
+the render began; then the panic resumes. Upstream `docFunction` catches, calls
+`clear()` and rethrows the same way, but its `clear()` takes the modifiers from
+the bottom of the pushed stack, which misses a modifier saved and set without a
+push: a panic while a load's pointer prints under `print_load_value` would
+leave it on, and every later function would drop the `&` from its array
+element addresses. A batch that contains a
+render panic as that one function's error record
+(`decompiler/crates/kuna-console/src/project.rs (decompile_pulled)`, serial or
+inside a `--jobs` worker) therefore renders every later function with the
+printer settings the run configured (`indentincrement`, `arraynotation`,
+`truthycond`, ...), not a default printer's. The test-only
+`KUNA_RENDER_FAULT=<addr>` (`decompiler/crates/kuna-decomp/src/p9_emit/kuna_renderfault.rs`)
+panics the render of the function at that entry just after its opening brace.
+
 A HighVariable linked to a local Symbol is classified for declaration emission
 by that Symbol's category. A linked parameter whose name belongs to the
 prototype is emitted only in the signature. A later register local may have
@@ -1943,7 +2021,9 @@ where upstream always breaks lines at 100 columns. `option maxlinewidth N`
 (20 to 10000) selects upstream's line breaking for plain text:
 `printc.rs (PrintC::set_max_line_size)` puts `EmitPrettyPrint` in front of the
 plain emitter, and `printc.rs (PrintC::set_markup)` keeps it when it restores
-plain text after a markup render. The markup back-end is never wrapped. The
+plain text after a markup render. The markup back-end is never wrapped, and
+neither is Go output, where a newline ends a statement or a declaration's name
+(`printc.rs (PrintC::plain_emit)`; `PrintC::set_name` re-picks the emitter). The
 line size also bounds `option commentindent`: an indent of N or more is refused
 (`printc.rs (PrintC::set_line_comment_indent)`), as upstream does
 (`tests/stages/kuna-maxlinewidth.xml`). The datatest corpus passes unchanged
@@ -2042,7 +2122,11 @@ default-ON with the `emitInplaceOp` consumer ported: a standalone statement
 `out = out OP y` whose first input is the same HighVariable as the output
 renders as the compound assignment `out OP= y` for the ten integer
 operators, and a negative signed INT_ADD addend folds to `out -= c`;
-comma contexts — for-loop headers and condition-block side effects — keep
+when the variable covers only part of its mapped symbol (a 4-byte field of
+an 8-byte global), its read form is a cast (`(int)origin`) and not an
+lvalue, so the left side renders from the statement's output in the store
+form a plain assignment uses (`*(int *)&origin += 1`,
+`printc.rs (inplace_target)`); comma contexts — for-loop headers and condition-block side effects — keep
 the spelled-out upstream form, so `for (...; i = i + 1)` is unchanged;
 `option inplaceops off` restores everything, exercised by
 `tests/stages/kuna-cnorm-compoundassign.xml`), and
@@ -2157,7 +2241,19 @@ HighVariable, exactly one counter); parameters with no recovered name are
 `a0`, `a1`, … by signature slot; global data reads `dat_<addr>` (lowercase
 bare hex), unnamed callees `sub_<addr>`, goto targets `label_<addr>`
 (`printc.rs (PrintC::block_label_name)`, from the target block's entry
-address so goto and label always agree). Under `ghidra` the upstream scheme
+address so goto and label always agree). Two printed labels can start at
+the same address: `ActionReturnSplit` clones a shared return block once per
+goto edge, each clone keeping the original's address cover, and a clone
+spliced into its predecessor still starts at the return block's address.
+When two such copies are both goto targets, each would print
+`label_<addr>:`, a duplicate label (a C compile error) that leaves every
+goto to either copy ambiguous. Before the body prints,
+`decompiler/crates/kuna-decomp/src/p9_emit/printc.rs (PrintC::assign_label_names)`
+walks the structured tree in child order over the leaves that print a
+label; the first leaf with a given name keeps it and the n-th takes
+`label_<addr>_<n>` (`LAB_%08x_<n>` in ghidra mode). A goto resolves its
+target's front leaf through the same table, so it names the copy it jumps
+to. A function with no shared label prints exactly as before. Under `ghidra` the upstream scheme
 returns: `param_N`, type-prefixed `iVar1`/`uVar2`-style locals
 (`decompiler/crates/kuna-decomp/src/p6_variables/coreaction_cleanup.rs
 (kuna_default_local_name)`), `func_`/`code_` addresses. Both schemes are
@@ -2630,6 +2726,15 @@ storage-backed or name-backed evidence was found
 body object, but the function-scope uniqueness invariant gives it a suffix
 instead of re-declaring the parameter's identifier.
 
+*(kuna perf)* Whether a high is a reference, piece or strict partial whose
+declaration belongs to a same-named sibling (the whole symbol, the storage local
+a `&symbol` reference points at, the group's owner) is answered from the
+function's named highs grouped by name once per declaration walk, each group in
+the high bank's own order (`printc.rs (SameNamed)`). Each test walks only its
+name's group instead of every high of the function, and finds the same first
+sibling it found before. With the other GH-1034 fixes in, serde-hkx's 174 KB
+deserializer drops from 238 s to 152 s, nearly all of it in these walks.
+
 **(angr) dedupvardecls — collapsing duplicate declarations.** kuna's
 declaration emitter walks HighVariables, not the upstream symbol table (which
 declares each Symbol exactly once), so many scalar HighVariables sharing one
@@ -2998,6 +3103,14 @@ Three artifacts make up the plane, all in
   `p8_structure/kuna_loopbreak_recovery.rs` legitimately retags a
   goto-to-switch-exit as `f_break_goto` (§8.3); a language whose switch does *not*
   capture `break` must re-resolve that scope or emit a jump to the wrong place.
+  A direct case edge marked `f_break_goto` is precisely an empty switch-exit
+  arm. `kuna_langrust.rs (PrintC::emit_match_arm_rust)` emits its pattern and
+  empty body without a transfer statement. Rust leaves the match naturally;
+  a bare `break` would instead leave an enclosing loop or fail to compile when
+  there is no loop. Shared case labels retain their common empty arm. Other
+  case transfers and breaks emitted inside actual loop bodies retain their
+  existing handling. This corrects Rust emission without changing C or Go
+  output, the recovered control-flow graph, or the option catalog.
 - **`kuna_langtypes.rs`** — `TypeSpeller` and `SpellCtx`. Type *recovery* (P5) is
   language-independent; only the spelling differs, and it lives in the printer for
   the reason `kuna_ctypes.rs` records: `Datatype::hash_name` makes the registered
@@ -3075,6 +3188,14 @@ What differs, and why each is a language fact rather than a preference:
   numbers, since `b'a'` is a `u8`. A width Rust cannot name (3/5/6/7, x87's 10) spells `[u8; N]`, which
   is *more* faithful than C's `undefined3`: it names the storage exactly and does
   not claim to be a scalar.
+- **Integer widening** remains explicit: Rust has no implicit C integer
+  promotions, even when a wider arithmetic operation consumes the result.
+  `p9_emit/kuna_rustextend.rs` interprets signed core text storage at its
+  signed integer width before `INT_SEXT` widens it. A byte stored as `u8`
+  therefore extends through `as i8`, preserving negative byte values without
+  changing text declarations, pointer pointees, or return signatures. Narrow
+  arithmetic stays inside that interpretation so its original truncation occurs
+  before widening. Zero extension retains unsigned interpretation.
 - **Recovered composite names** are spelled in *type* position rather than
   flattened to an identifier. A composite carries whatever spelling the debug
   info recorded — `Result<u8, u32>`, `Vec<u8, alloc::alloc::Global>`,
@@ -3141,6 +3262,13 @@ What differs, and why each is a language fact rather than a preference:
   `braceelide` (DIV-38) would emit a braceless body, and `nullprinting` (DIV-35)
   would emit `NULL` (Rust spells it `core::ptr::null_mut()`). `condfold`'s comma
   operand has no Rust form either and is refused the same way.
+- **Constructed null expressions** use `printlanguage.rs (TagType)`'s
+  `LiteralToken`. `printc.rs (PrintC::emit_atom)` emits that final Rust spelling
+  through the same variable-markup path, preserving the operation and varnode
+  associations while keeping the parentheses in `core::ptr::null_mut()`.
+  Recovered variable names, including enum constants, still pass through the
+  identifier speller. The tag preserves this distinction for both constant
+  and variable highlighting. C and Go null atoms keep their existing tags.
 - **What Rust cannot express** is marked, never silently emitted. The structurer
   manufactures `goto`s as its escape hatch and Rust has no form for one that is
   neither a `break` nor a `continue`; those render as a comment plus a **diverging**
@@ -3184,11 +3312,191 @@ deliberately outside this count: it is a different lossy construct, and naming
 one number `unstructured_gotos` that meant two things would be worse than
 reporting the one.
 
+Go integer stores use `p9_emit/kuna_gostorevalue.rs` to match the rendered
+pointer's pointee type. When both source and destination are signed or unsigned
+integers of the same one-, two-, four- or eight-byte width with different
+signedness, the value receives an explicit destination conversion. The guard
+compares integer metadata without constructing type-name strings. This
+preserves its stored bits while satisfying Go's assignment rules, including
+field, plain-pointer and indexed destinations. The pointer and value are each
+emitted once, with the original expression modifiers. Floating, boolean,
+pointer, opaque and width-mismatched values retain their existing handling;
+this conversion does not reinterpret their representations. It also does not
+change local partial-field assignments, which use a separate emission path.
+
 Two surfaces refuse the language rather than half-honouring it. `kuna-ghidra`
 pins its Clang token-markup document to C (`process.rs`), because that document
 is consumed by Ghidra's C token model and Rust text in C token slots is a GUI
 regression. `kuna decompile-project` errors, because its `.c`/`.h`/`.asm` export
 is C-shaped end to end.
+
+**Verified Go pairs (`gopairreturns`).** `p9_emit/kuna_gopairreturns.rs` renders
+the pair-result metadata imported by `godwarfsig` when both options are on.
+With either option off, call emission bypasses the pair adapter and projection
+dispatch before inspecting any call contract.
+Every consumer verifies the full two-field, 16-byte, eight-aligned integer
+layout against its language facet; a name prefix or an ordinary two-field
+record is insufficient. `SpellCtx` shares the enabled architecture's type
+factory without copying its metadata table. Function declarations and function
+pointer types use the same `(int64, uint64)`-style result spelling. Local
+storage remains an anonymous struct with named result fields.
+
+A statement call assigns both fields from one invocation. An implied call
+passes its two results as the sole arguments of a function literal returning
+the struct; the original call evaluates outside that literal's parameter
+scope, so generated parameter names cannot capture caller identifiers. Returns
+project a stable local's two fields, forward a matching pair call directly,
+or use the inverse function literal to evaluate any other joined expression
+once. PIECE constructs the struct from its low and high eight-byte operands,
+with explicit scalar conversions where required. A verified pair cast of an
+implied eight-to-sixteen-byte zero extension constructs the low field and a
+zero high field, including a wholly zero pair. A 16-byte left shift by exactly
+64 bits instead constructs a zero low field and takes the input's low word.
+Go reads that word from validated pair storage or a materialized 16-byte local;
+it does not apply an integer shift to a byte array. The selected input is
+read once. Other shift amounts, volatile values and unproven storage retain
+the ordinary emission path. An opaque 16-byte integer or byte carrier from a
+call, load or materialized local may also feed a proven pair. Go passes that
+carrier once into a function literal that reads its two words; C uses a
+compound union value with the proven pair layout. A call may have an opaque
+16-byte return type, or an unlocked unresolved prototype with an existing
+16-byte result varnode. The latter retains the recovered result width even
+when the provisional prototype still says void. A locked void return or an
+already typed pair does not qualify for this conversion.
+These adapters avoid an invalid direct conversion between a byte array or
+128-bit integer and the pair struct. Existing field extraction
+and partial stores retain their ordinary struct semantics. An eight-byte
+SUBPIECE at offset zero or eight projects the corresponding validated field,
+including from an implied indirect call, and converts signedness at the scalar
+field rather than casting the whole struct to an integer. If call-output
+extraction instead narrows a field to fewer than eight bytes, the shared
+integer field renderer preserves that width, including a narrowed second
+result from a callback, without evaluating the call twice. If call-output
+trimming has already reduced an amd64 ABIInternal call to one eight-byte
+register, an exact RAX/RBX storage match selects the first/second result from
+the single-evaluation adapter. C and Rust make the same projection directly
+from the ordinary struct-valued call while both import options are enabled.
+A callee's two-result type alone does not turn
+that narrowed output back into a whole struct. Operation and
+variable associations remain attached to the recovered expressions. C and
+Rust continue to render the ordinary proven struct; with either import option
+off, their previous output is unchanged.
+
+**Go output (`outlang go`).** `p9_emit/kuna_langgo.rs` adds a Go profile and type
+speller to the shared RPN and block printer. `outlang c|rust|go` is a cataloged
+alias of `setlanguage`; the engine default is C and the CLI automatic policy is
+unchanged. Explicit Go selection applies to any input language. Function names
+are legal Go identifiers with the original qualified symbol in a comment;
+invalid names, keywords, predeclared names and the generated helpers' `math`/`unsafe`
+package names use an injective byte-hex escape, including escaping
+the escape prefix itself. Locals, parameters and member tokens use the same rule.
+Same-package call references omit that package qualifier. For Go source images,
+`p9_emit/kuna_gopackage.rs` also resolves the current function's package for
+record type spelling: `main.scale` uses `*point` for `main.point`. The context
+reaches nested pointers, arrays, local declarations and conversions. Import-path
+dots, method receivers and generic function arguments do not alter the package
+boundary. Only a simple type identifier with the exact package prefix is
+shortened; external and compound type names retain their existing spelling.
+This per-document context never renames the interned type and is cleared for
+other source or output languages.
+
+Go integer and float names retain the recovered byte width. Unknown or unusual
+widths use `[N]byte` storage rather than assert a different integer size. Arrays
+use `[N]T`, pointers use `*T`, void/opaque pointers use `unsafe.Pointer`, and a
+code pointer with a recovered prototype uses `func(...) T`. Signatures use
+`func name(parameter T) R`, with no return type for void, and locals use `var`.
+Variadic tails use the blank identifier so they cannot capture a source name.
+This is a presentation of the recovered ABI: it does not infer missing Go
+multi-results, receivers, strings, slices or interfaces.
+
+`p9_emit/kuna_gobyteview.rs` makes bounded artificial members of byte-array
+storage usable under Go output. A final unnamed piece covering the whole array
+reads or writes the array value directly. A one-, two-, four- or eight-byte
+integer piece uses `*(*T)(unsafe.Add(unsafe.Pointer(&path), offset))`, preserving
+the named member/subscript prefix and the exact memory offset. This is an lvalue
+for stores as well as a read. Its integer type follows the emitted Go value type,
+so its signedness agrees with the surrounding assignment and operand conversions;
+the facing IR type must independently qualify for the same kind of view.
+The varnode and both value types must have the access
+width, and the complete access must fit inside an array of one-byte unsigned or
+unknown elements. Anonymous partial types of such arrays use their cached
+unsigned or unknown stripped type. Negative or overflowing offsets, unsupported
+widths, other containers, volatile or annotation values, address-position
+accesses and pending casts keep their existing handling. An unknown scalar
+carrying floating-point data also declines the integer view. This changes only
+Go spelling; it neither changes the ABI nor infers source tuples. In particular,
+an inferred two-word result remains `[16]byte`, with both words preserved.
+
+`p9_emit/kuna_gobyteextract.rs` prints a scalar `SUBPIECE` of a whole named
+local byte array as a bounded typed read. The local's actual declaration and
+the Go value type must both identify the complete byte array. The source must
+be explicit, nonvolatile and addressable; implied expressions, globals,
+annotations and constants keep the existing handling. Integer results of one,
+two, four or eight bytes use their read-facing type, or the defining type when
+there is no reading operation. A result consumed directly by a store instead
+uses the rendered destination pointer's integer pointee type; both that type
+and the facing result type must qualify. This preserves the store's signedness
+even when inference gives the local pointer and the access different types.
+Pointer, boolean and floating results decline,
+as do unknown results consumed as floating-point storage. A constant low-end
+byte offset must fit completely inside the input. For big-endian storage its
+memory offset is `input size - result size - low-end offset`; little-endian
+storage uses the low-end offset directly. The read takes the address of the
+existing local, so an earlier call that produced the array is neither moved
+nor duplicated. This is Go output spelling of the recovered register carrier;
+it does not infer a source multi-result signature.
+
+Go integer extensions retain their explicit widening conversion before the
+consuming expression. C's implicit-promotion rule cannot hide a `SEXT` or
+`ZEXT` in Go. A narrow signed interpretation is kept inside the widening cast,
+so scaling a signed byte happens at the recovered wider width rather than
+overflowing the byte first.
+Widening a boolean uses the Go conversion form that evaluates its operand once
+and returns integer one or zero; a boolean is never used directly in arithmetic.
+
+The token table puts shifts and bitwise AND with multiplication, OR and XOR
+with addition, and all comparisons below those groups. Boolean XOR is `!=`.
+Equal-precedence right nesting retains parentheses unless the same associative
+operator permits flattening. Operand and assignment conversions use the type
+actually emitted for each local after declaration collapse and signedness
+selection, rather than an earlier SSA member's type. Integer constant copies
+spell the destination-width bit pattern directly, so an unsigned destination
+receives `0xffffffffffffffff` rather than the invalid constant conversion
+`uint64(-1)`. The same rule follows at most eight implied, same-width integer
+COPY/CAST nodes when a constant reaches a return or operand; it never folds
+named values, arithmetic or effects. Numeric conversions use
+`T(value)`; integer and pointer conversions carry `uintptr` and `unsafe.Pointer`, and pointer indexing
+uses `unsafe.Add` with the IR's byte scale. Boolean-to-integer conversions use a
+single-evaluation function literal. Float storage transfers use the matching
+`math.Float32bits`/`Float64bits` and inverse operations, preserving the distinction
+from numeric conversion. Non-finite and negative-zero literals retain their bits.
+Rune and string escaping uses Go syntax; invalid rune values stay numeric. A
+resolved one-byte C string pointer uses `unsafe.StringData` and includes its
+terminating zero. Wide or truncated pointer strings retain their address.
+Internal one-byte `DISPLAY_STRING` values use the same data-pointer conversion
+and retain their recovered pointer type before any caller conversion. This
+also covers length-bounded Go string arguments rewritten by `fatstr`; their
+separate length operand is unchanged. A Go string value cannot be converted
+directly to `unsafe.Pointer`.
+
+Go has neither ternary nor comma expressions. Recovered if diamonds remain
+statements. A short-circuit operand with leading statements evaluates those
+inside a `func() bool { ...; return condition }()` operand, so skipped operands
+have no effects. While and C-shaped for loops become Go `for` forms. A bottom-
+tested loop uses a fresh first-iteration boolean in its for header: the first
+condition is skipped, every later condition is tested, including after continue.
+Braces and else clauses share the required lines regardless of C brace options;
+selecting Go does not mutate those options.
+
+Switch labels sharing a body form one comma-separated case. A case's sole goto
+to another case can be rendered by ordering those cases adjacently and replacing
+that goto with `fallthrough`; its now-unused label is suppressed. The decision
+uses the current block graph, not stale chain metadata after return duplication.
+Other gotos remain explicit, including jumps Go's lexical scope rules may reject.
+Unknown machine helpers retain their operands. The broad contract is parseable
+Go; compilation and execution are checked for the supported scalar, pointer,
+conversion and control-flow fixtures. Missing types, low-level helpers and
+incomplete ABI recovery still prevent arbitrary output from compiling.
 
 **The java-language back-end.** `option setlanguage java-language` selects it;
 the CLI selects it automatically for a DEX file (chapter 00). It follows upstream
@@ -4160,3 +4468,461 @@ the one printed right before the step in the same block. `v = *p; p = &p[1];`
 prints `v = *p++;`, `*d = c; d = &d[1];` prints `*d++ = c;`. Lua 5.4 x86-64:
 4 folds (`v2 = *envp++;` in `__init_libc`), ld.so 5; a step that goes through
 a copy the loop also compares (`v2 = &a0[1]; v1 += *a0; a0 = v2;`) is left.
+
+### Rust signed primitive operations
+
+Rust represents core signed text storage with unsigned integer types so recovered
+bytes remain ordinary storage. Recovered unsigned primitives can also feed signed machine operations when
+prototype constraints keep their storage unsigned. At signed less-than, less-or-equal, and arithmetic
+right-shift operations, `kuna_rustsigned.rs` reinterprets that storage through the
+signed integer of the same width before applying the operator; the IR opcode
+defines signed interpretation even when the recovered input type is unsigned. Comparisons retain
+their boolean result; a shift converts its result back to the declared storage
+type when necessary. This preserves negative ordering and sign-bit propagation
+without changing declarations or shift counts. Unsigned constants retain an
+inner cast to their storage width so Rust does not infer an overflowing signed
+literal before reinterpreting its bits. Each operand is emitted once.
+An in-place assignment is expanded when its unsigned storage cannot itself
+perform the required signed operation.
+
+The plan requires core integer inputs with exact matching operation widths,
+and activates when a numeric operand has unsigned or signed text storage, or a
+signed shift must restore unsigned result storage even when its input already
+prints with the correct signed type. Non-core aliases,
+pointers, floats, unsupported widths and unrelated operators retain their existing
+emission. Shift outputs must be core integer storage of the same width. Explicit
+cast suppression still suppresses these conversions. Unsigned comparisons and
+logical shifts, and output languages other than Rust, are unchanged.
+
+### Rust integer assignment and arithmetic conversions
+
+Rust requires explicit conversions between signed and unsigned primitive integers
+of the same width. `kuna_rustintegers.rs` applies those conversions to returns,
+COPY assignments, and the operands of addition, subtraction, multiplication,
+and bitwise AND, OR and XOR. Named values use their printed local or recovered
+variable type; implied expressions use their read-facing type. A binary
+operation uses its output's printed storage type. An in-place assignment is
+expanded when its operands need these conversions. Each operand remains a
+single expression evaluation.
+
+The conversion preserves the integer's bit pattern at widths 1, 2, 4 and 8 bytes.
+Core text types follow Rust's unsigned byte spelling. Constant conversions first
+establish their source integer width, avoiding an out-of-range inferred literal.
+Before a same-width explicit cast or a new conversion around a context-dependent
+implied integer expression, the emitter
+establishes its source width with `::core::convert::identity::<T>`. This keeps an
+unsuffixed literal in a shift such as `1 << n` from falling back to `i32` after
+the outer cast removes its surrounding type context. A bounded walk follows the
+value operand of shifts/unary operations and both operands of integer binary
+operations; named values and explicitly typed operations already establish their
+types. An exhausted walk declines the conversion. The identity evaluates its
+operand once and preserves its value.
+Rust casts also retain parentheses when the next printed token is an angle
+comparison or shift after an enclosing right-hand arithmetic expression. The
+emitter walks those pending expressions until a printed token or closing
+delimiter ends the boundary, so `a + (b as u64) < c` cannot be parsed as generic
+arguments. This applies to existing Rust casts as well as newly added ones.
+The helper declines mismatched widths, enums, noninteger values and aggregates;
+it does not infer aggregate layout or repair memory STORE widths. Cosmetic cast
+suppression disables these conversions. C and Go emission are unchanged.
+
+Native validation uses wrapping arithmetic, with Rust overflow checks disabled,
+to match the binary's integer operations. The conversion does not itself select
+checked versus wrapping arithmetic for a source build.
+
+### Rust machine-operation names
+
+A functional `CALLOTHER` names the architecture's machine operation. When Rust
+output encounters a strict or reserved keyword such as x86 `in`, AVR `break`, or
+MIPS `yield`, `kuna_rustuserop.rs` supplies the raw-identifier prefix `r#`. This
+preserves the operation's identifier and arguments while preventing Rust from
+parsing it as a control-flow construct or rejecting it as a keyword. Ordinary
+names and other output languages keep their spelling. The keyword set includes
+edition-specific reserved words; weak keywords remain ordinary identifiers.
+Rust forbids raw spellings of `_`, `crate`, `self`, `Self`, and `super`, so those
+are excluded. This correction applies only to functional machine-operation
+calls, not to unrelated type, variable, namespace, or symbol naming.
+
+### Literal Rust print macros
+
+`rustfmtliteral` (default on) uses
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_rustfmtliteral.rs` to render
+literal-only `std::io::stdio::_print` and `_eprint` calls as Rust print macros.
+It changes only Rust output and requires the detected Rust language, an
+unambiguous stable 1.93.0 or 1.93.1 compiler version, and a 64-bit little-endian data space.
+The loader obtains the version from ELF `.comment` records through
+`decompiler/crates/kuna-analysis/src/analyzers/sourcelang/kuna_rustversion.rs`.
+Absent, malformed, prerelease or conflicting Rust records provide no version;
+a forced source-language option cannot manufacture version evidence.
+
+A resolved sink may store its name as a qualified string or as a leaf name plus
+namespace. A leaf `_print`/`_eprint` qualifies only at the exact symbol entry and
+with the complete `std::io::stdio` scope. Missing, extra or unrelated namespaces
+keep the runtime call, including when resolution follows a relocated GOT slot.
+
+The call must have exactly two constant machine-word arguments and no result.
+In this compiler layout the second word's low bit distinguishes a literal from
+a formatting template: odd means `(byte_length << 1) | 1`. The first word must
+be nonnull, and every byte of the bounded (at most 4096-byte) string must be
+readonly, nonvolatile, mapped and valid UTF-8. An empty string needs no read.
+Even tags, nonconstant arguments and mismatched sink names keep the runtime call.
+This checks the IR and loader bytes; it does not rewrite output text.
+
+A final LF selects `println!` or `eprintln!` and removes exactly that one byte
+from the argument. All other bytes, including a preceding CR, are retained.
+Rust string escaping protects controls, quotes and backslashes; doubled braces
+preserve literal formatting semantics. No arguments or side effects are dropped.
+The option does not recover placeholder templates, `format!`, `write!` or panic
+macros. Turning it off restores both encoded runtime arguments.
+
+### Primitive Rust print arguments
+
+`rustfmtargs` (default on) uses
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_rustfmtargs.rs` for the placeholder
+representation at the same verified Rust 1.93.0/1.93.1 stdout/stderr sinks.
+It requires Rust output, a 64-bit little-endian data space, exactly two runtime
+arguments, no return value and a nonnull constant template pointer. Sink identity
+may be a fully qualified call name or the exact function symbol with its
+`std::io::stdio` namespace chain; an unqualified spelling alone is insufficient. Every consumed
+template byte is mapped, readonly and nonvolatile. A bounded decoder accepts UTF-8
+literal pieces and default placeholders, including explicit argument indices.
+It limits input to 4096 bytes, 128 pieces and 16 referenced arguments. Missing
+terminators, unsupported formatting flags and gaps in the referenced indices
+preserve the runtime call.
+
+The second word must identify a naturally aligned local stack descriptor array.
+Only pre-call inputs of stack INDIRECT effects associated with this exact call
+provide descriptor cells. Overlapping, missing or duplicate cells reject the
+whole candidate. Formatter pointers must resolve through bounded pure operations
+to an unambiguous primitive integer Display identity retained from full object
+symbols, before trait qualifiers are removed for display names. A normalized
+`fmt` name cannot distinguish Display, Debug or exponent formatting and is never
+used as evidence. Conflicting symbol aliases also disqualify a callback.
+
+Each value pointer must resolve through pure operations to an aligned local stack
+address. The macro borrows a dereference cast to the formatter's integer type,
+preserving width and signedness without substituting a later memory version.
+Literal escaping doubles braces and retains all controls; exactly one final LF
+selects an `ln` macro. Explicit indices preserve repeated-argument order. All
+original setup statements and IR remain intact, and C output is unchanged.
+Generic reference formatters, `format!`, `write!` and specialized sinks remain
+explicit. Other integer traits and width/precision require `rustfmtflags`.
+
+### Static Rust integer format specifications
+
+`rustfmtflags` (default on) extends `rustfmtargs` through
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_rustfmtflags.rs`. The same version,
+language, memory, stack descriptor and exact sink requirements apply. Full object
+symbols establish both integer width/signedness and Display, Debug, LowerHex,
+UpperHex, Octal, Binary, LowerExp or UpperExp trait identity. Only exact standard
+library paths for 8-, 16-, 32- and 64-bit integers qualify. Pointer-sized integer
+aliases may share their corresponding 64-bit formatter; different types or traits
+and unknown aliases invalidate the address. Generic formatter types are not inferred. The loader indexes only candidate formatter addresses, then checks every symbol against those candidates; unknown aliases before or after a recognized name still invalidate the address.
+
+The bounded template decoder accepts static flags, width and precision before an
+optional explicit argument index. Dynamic count headers are refused before reading
+their fields. Width and precision values must agree with their enable bits: the
+runtime copies encoded values without enabling them. Enabled fields omitted from
+the template have value zero. Width zero without zero-padding is refused because
+the corresponding source spelling would turn on zero-padding. Invalid Unicode
+fill, brace fill, a reserved high bit, conflicting signs or debug-hex modes, and
+non-space fill without explicit alignment also preserve the runtime call.
+
+Rendering retains alignment, fill, sign, alternate form, zero-padding, width and
+precision, followed by the verified trait suffix. Debug hexadecimal flags require
+a Debug callback. Fill characters are escaped for the surrounding Rust string;
+literal braces and repeated argument indices retain their existing treatment.
+Turning the option off restores default-only Display recovery. Disabling
+`rustfmtargs` disables this extension too. Floating-point, pointer and generic
+formatters, dynamic counts, `format!`, `write!` and specialized sinks remain
+explicit. No IR, descriptor setup or C output changes.
+
+### Rust format String initialization
+
+`rustfmtresult` (default on), in
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_rustfmtresult.rs`, recognizes only
+`alloc::fmt::format::format_inner` at the existing direct-call rendering hook.
+The name must be fully qualified or resolve to the exact entry with the complete
+`alloc::fmt::format` namespace. The call has a hidden destination, template and
+argument-array input, and no output varnode. It reuses `rustfmtargs` version,
+language, endian, readonly-template, same-call descriptor and integer formatter
+proofs; disabling `rustfmtargs` also disables this result consumer. Static format
+specifications independently require `rustfmtflags`.
+
+The destination is a word-sized integer/unknown or pointer value that resolves
+through bounded pure copies/casts to a non-spacebase entry input. Constants,
+computed pointers, local destinations and incompatible types are refused. A
+local output buffer may still be split across several primitive declarations;
+it is not rendered as a String write until its complete allocation is recovered. An
+entry value is interpreted as an output pointer according to the verified sink's
+ABI; its dynamic address is not guessed from a type name.
+
+The renderer uses `std::ptr::write(destination as *mut std::string::String,
+format!(...))`, with a raw-pointer bridge for pointer/reference expressions.
+This initializes the caller's storage without dropping its previous contents,
+as the original hidden-result call does. Format literals retain terminal LF;
+there is no println-style newline removal. Descriptor setup, surrounding IR,
+existing returns and function signatures remain intact. The option does not
+recover generic wrappers, indirect calls, call-return values, unsupported
+formatters or other layouts, and it does not change C output.
+
+### Rust panic messages
+
+`rustfmtpanic` (default on), in
+`decompiler/crates/kuna-decomp/src/p9_emit/kuna_rustfmtpanic.rs`, renders verified
+`core::panicking::panic_fmt` calls as `panic!`. The source language must be Rust,
+the output must be Rust, and the compiler record must identify stable Rust 1.93.0
+or 1.93.1 on a little-endian 64-bit data space. A direct call must have exactly
+three runtime arguments and no output. The name is either fully qualified or
+resolves to the exact function entry in the complete `core::panicking` scope.
+The call prototype must be non-returning, or its basic block must end in the
+artificial no-return halt attached to the same machine instruction. This accepts
+the existing flow proof when its fact is stored separately from the call prototype.
+
+The third argument is the hidden `track_caller` location. A bounded pure
+constant-expression walk must recover a nonnull address, and all 24 bytes of the
+location record must be mapped and nonvolatile. Its contents are not interpreted:
+normal PIE images place this record in relocation-backed data, and its original
+file and line are not part of the recovered message. Dynamic caller locations
+remain explicit. The macro displays a source-level panic; recompiling it naturally
+uses the recovered source's location rather than the original binary's file and
+line. No original-location or backtrace equivalence is claimed.
+
+The first two arguments use the existing verified `fmt::Arguments` layout.
+Literal-only messages share the bounded readonly UTF-8 byte reader with
+`rustfmtliteral`, but do not depend on that option. Braces are doubled and controls
+are escaped; every terminal newline is retained. Primitive integer messages reuse
+`rustfmtargs`' same-call descriptor cells, aligned local value pointers and exact
+formatter identities. Static format specifications additionally require
+`rustfmtflags`. Disabling either prerequisite retains calls requiring it; literal
+panics still qualify when both are off. Unsupported callbacks, templates, versions,
+call shapes or location records retain the runtime call.
+
+The change is confined to rendering the call expression. All descriptor setup,
+IR, declarations, existing returns and no-return control flow remain intact.
+It does not recover generic arguments, other panic entry points, indirect calls
+or earlier formatting layouts, and it does not change C or Go output.
+
+## Verified Rust piece-array printing
+
+`kuna_rustfmtpieces` extends source printing to the pre-template
+`fmt::Arguments` representation. The default-on `rustfmtpieces` option accepts
+x86-64 little-endian ELF executables from stable Rust 1.89.0 and 1.90.0 and
+nightly 1.89.0 `bf64d66bd` dated 2025-05-21. Compiler comments must identify one
+unambiguous supported build; other nightly commits, missing metadata and mixed
+versions do not qualify. The stable-version fact used by the 1.93 template
+readers retains its existing meaning.
+
+An exact `_print` or `_eprint` identity, including exact namespace resolution,
+must have one runtime argument and no result. Its argument must point to an
+aligned stack descriptor. The call's non-creation INDIRECT effects must supply
+five distinct complete words: piece pointer/count, argument pointer/count, and
+a null optional-format pointer. The inactive optional-format length is not
+read. Missing, overlapping, dynamic or ambiguous cells prevent recovery.
+There may be at most sixteen arguments, and the piece count must equal that
+count or exceed it by one. Every table span and string span must be mapped,
+immutable and nonvolatile; all strings must be UTF-8 and total at most 4096
+bytes. Null pointers and overflowed spans are rejected.
+
+The loader records the supported image's RELRO extent for this renderer only.
+The upper bound is rounded down to a complete 4096-byte page, while the lower
+bound remains inside the declared segment. This supplies immutable-range
+proof for adjacent length words in relocation-backed piece arrays. It does
+not change global readonly properties or general constant propagation.
+Explicit volatile markings override both this fact and existing readonly
+properties. A relocated pointer alone is insufficient evidence for the
+surrounding table.
+
+Literal recovery also requires `rustfmtliteral`. Nonempty argument arrays also
+require `rustfmtargs`, exact full primitive Display callback identities, and
+the shared aligned stack-pointer proof for each 8/16/32/64-bit signed or
+unsigned input. Formatting specifications, generic callbacks and non-Display
+traits remain explicit. The pieces are interleaved with default placeholders
+and escaped through the shared renderer; precisely one final newline selects
+`println!` or `eprintln!`. Empty arrays, empty separating pieces, braces,
+Unicode and control characters preserve their output bytes.
+
+The pass replaces only the print call's presentation. All setup assignments,
+IR, function prototypes, returns and surrounding statements remain. Existing
+descriptor type gaps can still prevent complete primitive functions from
+compiling; primitive macro execution does not imply whole-function
+recompilability. C and Go output, newer layouts and other formatting sinks are
+unchanged. Disabling `rustfmtpieces` restores the runtime-call presentation.
+
+String callback discovery likewise indexes only the forwarding and pad candidates, then rejects every conflicting or unknown alias before reading callback bytes.
+
+`rustfmtstr` extends template-layout formatting to a proven string Display
+argument. In x86-64 ELF images, complete object-symbol identities must identify
+both a generic reference Display callback and `core::fmt::Formatter::pad`.
+The callback must have the exact 18-byte body that loads the first two words of
+its argument as string data and length, preserves the formatter argument, and
+tail-jumps directly to that pad function. Conflicting aliases, another target,
+extra operations and other instruction sequences do not establish this fact.
+The generic name itself never supplies a concrete type.
+
+Recovery is restricted to stable Rust 1.93.0/1.93.1 and requires both live,
+eight-byte, aligned stack words at the existing formatting call. It constructs
+`std::str::from_utf8_unchecked(std::slice::from_raw_parts(data, length))` from
+those values. Valid UTF-8 storage follows the original `pad(&str)` call contract;
+no string contents are guessed from neighboring memory. Existing literal,
+argument, static-format, result-destination and panic-location checks still
+apply. Every setup statement, IR operation, prototype and return remains.
+Disabling the option preserves runtime calls containing these string arguments;
+unknown wrappers and derived Debug callbacks remain explicit. C and Go emission
+is unchanged.
+
+`rustfmtwrite` is off by default: the declared speed study did not clear the
+small-C wall-time confidence bound, despite median deltas below 0.2 percent.
+When enabled, it recovers formatting into an existing `String` only for the verified
+Rust 1.93.0/1.93.1 x86-64 little-endian ELF layout. The direct call must resolve
+exactly to `core::fmt::write`, with four runtime arguments and a one-byte result.
+The writer must derive from a function input through copies or casts. Its vtable
+must be aligned and contain six complete immutable, nonvolatile words: String
+drop identity, size 24, alignment 8, String's `fmt::Write::write_str` and
+`write_char`, and `core::fmt::Write::write_fmt`. Every method requires its full
+object-symbol identity; conflicting aliases invalidate that address. The loader
+provides a private RELRO extent with its upper boundary rounded down to a full
+4096-byte page, without changing global memory properties. Volatile annotations
+always override the private immutable-range evidence.
+
+The existing literal or compact-template checks establish all formatting bytes
+and arguments. One terminal newline selects `writeln!`; otherwise the renderer
+uses `write!`. The writer is cast to the proven String type and borrowed mutably.
+A local expression block imports `std::fmt::Write` for this call. The macro's
+`is_err()` preserves the original `fmt::Result` zero/success and one/error byte,
+with a cast matching the recovered signed or unsigned byte type; boolean results
+need no cast. Other result sizes or types remain explicit. Descriptor stores,
+result uses, branches, prototypes and IR remain unchanged. Custom writers,
+unsupported callbacks and IO-error result layouts do not qualify. Disabling the
+option retains the runtime call, and C/Go output is unchanged.
+
+
+`rustfmtio` is off in every preset: the declared speed study did not clear the
+Go-control CPU and wall-time confidence bounds, despite median deltas below
+1.3 percent. When enabled, it recovers Stdout `write!` and `writeln!` expressions only for exact
+stable Rust 1.93.1 x86-64 little-endian linked ELF implementations. The loader
+proves the full `&Stdout` write_fmt body and all four formatting-adapter callback
+bodies. All nonrelative bytes, internal branches, external target roles and
+symbol aliases must agree. In particular, generic adapter callback names alone
+do not establish the writer: write_str and write_char must call the exact
+StdoutLock write_all identity. The forwarded write_fmt must use the same adapter
+table and core formatting function. The complete table, panic text and location,
+code and unwind stubs must be immutable and nonvolatile. Resolved whole-word
+relocations are applied before comparison; unresolved, overlapping or partial
+relocations in protected spans invalidate recovery. Import slots must have one
+exact unresolved binding with the expected identity and zero addend. Private
+RELRO evidence uses the same page boundary rule as String writes. The emitter
+rechecks every protected byte against its current loader image.
+
+The two verified method bodies distinguish a reference-cell receiver from an
+optimizer-promoted inner pointer, even when both have the same method name.
+Recovery borrows the original `&Stdout` cell or reconstructs a temporary Stdout
+handle from that same inner pointer. It evaluates the original receiver once
+and never substitutes a newly acquired stdout handle. The original direct call
+must have three runtime arguments and an eight-byte integer result. Existing
+literal, primitive, string and flag proofs establish the formatting inputs.
+
+A scoped `std::io::Write` import enables the macro. Matching its Result preserves
+zero for success; an error is consumed into its pointer representation, then
+converted through usize to the original signed or unsigned integer type. This
+preserves the owned error payload for surrounding result handling, without
+dropping it or reducing it to a Boolean. Descriptor setup, branches, prototypes
+and IR remain. Other writers, producer versions, dynamic formats, callback
+profiles and result layouts stay explicit. Disabling the option restores the
+runtime call, and C/Go emission is unchanged.
+
+An empty literal stays a runtime call. In the buffered broken-pipe regression,
+the Rust 1.93.1 producer reports an error for that call, while a recovered empty
+macro built with Rust 1.90.0 reports success. Rebuilding the original empty-call
+source shows the same compiler-version difference: original and macro agree
+within 1.90.0, 1.93.1 and 1.99.1. This is a standard-library-version boundary,
+not evidence that a same-version macro changes the result. Recovery refuses it
+because the supported older execution compiler does not preserve the producer's
+behavior. Six other recovered forms match across all three execution compilers;
+no broader compiler-version equivalence is inferred.
+
+### Rust integer store values
+
+`kuna_ruststorevalue.rs` converts a STORE value to the integer type reached
+through the rendered pointer when their 1-, 2-, 4- or 8-byte primitive widths
+match but their signedness differs. The value keeps its bits; for example,
+a `u64` expression assigned through an `i64` pointer receives `as i64`.
+The shared Rust integer conversion helper retains the source width of
+context-dependent literal expressions before applying the destination cast.
+
+The pointer is emitted once as the assignment destination and the complete
+value expression once as its right-hand side. Named pointers use their
+rendered declaration type; implied field pointers use their read-facing type.
+The emitter restores its expression modifiers after rendering the value.
+Cast suppression retains its existing output. Enums, floats, booleans,
+pointers used as values, mismatched widths and unsupported integer widths
+retain their prior paths. This conversion does not change memory-operation
+widths or repair raw-pointer indexing.
+
+
+### Rust raw-pointer indices
+
+`kuna_rustptradd.rs` renders a raw-pointer PTRADD as
+`base.wrapping_byte_offset((index as isize).wrapping_mul(scale))`.
+The byte scale comes from the instruction, so it does not depend on the
+recovered pointee's Rust layout. Index conversion and multiplication retain
+modular address arithmetic. Literal-dependent index expressions keep their
+recovered integer width before the `isize` conversion. A value use adds one
+dereference; an address use leaves a raw pointer without creating a reference.
+The base and index each appear once, in their existing order. A different
+output pointee receives an explicit pointer cast.
+
+This path requires matching 32- or 64-bit raw-pointer and integer-index
+widths, byte-addressed pointers and a constant scale. Array-valued sources,
+constant bases, relative pointers and implied PTRSUB/COPY bases retain their
+existing paths. These exclusions avoid treating an array value as a pointer
+receiver. `nocastprinting` retains its previous diagnostic output. This
+corrects raw-pointer index syntax; it does not infer array layouts or repair
+unrelated pointer arithmetic and memory widths.
+
+### Rust array index conversions
+
+The Rust generic PTRADD subscript path renders a nonconstant primitive integer
+index as `usize`, as required by Rust arrays and slices. The complete index
+expression is evaluated once. Its rendered integer type and any literal-dependent
+arithmetic retain their original width before the target-sized conversion; the
+bounded integer-context query refuses expressions whose context cannot be
+established. The conversion applies to load, store and array-notation address
+expressions. Existing constant subscripts retain Rust's contextual type inference.
+
+The helper accepts matching varnode/type widths of 1, 2, 4 or 8 bytes and excludes
+enums and noninteger types. Cast suppression retains diagnostic output. The
+raw-pointer wrapping path and plain pointer-addition notation are separate paths.
+This repairs valid array indexing without establishing correctness of raw-pointer
+fallbacks, global byte-scale recovery or uninitialized local arrays. Proven
+array-place addresses use the raw-address path described below. The native regression checks complete emitted field and nested-array
+bodies, valid addresses, all store and guard bytes, callback order, and literal
+shift expressions against C at both optimization levels.
+
+
+### Rust raw array addresses
+
+`kuna_rustarrayaddr.rs` forms a raw pointer to a proven whole-array place with
+`&raw mut`, then applies the PTRADD byte scale using `wrapping_byte_offset` and
+`wrapping_mul`. It casts the result to the recovered output pointer type. This
+avoids subscripting, bounds checks, references and array loads when computing an
+address, including a valid one-past pointer. A same-width primitive integer cast
+of the same proven array place also takes its raw address before the cast; Rust
+has no implicit array-to-pointer decay.
+
+The proof accepts an implied PTRSUB at the exact start of a nonempty struct
+array field, or offset zero through a pointer to a nonempty array. It excludes
+unresolved fields, unions, relative pointers, non-byte-addressed pointers and
+other array-place forms. PTRADD requires matching 32- or 64-bit pointer and
+primitive integer-index widths and a constant byte scale. The existing bounded
+integer-context query preserves literal-dependent index arithmetic before
+converting to `isize`. Each operand is evaluated once. Load/store uses retain
+the array-index path. Cast suppression retains diagnostic output, and disabled
+array notation retains its previous PTRADD path. Array projection still requires a valid containing
+object; this does not establish correctness for arbitrary null or dangling bases.
+
+The native regression compiles complete emitted functions at both optimization
+levels and compares pointer bits with C. It covers signed and unsigned indices,
+integer, floating, pointer and boolean array fields, nested arrays, one-past
+addresses, callback order and modular integer address arithmetic. The same
+functions run over readable and protected memory without reading the array.

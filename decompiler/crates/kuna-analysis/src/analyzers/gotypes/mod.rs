@@ -19,8 +19,9 @@
 //! beyond an opaque named shell, typed GLOBALS (no variable binding happens
 //! here), and any caller-signature recovery. Named non-struct types (a
 //! `type MyInt int`) are also skipped — a bare alias adds no layout knowledge.
-//! 64-bit little-endian images only (every supported Go target in the corpus;
-//! a 32-bit or BE image returns empty).
+//! Little-endian images: Go 1.18–1.25 32-bit typelinks layouts, and both
+//! typelinks and newer descriptor regions on 64-bit targets. Big-endian images
+//! and 32-bit descriptor regions remain unsupported.
 //!
 //! ## Locating moduledata without symbols
 //!
@@ -53,6 +54,7 @@
 //! (`tflagExtraStar` prefixes a `*` to strip). A struct type continues with
 //! `pkgPath (ptr) @48`, `fields slice @56`: each field is
 //! `{name (ptr), typ (ptr), offset (uintptr)}`, 24 bytes, since go1.19.
+//! Go1.18 stores `offset << 1 | embedded` in that final word instead.
 //!
 //! ## Gating
 //!
@@ -73,7 +75,14 @@ use kuna_decomp::kuna_gotypes::{gotypes_enabled, GOTYPES_MAX_TYPELINKS};
 use kuna_decomp::kuna_langfacet::LangFacet;
 
 use crate::pass::{AnalysisCtx, AnalysisOutput, AnalysisPass, Phase};
-use crate::pclntab::{locate_header, ImageBytes};
+use crate::pclntab::locate_header;
+use kuna_layout::GoImage;
+use crate::loader::gobuildinfo::{buildinfo_blob, version_from_blob};
+
+mod kuna_structorder;
+mod kuna_layout;
+mod kuna_fieldtypes;
+use kuna_fieldtypes::field_type;
 
 /// Go `kind` byte values (`internal/abi.Kind`), masked by [`KIND_MASK`].
 const KIND_MASK: u8 = 0x1f;
@@ -143,20 +152,20 @@ struct TypeMeta {
     colon_names: bool,
 }
 
-/// Read a u64 word at `vma`.
-fn word(img: &ImageBytes, vma: u64) -> Option<u64> {
-    img.read(vma, 8).map(|b| u64::from_le_bytes(b.try_into().unwrap()))
+/// Read a target-width word at `vma`.
+fn word(img: &GoImage, vma: u64) -> Option<u64> {
+    img.word(vma)
 }
 
 /// `true` if `vma` reads as mapped image bytes.
-fn mapped(img: &ImageBytes, vma: u64) -> bool {
+fn mapped(img: &GoImage, vma: u64) -> bool {
     img.read(vma, 1).is_some()
 }
 
 /// Decode a Go name record at `vma`: a flags byte, then the length (a varint
 /// since go1.17, a big-endian `u16` before, `old`), then the UTF-8 bytes.
 /// Returns `None` on any malformation.
-fn read_go_name(img: &ImageBytes, vma: u64, old: bool) -> Option<String> {
+fn read_go_name(img: &GoImage, vma: u64, old: bool) -> Option<String> {
     let _flags = img.read(vma, 1)?[0];
     let mut len: usize = 0;
     let mut cur = vma + 1;
@@ -184,17 +193,18 @@ fn read_go_name(img: &ImageBytes, vma: u64, old: bool) -> Option<String> {
 }
 
 /// Decode the `_type` base record at `types + off`. The name comes from the
-/// `nameOff` at `+40`, resolved against the blob base, `tflagExtraStar`'s
+/// target-width `nameOff` field, resolved against the blob base, `tflagExtraStar`'s
 /// leading `*` stripped.
-fn read_type(img: &ImageBytes, types: u64, etypes: u64, off: u32, old_names: bool) -> Option<GoType> {
+fn read_type(img: &GoImage, types: u64, etypes: u64, off: u32, old_names: bool) -> Option<GoType> {
     let vma = types.checked_add(off as u64)?;
-    if vma + TYPE_BASE > etypes {
+    if vma.checked_add(img.type_base())? > etypes {
         return None;
     }
-    let rec = img.read(vma, TYPE_BASE as usize)?;
-    let size = u64::from_le_bytes(rec[0..8].try_into().unwrap());
-    let tflag = rec[20];
-    let kind = rec[23] & KIND_MASK;
+    let rec = img.read(vma, img.type_base() as usize)?;
+    let width = img.word_size as usize;
+    let size = word(img, vma)?;
+    let tflag = rec[2 * width + 4];
+    let kind = rec[2 * width + 7] & KIND_MASK;
     if kind == 0 || kind > KIND_UNSAFEPTR {
         return None;
     }
@@ -202,7 +212,7 @@ fn read_type(img: &ImageBytes, types: u64, etypes: u64, off: u32, old_names: boo
     if size > 0x4000_0000 {
         return None;
     }
-    let name_off = i32::from_le_bytes(rec[40..44].try_into().unwrap());
+    let name_off = i32::from_le_bytes(rec[4 * width + 8..4 * width + 12].try_into().unwrap());
     if name_off <= 0 {
         return None;
     }
@@ -216,10 +226,10 @@ fn read_type(img: &ImageBytes, types: u64, etypes: u64, off: u32, old_names: boo
 
 /// `true` if the three words at `vma` parse as a plausible Go slice header
 /// (`ptr` mapped, `len == cap`, `len <= max`).
-fn plausible_slice(img: &ImageBytes, vma: u64, max_len: u64) -> Option<(u64, u64)> {
+fn plausible_slice(img: &GoImage, vma: u64, max_len: u64) -> Option<(u64, u64)> {
     let ptr = word(img, vma)?;
-    let len = word(img, vma + 8)?;
-    let cap = word(img, vma + 16)?;
+    let len = word(img, vma + img.word_size)?;
+    let cap = word(img, vma + 2 * img.word_size)?;
     if len == 0 || len != cap || len > max_len || !mapped(img, ptr) {
         return None;
     }
@@ -229,16 +239,16 @@ fn plausible_slice(img: &ImageBytes, vma: u64, max_len: u64) -> Option<(u64, u64
 /// Locate `types`/`etypes` and the `typelinks` slice inside the moduledata
 /// window at `anchor`, by cross-validation (see the module header). Samples up
 /// to 16 typelink entries and requires every sampled one to decode.
-fn locate_type_meta(img: &ImageBytes, anchor: u64) -> Option<TypeMeta> {
+fn locate_type_meta(img: &GoImage, anchor: u64) -> Option<TypeMeta> {
     // Candidate (types, etypes) pairs: adjacent words, both mapped, ordered,
     // blob no larger than 256 MiB.
     let mut pairs: Vec<(u64, u64, u64)> = Vec::new(); // (word_idx, types, etypes)
     for i in 0..MODULEDATA_WINDOW_WORDS {
-        let a = match word(img, anchor + i * 8) {
+        let a = match word(img, anchor + i * img.word_size) {
             Some(v) => v,
             None => break,
         };
-        let Some(b) = word(img, anchor + (i + 1) * 8) else { break };
+        let Some(b) = word(img, anchor + (i + 1) * img.word_size) else { break };
         if a != 0 && a < b && b - a < 0x1000_0000 && mapped(img, a) && mapped(img, b - 1) {
             pairs.push((i, a, b));
         }
@@ -246,7 +256,7 @@ fn locate_type_meta(img: &ImageBytes, anchor: u64) -> Option<TypeMeta> {
     for &(i, types, etypes) in &pairs {
         // The typelinks slice follows (types, etypes) within the window.
         for j in (i + 2)..MODULEDATA_WINDOW_WORDS {
-            let Some((tl_ptr, tl_len)) = plausible_slice(img, anchor + j * 8, 1_000_000) else {
+            let Some((tl_ptr, tl_len)) = plausible_slice(img, anchor + j * img.word_size, 1_000_000) else {
                 continue;
             };
             // Validate: sampled entries are int32 offsets into the blob whose
@@ -287,7 +297,10 @@ fn locate_type_meta(img: &ImageBytes, anchor: u64) -> Option<TypeMeta> {
 /// kind's trailing arrays, in that memory order. `None` for a stride this
 /// phase cannot trust; the caller stops the walk there (conservative: keep
 /// what already decoded).
-fn descriptor_stride(img: &ImageBytes, t: &GoType) -> Option<u64> {
+fn descriptor_stride(img: &GoImage, t: &GoType) -> Option<u64> {
+    if img.word_size != 8 {
+        return None;
+    }
     const UNCOMMON_SIZE: u64 = 16; // {PkgPath i32, Mcount u16, Xcount u16, Moff u32, _ u32}
     const METHOD_SIZE: u64 = 16; // 4 x i32
     const TFLAG_UNCOMMON: u8 = 0x1;
@@ -343,7 +356,10 @@ fn descriptor_stride(img: &ImageBytes, t: &GoType) -> Option<u64> {
 /// the same way the slice form is: the triple's arithmetic must hold
 /// (`types + typedesclen <= etypes`), both bounds must map, and the walk must
 /// decode records back to back — a divergence stops it conservatively.
-fn locate_type_meta_descriptors(img: &ImageBytes, anchor: u64) -> Option<TypeMeta> {
+fn locate_type_meta_descriptors(img: &GoImage, anchor: u64) -> Option<TypeMeta> {
+    if img.word_size != 8 {
+        return None;
+    }
     for i in 0..MODULEDATA_WINDOW_WORDS {
         let Some(types) = word(img, anchor + i * 8) else { break };
         let Some(typedesclen) = word(img, anchor + (i + 1) * 8) else { break };
@@ -384,7 +400,7 @@ fn locate_type_meta_descriptors(img: &ImageBytes, anchor: u64) -> Option<TypeMet
 
 /// Find the moduledata anchor: a data-section word holding the pclntab header
 /// VMA whose following three words parse as the `funcnametab` slice.
-fn locate_moduledata(file: &object::File, img: &ImageBytes, header_vma: u64) -> Option<u64> {
+fn locate_moduledata(file: &object::File, img: &GoImage, header_vma: u64) -> Option<u64> {
     use object::ObjectSection;
     for sec in file.sections() {
         let name = sec.name().unwrap_or("");
@@ -399,15 +415,16 @@ fn locate_moduledata(file: &object::File, img: &ImageBytes, header_vma: u64) -> 
         }
         let base = sec.address();
         let Ok(data) = sec.data() else { continue };
-        let words = data.len() / 8;
+        let width = img.word_size as usize;
+        let words = data.len() / width;
         for w in 0..words {
-            let v = u64::from_le_bytes(data[w * 8..w * 8 + 8].try_into().unwrap());
+            let anchor = base + (w as u64) * img.word_size;
+            let Some(v) = img.decode_word(&data[w * width..(w + 1) * width]) else { continue };
             if v != header_vma {
                 continue;
             }
-            let anchor = base + (w as u64) * 8;
             // funcnametab slice directly follows pcHeader*.
-            if plausible_slice(img, anchor + 8, 0x1000_0000).is_some() {
+            if plausible_slice(img, anchor + img.word_size, 0x1000_0000).is_some() {
                 return Some(anchor);
             }
         }
@@ -415,61 +432,9 @@ fn locate_moduledata(file: &object::File, img: &ImageBytes, header_vma: u64) -> 
     None
 }
 
-/// Map a field's `_type` to an interned kuna datatype. Named structs reference
-/// their (possibly still incomplete) shells; scalars map to base widths; the
-/// string/slice/interface kinds map to the well-known header shells; anything
-/// else degrades to `undefined<size>` so the field's extent stays honest.
-fn field_type(
-    tf: &dyn TypeFactory,
-    img: &ImageBytes,
-    meta: &TypeMeta,
-    type_vma: u64,
-) -> Option<Rc<Datatype>> {
-    if type_vma < meta.types || type_vma + TYPE_BASE > meta.etypes {
-        return None;
-    }
-    let off = (type_vma - meta.types) as u32;
-    let t = read_type(img, meta.types, meta.etypes, off, meta.old_names)?;
-    let m = |mt| tf.get_base(t.size as int4, mt).ok();
-    match t.kind {
-        KIND_BOOL => tf.get_base(1, type_metatype::TYPE_BOOL).ok(),
-        KIND_INT | KIND_INT8 | KIND_INT16 | KIND_INT32 | KIND_INT64 => {
-            m(type_metatype::TYPE_INT)
-        }
-        KIND_UINT | KIND_UINT8 | KIND_UINT16 | KIND_UINT32 | KIND_UINT64 | KIND_UINTPTR => {
-            m(type_metatype::TYPE_UINT)
-        }
-        KIND_FLOAT32 | KIND_FLOAT64 => m(type_metatype::TYPE_FLOAT),
-        KIND_POINTER => {
-            // elem *Type sits at +48; a named struct pointee references its
-            // shell, anything else is a void*.
-            let pointee = word(img, t.vma + TYPE_BASE)
-                .and_then(|elem| field_type(tf, img, meta, elem))
-                .unwrap_or_else(|| tf.get_type_void().expect("void type"));
-            tf.get_type_pointer(8, pointee, 1).ok()
-        }
-        KIND_STRING => shell(tf, "go.string").ok(),
-        KIND_SLICE => shell(tf, "go.slice").ok(),
-        KIND_INTERFACE => {
-            // `any` (no methods) is an eface; everything else an iface. The
-            // method count lives past the base record; phase 1 keys off the
-            // canonical names instead: `interface {}` is the eface.
-            if t.name == "interface {}" {
-                shell(tf, "go.eface").ok()
-            } else {
-                shell(tf, "go.iface").ok()
-            }
-        }
-        KIND_STRUCT if t.tflag & TFLAG_NAMED != 0 && t.name.contains('.') => {
-            shell(tf, &t.name).ok()
-        }
-        _ => m(type_metatype::TYPE_UNKNOWN),
-    }
-}
-
 /// Get-or-create one of the well-known Go header shells: an already-interned
-/// (possibly completed) struct is returned as-is — `get_type_struct` alone
-/// refuses a name it has already completed.
+/// (possibly completed) struct is returned as-is. New shells retain a completion
+/// link so pointers created before field import see the completed layout.
 fn shell(tf: &dyn TypeFactory, name: &str) -> kuna_base::error::KunaResult<Rc<Datatype>> {
     if let Some(held) = tf.find_by_name(name)? {
         if held.get_metatype() == type_metatype::TYPE_STRUCT {
@@ -479,42 +444,42 @@ fn shell(tf: &dyn TypeFactory, name: &str) -> kuna_base::error::KunaResult<Rc<Da
             "gotypes: `{name}` is already held by a non-struct"
         )));
     }
-    tf.get_type_struct(name)
+    tf.kuna_declare_record(name, false)
 }
 
 /// Intern the four well-known header shells and their facets. Idempotent: an
 /// already-complete shell is left alone.
-fn intern_header_shells(tf: &dyn TypeFactory) {
-    let ptr8 = |tf: &dyn TypeFactory| {
+fn intern_header_shells(tf: &dyn TypeFactory, width: int4) {
+    let ptr = |tf: &dyn TypeFactory| {
         let v = tf.get_type_void().expect("void");
-        tf.get_type_pointer(8, v, 1).expect("ptr")
+        tf.get_type_pointer(width, v, 1).expect("ptr")
     };
     let u8w = |tf: &dyn TypeFactory, w: int4| tf.get_base(w, type_metatype::TYPE_UINT).expect("uint");
     let rows: [(&str, Vec<(&str, Rc<Datatype>)>, LangFacet); 4] = [
-        ("go.string", vec![("data", ptr8(tf)), ("len", u8w(tf, 8))], LangFacet::GoString),
+        ("go.string", vec![("data", ptr(tf)), ("len", u8w(tf, width))], LangFacet::GoString),
         (
             "go.slice",
-            vec![("data", ptr8(tf)), ("len", u8w(tf, 8)), ("cap", u8w(tf, 8))],
-            LangFacet::GoSlice { elem: "undefined8".into() },
+            vec![("data", ptr(tf)), ("len", u8w(tf, width)), ("cap", u8w(tf, width))],
+            LangFacet::GoSlice { elem: format!("undefined{width}") },
         ),
-        ("go.iface", vec![("tab", ptr8(tf)), ("data", ptr8(tf))], LangFacet::GoIface { eface: false }),
-        ("go.eface", vec![("type", ptr8(tf)), ("data", ptr8(tf))], LangFacet::GoIface { eface: true }),
+        ("go.iface", vec![("tab", ptr(tf)), ("data", ptr(tf))], LangFacet::GoIface { eface: false }),
+        ("go.eface", vec![("type", ptr(tf)), ("data", ptr(tf))], LangFacet::GoIface { eface: true }),
     ];
     for (name, fields, facet) in rows {
         let Ok(ct) = shell(tf, name) else { continue };
         if ct.get_size() == 0 {
-            let size = (fields.len() * 8) as int4;
+            let size = fields.len() as int4 * width;
             let fd: Vec<TypeField> = fields
                 .into_iter()
                 .enumerate()
                 .map(|(i, (n, t))| TypeField {
                     ident: i as int4,
-                    offset: (i * 8) as int4,
+                    offset: i as int4 * width,
                     name: n.to_string(),
                     field_type: t,
                 })
                 .collect();
-            let _ = tf.set_fields_struct_raw(&ct, fd, Vec::new(), size, 8, 0);
+            let _ = tf.set_fields_struct_raw(&ct, fd, Vec::new(), size, width, 0);
         }
         let _ = tf.kuna_register_lang_facet(name, facet);
     }
@@ -537,9 +502,11 @@ fn name_ok(name: &str) -> bool {
 /// `(walked, interned)` for the note/tests.
 fn intern_named_structs(
     tf: &dyn TypeFactory,
-    img: &ImageBytes,
+    img: &GoImage,
     meta: &TypeMeta,
+    version: Option<(u16, u16)>,
 ) -> (usize, usize) {
+    let packed_offsets = matches!(version, Some((1, 9..=18)));
     let mut walked = 0usize;
     let mut interned = 0usize;
     // Pass 1: declare every named struct so cross-references resolve by name.
@@ -553,8 +520,8 @@ fn intern_named_structs(
         // a pointer, the record it points at.
         let mut candidates: Vec<GoType> = Vec::new();
         if t.kind == KIND_POINTER {
-            if let Some(elem) = word(img, t.vma + TYPE_BASE) {
-                if elem >= meta.types && elem + TYPE_BASE <= meta.etypes {
+            if let Some(elem) = word(img, t.vma + img.type_base()) {
+                if elem >= meta.types && elem.checked_add(img.type_base()).is_some_and(|end| end <= meta.etypes) {
                     if let Some(p) = read_type(img, meta.types, meta.etypes, (elem - meta.types) as u32, meta.old_names) {
                         candidates.push(p);
                     }
@@ -573,7 +540,8 @@ fn intern_named_structs(
             }
         }
     }
-    // Pass 2: fill the layouts.
+    // Pass 2: fill value dependencies before their enclosing layouts.
+    let structs = kuna_structorder::complete_order(tf, img, meta, structs);
     for t in &structs {
         let Ok(ct) = shell(tf, &t.name) else { continue };
         if ct.get_size() != 0 {
@@ -581,13 +549,13 @@ fn intern_named_structs(
             // module) — leave the existing layout alone.
             continue;
         }
-        // structtype: pkgPath (ptr) @ +48, fields slice @ +56.
-        let Some((f_ptr, f_len)) = plausible_slice(img, t.vma + TYPE_BASE + 8, 4096)
+        // The fields slice follows the base type and package-path pointer.
+        let Some((f_ptr, f_len)) = plausible_slice(img, t.vma + img.type_base() + img.word_size, 4096)
             .or_else(|| {
                 // A zero-field struct has len == cap == 0; plausible_slice
                 // rejects len 0, so probe that case explicitly.
-                let len = word(img, t.vma + TYPE_BASE + 16)?;
-                let cap = word(img, t.vma + TYPE_BASE + 24)?;
+                let len = word(img, t.vma + img.type_base() + 2 * img.word_size)?;
+                let cap = word(img, t.vma + img.type_base() + 3 * img.word_size)?;
                 (len == 0 && cap == 0).then_some((0, 0))
             })
         else {
@@ -596,13 +564,14 @@ fn intern_named_structs(
         let mut fields: Vec<TypeField> = Vec::new();
         let mut good = true;
         for i in 0..f_len {
-            let fv = f_ptr + i * 24;
+            let fv = f_ptr + i * 3 * img.word_size;
             let (Some(name_ptr), Some(typ_ptr), Some(offset)) =
-                (word(img, fv), word(img, fv + 8), word(img, fv + 16))
+                (word(img, fv), word(img, fv + img.word_size), word(img, fv + 2 * img.word_size))
             else {
                 good = false;
                 break;
             };
+            let offset = if packed_offsets || meta.old_fields { offset >> 1 } else { offset };
             let Some(fname) = read_go_name(img, name_ptr, meta.old_names) else {
                 good = false;
                 break;
@@ -611,7 +580,6 @@ fn intern_named_structs(
                 good = false;
                 break;
             };
-            let offset = if meta.old_fields { offset >> 1 } else { offset };
             if offset > t.size || offset > i32::MAX as u64 {
                 good = false;
                 break;
@@ -620,6 +588,10 @@ fn intern_named_structs(
             // no bytes — drop it rather than refuse the layout (the DWARF
             // importer makes the same call).
             if fty.get_size() == 0 {
+                if word(img, typ_ptr) != Some(0) {
+                    good = false;
+                    break;
+                }
                 continue;
             }
             fields.push(TypeField {
@@ -649,7 +621,7 @@ fn intern_named_structs(
             continue;
         }
         if tf
-            .set_fields_struct_raw(&ct, fields, Vec::new(), t.size as int4, 8, 0)
+            .set_fields_struct_raw(&ct, fields, Vec::new(), t.size as int4, img.word_size as int4, 0)
             .is_ok()
         {
             interned += 1;
@@ -662,8 +634,13 @@ fn intern_named_structs(
 /// ([`crate::pclntab::kuna_gomoduledata`]), for a release that has a row.
 /// `minor` is the build-info release; without it the go1.16 name encoding
 /// is chosen by which one decodes the sampled `typelinks`.
-fn type_meta_from_table(file: &object::File, img: &ImageBytes, header_vma: u64, minor: Option<u16>) -> Option<TypeMeta> {
-    let md = crate::pclntab::kuna_gomoduledata::locate(file, img, header_vma, minor, 8, &|img, va| word(img, va))?;
+fn type_meta_from_table(file: &object::File, img: &GoImage, header_vma: u64, minor: Option<u16>) -> Option<TypeMeta> {
+    if img.word_size != 8 {
+        return None;
+    }
+    let md = crate::pclntab::kuna_gomoduledata::locate(file, &img.bytes, header_vma, minor, 8, &|b, va| {
+        b.read(va, 8).map(|w| u64::from_le_bytes(w.try_into().unwrap()))
+    })?;
     let (tl_ptr, tl_len) = md.typelinks;
     let offsets: Vec<u32> = (0..tl_len.min(GOTYPES_MAX_TYPELINKS as u64))
         .filter_map(|k| img.read(tl_ptr + k * 4, 4))
@@ -701,11 +678,11 @@ fn type_meta_from_table(file: &object::File, img: &ImageBytes, header_vma: u64, 
 /// `poll.DeadlineExceededError`), as the linker names its symbols. The path
 /// is the `uncommontype.pkgPath` of a named type; pointer, slice, array and
 /// map names are rebuilt from their elements'.
-fn qualified_name(img: &ImageBytes, meta: &TypeMeta, t: &GoType) -> String {
+fn qualified_name(img: &GoImage, meta: &TypeMeta, t: &GoType) -> String {
     qualified(img, meta, t, 8)
 }
 
-fn qualified(img: &ImageBytes, meta: &TypeMeta, t: &GoType, depth: u32) -> String {
+fn qualified(img: &GoImage, meta: &TypeMeta, t: &GoType, depth: u32) -> String {
     let child = |off: u64| {
         word(img, t.vma + off)
             .filter(|&e| depth > 0 && e >= meta.types && e + TYPE_BASE <= meta.etypes)
@@ -733,7 +710,7 @@ fn qualified(img: &ImageBytes, meta: &TypeMeta, t: &GoType, depth: u32) -> Strin
 /// The `uncommontype.pkgPath` of a named type: the uncommon record follows
 /// the kind's own record (map types, whose record size changed with the
 /// swiss-table maps, are left short).
-fn pkg_path(img: &ImageBytes, meta: &TypeMeta, t: &GoType) -> Option<String> {
+fn pkg_path(img: &GoImage, meta: &TypeMeta, t: &GoType) -> Option<String> {
     if t.tflag & 0x1 == 0 || t.tflag & TFLAG_NAMED == 0 {
         return None;
     }
@@ -759,7 +736,7 @@ const RTTI_MAX: usize = 200_000;
 /// `go.itab.` before go1.20). The descriptors are found by walking the type
 /// graph from `typelinks` and the itabs: element, key, field, parameter,
 /// method and `ptrToThis` edges. Returns `(vma, name, is_itab)`.
-fn rtti_names(img: &ImageBytes, meta: &TypeMeta) -> Vec<(u64, String, bool)> {
+fn rtti_names(img: &GoImage, meta: &TypeMeta) -> Vec<(u64, String, bool)> {
     let in_blob = |v: u64| v >= meta.types && v + TYPE_BASE <= meta.etypes;
     let type_off = |b: &[u8]| -> Option<u64> {
         let o = i32::from_le_bytes(b.try_into().ok()?);
@@ -881,12 +858,16 @@ impl AnalysisPass for GoTypesPass {
         if !gotypes_enabled() {
             return AnalysisOutput::default();
         }
-        // 64-bit little-endian only (module header).
-        if !ctx.file.is_little_endian() || !ctx.file.is_64() {
+        // The metadata readers currently cover little-endian layouts.
+        if !ctx.file.is_little_endian() {
             return AnalysisOutput::default();
         }
-        let img = ImageBytes::new(ctx.file);
-        let Some(header_vma) = locate_header(ctx.file, &img) else {
+        let version = buildinfo_blob(ctx.file).and_then(version_from_blob);
+        if !ctx.file.is_64() && !matches!(version, Some((1, 18..=25))) {
+            return AnalysisOutput::default();
+        }
+        let img = GoImage::new(ctx.file);
+        let Some(header_vma) = locate_header(ctx.file, &img.bytes) else {
             return AnalysisOutput::default();
         };
         let minor = crate::loader::gobuildinfo::go_version_of(ctx.file).filter(|v| v.0 == 1).map(|v| v.1);
@@ -900,18 +881,20 @@ impl AnalysisPass for GoTypesPass {
             return AnalysisOutput::default();
         };
         let tf = ctx.arch.types();
-        intern_header_shells(tf);
-        intern_named_structs(tf, &img, &meta);
+        intern_header_shells(tf, img.word_size as int4);
+        intern_named_structs(tf, &img, &meta, version);
         let mut out = AnalysisOutput::default();
-        if let Some((rtype, itab)) = rtti_record_types(tf) {
-            out.go_rtti = rtti_names(&img, &meta)
-                .into_iter()
-                .map(|(addr, name, is_itab)| crate::pass::TypedDataFact {
-                    addr,
-                    name,
-                    type_: if is_itab { itab.clone() } else { rtype.clone() },
-                })
-                .collect();
+        if img.word_size == 8 {
+            if let Some((rtype, itab)) = rtti_record_types(tf) {
+                out.go_rtti = rtti_names(&img, &meta)
+                    .into_iter()
+                    .map(|(addr, name, is_itab)| crate::pass::TypedDataFact {
+                        addr,
+                        name,
+                        type_: if is_itab { itab.clone() } else { rtype.clone() },
+                    })
+                    .collect();
+            }
         }
         out
     }

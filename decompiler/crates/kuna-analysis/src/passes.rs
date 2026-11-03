@@ -286,6 +286,8 @@ pub fn passes_for(compiler: Compiler, format: object::BinaryFormat) -> Vec<Box<d
         // untouched). Always-on, like arm_markers/mips_gp; `--option mips_isa off`
         // restores the un-painted (MIPS32-misdecoded) rendering.
         Box::new(crate::loader::mips_markers::MipsIsaModePass),
+        // PPC32 ELF relocation metadata; self-gated like the register passes.
+        Box::new(crate::loader::kuna_ppc32_imports::PicSlotsPass),
         // S1 DWARF: recover function/global names and TYPED function signatures
         // from `.debug_*` sections (the kuna analog of Ghidra's `DWARFAnalyzer`).
         // Registered AFTER LibProtoPass so for any name both emit, the DWARF
@@ -809,6 +811,19 @@ pub fn run_listing_consumers_replaying(
         return Vec::new();
     }
     let mut seeds = listing_seeds_for_language(&file, bytes, Some(arch.get_description()));
+    // (kuna `gowalkprune`) The fast inventory walk leaves out the functions a Go
+    // pclntab names, but only where the `gopclntab` pass ran and commits them:
+    // the pass set follows the load-time verdict, not a later `sourcelang` force.
+    // See `pclntab::function_entries`.
+    if arch.analysis_gowalkprune
+        && arch.analysis_fast_funcdisc
+        && !arch.analysis_listing
+        && arch.analysis_gopclntab
+        && arch.source_lang_detected == kuna_decomp::kuna_sourcelang::SourceLang::Go
+    {
+        let go = crate::pclntab::function_entries(&file);
+        seeds.retain(|seed| go.binary_search(seed).is_err());
+    }
     let bracket_evidence = std::cell::OnceCell::new();
     let bracket = |exec: &[(u64, u64)]| arch.analysis_aifbracket.then(|| {
         bracket_evidence.get_or_init(|| crate::aif::kuna_aifbracket::BracketEvidence::from_object(&file, exec))
@@ -1293,6 +1308,7 @@ pub fn run_listing_consumers_replaying(
                 &listing, None, arch, translate, std::rc::Rc::clone(code_space), ptrentry_out.clone(),
                 bracket(listing.exec_ranges()), None,
             ));
+            let bodies = crate::entry::sized_function_bodies(&file);
             aif_out.entries = checked.entries;
             // (kuna `aifdataveto`) IDA rolls a speculative code run back when
             // the program reads or writes any of it as data.
@@ -1318,6 +1334,7 @@ pub fn run_listing_consumers_replaying(
                     });
                 }
             }
+            aif_out.entries.retain(|&vma| !crate::entry::inside_body(&bodies, vma));
             if !checked.pool_entries.is_empty() {
                 let mut pool_out = AnalysisOutput::default();
                 pool_out.entries = checked.pool_entries;

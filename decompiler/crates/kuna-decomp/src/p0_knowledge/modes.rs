@@ -559,7 +559,7 @@ mod tests {
         /// it on that correct `int` prints as a wrong `long long` (GH-904). In
         /// the preset it would be the default output under 500 KiB, which is
         /// exactly what it is opt-in to avoid; every mode keeps the default,
-        /// `evidence`, which joins that way only on proof.
+        /// `callers`, which joins that way only on proof.
         /// `mixedtailret` returns a value a function tested beside a tail call,
         /// and a `void` guard that leaves the tested value in the return
         /// register compiles to the same bytes (clang's ARM `thr`/`keep`), so
@@ -592,12 +592,20 @@ mod tests {
         ///
         /// `callwide` requires complete caller evidence and remains an explicit
         /// opt-in until its default validation is complete.
+        /// `ppc32picimports` proves PIC caller bases but adds significant load
+        /// cost on large import inventories, so it requires an explicit option.
+        /// `rustfmtwrite` did not clear its declared small-C wall-time confidence
+        /// bound and remains explicit in every preset.
+        /// `rustfmtio` did not clear its Go-control CPU and wall-time confidence
+        /// bounds and remains explicit in every preset.
+        /// `rustprobestack` did not clear its default wall-time confidence bounds.
+        /// `highsliceguard` added 10.8% CPU time when recovering the upstream table.
         const EXCLUDED_ON_PURPOSE: &[&str] =
             &["v850indirectbranch", "dwarf_lines", "ifuncfpret",
               "aifcorroborate", "linuxsyscall", "nulterminator", "msvcstrappend",
               "structdefs", "indirectonly", "protoorder", "stackalias", "stackviews", "bejoin",
               "mixedtailret", "varargsharedfloat", "callarrayextent",
-              "armconstshift", "callmechanisms", "regsigned", "x86listingswitch", "callwide",
+              "armconstshift", "callmechanisms", "regsigned", "x86listingswitch", "callwide", "ppc32picimports", "rustfmtwrite", "rustfmtio", "rustprobestack", "highsliceguard",
               // `lazyfuncs` changes no output, but its saving is a single-function
               // property: the whole-binary surfaces the presets drive (decompile-all,
               // the web front-end, the benchmark) materialize every target they walk
@@ -653,6 +661,8 @@ mod tests {
         /// `poolentry`) came OFF this list in DIV-93. The joint evaluation this entry
         /// asked for was run over the 110 stripped non-x86-64 decbench twins and all
         /// four passed it, so they are in `AGGRESSIVE_OVERRIDES` above.
+        /// `godwarfsig` and `gopairreturns` remain explicit while aggregate ABI interactions and
+        /// decompression costs across Go corpus sizes are evaluated for automatic selection.
         const UNEVALUATED: &[&str] = &[
             // Landed with fixture measurements only: `funcchunks` changes only FID's
             // input, `tailcallentryall` was measured on Lua and the LLVM tools, and
@@ -661,6 +671,8 @@ mod tests {
             // `dwarfglobaltypes` was turned off by default in its own branch after
             // landing; it has no preset sweep yet.
             "dwarfglobaltypes",
+            "godwarfsig",
+            "gopairreturns",
             // Stack-address liveness can be incidental; synthetic regressions and
             // a local speed measurement do not justify a broad preset flip.
             "stackaddrargtrial",

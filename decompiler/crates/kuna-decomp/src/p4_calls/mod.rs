@@ -5,6 +5,7 @@
 
 pub mod funcdata_callsite;
 pub mod fspec;
+pub(crate) mod kuna_joincalloutput;
 pub mod modelrules;
 pub mod coreaction_protos;
 pub mod kuna_calleedeadarg;
@@ -42,6 +43,7 @@ pub mod kuna_zeroidiomuse; // (kuna) a self-cancelling `xor r,r` is not a compet
 pub mod kuna_varargstackargs; // (kuna) the variadic call's stack tail is its own fillinMap section
 pub mod kuna_argclobber; // (kuna) drop a trailing register argument a previous call's clobber put there
 pub mod kuna_passthrough; // (kuna) a register forwarded untouched to a callee that reads it is a parameter
+pub mod kuna_pltlocal; // (kuna) a call through a PLT stub bound to the image's own definition calls that definition
 pub mod kuna_mixedtailret; // (kuna) a value returned beside a claimed tail-call result is returned too
 pub mod kuna_varargtail; // (kuna) a recovered parameter that only feeds a variadic tail is not one a caller may gain
 pub mod kuna_calleearity; // (kuna) one callee, one argument list across its call sites
@@ -88,6 +90,7 @@ pub mod kuna_voidret; // (kuna) a function whose result a caller reads returns i
 pub mod kuna_callerreads; // (kuna) a function decompiled alone returns what its callers read
 pub mod kuna_callwide;
 pub mod kuna_bejoin; // (kuna) a big-endian pair joins its halves in the ABI's order when its low word is returned on purpose
+pub mod kuna_bejoinpass; // (kuna) a big-endian pair a call hands back to the RETURN untouched is one value
 
 pub(crate) mod kuna_customreturn;
 pub(crate) mod kuna_stackparamalign;

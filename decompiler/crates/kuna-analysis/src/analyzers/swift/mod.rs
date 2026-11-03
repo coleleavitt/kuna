@@ -93,11 +93,11 @@ impl AnalysisPass for SwiftMetadataPass {
         // A chained-fixup Mach-O binds other images' descriptors into `__const`
         // slots the indirect-symbol table does not list; an ELF binds them
         // through GOT slots whose dynamic relocations name the symbol.
-        for (slot, name) in fixups.binds() {
+        for (slot, name) in fixups.named_binds() {
             imports.entry(slot).or_insert_with(|| name.to_string());
         }
         let mut bind_slots: std::collections::HashSet<u64> =
-            fixups.binds().map(|(slot, _)| slot).collect();
+            fixups.named_binds().map(|(slot, _)| slot).collect();
         for (addr, reloc) in ctx.file.dynamic_relocations().into_iter().flatten() {
             if let object::RelocationTarget::Symbol(idx) = reloc.target() {
                 let sym = ctx

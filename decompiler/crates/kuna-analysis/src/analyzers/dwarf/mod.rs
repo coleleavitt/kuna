@@ -122,6 +122,8 @@ mod callwide;
 pub use callwide::declarations as callwide_declarations;
 
 mod kuna_cppproto;
+mod kuna_cppnames;
+pub use kuna_cppnames::merge_symbols as merge_cpp_symbols;
 mod kuna_dwarfbounds;
 mod kuna_dwarfbyref;
 mod kuna_dwarflocation;
@@ -129,6 +131,9 @@ pub mod kuna_dwarfscopes;
 use kuna_dwarfscopes::FrameBase;
 pub(crate) mod kuna_dwarfcomplex;
 mod kuna_dwarflinkage;
+mod kuna_dwarfsignatures;
+pub mod kuna_godwarfsig;
+mod kuna_goformals;
 
 mod kuna_typedepth;
 use kuna_typedepth::TypeWalk;
@@ -231,9 +236,13 @@ struct DieSnap {
     /// it is the DWARF 2/3 bitfield CONTAINER width).
     byte_size: Option<u64>,
     /// (kuna `dwarfstructs`) `DW_AT_data_member_location` — a `DW_TAG_member`'s
-    /// byte offset within its aggregate, taken verbatim. `None` for a member with
-    /// no location (a C++ `static` data member, which is not part of the layout).
+    /// byte offset within its aggregate, taken verbatim. `None` when the
+    /// attribute is absent or its expression is not a constant displacement;
+    /// [`Self::member_location_unknown`] tells the two apart.
     data_member_location: Option<i64>,
+    /// The member has a `DW_AT_data_member_location` whose expression is not a
+    /// constant displacement (a dynamic virtual-base location, or malformed).
+    member_location_unknown: bool,
     /// (kuna `dwarfstructs`) `DW_AT_bit_size` — a bitfield member's width in bits.
     bit_size: Option<u64>,
     /// (kuna `dwarfstructs`) `DW_AT_bit_offset` — the DWARF 2/3 bitfield spelling:
@@ -318,6 +327,7 @@ impl DieSnap {
             type_ref: None,
             byte_size: None,
             data_member_location: None,
+            member_location_unknown: false,
             bit_size: None,
             bit_offset: None,
             data_bit_offset: None,
@@ -364,12 +374,29 @@ fn snapshot_unit_for_abi(
     unit: &gimli::Unit<Reader<'_>>,
     abi: kuna_dwarfbyref::ArgumentAbi,
 ) -> BTreeMap<usize, DieSnap> {
+    snapshot_unit_with_go(dwarf, unit, abi, None)
+}
+
+fn snapshot_unit_with_go(
+    dwarf: &gimli::Dwarf<Reader<'_>>,
+    unit: &gimli::Unit<Reader<'_>>,
+    abi: kuna_dwarfbyref::ArgumentAbi,
+    mut go: Option<&mut kuna_godwarfsig::UnitExtras>,
+) -> BTreeMap<usize, DieSnap> {
     let mut map: BTreeMap<usize, DieSnap> = BTreeMap::new();
     // Parent stack of (offset, depth) to attach children to their parent.
     let mut stack: Vec<(usize, isize)> = Vec::new();
     let mut language = None;
     let mut cursor = unit.entries();
-    while let Ok(Some(entry)) = cursor.next_dfs() {
+    loop {
+        let entry = match cursor.next_dfs() {
+            Ok(Some(entry)) => entry,
+            Ok(None) => {
+                if let Some(go) = go.as_mut() { go.complete = true; }
+                break;
+            }
+            Err(_) => break,
+        };
         let off = entry.offset().0;
         let depth = entry.depth();
         if depth == 0 {
@@ -438,13 +465,9 @@ fn snapshot_unit_for_abi(
         if let Some(v) = entry.attr_value(gimli::DW_AT_byte_size) {
             snap.byte_size = v.udata_value();
         }
-        // (kuna `dwarfstructs`) The aggregate-layout attributes. gcc spells a
-        // member's offset as a plain constant; a `DW_AT_data_member_location` that
-        // is a location EXPRESSION (the C++ virtual-base form) has no udata value
-        // and reads as `None`, which skips that member rather than misplacing it.
         if let Some(v) = entry.attr_value(gimli::DW_AT_data_member_location) {
-            snap.data_member_location =
-                v.sdata_value().or_else(|| v.udata_value().map(|u| u as i64));
+            snap.data_member_location = simple_member_location(&v);
+            snap.member_location_unknown = snap.data_member_location.is_none();
         }
         if let Some(v) = entry.attr_value(gimli::DW_AT_bit_size) {
             snap.bit_size = v.udata_value();
@@ -502,7 +525,7 @@ fn snapshot_unit_for_abi(
         }
         if let Some(loc) = entry.attr_value(gimli::DW_AT_location) {
             snap.has_location = true;
-            snap.addr_location = simple_addr_location(dwarf, unit, &loc);
+            snap.addr_location = unit_addr_location(dwarf, unit, &loc);
             snap.fbreg_location = simple_fbreg_location(&loc).or_else(|| {
                 kuna_dwarfscopes::enabled()
                     .then(|| kuna_dwarfscopes::loclist_frame_offset(dwarf, unit, &loc))
@@ -536,6 +559,11 @@ fn snapshot_unit_for_abi(
             }
         }
 
+        if let Some(go) = go.as_mut() {
+            if depth == 0 || go.enabled() {
+                go.capture(dwarf, unit, &entry, parent_off.and_then(|parent| map.get(&parent)).and_then(|parent| parent.low_pc));
+            }
+        }
         map.insert(off, snap);
         if entry.has_children() {
             stack.push((off, depth));
@@ -545,14 +573,10 @@ fn snapshot_unit_for_abi(
 }
 
 /// Decode a `DW_AT_location` that is a single `DW_OP_addr <vma>` expression (the
-/// only global-variable location form this pass handles), returning the VMA.
-/// The operand is read in the file's byte order; a DWARF 5 `DW_OP_addrx` (and
-/// its GNU split-DWARF predecessor) resolves through the unit's `.debug_addr`
-/// table. Anything else (`DW_OP_fbreg`,
-/// register, multi-op) returns `None` — a `DW_OP_fbreg` stack local is handled
-/// separately by [`simple_fbreg_location`] (subtask 3); a register/multi-op
-/// location has no static address.
-fn simple_addr_location<'a>(
+/// only global-variable location form this pass handles), returning the VMA. A
+/// DWARF 5 `DW_OP_addrx` (and its GNU split-DWARF predecessor) resolves through
+/// the unit's `.debug_addr` table; a `DW_OP_addr` is [`simple_addr_location`].
+fn unit_addr_location<'a>(
     dwarf: &gimli::Dwarf<Reader<'a>>,
     unit: &gimli::Unit<Reader<'a>>,
     loc: &gimli::AttributeValue<Reader<'a>>,
@@ -571,13 +595,38 @@ fn simple_addr_location<'a>(
         }
         return dwarf.address(unit, gimli::DebugAddrIndex(usize::try_from(index).ok()?)).ok();
     }
-    if opcode != gimli::DW_OP_addr {
+    simple_addr_location(loc, unit.encoding().address_size)
+}
+
+/// A single `DW_OP_addr <vma>` expression, its operand read in the file's byte
+/// order. Anything else (`DW_OP_fbreg`, register, multi-op) returns `None` — a
+/// `DW_OP_fbreg` stack local is handled separately by [`simple_fbreg_location`]
+/// (subtask 3); a register/multi-op location has no static address. The
+/// operand is the unit's `address_size` wide, so the expression is exactly that
+/// operand after the opcode.
+fn simple_addr_location(loc: &gimli::AttributeValue<Reader<'_>>, address_size: u8) -> Option<u64> {
+    let mut expr = match loc {
+        gimli::AttributeValue::Exprloc(e) => e.clone(),
+        gimli::AttributeValue::Block(b) => gimli::Expression(b.clone()),
+        _ => return None,
+    };
+    if !matches!(address_size, 4 | 8)
+        || expr.0.slice().len() != 1 + usize::from(address_size)
+        || gimli::Reader::read_u8(&mut expr.0).ok()? != gimli::DW_OP_addr.0
+    {
         return None;
     }
-    match operand.len() {
-        4 => operand.read_u32().ok().map(u64::from),
-        8 => operand.read_u64().ok(),
-        _ => None,
+    gimli::Reader::read_address(&mut expr.0, address_size).ok()
+}
+
+/// DWARF 2 uses a single plus-uconst expression where later versions use a
+/// constant member offset. Dynamic and malformed locations stay unknown.
+fn simple_member_location(loc: &gimli::AttributeValue<Reader<'_>>) -> Option<i64> {
+    match loc {
+        gimli::AttributeValue::Exprloc(expression) => kuna_dwarflocation::member_offset(expression.0.slice()),
+        gimli::AttributeValue::Block(block) => kuna_dwarflocation::member_offset(block.slice()),
+        gimli::AttributeValue::Sdata(value) => Some(*value),
+        _ => loc.udata_value().and_then(|u| i64::try_from(u).ok()),
     }
 }
 
@@ -1190,6 +1239,10 @@ impl AnalysisPass for DwarfPass {
 
     fn run(&self, ctx: &AnalysisCtx) -> AnalysisOutput {
         let mut out = AnalysisOutput::default();
+        if let Some(facts) = kuna_godwarfsig::capture_compressed(ctx) {
+            out.go_dwarf.push(facts);
+            return out;
+        }
         // gimli is **format-neutral** — it parses the DWARF byte stream, not the
         // container. The only container coupling is the *section-name lookup*, and
         // that is delegated to `object`'s format-aware `section_by_name`
@@ -1252,13 +1305,17 @@ impl AnalysisPass for DwarfPass {
 
         let linkage_imports = kuna_dwarflinkage::imports(ctx);
         let linkage_definitions = kuna_dwarflinkage::definitions(ctx, &linkage_imports);
+        let go_target = ctx.file.is_little_endian() && ctx.file.architecture() == object::Architecture::X86_64;
+        let mut go_facts = kuna_godwarfsig::Facts::default();
         let mut units = dwarf.units();
         while let Ok(Some(header)) = units.next() {
             let Ok(unit) = dwarf.unit(header) else { continue };
-            let mut dies = snapshot_unit_for_abi(
+            let mut go = kuna_godwarfsig::UnitExtras::default();
+            let mut dies = snapshot_unit_with_go(
                 &dwarf,
                 &unit,
                 kuna_dwarfbyref::argument_abi(ctx.file.format(), ctx.file.architecture()),
+                go_target.then_some(&mut go),
             );
             if complex_max > 0 {
                 for die in dies.values_mut() {
@@ -1266,6 +1323,8 @@ impl AnalysisPass for DwarfPass {
                 }
             }
 
+            let signatures = kuna_goformals::generic_prototype_allowed(&unit)
+                && kuna_dwarfsignatures::has_signature_information(&dies);
             for snap in dies.values() {
                 match snap.tag {
                     gimli::DW_TAG_subprogram => {
@@ -1276,15 +1335,22 @@ impl AnalysisPass for DwarfPass {
                             continue;
                         }
                         if !snap.name.is_empty() {
+                            let name = if signatures {
+                                snap.name.clone()
+                            } else {
+                                kuna_cppproto::resolve_subprogram(snap, &dies)
+                                    .map(|resolved| resolved.name)
+                                    .unwrap_or_else(|| snap.name.clone())
+                            };
                             out.symbols.push(SymFact {
                                 addr: low_pc,
-                                name: snap.name.clone(),
+                                name,
                                 kind: SymKind::Function,
                             });
                             // subtask 2: typed signature. A prototype that can't be
                             // fully typed is skipped (never fails the analysis).
                             if let Some(pieces) =
-                                build_pieces(&snap.name, snap, &dies, types, word_size)
+                                signatures.then(|| build_pieces(&snap.name, snap, &dies, types, word_size)).flatten()
                             {
                                 kuna_dwarfscopes::entry_storage(snap, low_pc, &dies, &pieces, &mut out.dwarf_param_regs);
                                 kuna_dwarflinkage::append(snap, &dies, &pieces, &linkage_imports, &linkage_definitions, &mut out.prototypes_at);
@@ -1326,7 +1392,7 @@ impl AnalysisPass for DwarfPass {
                             });
                         }
                         if let Some(pieces) =
-                            kuna_cppproto::build_pieces(&res, &dies, types, word_size)
+                            signatures.then(|| kuna_cppproto::build_pieces(&res, &dies, types, word_size)).flatten()
                         {
                             kuna_dwarflinkage::append(snap, &dies, &pieces, &linkage_imports, &linkage_definitions, &mut out.cpp_dwarf.prototypes);
                             note_nocall(snap, low_pc, &pieces.name, res.params.iter().copied(), &dies, &mut out.dwarf_nocall);
@@ -1386,6 +1452,10 @@ impl AnalysisPass for DwarfPass {
                     _ => {}
                 }
             }
+            go_facts.append_unit(dies, go);
+        }
+        if !go_facts.is_empty() {
+            out.go_dwarf.push(go_facts);
         }
         let arch = ctx.file.architecture();
         for list in [&mut out.dwarf_reg_locals, &mut out.dwarf_param_regs] {
@@ -1405,6 +1475,39 @@ impl AnalysisPass for DwarfPass {
 mod tests {
     use super::*;
     use kuna_decomp::dtype::TypeFactoryImpl;
+
+    #[test]
+    fn constant_locations_keep_the_dwarf_byte_order_and_member_offsets() {
+        for endian in [gimli::RunTimeEndian::Big, gimli::RunTimeEndian::Little] {
+            for size in [4, 8] {
+                let expected = if size == 4 { 0x81234567u64 } else { 0x8123456789abcdefu64 };
+                let mut bytes = vec![gimli::DW_OP_addr.0];
+                match (endian, size) {
+                    (gimli::RunTimeEndian::Big, 4) => bytes.extend((expected as u32).to_be_bytes()),
+                    (gimli::RunTimeEndian::Little, 4) => bytes.extend((expected as u32).to_le_bytes()),
+                    (gimli::RunTimeEndian::Big, _) => bytes.extend(expected.to_be_bytes()),
+                    _ => bytes.extend(expected.to_le_bytes()),
+                }
+                let data = Reader::new(&bytes, endian);
+                assert_eq!(simple_addr_location(&gimli::AttributeValue::Block(data), size), Some(expected));
+                assert_eq!(simple_addr_location(&gimli::AttributeValue::Exprloc(gimli::Expression(data)), size), Some(expected));
+                let other = if size == 4 { 8 } else { 4 };
+                assert_eq!(simple_addr_location(&gimli::AttributeValue::Block(data), other), None,
+                    "a {size}-byte operand is not a {other}-byte unit's address");
+            }
+            let mut trailing = vec![gimli::DW_OP_addr.0, 0, 0, 0x10, 0];
+            trailing.extend([gimli::DW_OP_lit0.0, gimli::DW_OP_plus.0, gimli::DW_OP_lit0.0, gimli::DW_OP_plus.0]);
+            let data = Reader::new(&trailing, endian);
+            assert_eq!(simple_addr_location(&gimli::AttributeValue::Block(data), 4), None,
+                "a 32-bit address followed by more operations is not a static address");
+            let data = Reader::new(&[0x23, 0x08], endian);
+            assert_eq!(simple_member_location(&gimli::AttributeValue::Block(data)), Some(8));
+            assert_eq!(simple_member_location(&gimli::AttributeValue::Exprloc(gimli::Expression(data))), Some(8));
+        }
+        assert_eq!(simple_member_location(&gimli::AttributeValue::Udata(u64::MAX)), None);
+        assert_eq!(simple_member_location(&gimli::AttributeValue::Data1(128)), Some(128));
+        assert_eq!(simple_member_location(&gimli::AttributeValue::Data8(u64::MAX)), None);
+    }
 
     /// A configured [`TypeFactory`] for the mapper unit tests (the dtype-test
     /// recipe: default alignment map, max base size 8, 64-bit sizes, core-type

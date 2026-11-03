@@ -5,6 +5,7 @@
 
 pub mod funcdata_resolveflow;
 pub mod flow;
+pub mod kuna_ppc32piccalls;
 pub mod kuna_armflowcontext;
 pub mod jumptable;
 pub mod kuna_emulatefunction;
@@ -17,8 +18,8 @@ pub mod kuna_switchguardbound;
 pub mod kuna_switchguardrange;
 pub mod kuna_switchguardmerge; // (kuna) merge an equality guard into its switch
 pub mod kuna_switchsharedcase;
-pub mod kuna_segmentops; // (kuna) <segmentop> definitions for ActionSegmentize / RuleSegment
 pub mod kuna_jumpassist; // (kuna) the JumpAssisted model: switches computed by a <jumpassist> user-op
+pub mod kuna_switchrunon; // (kuna) an unguarded jump table stops where its rows leave the function
 pub mod kuna_constselectjump; // (kuna) recover a BRANCHIND whose destination is selected between constants
 pub mod kuna_sparcstructret;
 pub mod kuna_stackprobeloop;
@@ -31,6 +32,7 @@ pub mod kuna_loweredswitchheads; // (kuna) try a lowered-switch cascade behind e
 pub mod kuna_noreturn_externmatch; // (kuna) angr incorrect-duplication-chcon: name-matched extern no-return
 pub mod kuna_noreturnextern; // (kuna) angr tail-tail-bytes-ret-dup: undefined-extern name-based no-return
 pub mod kuna_tailcalljump;
+pub mod kuna_gottailcall; // (kuna) a one-destination computed jump to a function is a tail call when the call loses nothing
 pub mod kuna_funcboundflow; // (kuna) bound fall-through at a known function entry (no cross-function merge)
 pub mod kuna_mappedflowboundary;
 pub mod kuna_tailcallframe; // (kuna) recover a frame-teardown tail jump whose callee was never discovered
@@ -61,5 +63,14 @@ pub mod kuna_msvcstrappend; // (kuna) collapse an inlined MSVC std::string push_
 pub mod kuna_fastfailnoreturn; // (kuna) a Windows `int 0x29` (__fastfail) ends the flow instead of unbalancing the stack
 pub mod kuna_msvcimportcall; // (kuna `msvcsig`) a call through an import slot with a locked MSVC prototype is direct from the flow on
 pub mod kuna_retpolinethunk; // (kuna) a retpoline thunk recognized by its body is `call *%reg`
+pub mod kuna_mipsunaligned; // (kuna) lift a MIPS lwl/lwr-style unaligned pair as one whole access
 pub mod kuna_int3pad; // (kuna) name the int3 pad control ran into instead of printing it as a call through swi()
 pub mod kuna_decodehalt; // (kuna) a halt planted where the decode failed says so instead of printing as an ordinary return
+pub mod kuna_fpuemu; // (kuna) decode the 8087 emulator's INT 34h-3Dh as the x87 instructions they stand for
+pub mod kuna_jumptablefault; // (kuna) test-only: panic one function's jump-table recovery
+
+pub mod kuna_gojumpchain;
+
+pub mod kuna_rustprobestack;
+
+pub(crate) mod kuna_highslice_guard;

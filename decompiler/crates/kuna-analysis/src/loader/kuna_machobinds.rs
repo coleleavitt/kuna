@@ -32,7 +32,7 @@ pub(crate) fn bound_slots(file: &object::File, bytes: &[u8]) -> Vec<(u64, String
     let chained = resolve_chained_fixups(file, bytes);
     let classic = resolve_dyld_info_bind_slots(file, bytes);
     let mut binds: Vec<(u64, &str)> = chained
-        .binds()
+        .named_binds()
         .filter(|&(slot, _)| chained.bind(slot).is_some_and(|(_, addend)| addend == 0))
         .chain(classic.iter().filter(|(_, (_, addend))| *addend == 0).map(|(&slot, (name, _))| (slot, name.as_str())))
         .filter(|&(slot, _)| !named.contains(&slot) && !owned.iter().any(|&(lo, hi)| slot >= lo && slot < hi))

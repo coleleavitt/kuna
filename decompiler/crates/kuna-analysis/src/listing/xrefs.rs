@@ -39,7 +39,9 @@
 //!    walk — the same projection [`crate::operand_refs`] makes — so it reuses that
 //!    pass's upstream `ScalarOperandAnalyzer.checkOperands` value filter
 //!    (`>= 4096`, no byte masks), and a bare integer that happens to look like an
-//!    address is not reported. A materialized address that is not dereferenced is
+//!    address is not reported. A constant the instruction computed from its own
+//!    address is an address whatever its size, so it is exempt
+//!    ([`super::kuna_pcform`]). A materialized address that is not dereferenced is
 //!    [`XrefKind::Data`]: the address-taken case — a function pointer, a string
 //!    pointer, a global's address.
 //!
@@ -77,9 +79,11 @@ use object::SectionKind;
 
 use super::classify::classify;
 use super::context::ContextPainter;
+use super::kuna_pcform::{Formed, PcForm};
 use super::kuna_picbase::{self, Ctx as PicCtx, PicBase};
 use super::kuna_picpool::{self, GotImage, Insn, PicPool};
 use super::kuna_poolref::PoolImage;
+use super::kuna_regcarry::{self, Machine as CarryMachine};
 use super::kuna_switchtable;
 use super::model::{FlowKind, RawOp};
 #[path = "kuna_prefixreuse.rs"]
@@ -156,6 +160,8 @@ pub struct XrefIndex {
     /// Outgoing edges, keyed by the entry of the function the source lies in;
     /// sorted by target then source.
     by_source_function: BTreeMap<u64, Vec<Xref>>,
+    /// Entry contexts proving each scoped `(instruction, target)` call edge.
+    scoped_callers: BTreeMap<(u64, u64), BTreeSet<u64>>,
     /// Every instruction VMA the walk decoded (membership only).
     decoded: HashSet<u64>,
     /// Every function entry the walk seeded or discovered, in address order.
@@ -177,6 +183,9 @@ pub struct XrefIndex {
     flow: Option<FlowGraph>,
     /// Every jump table the walk read, in walk order.
     switches: Vec<SwitchTable>,
+    /// The targets of decoded direct calls and branches that lie outside the
+    /// sections the walk decodes.
+    stopped: BTreeSet<u64>,
 }
 
 /// Every decoded instruction and its intra-function successors, so each entry's
@@ -283,6 +292,30 @@ pub struct SwitchTable {
 }
 
 impl XrefIndex {
+    /// Add a call proved in one entry's register context. This does not create a
+    /// veneer alias: another entry may use the same stub with a different base.
+    pub fn add_scoped_call(&mut self, arch: &Architecture, function: u64, from: u64, to: u64) {
+        self.scoped_callers.entry((from, to)).or_default().insert(function);
+        let instruction = self.by_source.get(&from).and_then(|r| r.first())
+            .map(|r| r.instruction.clone()).filter(|text| !text.is_empty())
+            .unwrap_or_else(|| arch.manage().get_default_code_space()
+                .map(|space| assembly(arch.translate(), from, space)).unwrap_or_default());
+        let edge = Xref { from, to, kind: XrefKind::Call, instruction };
+        for (edges, by_source) in [
+            (self.by_target.entry(to).or_default(), true),
+            (self.by_source.entry(from).or_default(), false),
+            (self.by_source_function.entry(function).or_default(), false),
+        ] {
+            edges.push(edge.clone());
+            sort_dedup(edges, by_source);
+        }
+    }
+
+    /// Proving entries for a scoped call, independent of physical containment.
+    pub fn scoped_callers(&self, from: u64, to: u64) -> Option<&BTreeSet<u64>> {
+        self.scoped_callers.get(&(from, to))
+    }
+
     /// Everything that references `vma` — call sites, branches, and data
     /// references — sorted by source VMA.
     pub fn refs_to(&self, vma: u64) -> &[Xref] {
@@ -466,6 +499,24 @@ impl XrefIndex {
         self.funcs.contains(&vma)
     }
 
+    /// Did the walk decode an instruction at `vma`?
+    pub fn is_decoded(&self, vma: u64) -> bool {
+        self.decoded.contains(&vma)
+    }
+
+    /// Does a decoded direct call or branch target `vma` outside the sections the
+    /// walk decodes? A call through a slot does not count: its target is the slot.
+    pub fn is_stopped_flow_target(&self, vma: u64) -> bool {
+        self.stopped.contains(&vma)
+    }
+
+    /// The [`is_stopped_flow_target`](Self::is_stopped_flow_target) addresses
+    /// the walk decoded no instruction at, in address order: code the descent was
+    /// pointed at and stopped short of.
+    pub fn undecoded_flow_targets(&self) -> impl Iterator<Item = u64> + '_ {
+        self.stopped.iter().copied().filter(|to| !self.decoded.contains(to))
+    }
+
     /// How many distinct instructions the walk decoded.
     pub fn instruction_count(&self) -> usize {
         self.insns
@@ -633,7 +684,7 @@ pub fn build(
     translate: &dyn Translate,
     seeds: &[u64],
 ) -> XrefIndex {
-    descend(file, arch, translate, seeds, &[], false)
+    descend(file, arch, translate, seeds, &[], (&[], &[]), false)
 }
 
 /// [`build`], also keeping the successor graph
@@ -646,7 +697,7 @@ pub fn build_measured(
     translate: &dyn Translate,
     seeds: &[u64],
 ) -> XrefIndex {
-    descend(file, arch, translate, seeds, &[], true)
+    descend(file, arch, translate, seeds, &[], (&[], &[]), true)
 }
 
 /// [`build`], plus the addresses the CALLER named.
@@ -668,15 +719,44 @@ pub fn build_with_focus(
     seeds: &[u64],
     focus: &[u64],
 ) -> XrefIndex {
-    descend(file, arch, translate, seeds, focus, false)
+    descend(file, arch, translate, seeds, focus, (&[], &[]), false)
 }
 
+/// [`build_with_focus`], where a focus address may also lie in one of
+/// `unflagged`: executable memory in a section not marked as code
+/// ([`super::kuna_unflaggedcode`]). The caller naming such an address is not
+/// enough to read its bytes as instructions; it is decoded when the image says
+/// it is code, because a direct call or branch the seeded walk decoded targets
+/// it, or because it is one of `declared` (an ELF `STT_FUNC`). Only its own body
+/// is decoded: its branches are followed while they stay inside the range it
+/// starts in, and a call out of it is filed and walked under the ordinary rules.
+pub fn build_with_unflagged_focus(
+    file: &object::File,
+    arch: &Architecture,
+    translate: &dyn Translate,
+    seeds: &[u64],
+    focus: &[u64],
+    unflagged: &[(u64, u64)],
+    declared: &[u64],
+) -> XrefIndex {
+    descend(file, arch, translate, seeds, focus, (unflagged, declared), false)
+}
+
+/// The walk behind every `build*`.
+///
+/// (kuna `armframes`) On an ARM image a computed jump is tried as an A32
+/// `addls pc,pc,rN,lsl #2` / `ldrls pc,[pc,rN,lsl #2]` table
+/// ([`super::kuna_a32switch`]) before any other table read, because its
+/// PC-relative operand names the dispatch itself rather than a table, and the
+/// predicated skip of such a jump, which stays one of its `flows`, files no row
+/// ([`super::classify::Classified::predicated_skip`]).
 fn descend(
     file: &object::File,
     arch: &Architecture,
     translate: &dyn Translate,
     seeds: &[u64],
     focus: &[u64],
+    (unflagged, declared): (&[(u64, u64)], &[u64]),
     measure: bool,
 ) -> XrefIndex {
     let Some(code_space) = arch.manage().get_default_code_space().map(Rc::clone) else {
@@ -742,6 +822,10 @@ fn descend(
     let pool = if mapped.is_empty() { None } else { PoolImage::new(file) };
     // (kuna) `picpool`: the GOT's file bytes, read through a PC-composed base.
     let got = if mapped.is_empty() { None } else { GotImage::new(file) };
+    // (kuna) `pcform`: the addresses an instruction forms from its own address,
+    // which the `checkOperands` floor must not drop. `None` unless the image
+    // maps something below that floor. See [`super::kuna_pcform`].
+    let pcform = PcForm::new(file, pool.as_ref(), &mapped);
     let max_entries = match arch.max_jumptable_size {
         0 => kuna_switchtable::DEFAULT_MAX_ENTRIES,
         n => n as usize,
@@ -762,6 +846,15 @@ fn descend(
         got: got.as_ref(),
         preserved: &preserved,
     });
+    // (kuna) `regcarry`: the register space a carried constant lives in.
+    let carry_machine = CarryMachine::new(
+        file,
+        arch.manage().get_space_by_name("register"),
+        data_space.as_ref(),
+        &preserved,
+        &mapped,
+        pool.as_ref(),
+    );
     // (kuna) `picpool`: odd composed addresses held for the Thumb-bit decision.
     let mut thumb_refs: Vec<(u64, u64, XrefKind, String)> = Vec::new();
     // (kuna) `switchtable`: the dispatches whose read stopped for want of a
@@ -770,6 +863,10 @@ fn descend(
     let thumb_tables = (arch.analysis_thumbswitch && sections_are_runtime)
         .then(|| super::kuna_thumbswitch::HalfwordTables::new(file, data_space.clone(), max_entries))
         .flatten();
+    let a32_tables = pool
+        .as_ref()
+        .filter(|_| super::kuna_a32switch::applies(file, arch))
+        .map(|pool| super::kuna_a32switch::A32Tables::new(arch, pool));
 
     let preserve_bodies = sections_are_runtime
         && arch.analysis_funcstart_patterns
@@ -817,6 +914,18 @@ fn descend(
     pending_focus.dedup();
     pending_focus.reverse();
     let mut focused: Vec<u64> = Vec::new();
+    let unflagged = range_union(unflagged.to_vec());
+    let forced: HashSet<u64> = if sections_are_runtime {
+        focus.iter().copied()
+            .filter(|&f| !in_range(&exec_set, f) && in_range(&unflagged, f))
+            .collect()
+    } else {
+        HashSet::new()
+    };
+    // Only the focus pass decodes a forced address; the descent that reaches one
+    // as a callee first stops at it, as it always has.
+    let mut admitted: HashSet<u64> = HashSet::new();
+    let mut stopped: BTreeSet<u64> = BTreeSet::new();
 
     loop {
         // Drain known entries first, then merge recovered roots and focus addresses
@@ -865,10 +974,15 @@ fn descend(
             }
             None => match pending_focus.pop() {
                 Some(f) => {
+                    let admit = forced.contains(&f) && (declared.contains(&f) || stopped.contains(&f));
                     if st.decoded.contains(&f) || partition_covers(&recovered_spans, f)
-                        || (sections_are_runtime && !in_range(&exec_set, f))
+                        || (sections_are_runtime && !in_range(&exec_set, f) && !admit)
                     {
                         continue;
+                    }
+                    if admit {
+                        walked.remove(&f);
+                        admitted.insert(f);
                     }
                     st.funcs.insert(f);
                     focused.push(f);
@@ -962,6 +1076,8 @@ fn descend(
                         pending_focus.dedup();
                         pending_focus.reverse();
                         focused.clear();
+                        admitted.clear();
+                        stopped.clear();
                         walked.clear();
                         if let Some(context) = &mut walk_context { context.reset(); }
                         partition.clear();
@@ -1004,6 +1120,8 @@ fn descend(
         }
         let entry_mode = walk_context.as_ref().and_then(|context| context.entry(entry));
         let mut insn_queue = VecDeque::from([(entry, entry_mode)]);
+        let body_range = admitted.contains(&entry)
+            .then(|| unflagged[unflagged.partition_point(|&(lo, _)| lo <= entry) - 1]);
         // (kuna) `switchtable`: the dispatches this body's decoding filled the gap
         // above, to read again once it drains.
         let mut woken: Vec<(u64, _, VarnodeData)> = Vec::new();
@@ -1018,6 +1136,7 @@ fn descend(
         // (kuna) `picpool`: `poolref` rows for pool words still in flight, filed
         // once the body drains unless a PC fold consumed the word.
         let mut held: Vec<(u64, u64, String)> = Vec::new();
+        st.carry.begin_body();
         // (kuna) `switchtable`: a dispatch can be decoded before the code that
         // falls into it -- breadth-first, or by a `.cold` fragment's jump back
         // into its parent's loop ahead of the parent's own walk -- and the slice
@@ -1028,18 +1147,26 @@ fn descend(
         while let Some((vma, mode)) = insn_queue.pop_front().or_else(|| {
             let p = pool.as_ref()?;
             for (vma, mode, branch) in std::mem::take(&mut woken) {
-                let read = branch_cases(
-                    translate,
-                    &code_space,
-                    data_space.as_ref(),
-                    &st.decoded,
-                    vma,
-                    Some(&branch),
-                    p,
-                    &exec,
-                    &reach,
-                    thumb_tables.as_ref(),
-                );
+                let mut read = kuna_switchtable::TableRead::default();
+                if let Some(tables) = &a32_tables {
+                    let decoded = |at: u64| st.decoded.contains(&at);
+                    read = tables.targets(translate, &code_space, &exec, &decoded, vma);
+                }
+                let predicated = a32_tables.is_some() && is_predicated(translate, &code_space, vma);
+                if read.cases.is_empty() && read.stated.is_none() && read.gap.is_none() && !predicated {
+                    read = branch_cases(
+                        translate,
+                        &code_space,
+                        data_space.as_ref(),
+                        &st.decoded,
+                        vma,
+                        Some(&branch),
+                        p,
+                        &exec,
+                        &reach,
+                        thumb_tables.as_ref(),
+                    );
+                }
                 if read.cases.is_empty() && read.stated.is_none() {
                     if let Some(gap) = read.gap {
                         waiting.entry(gap).or_default().push((vma, mode, branch));
@@ -1073,7 +1200,9 @@ fn descend(
                 st.refused.insert(vma);
                 continue;
             }
-            if sections_are_runtime && !in_range(&exec_set, vma) {
+            if sections_are_runtime && !in_range(&exec_set, vma)
+                && !body_range.is_some_and(|(lo, hi)| vma >= lo && vma < hi)
+            {
                 continue; // out of bounds (the `flow.rs` gate)
             }
             let selection = super::kuna_walkcontext::InstructionMode::select(arch, translate, &code_space, vma, mode);
@@ -1106,6 +1235,7 @@ fn descend(
                     .map(|op| RawOp { opcode: op.opcode, in0: op.ins.first().cloned() }),
             );
             let c = classify(&raw, vma, len);
+            let skip = a32_tables.as_ref().and_then(|_| c.predicated_skip(vma, len));
             if let Some(fall) = c.fall_through.filter(|_| !waiting.is_empty()) {
                 woken.extend(waiting.remove(&fall).into_iter().flatten());
             }
@@ -1115,12 +1245,26 @@ fn descend(
                     flow.jumps.extend(c.flows.iter().map(|&to| (vma, to)));
                 }
             }
+            let formed = pcform.as_ref().map_or_else(Formed::default, |p| p.formed(vma, len));
             let mut drefs = if mapped.is_empty() {
                 Vec::new()
             } else {
                 let fall_through = vma.wrapping_add(len as u64);
-                data_refs(cap.ops(), data_space.as_ref(), &mapped, fall_through, pool.as_ref())
+                let delayed = || has_delay_slot(translate, vma, &code_space, len);
+                data_refs(cap.ops(), data_space.as_ref(), &mapped, fall_through, pool.as_ref(), &formed, &delayed)
             };
+            // (kuna) `regcarry`: the address a register pair forms across
+            // instructions. See [`super::kuna_regcarry`].
+            if let Some(m) = &carry_machine {
+                st.carry.step(m, kuna_regcarry::Insn {
+                    vma,
+                    ops: cap.ops(),
+                    fall: c.fall_through,
+                    branches: if c.flow.is_call { &[] } else { &c.flows },
+                    calls: c.flow.is_call,
+                    formed,
+                });
+            }
             // (kuna) `picpool`: the address a PC-relative literal-pool pair forms,
             // which is in neither of its two instructions on its own. See
             // [`super::kuna_picpool`].
@@ -1141,7 +1285,11 @@ fn descend(
             // Every row this instruction produces carries the same render, and an
             // instruction that produces none needs no render at all.
             let vcall = arch.kuna_vcall_targets.get(&vma).map(|v| &v.targets);
-            let mut text = if c.flows.is_empty() && drefs.is_empty() && pointer.is_none() && vcall.is_none() {
+            let mut text = if c.flows.iter().all(|&t| Some(t) == skip)
+                && drefs.is_empty()
+                && pointer.is_none()
+                && vcall.is_none()
+            {
                 String::new()
             } else {
                 assembly(translate, vma, &code_space)
@@ -1166,7 +1314,12 @@ fn descend(
 
             for &target in &c.flows {
                 let kind = if c.flow.is_call { XrefKind::Call } else { XrefKind::Jump };
-                st.file(vma, target, kind, &text);
+                if Some(target) != skip {
+                    st.file(vma, target, kind, &text);
+                }
+                if sections_are_runtime && !in_range(&exec_set, target) {
+                    stopped.insert(target);
+                }
                 if c.flow.is_call {
                     let target_mode = walk_context.as_ref()
                         .and_then(|context| context.successor(target, mode, &commits));
@@ -1193,13 +1346,25 @@ fn descend(
             // table the jump indexes and take its entries up as successors of
             // THIS function: a case body is the dispatcher's own code. See
             // [`super::kuna_switchtable`].
-            if c.flows.is_empty() && c.flow.is_computed && c.flow.is_jump && !c.flow.is_call {
+            if c.flows.iter().all(|&t| Some(t) == skip) && c.flow.is_computed && c.flow.is_jump && !c.flow.is_call {
                 if let Some(p) = pool.as_ref() {
-                    let mut cases: Vec<u64> = Vec::new();
-                    let mut stated: Option<usize> = None;
-                    let mut unbounded = false;
+                    let a32 = a32_tables.as_ref().map_or_else(kuna_switchtable::TableRead::default, |tables| {
+                        let decoded = |at: u64| st.decoded.contains(&at);
+                        tables.decoded_targets(translate, &code_space, &exec, &decoded, vma, cap.ops(), len)
+                    });
+                    let branch = cap
+                        .ops()
+                        .iter()
+                        .find(|o| o.opcode == OpCode::CPUI_BRANCHIND)
+                        .and_then(|o| o.ins.first());
+                    let (mut cases, mut stated) = (a32.cases, a32.stated);
+                    if let (Some(gap), Some(branch)) = (a32.gap, branch) {
+                        waiting.entry(gap).or_default().push((vma, mode, branch.clone()));
+                    }
+                    let unpredicated = c.flows.is_empty();
+                    let mut unbounded = a32.unbounded;
                     for &(base, kind) in &drefs {
-                        if kind == XrefKind::Data {
+                        if unpredicated && kind == XrefKind::Data && stated.is_none() && a32.gap.is_none() {
                             cases.extend(kuna_switchtable::targets(
                                 base,
                                 vma,
@@ -1213,12 +1378,7 @@ fn descend(
                     // The base is on an instruction of its own and the entries
                     // are displacements on every x86-64 compiler, so ask what the
                     // branch register holds when the operand carried nothing.
-                    let branch = cap
-                        .ops()
-                        .iter()
-                        .find(|o| o.opcode == OpCode::CPUI_BRANCHIND)
-                        .and_then(|o| o.ins.first());
-                    if cases.is_empty() {
+                    if unpredicated && cases.is_empty() && stated.is_none() && a32.gap.is_none() {
                         let read = branch_cases(
                             translate,
                             &code_space,
@@ -1354,6 +1514,23 @@ fn descend(
             let _ = ctx;
         }
     }
+    // (kuna) `regcarry`: a carried reference holds only where nothing joined
+    // the run that carried it, which the whole walk has to have been seen for.
+    let mut carried_text: HashMap<u64, String> = HashMap::new();
+    for (vma, to, kind) in st.carry.finish(&st.funcs) {
+        let text = carried_text
+            .entry(vma)
+            .or_insert_with(|| assembly(translate, vma, &code_space))
+            .clone();
+        if arm && to & 1 == 1 && in_range(&exec_set, to & !1) {
+            thumb_refs.push((vma, to, kind, text));
+        } else {
+            st.file(vma, to, kind, &text);
+        }
+    }
+    for (vma, page) in st.carry.superseded(&st.funcs) {
+        st.unfile(vma, page, XrefKind::Data);
+    }
     // A focus address that did not decode is not a function: recording it as one
     // would answer `sub_<addr>` for a byte in the middle of a string.
     for f in focused {
@@ -1398,6 +1575,7 @@ fn descend(
         let width = crate::addrtable::ptr_width(file);
         index.file_pointer_tables(&crate::addrtable::scan_address_tables(file, 2, width), width as u64);
     }
+    index.stopped = stopped;
     index
 }
 
@@ -1633,6 +1811,9 @@ struct State {
     /// The frame's own edges into one are in no other body's record, so a body
     /// that decodes it later cannot trust what it carries there.
     refused: HashSet<u64>,
+    /// (kuna) `regcarry`: the register constants in flight and the references
+    /// they wait to file.
+    carry: kuna_regcarry::Tracker,
 }
 
 impl State {
@@ -1649,6 +1830,7 @@ impl State {
             }),
             switches: Vec::new(),
             refused: HashSet::new(),
+            carry: kuna_regcarry::Tracker::default(),
         }
     }
 
@@ -1678,6 +1860,7 @@ impl State {
             flow.jumps.extend(cases.iter().map(|&to| (vma, to)));
         }
         for &target in cases {
+            self.carry.enter(target);
             self.file(vma, target, XrefKind::Jump, text);
         }
     }
@@ -1686,6 +1869,20 @@ impl State {
         let r = Xref { from, to, kind, instruction: instruction.to_string() };
         self.by_target.entry(to).or_default().push(r.clone());
         self.by_source.entry(from).or_default().push(r);
+    }
+
+    /// Withdraw every `from -> to` row of `kind`.
+    fn unfile(&mut self, from: u64, to: u64, kind: XrefKind) {
+        let withdraw = |map: &mut BTreeMap<u64, Vec<Xref>>, key: u64| {
+            if let Some(refs) = map.get_mut(&key) {
+                refs.retain(|r| (r.from, r.to, r.kind) != (from, to, kind));
+                if refs.is_empty() {
+                    map.remove(&key);
+                }
+            }
+        };
+        withdraw(&mut self.by_source, from);
+        withdraw(&mut self.by_target, to);
     }
 
     /// Use the same owners for incoming rows, outgoing buckets and computed calls.
@@ -1732,6 +1929,7 @@ impl State {
             by_target: self.by_target,
             by_source: self.by_source,
             by_source_function,
+            scoped_callers: BTreeMap::new(),
             decoded: self.decoded,
             funcs: self.funcs,
             body_owners,
@@ -1741,6 +1939,7 @@ impl State {
             insns,
             flow: self.flow,
             switches: self.switches,
+            stopped: BTreeSet::new(),
         }
     }
 }
@@ -1801,6 +2000,7 @@ fn empty() -> XrefIndex {
         by_target: BTreeMap::new(),
         by_source: BTreeMap::new(),
         by_source_function: BTreeMap::new(),
+        scoped_callers: BTreeMap::new(),
         decoded: HashSet::new(),
         funcs: BTreeSet::new(),
         body_owners: None,
@@ -1810,6 +2010,7 @@ fn empty() -> XrefIndex {
         insns: 0,
         flow: None,
         switches: Vec::new(),
+        stopped: BTreeSet::new(),
     }
 }
 
@@ -1844,6 +2045,13 @@ fn branch_cases(
         }
     }
     read
+}
+
+/// Whether the instruction at `vma` is predicated: its p-code holds a `CBRANCH`.
+fn is_predicated(translate: &dyn Translate, code_space: &Rc<AddrSpace>, vma: u64) -> bool {
+    let mut cap = FullCapture::default();
+    decode(translate, vma, code_space, &mut cap).is_some()
+        && cap.ops().iter().any(|op| op.opcode == OpCode::CPUI_CBRANCH)
 }
 
 /// Decode the instruction at `vma` into `cap`, keeping every input varnode, and
@@ -1914,19 +2122,35 @@ fn assembly(translate: &dyn Translate, vma: u64, code_space: &Rc<AddrSpace>) -> 
 /// exposed as `forwardsTo`; [`XrefIndex::refs_to_unified`] still removes it from
 /// inbound alias-class queries so it is not counted as an external caller.
 ///
-/// `fall_through` (`vma + len`) is skipped as a value for the same reason: a
-/// call materializes its own return address, and every architecture spells that
-/// as this instruction's fall-through — x86 stores the constant to the stack,
-/// ARM copies it into `LR`, MIPS into `$ra`. Reported, it would put a phantom
-/// data reference on the instruction after every single call site.
+/// `fall_through` (`vma + len`) is skipped as a value where it is a return
+/// address ([`is_return_address`]): a call materializes the address it returns
+/// to, and every architecture spells that as this instruction's fall-through —
+/// x86 stores the constant to the stack, ARM copies it into `LR`, MIPS into
+/// `$ra`. Reported, it would put a phantom data reference on the instruction
+/// after every single call site. AArch64 spells it as a sum instead — `bl` and
+/// `blr` lift `x30 = inst_start + 4` to one `INT_ADD` of two constants — so in
+/// an instruction that [`links`], an op that adds two constants into the
+/// fall-through is the same return address, and neither half of it (the first
+/// is the `bl`'s own address) is a reference. `delayed` says whether the
+/// instruction ends past a delay slot ([`has_delay_slot`]); it is asked only of
+/// an instruction that moves its fall-through whole and does not branch
+/// ([`links`], [`branches`]).
+///
+/// A constant below the `checkOperands` floor is still an address where the
+/// instruction computed it from its own address: `formed`, the values
+/// [`super::kuna_pcform`] recomputes from the encoding (`adr`, `lea [rip]`).
 fn data_refs(
     ops: &[FullOp],
     data_space: Option<&Rc<AddrSpace>>,
     mapped: &[(u64, u64)],
     fall_through: u64,
     pool: Option<&PoolImage>,
+    formed: &Formed,
+    delayed: &dyn Fn() -> bool,
 ) -> Vec<(u64, XrefKind)> {
     let mut out = Vec::new();
+    let linked = links(ops);
+    let never_taken = || !branches(ops) && delayed();
     // (kuna) `poolref`: the second edge a literal-pool load forms, from this same
     // instruction to the address the pool word holds. See [`super::kuna_poolref`].
     // `width` is how many bytes the instruction READ, which a `LOAD`'s address
@@ -1954,6 +2178,9 @@ fn data_refs(
             if in_data_space(vn) {
                 out.push((vn.offset, XrefKind::Write));
             }
+        }
+        if linked && is_return_address_sum(op, fall_through) {
+            continue;
         }
         for (i, vn) in op.ins.iter().enumerate() {
             let is_target_slot = i == 0
@@ -1986,7 +2213,7 @@ fn data_refs(
                 continue;
             }
             let value = vn.offset;
-            if !looks_like_address(value) || !in_range(mapped, value) {
+            if !(looks_like_address(value) || formed.contains(value)) || !in_range(mapped, value) {
                 continue;
             }
             let kind = match op.opcode {
@@ -1994,8 +2221,11 @@ fn data_refs(
                 OpCode::CPUI_STORE if i == 1 => XrefKind::Write,
                 _ => XrefKind::Data,
             };
-            if kind == XrefKind::Data && value == fall_through {
-                continue; // this call's own return address
+            if kind == XrefKind::Data
+                && value == fall_through
+                && is_return_address(op, i, linked, &never_taken)
+            {
+                continue;
             }
             out.push((value, kind));
             if kind == XrefKind::Read {
@@ -2006,6 +2236,84 @@ fn data_refs(
     out.sort_unstable();
     out.dedup();
     out
+}
+
+/// Does this instruction leave a return address behind? It does when it
+/// transfers control — a `CALL`/`CALLIND`, a `BRANCH` to an address, a
+/// `BRANCHIND`, or a `CALLOTHER` trap — since whatever it writes that equals its
+/// fall-through is where control comes back. Not every link is a `CALL`: x86's
+/// `call $+5` lifts to a push and a `BRANCH`, PowerPC's `bcl 20,31,$+4` and
+/// RISC-V's `jal t0` to a link-register write and a `BRANCH`, a RISC-V PLT
+/// entry's `jalr t1,t3` to a `BRANCHIND`, and x86-64's `syscall` saves it in
+/// `RCX` beside a `CALLOTHER`. A p-code-relative `BRANCH` stays inside the
+/// instruction and transfers nothing.
+pub(super) fn links(ops: &[FullOp]) -> bool {
+    ops.iter().any(|op| match op.opcode {
+        OpCode::CPUI_CALL | OpCode::CPUI_CALLIND | OpCode::CPUI_BRANCHIND | OpCode::CPUI_CALLOTHER => {
+            true
+        }
+        OpCode::CPUI_BRANCH => op.ins.first().is_some_and(|vn| {
+            vn.space.as_ref().is_some_and(|s| s.get_type() != spacetype::IPTR_CONSTANT)
+        }),
+        _ => false,
+    })
+}
+
+/// Is the constant `op` takes in `slot`, which equals the instruction's
+/// fall-through, the return address the instruction leaves rather than an
+/// address it forms (GH #1360)? An instruction that [`links`] (`linked`) leaves
+/// one. One that does not forms its fall-through only where it moves that
+/// constant whole — `adr x0,.+4` and `lea rax,[rip]` copy it into a register,
+/// `push offset next` stores it — and is no branch. A fall-through combined
+/// with another constant is one half of a link value: A32 `mov lr,pc` lifts to
+/// `lr = inst_next + 4` for the `bx` after it, microMIPS `bgezal` to `ra =
+/// inst_next | 1`. MIPS `nal` (`bltzal $zero`) is a branch never taken, which
+/// lifts to nothing but `ra = inst_next`; only a delay slot behind an
+/// instruction with no branch (`never_taken`) says it is one, on MIPS64 as on
+/// MIPS32. A delay slot behind a branch is just another instruction: SuperH
+/// `rts; mova` forms the address after it.
+fn is_return_address(op: &FullOp, slot: usize, linked: bool, never_taken: &dyn Fn() -> bool) -> bool {
+    let whole = op.ins.len() == 1 || (op.opcode == OpCode::CPUI_STORE && slot == 2);
+    linked || !whole || never_taken()
+}
+
+/// Does the instruction leave for an address other than by [`links`]: a
+/// `CBRANCH` there, or a `RETURN`? A p-code-relative `CBRANCH` (MIPS `movz`)
+/// stays inside the instruction.
+fn branches(ops: &[FullOp]) -> bool {
+    ops.iter().any(|op| match op.opcode {
+        OpCode::CPUI_RETURN => true,
+        OpCode::CPUI_CBRANCH => op.ins.first().is_some_and(|vn| {
+            vn.space.as_ref().is_some_and(|s| s.get_type() != spacetype::IPTR_CONSTANT)
+        }),
+        _ => false,
+    })
+}
+
+/// Does the instruction at `vma` end past a delay slot? Its `len` is where it
+/// falls through to, and only a branch has a slot between its own encoding and
+/// that address.
+fn has_delay_slot(translate: &dyn Translate, vma: u64, code_space: &Rc<AddrSpace>, len: u32) -> bool {
+    let addr = Address::new(Rc::clone(code_space), vma);
+    let own = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        translate.instruction_length(&addr)
+    }));
+    matches!(own, Ok(Ok(n)) if n > 0 && (n as u32) < len)
+}
+
+/// Does `op` add two constants into `fall_through` (AArch64's `x30 =
+/// inst_start + 4`)? Only a link's value: a Thumb-2 `vldr s0,[pc,#8]` reads
+/// `pc` as the same sum, and that is not a return address. See [`data_refs`].
+fn is_return_address_sum(op: &FullOp, fall_through: u64) -> bool {
+    let constant = |vn: &VarnodeData| {
+        vn.space.as_ref().is_some_and(|s| s.get_type() == spacetype::IPTR_CONSTANT)
+    };
+    let (Some(out), [a, b]) = (&op.out, op.ins.as_slice()) else { return false };
+    let mask = if out.size >= 8 { u64::MAX } else { (1u64 << (8 * out.size)) - 1 };
+    op.opcode == OpCode::CPUI_INT_ADD
+        && constant(a)
+        && constant(b)
+        && a.offset.wrapping_add(b.offset) & mask == fall_through
 }
 
 /// How many single-instruction `COPY`s may stand between a `CALLIND` and the
@@ -2068,6 +2376,13 @@ pub(super) fn looks_like_address(value: u64) -> bool {
 /// does. Only the no-section-table arm takes the fallback: an image that has
 /// sections which are not the runtime layout (a relocatable object) is declined
 /// before this is ever called.
+///
+/// (kuna) A Mach-O section carries no allocation bit, and `object` classifies
+/// only a dozen `(segment, section)` name pairs, so `__DATA_CONST,__got`,
+/// `__la_symbol_ptr`, `__DATA_CONST,__const`, `__cfstring`, `__objc_selrefs` and
+/// `__TEXT,__stubs` read as unknown and every reference into them was dropped
+/// (GH #1376). dyld maps every section of a loaded segment, so on Mach-O each
+/// section is mapped except a debug one.
 fn mapped_ranges(file: &object::File) -> Vec<(u64, u64)> {
     let mut out = Vec::new();
     if file.sections().next().is_none() {
@@ -2091,6 +2406,9 @@ fn mapped_ranges(file: &object::File) -> Vec<(u64, u64)> {
         }
         let allocated = match sec.flags() {
             object::SectionFlags::Elf { sh_flags } => sh_flags & SHF_ALLOC != 0,
+            object::SectionFlags::MachO { flags } => {
+                flags & object::macho::S_ATTR_DEBUG == 0 && sec.kind() != SectionKind::Debug
+            }
             _ => matches!(
                 sec.kind(),
                 SectionKind::Text
@@ -2186,7 +2504,7 @@ mod tests {
     /// Run [`data_refs`] with `ram` as the default data space and a fall-through
     /// no op under test materializes.
     fn refs(ram: &Rc<AddrSpace>, ops: &[FullOp]) -> Vec<(u64, XrefKind)> {
-        data_refs(ops, Some(ram), &MAPPED, 0, None)
+        data_refs(ops, Some(ram), &MAPPED, 0, None, &Formed::default(), &|| false)
     }
 
     /// The shape a constant-address memory operand actually lifts to: a direct
@@ -2198,6 +2516,21 @@ mod tests {
         assert_eq!(refs(&ram, &[load]), vec![(0x4014, XrefKind::Read)]);
         let store = op(OpCode::CPUI_COPY, Some(vn(&ram, 0x4010)), vec![]);
         assert_eq!(refs(&ram, &[store]), vec![(0x4010, XrefKind::Write)]);
+    }
+
+    /// GH #1364: below the `checkOperands` floor a mapped constant is a
+    /// reference only where the instruction computed it from its own address
+    /// (`adr x0, 0x378` in a dylib's first page); `mov x0, #0x378` is a number.
+    #[test]
+    fn a_pc_relative_constant_below_the_floor_is_a_reference() {
+        let (ram, cst) = spaces();
+        let low = [(0x300, 0x2000)];
+        let copy = [op(OpCode::CPUI_COPY, None, vec![vn(&cst, 0x378)])];
+        let formed = data_refs(&copy, Some(&ram), &low, 0x3a4, None, &Formed::one(0x378), &|| false);
+        assert_eq!(formed, vec![(0x378, XrefKind::Data)]);
+        assert!(data_refs(&copy, Some(&ram), &low, 0x3a4, None, &Formed::default(), &|| false).is_empty());
+        let unmapped = [op(OpCode::CPUI_COPY, None, vec![vn(&cst, 0x200)])];
+        assert!(data_refs(&unmapped, Some(&ram), &low, 0x3a4, None, &Formed::one(0x200), &|| false).is_empty());
     }
 
     /// A branch/call target is also a data-space varnode, and it is already
@@ -2311,22 +2644,138 @@ mod tests {
     }
 
     /// Every architecture materializes a call's return address as this
-    /// instruction's fall-through — x86 stores it, ARM copies it to `LR`. It is
-    /// never a reference, so it must not survive either spelling.
+    /// instruction's fall-through, and it is never a reference: not beside a
+    /// `CALL` (x86 `call` pushes it, A32 `bl` copies it to `lr`), nor beside the
+    /// `BRANCH` of x86 `call $+5` and PowerPC `bcl 20,31,$+4`, the `BRANCHIND`
+    /// of a RISC-V PLT's `jalr t1,t3`, or x86-64 `syscall`'s `CALLOTHER`; nor
+    /// where nothing branches but the value is a link: A32 `mov lr,pc` adds the
+    /// fall-through to 4, and MIPS `nal` copies it into `ra` from behind a delay
+    /// slot.
     #[test]
     fn a_calls_own_return_address_is_never_a_data_reference() {
         let (ram, cst) = spaces();
-        let arm = [op(OpCode::CPUI_COPY, None, vec![vn(&cst, 0x1104)])];
-        let x86 = [op(
-            OpCode::CPUI_STORE,
-            None,
-            vec![vn(&cst, 0x1b), vn(&ram, 0x4010), vn(&cst, 0x1104)],
-        )];
-        assert!(data_refs(&arm, Some(&ram), &MAPPED, 0x1104, None).is_empty());
-        assert_eq!(
-            data_refs(&x86, Some(&ram), &MAPPED, 0x1104, None),
-            vec![(0x4010, XrefKind::Read)]
-        );
+        let reg = Rc::new(AddrSpace::new_for_decode(spacetype::IPTR_PROCESSOR));
+        let r = |offset| VarnodeData { space: Some(Rc::clone(&reg)), offset, size: 4 };
+        let fall = || vn(&cst, 0x1104);
+        let push = op(OpCode::CPUI_STORE, None, vec![vn(&cst, 0x1b), r(0x10), fall()]);
+        let to_lr = op(OpCode::CPUI_COPY, Some(r(0x58)), vec![fall()]);
+        let call = op(OpCode::CPUI_CALL, None, vec![vn(&ram, 0x1180)]);
+        let to_next = op(OpCode::CPUI_BRANCH, None, vec![vn(&ram, 0x1104)]);
+        let links = [
+            ("x86 call", vec![push.clone(), call.clone()]),
+            ("A32 bl", vec![to_lr.clone(), call]),
+            ("x86 call $+5", vec![push, to_next.clone()]),
+            ("PowerPC bcl 20,31,$+4", vec![to_lr, to_next]),
+            (
+                "RISC-V jalr t1,t3",
+                vec![
+                    op(OpCode::CPUI_COPY, Some(r(0x30)), vec![fall()]),
+                    op(OpCode::CPUI_BRANCHIND, None, vec![r(0xe0)]),
+                ],
+            ),
+            (
+                "x86-64 syscall",
+                vec![
+                    op(OpCode::CPUI_COPY, Some(r(0x8)), vec![fall()]),
+                    op(OpCode::CPUI_CALLOTHER, None, vec![vn(&cst, 5)]),
+                ],
+            ),
+            ("A32 mov lr,pc", vec![op(OpCode::CPUI_INT_ADD, Some(r(0x58)), vec![fall(), vn(&cst, 4)])]),
+        ];
+        for (what, ops) in &links {
+            let decoded = || panic!("{what}: a link needs no second decode");
+            assert!(data_refs(ops, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &decoded).is_empty(), "{what}");
+        }
+        let nal = [op(OpCode::CPUI_COPY, Some(r(0x7c)), vec![fall()])];
+        assert!(data_refs(&nal, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| true).is_empty());
+        let nal_movz = [
+            op(OpCode::CPUI_COPY, Some(r(0x7c)), vec![fall()]),
+            op(OpCode::CPUI_CBRANCH, None, vec![vn(&cst, 2), r(0x200)]),
+        ];
+        assert!(data_refs(&nal_movz, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| true).is_empty());
+    }
+
+    /// A delay slot behind a branch is an ordinary instruction: SuperH `rts;
+    /// mova` and `bt/s; mova` form the address right after the slot in `r0`.
+    #[test]
+    fn an_address_formed_in_a_branchs_delay_slot_is_a_data_reference() {
+        let (ram, cst) = spaces();
+        let reg = Rc::new(AddrSpace::new_for_decode(spacetype::IPTR_PROCESSOR));
+        let r = |offset| VarnodeData { space: Some(Rc::clone(&reg)), offset, size: 4 };
+        let mova = op(OpCode::CPUI_COPY, Some(r(0)), vec![vn(&cst, 0x1104)]);
+        for (what, flow) in [
+            ("rts", op(OpCode::CPUI_RETURN, None, vec![r(0x188)])),
+            ("bt/s", op(OpCode::CPUI_CBRANCH, None, vec![vn(&ram, 0x1180), r(0x200)])),
+        ] {
+            let ops = [mova.clone(), flow];
+            assert_eq!(
+                data_refs(&ops, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| true),
+                vec![(0x1104, XrefKind::Data)],
+                "{what}"
+            );
+        }
+    }
+
+    /// An instruction that transfers no control and moves its own fall-through
+    /// whole has formed that address (GH #1360): AArch64 `adr x0,.+4` and x86-64
+    /// `lea rax,[rip]` copy it, `mov eax,offset next` zero-extends it, `push
+    /// offset next` stores it, and a predicated A32 `adreq` only branches to skip
+    /// itself.
+    #[test]
+    fn an_address_formed_at_the_fall_through_is_a_data_reference() {
+        let (ram, cst) = spaces();
+        let reg = Rc::new(AddrSpace::new_for_decode(spacetype::IPTR_PROCESSOR));
+        let r = |offset| VarnodeData { space: Some(Rc::clone(&reg)), offset, size: 4 };
+        let fall = || vn(&cst, 0x1104);
+        let formed = [
+            ("adr x0,.+4", vec![op(OpCode::CPUI_COPY, Some(r(0)), vec![fall()])]),
+            ("mov eax,offset next", vec![op(OpCode::CPUI_INT_ZEXT, Some(r(0)), vec![fall()])]),
+            (
+                "push offset next",
+                vec![
+                    op(OpCode::CPUI_INT_SUB, Some(r(0x10)), vec![r(0x10), vn(&cst, 8)]),
+                    op(OpCode::CPUI_STORE, None, vec![vn(&cst, 0x1b), r(0x10), fall()]),
+                ],
+            ),
+            (
+                "A32 adreq r0,.+4",
+                vec![
+                    op(OpCode::CPUI_CBRANCH, None, vec![vn(&ram, 0x1104), r(0x200)]),
+                    op(OpCode::CPUI_COPY, Some(r(0)), vec![fall()]),
+                ],
+            ),
+        ];
+        for (what, ops) in &formed {
+            assert_eq!(
+                data_refs(ops, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| false),
+                vec![(0x1104, XrefKind::Data)],
+                "{what}"
+            );
+        }
+    }
+
+    /// An AArch64 `bl`/`blr` lifts its link value as `x30 = inst_start + 4`: the
+    /// sum is the fall-through, so neither constant is the instruction
+    /// referencing itself. A real self-reference (`adr x0,.`), a PC-relative sum
+    /// that is not the fall-through, and the same sum outside a call (Thumb-2's
+    /// `pc` read) are reported as before.
+    #[test]
+    fn an_aarch64_link_value_is_never_a_data_reference() {
+        let (ram, cst) = spaces();
+        let reg = Rc::new(AddrSpace::new_for_decode(spacetype::IPTR_PROCESSOR));
+        let x30 = VarnodeData { space: Some(Rc::clone(&reg)), offset: 0xf0, size: 8 };
+        let x0 = VarnodeData { space: Some(Rc::clone(&reg)), offset: 0, size: 8 };
+        let bl = [
+            op(OpCode::CPUI_INT_ADD, Some(x30), vec![vn(&cst, 0x1100), vn(&cst, 4)]),
+            op(OpCode::CPUI_CALL, None, vec![vn(&ram, 0x1180)]),
+        ];
+        assert!(data_refs(&bl, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| false).is_empty());
+        let adr = [op(OpCode::CPUI_COPY, Some(x0.clone()), vec![vn(&cst, 0x1100)])];
+        assert_eq!(data_refs(&adr, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| false), vec![(0x1100, XrefKind::Data)]);
+        let add_pc = [op(OpCode::CPUI_INT_ADD, Some(x0.clone()), vec![vn(&cst, 0x1100), vn(&cst, 0x10)])];
+        assert_eq!(data_refs(&add_pc, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| false), vec![(0x1100, XrefKind::Data)]);
+        let pc_read = [op(OpCode::CPUI_INT_ADD, Some(x0), vec![vn(&cst, 0x1100), vn(&cst, 4)])];
+        assert_eq!(data_refs(&pc_read, Some(&ram), &MAPPED, 0x1104, None, &Formed::default(), &|| false), vec![(0x1100, XrefKind::Data)]);
     }
 
     /// (kuna) `poolref`: a pointer-sized read of a read-only word files the
@@ -2345,7 +2794,7 @@ mod tests {
             vec![vn(&cst, 0x1b), vn(&ram, 0x1000)],
         );
         assert_eq!(
-            data_refs(&[load], Some(&ram), &MAPPED, 0, Some(&pool)),
+            data_refs(&[load], Some(&ram), &MAPPED, 0, Some(&pool), &Formed::default(), &|| false),
             vec![(0x1000, XrefKind::Read), (0x4000, XrefKind::Data), (0x4020, XrefKind::Write)]
         );
     }
@@ -2365,7 +2814,7 @@ mod tests {
             vec![vn(&cst, 0x1b), vn(&ram, 0x1000)],
         );
         assert_eq!(
-            data_refs(&[load], Some(&ram), &MAPPED, 0, Some(&pool)),
+            data_refs(&[load], Some(&ram), &MAPPED, 0, Some(&pool), &Formed::default(), &|| false),
             vec![(0x1000, XrefKind::Read), (0x4020, XrefKind::Write)]
         );
     }
@@ -2380,7 +2829,7 @@ mod tests {
         src.size = 4;
         let copy = op(OpCode::CPUI_COPY, None, vec![src]);
         assert_eq!(
-            data_refs(&[copy], Some(&ram), &MAPPED, 0, Some(&pool)),
+            data_refs(&[copy], Some(&ram), &MAPPED, 0, Some(&pool), &Formed::default(), &|| false),
             vec![(0x1008, XrefKind::Read), (0x4010, XrefKind::Data)]
         );
     }
@@ -2445,6 +2894,7 @@ mod tests {
             flow: None,
             switches: Vec::new(),
             refused: HashSet::new(),
+            carry: kuna_regcarry::Tracker::default(),
         };
         for e in edges {
             st.file(e.from, e.to, e.kind, "");
@@ -2503,6 +2953,7 @@ mod tests {
             flow: None,
             switches: Vec::new(),
             refused: HashSet::new(),
+            carry: kuna_regcarry::Tracker::default(),
         };
         st.file(0x1188, 0x4008, XrefKind::Read, "");
         let index = st.finish(BTreeMap::new(), false);
@@ -2539,6 +2990,7 @@ mod tests {
             }),
             switches: Vec::new(),
             refused: HashSet::new(),
+            carry: kuna_regcarry::Tracker::default(),
         };
         let index = st.finish(BTreeMap::new(), true);
         assert_eq!(index.function_containing(0x1001), Some(0x1000));
@@ -2612,6 +3064,18 @@ mod tests {
             assert!(sections.contains(r), "{r:x?} is not any section's span");
         }
         assert!(!in_range(&mapped, 0), "the ELF header read as mapped data");
+    }
+
+    /// GH #1376: `object` names no kind for `__DATA_CONST,__got`, and dyld maps
+    /// it like every other section of a loaded segment.
+    #[test]
+    fn every_section_of_a_macho_segment_is_mapped() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/gotcall_macho_arm64");
+        let data = std::fs::read(path).unwrap();
+        let file = object::File::parse(&*data).unwrap();
+        let got = file.section_by_name("__got").unwrap();
+        assert_eq!(got.kind(), SectionKind::Unknown, "object learned the section's kind");
+        assert!(in_range(&range_union(mapped_ranges(&file)), got.address()), "the GOT slot reads as unmapped");
     }
 
     /// `sort_dedup` collapses the `(from, to, kind)` triple: one row per site.

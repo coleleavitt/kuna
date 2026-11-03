@@ -61,7 +61,7 @@ fn auth_ptr_binds(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
     let fixups = resolve_chained_fixups(file, bytes);
     let width: u64 = if file.is_64() { 8 } else { 4 };
     let mut slots: Vec<(u64, &str)> = fixups
-        .binds()
+        .named_binds()
         .filter(|&(va, _)| ranges.iter().any(|&(lo, hi)| va >= lo && va < hi))
         .filter(|&(va, _)| fixups.bind(va).is_some_and(|(_, addend)| addend == 0))
         .collect();

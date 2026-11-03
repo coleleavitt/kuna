@@ -2781,6 +2781,10 @@ impl RuleSubvarAnd {
 }
 
 impl Rule for RuleSubvarAnd {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_INT_AND]
     }
@@ -2848,6 +2852,10 @@ impl RuleSubvarSubpiece {
 }
 
 impl Rule for RuleSubvarSubpiece {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_SUBPIECE]
     }
@@ -2872,15 +2880,12 @@ impl Rule for RuleSubvarSubpiece {
         }
         let mut mask = calc_mask(flowsize);
         mask <<= 8 * sa;
-        let aggressive = data.vbank().get(outvn).expect("vn").is_ptr_flow();
-        if !aggressive {
-            let vnconsume = data.vbank().get(vn).expect("vn").get_consume();
-            if (vnconsume & mask) != vnconsume {
-                return 0;
-            }
-            if data.vbank().get(outvn).expect("vn").has_no_descend() {
-                return 0;
-            }
+        let vnconsume = data.vbank().get(vn).expect("vn").get_consume();
+        if (vnconsume & mask) != vnconsume {
+            return 0;
+        }
+        if data.vbank().get(outvn).expect("vn").has_no_descend() {
+            return 0;
         }
         let mut big = false;
         if flowsize >= 8 && data.vbank().get(vn).expect("vn").is_input() {
@@ -2890,7 +2895,7 @@ impl Rule for RuleSubvarSubpiece {
                 big = true;
             }
         }
-        run_subflow(data, vn, mask, aggressive, false, big)
+        run_subflow(data, vn, mask, false, false, big)
     }
 }
 
@@ -2908,6 +2913,10 @@ impl RuleSubvarCompZero {
 }
 
 impl Rule for RuleSubvarCompZero {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_INT_NOTEQUAL, OpCode::CPUI_INT_EQUAL]
     }
@@ -2992,6 +3001,10 @@ impl RuleSubvarShift {
 }
 
 impl Rule for RuleSubvarShift {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_INT_RIGHT]
     }
@@ -3044,6 +3057,10 @@ impl RuleSubvarZext {
 }
 
 impl Rule for RuleSubvarZext {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_INT_ZEXT]
     }
@@ -3061,9 +3078,7 @@ impl Rule for RuleSubvarZext {
         let invn = o.get_in(0).expect("in0");
         let invsize = data.vbank().get(invn).expect("vn").get_size();
         let mask = calc_mask(invsize);
-        let ptrflow = data.vbank().get(invn).expect("vn").is_ptr_flow();
-
-        let (applied, returned) = run_subflow_returning(data, vn, mask, ptrflow, false, false);
+        let (applied, returned) = run_subflow_returning(data, vn, mask, false, false, false);
         if returned {
             crate::kuna_callrettype::note_returned_extension(data, false, invsize);
         }
@@ -3087,6 +3102,10 @@ impl RuleSubvarSext {
 }
 
 impl Rule for RuleSubvarSext {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_INT_SEXT]
     }
@@ -3658,6 +3677,10 @@ impl RuleSplitFlow {
 }
 
 impl Rule for RuleSplitFlow {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_SUBPIECE]
     }
@@ -4977,6 +5000,10 @@ impl RuleSplitCopy {
 }
 
 impl Rule for RuleSplitCopy {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_COPY]
     }
@@ -5025,6 +5052,10 @@ impl RuleSplitLoad {
 }
 
 impl Rule for RuleSplitLoad {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_LOAD]
     }
@@ -5071,6 +5102,10 @@ impl RuleSplitStore {
 }
 
 impl Rule for RuleSplitStore {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_STORE]
     }
@@ -5122,6 +5157,10 @@ impl RuleDumptyHumpLate {
 }
 
 impl Rule for RuleDumptyHumpLate {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_SUBPIECE]
     }
@@ -5218,7 +5257,7 @@ impl RuleDumptyHumpLate {
                 TypeOp::new(
                     OpCode::CPUI_COPY,
                     pcodeop_flags::unary | pcodeop_flags::nocollapse,
-                    "copy".to_string(),
+                    "copy",
                 ),
             );
             data.op_set_input(op, vn, 0)?;
@@ -6309,7 +6348,9 @@ impl LaneDivide {
                         }
                         None => {
                             if self.allow_subpiece_terminator {
-                                let lane_index = self.description.get_boundary(byte_pos);
+                                let lane_index = self
+                                    .description
+                                    .get_boundary(byte_pos + self.description.get_position(skip_lanes));
                                 if lane_index < 0 || lane_index >= self.description.get_num_lanes() {
                                     return false; // Does piece start on lane boundary?
                                 }
@@ -6524,6 +6565,17 @@ impl LaneDivide {
     pub fn apply(&mut self, data: &mut Funcdata) -> KunaResult<()> {
         self.tm.apply(data)
     }
+
+    /// (kuna) The Varnodes the trace reached.
+    pub fn traced(&self) -> impl Iterator<Item = VarnodeId> + '_ {
+        self.tm.original_varnodes()
+    }
+
+    /// (kuna) Would [`Self::apply`] refuse the transform before rewriting
+    /// anything ([`TransformManager::check_free_fanout`])?
+    pub fn check_free_fanout(&self, data: &Funcdata) -> KunaResult<()> {
+        self.tm.check_free_fanout(data)
+    }
 }
 
 /// Perform SubfloatFlow analysis triggered by FLOAT_FLOAT2FLOAT (C++
@@ -6541,6 +6593,10 @@ impl RuleSubfloatConvert {
 }
 
 impl Rule for RuleSubfloatConvert {
+    fn walks_far(&self) -> bool {
+        true
+    }
+
     fn get_op_list(&self) -> Vec<OpCode> {
         vec![OpCode::CPUI_FLOAT_FLOAT2FLOAT]
     }

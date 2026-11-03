@@ -54,19 +54,19 @@ fn subphase_count_is_48() {
 }
 
 #[test]
-fn surface_count_is_120() {
-    assert_eq!(kuna_num_surfaces(), 120);
-    assert_eq!(SURFACE_TABLE.len(), 120);
+fn surface_count_is_121() {
+    assert_eq!(kuna_num_surfaces(), 121);
+    assert_eq!(SURFACE_TABLE.len(), 121);
 }
 
 #[test]
-fn settable_count_is_449() {
-    assert_eq!(kuna_num_settables(), 449);
-    assert_eq!(SETTABLE_TABLE.len(), 449);
+fn settable_count_is_485() {
+    assert_eq!(kuna_num_settables(), 485);
+    assert_eq!(SETTABLE_TABLE.len(), 485);
 }
 
 #[test]
-fn tier_counts_are_139_core_171_transform_139_analysis() {
+fn tier_counts_are_148_core_194_transform_143_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -78,7 +78,7 @@ fn tier_counts_are_139_core_171_transform_139_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (139, 171, 139));
+    assert_eq!((core, transform, analysis), (148, 194, 143));
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_213() {
+fn option_values_live_value_present_for_237() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -436,6 +436,10 @@ fn option_values_live_value_present_for_213() {
         // (kuna) The TE / raw-image object view -- an analysis-tier gate read at
         // the commit, console-side via kuna_live_value, like `rawdiscover`.
         "objectview",
+        // (kuna #1288) The MS-DOS evidence for rawdiscover's call sweep -- an
+        // analysis-tier gate read console-side via kuna_live_value. Default-ON,
+        // MZ loads only.
+        "mzsweep",
         "noreturn_disc",
         // (kuna, GH-312) The positive-evidence-only tally for `noreturn_disc` -- a
         // sub-rule gate with no codegen live reader (read console-side via
@@ -503,6 +507,10 @@ fn option_values_live_value_present_for_213() {
         // with no codegen live reader (read console-side via kuna_live_value), like
         // `unmappedentry` above. Default-ON.
         "ppclocalentry",
+        // (kuna, GH-1289) Go pclntab functions out of the fast inventory walk --
+        // an analysis-tier gate with no codegen live reader (read console-side via
+        // kuna_live_value), like `ppclocalentry` above. Default-ON.
+        "gowalkprune",
         // (kuna, GH-780) ARM flow-proven decode-mode paints -- an analysis-tier
         // gate read console-side via kuna_live_value, like `ppclocalentry` above.
         // Default-ON.
@@ -601,6 +609,7 @@ fn option_values_live_value_present_for_213() {
         // (kuna) loader-tier gate, no codegen live reader (read console-side via
         // kuna_live_value), same as the analysis-pass gates above.
         "i386_pie_plt",
+        "ppc32picimports",
         // (kuna) x86-64 IFUNC PLT-stub naming: a load-time gate read via the
         // `kuna_ifuncfpret` env var (no codegen live reader), like `i386_pie_plt`.
         "ifuncfpret",
@@ -636,6 +645,8 @@ fn option_values_live_value_present_for_213() {
         // (kuna) DWARF DW_CC_nocall parameter drop -- the same commit-boundary
         // gate as `cppproto`, read console-side. Default-on.
         "dwarfnocall",
+        "godwarfsig",
+        "gopairreturns",
         // (kuna) Demangled C++ signature application — an analysis-tier gate read
         // at the analysis COMMIT boundary (console-side via kuna_live_value), like
         // `cppproto` above. Three-valued, default `proven`.
@@ -690,6 +701,7 @@ fn option_values_live_value_present_for_213() {
                             | "implweight"
                             | "linearswitch"
                             | "treeswitch"
+                            | "outlang"
                             | "loweredswitch"
                             | "regionstructure"
                             | "regionlooprefine"
@@ -730,6 +742,7 @@ fn option_values_live_value_present_for_213() {
                             | "returndup"
                             | "orchain"
                             | "rettriangle"
+                            | "clonephiorder"
                             | "earlyreturn"
                             | "switchreturn"
                             | "loopbreak_recovery"
@@ -747,6 +760,15 @@ fn option_values_live_value_present_for_213() {
                             // the same reason `pebnames` is here. Its live value
                             // is `Architecture::ptr_from_use`.
                             | "ptrfromuse"
+                            // (kuna) `readonlycalls` takes `off|on|<n>`, a guard
+                            // count; its live value is `Architecture::readonly_calls`.
+                            | "readonlycalls"
+                            // (kuna) `persistcalls` takes `off|on|<n>`, a guard
+                            // count; its live value is `Architecture::persist_calls`.
+                            | "persistcalls"
+                            // (kuna) `retsplitlimit` takes `off|<n>`, an op count;
+                            // its live value is `Architecture::ret_split_limit`.
+                            | "retsplitlimit"
                             // (kuna) `narrowargs` takes `off|on|callers`; its
                             // live value is the pair `Architecture::narrow_args`
                             // and `Architecture::narrow_args_callers`.
@@ -801,6 +823,9 @@ fn option_values_live_value_present_for_213() {
                             // over an enum field, for the same reason.  Its live
                             // value is `Architecture::be_join`.
                             | "bejoin"
+                            // (kuna) `bejoinpass` likewise (`off|whole|high`);
+                            // its live value is `Architecture::be_join_pass`.
+                            | "bejoinpass"
                             | "arraycoverwidth"
                             | "bytearrayc"
                             | "emptystrconst"
@@ -853,9 +878,13 @@ fn option_values_live_value_present_for_213() {
                             // rustabi shape; its live value is
                             // `Architecture::go_morestack`.
                             | "gomorestack"
+                            | "rustprobestack"
                             // (kuna) `gobool` takes the same MODE shape; its
                             // live value is `Architecture::go_bool`.
                             | "gobool"
+                            // (kuna) `fpuemu` takes the same MODE shape; its
+                            // live value is `Architecture::fpu_emu`.
+                            | "fpuemu"
                             // (kuna) `gowritebarrier`: the same MODE shape;
                             // its live value is `Architecture::go_write_barrier`.
                             | "gowritebarrier"
@@ -1045,7 +1074,20 @@ fn option_values_live_value_present_for_213() {
     // +3 for `vexzeroupper`/`lanefuse`/`vectorabi`, +1 for `strcodelen`, +1 for `gortti`.
     // 195 -> 196: +1 for `vaarg` (live_field = va_arg).
     // +1 for `vtabletypes` (live_field = analysis_vtabletypes).
-    assert_eq!(with_live, 213);
+    // 154 -> 156: +2 for `readonlycalls` and `prunedssa` (readonly_calls, pruned_ssa).
+    // 156 -> 157: +1 for `segmentize` (live_field = segmentize).
+    // 157 -> 158: +1 for `loadguardreads` (load_guard_reads).
+    // 158 -> 157: `readonlycalls` takes `off|on|<n>` and has no live_field.
+    // 157 -> 158: +1 for `deadwaves` (pool_dead_waves).
+    // 158 -> 159: +1 for `earlyrestart` (early_restart).
+    // 159 -> 160: +1 for `pltlocal` (plt_local_calls).
+    // 160 -> 161: +1 for `haltloopguard` (halt_loop_guard).
+    // 161 -> 162: +1 for `truncptrflow` (trunc_ptr_flow).
+    // 168 -> 169: +1 for `switchrunon` (switch_run_on).
+    // 175 -> 176: +1 for `highsliceguard` (highslice_guard).
+    // 176 -> 177: +1 for `mipsunaligned` (mips_unaligned).
+    // 177 -> 178: +1 for `gottailcall` (got_tail_call).
+    assert_eq!(with_live, 237);
 }
 
 #[test]
@@ -1311,7 +1353,23 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `unmergecall`.
     // +1 for `vaarg`.
     // +1 for `vtabletypes`.
-    assert_eq!(json.matches("},\n").count(), 448);
+    // +2 for `readonlycalls` and `prunedssa`; their P3 rows sit at the end.
+    // +1 for `segmentize`; its P3 row sits beside `x64syscall`.
+    // +1 for `gowalkprune`; its P1 row sits beside `gonoreturn`.
+    // +1 for `loadguardreads`; its P3 row sits after `prunedssa`.
+    // +1 for `mzsweep`; its P1 row sits beside `rawdiscover`.
+    // +1 for `fpuemu`; its P2 row sits beside `decodehalt`.
+    // +1 for `retsplitlimit`; its P8 row sits after `retsplitglobal`.
+    // +1 for `deadwaves`; its P3 row sits after `jtsharepartial`.
+    // +1 for `earlyrestart`; its P3 row sits after `deadwaves`.
+    // +1 for `pltlocal`; its P4 row sits after `passthrough`.
+    // +1 for `haltloopguard`; its P3 row sits after `earlyrestart`.
+    // +1 for `truncptrflow`; its P3 row sits after `haltloopguard`.
+    // +1 for `clonephiorder`; its P8 row sits after `rettriangle`.
+    // +1 for `switchrunon`; its P2 row sits after `switchsharedcase`.
+    // +1 for `bejoinpass`; its P4 row sits after `bejoin`.
+    // +1 for `persistcalls`; its P3 row sits after `readonlycalls`.
+    assert_eq!(json.matches("},\n").count(), 484);
 }
 
 #[test]

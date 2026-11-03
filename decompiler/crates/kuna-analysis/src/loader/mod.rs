@@ -42,7 +42,9 @@ pub mod elf_debuglink;
 pub mod kuna_globalref;
 pub mod elfv1;
 mod elfv1_imports;
-mod kuna_ppc32_imports;
+pub mod kuna_ppc32_imports;
+mod kuna_ppc32picimports;
+pub use kuna_ppc32picimports::{ImportProofMemo, ImportProofScope};
 // (kuna) ELF section-table tolerance: an image whose section headers are
 // unreadable still has program headers describing every loadable byte.
 pub mod elf_shdr;
@@ -60,6 +62,8 @@ pub mod reloc_object;
 // Architecture-aware ELF instruction/data relocation encoders used by the
 // relocatable-object layout. Kept separate so bitfield rules are unit-testable.
 mod reloc_apply;
+// (kuna) MIPS relocations, `$gp` and GOT for a relocatable object.
+mod kuna_mipsreloc;
 mod kuna_commonalloc;
 mod kuna_sparc_relcode;
 // (kuna) `relocrebase`: rebase the load-time analysis facts of a relocatable
@@ -75,6 +79,15 @@ pub mod kuna_dynrelocs;
 // slots and report the SG_READ_ONLY (`__DATA_CONST`) ones as constant.
 pub mod kuna_machorelocs;
 pub mod kuna_elfgotimports;
+// (kuna `dynrelocs`) The MIPS primary-GOT slots the dynamic linker fills with an
+// address the image defines, reported constant.
+pub mod kuna_mipsgot;
+// (kuna) The pointers an image stores in its data, as its rebase / relocation
+// metadata lists them (the data half of `kuna xrefs`).
+pub mod kuna_dataptrs;
+// (kuna) `pltlocal`: the PLT stubs the image's own relocations bind to a
+// function it defines.
+pub(crate) mod kuna_pltlocal;
 // (kuna) `msvcfpconst`: recover an MSVC `__real@` floating-point constant COMDAT
 // from its mangled symbol name -- materialise the undefined half's bytes at its
 // synthetic extern slot, and mark both halves foldable.
@@ -102,6 +115,7 @@ pub mod kuna_machobinds;
 // references into other images named (`dyldimage`, `dyldcrossrefs`).
 pub mod kuna_dyldcache;
 pub mod macho_stubs;
+pub(crate) mod macho_trie;
 pub mod mips_markers;
 // (kuna) Go toolchain version off the build-info blob (goreg shell layouts).
 pub mod gobuildinfo;
@@ -115,3 +129,5 @@ pub mod kuna_armfuncmode;
 pub mod kuna_floatabi;
 // (kuna) does an arm64 image's platform have the callee extend a narrow return?
 pub mod kuna_returnext;
+// (kuna #1288) the x86 real-mode code segment a loader paints into the decode context.
+pub mod kuna_realmodecs;

@@ -299,7 +299,7 @@ impl MachoSlots {
         // A classic image (`LC_DYLD_INFO`) keeps its rebased pointers in the
         // file and zeros in its bind slots; only the bind names are needed.
         let named_binds: Vec<(u64, String, Option<i64>)> = if fixups.is_chained() {
-            fixups.binds().map(|(va, name)| (va, name.to_string(), fixups.bind(va).map(|(_, a)| a))).collect()
+            fixups.named_binds().map(|(va, name)| (va, name.to_string(), fixups.bind(va).map(|(_, a)| a))).collect()
         } else {
             crate::loader::format::macho::dyldinfo::resolve_dyld_info_binds(file, bytes)
                 .into_iter()

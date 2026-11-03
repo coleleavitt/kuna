@@ -144,6 +144,9 @@ impl FlowEnvironment for ArchFlowEnv {
         arch.is_lazy_entry(entry.get_offset())
             .then(|| arch.name_function(entry))
     }
+    fn query_call_definition(&self, entry: &Address) -> Option<Address> {
+        crate::p4_calls::kuna_pltlocal::definition(self.arch(), entry)
+    }
     fn query_call_no_return(&self, entry: &Address) -> bool {
         crate::p4_calls::kuna_calleenoreturn::is_no_return(self.arch(), entry)
     }
@@ -573,14 +576,24 @@ impl FlowEnvironment for ArchFlowEnv {
         dest_outside_extent: bool,
     ) -> bool {
         let glb = fd.get_arch();
+        let arch = self.arch();
         crate::kuna_tailcalljump::kuna_is_tail_call_table(
             fd,
             op,
-            self.arch().tail_call_tables,
+            arch.tail_call_tables,
             self.query_call(dest).is_some(),
             dest == fd.get_address(),
             dest_outside_extent,
             || {
+                if arch.got_tail_call
+                    && (crate::kuna_gottailcall::callable(arch, fd, dest)
+                        || !self.mapped_flow_image().map_or_else(
+                            || self.code_bytes_mapped(dest),
+                            |image| crate::kuna_mappedflowboundary::mapped_start(image, dest),
+                        ))
+                {
+                    return true;
+                }
                 use crate::kuna_tailcalljump::{
                     output_stated_by_pieces, stated_by_pieces, stated_by_proto,
                 };
@@ -807,9 +820,11 @@ pub fn build_and_follow_flow_with_override(
 
 /// (kuna decompile-all watchdog) [`build_and_follow_flow_with_override`] for a
 /// follow made outside a drive (the console's `load function` / `load addr`),
-/// under the budget a drive of `arch` would arm: a follow still running when it
-/// runs out fails with the budget error instead of leaving a truncated IR for
-/// the drive to adopt. With no budget it is the plain follow.
+/// under the budget and memory limit a drive of `arch` would arm: a follow
+/// still running when either runs out fails with the budget error instead of
+/// leaving a truncated IR for the drive to adopt. The follow includes every
+/// jump-table recovery, whose sub-pipeline is the costliest part of a huge
+/// function. With neither armed it is the plain follow.
 pub fn build_and_follow_flow_within_budget(
     arch: &mut Architecture,
     name: &str,
@@ -817,14 +832,45 @@ pub fn build_and_follow_flow_within_budget(
     size: int4,
     flow_overrides: &[(Address, kuna_base::types::uint4)],
 ) -> KunaResult<Funcdata> {
-    let Some(budget) = fn_budget(arch) else {
-        return build_and_follow_flow_with_override(arch, name, entry, size, flow_overrides);
+    within_flow_budget(arch, |arch| {
+        build_and_follow_flow_with_override(arch, name, entry, size, flow_overrides)
+    })
+}
+
+/// The caller-local PPC32 import calls `ppc32picimports on` proves for one entry.
+/// One unpublished flow under the drive budget: the proof is read off the flow a
+/// decompile would discard, so the replacement flow is never built.
+pub fn ppc32_pic_call_bindings(
+    arch: &mut Architecture,
+    name: &str,
+    entry: Address,
+    size: int4,
+) -> KunaResult<Vec<crate::kuna_ppc32piccalls::CallBinding>> {
+    within_flow_budget(arch, |arch| {
+        crate::kuna_armfloatreturn::park_float_library_prototypes(arch);
+        let fd = arch.new_funcdata(name, entry, size)?;
+        let data = generate_flow(arch, fd)?;
+        Ok(crate::kuna_ppc32piccalls::prove(&data, arch).into_values().collect())
+    })
+}
+
+/// Run `follow` under the budget and memory limit a drive of `arch` would arm.
+fn within_flow_budget<T>(
+    arch: &mut Architecture,
+    follow: impl FnOnce(&mut Architecture) -> KunaResult<T>,
+) -> KunaResult<T> {
+    let memory = arch.kuna_drive_publishes().then(crate::kuna_fnmemory::Armed::enter);
+    let horizon = match fn_budget(arch) {
+        Some(budget) => budget,
+        None if memory.as_ref().is_some_and(|guard| guard.is_armed()) => MEMORY_ONLY_HORIZON,
+        None => return follow(arch),
     };
-    let outer = arch.kuna_fn_deadline.replace(std::time::Instant::now() + budget);
+    let outer = arch.kuna_fn_deadline.replace(std::time::Instant::now() + horizon);
     let result = {
         let _deadline_scope = DeadlineScope::enter(arch.kuna_fn_deadline);
-        let fd = build_and_follow_flow_with_override(arch, name, entry, size, flow_overrides);
-        budget_error(arch).map_or(fd, Err)
+        let followed = follow(arch);
+        deadline_passed_in("flow following");
+        budget_error(arch).map_or(followed, Err)
     };
     arch.kuna_fn_deadline = outer;
     result
@@ -879,6 +925,25 @@ pub fn build_and_follow_flow_with_override_and_protos(
 /// clear, so the re-flow rebuilds the CALLIND straight as a direct CALL).
 #[allow(clippy::mutable_key_type)]
 fn follow_flow_on_fd(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcdata> {
+    let comments = fd.pending_comment_count();
+    let mut data = generate_flow(arch, fd)?;
+    let bindings = crate::kuna_ppc32piccalls::prove(&data, arch);
+    if !bindings.is_empty() {
+        // The discarded flow ran past calls the proof ends; nothing it buffered
+        // describes the replacement. Comments buffered before it are kept.
+        data.clear();
+        data.truncate_pending_comments(comments);
+        data.ppc32_pic_calls = bindings;
+        data = generate_flow(arch, data)?;
+    }
+    publish_flow(arch, data)
+}
+
+/// C++ `Funcdata::followFlow` through `startProcessing`'s sorting, without
+/// publishing the flow's buffered comments.
+#[allow(clippy::mutable_key_type)]
+fn generate_flow(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcdata> {
+    crate::kuna_mipsunaligned::paint(arch);
     // C++ Funcdata::followFlow(baddr, eaddr): a function carrying a declared byte
     // extent restricts flow to it; size 0 keeps the unbounded default the whole
     // engine has used until now (`kuna_console::engine::UNBOUNDED_SIZE`), so this
@@ -914,19 +979,30 @@ fn follow_flow_on_fd(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcda
     flow.set_maximum_instructions(arch.max_instructions);
     // C++ followFlow: generateOps() then generateBlocks().  The jump-table
     // recovery loop runs inside generateOps (via the action sub-pipeline).
+    // A panic in one recovery is the function's error, as it is in the main
+    // drive; the tables after it are not attempted.
     {
         let arch_ptr: *mut Architecture = arch;
+        let mut panicked: Option<KunaError> = None;
         let mut run_jt_pipeline = |partial: &mut Funcdata,
                                    visited: &crate::flow::VisitedMap|
          -> KunaResult<()> {
+            if panicked.is_some() {
+                return Err(KunaError::lowlevel("jump-table recovery stopped by an earlier panic"));
+            }
             // SAFETY: `arch_ptr` aliases the live `&mut Architecture`; the env's
             // reads (`translate`/`inst`/`symboltab`) are disjoint from the
             // `allacts` mutation here, and the `flow` borrow of `env`/`arch` does
             // not overlap this closure's run (it is only active between calls).
             let arch_mut: &mut Architecture = unsafe { &mut *arch_ptr };
-            run_jumptable_pipeline(arch_mut, partial, visited)
+            run_jumptable_pipeline(arch_mut, partial, visited, &mut panicked)
         };
-        flow.generate_ops_with_jumptables(&mut run_jt_pipeline)?;
+        let generated = flow.generate_ops_with_jumptables(&mut run_jt_pipeline);
+        drop(run_jt_pipeline);
+        if let Some(error) = panicked {
+            return Err(error);
+        }
+        generated?;
     }
     flow.generate_blocks()?;
     // C++ followFlow: switchOverJumpTables(flow) — map each recovered table's
@@ -948,6 +1024,11 @@ fn follow_flow_on_fd(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcda
     // C++ startProcessing also calls sortCallSpecs() (dominance order for the
     // call-spec list); now that qlst exists, sort it.
     data.sort_call_specs();
+    Ok(data)
+}
+
+/// Mark processing started and publish the flow's buffered comments.
+fn publish_flow(arch: &mut Architecture, mut data: Funcdata) -> KunaResult<Funcdata> {
     // startProcessing then sets the processing_started flag (so isProcStarted()
     // is true; the rest of startProcessing — sortCallSpecs / buildInfoList /
     // applyDeadCodeDelay — is a W4 stub or handled lazily in op_heritage).
@@ -959,10 +1040,15 @@ fn follow_flow_on_fd(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcda
     // program-wide comment database.
     let func_addr = data.get_address().clone();
     if arch.kuna_drive_publishes() {
+        if !arch.ppc32_pic_imports.is_empty() {
+            crate::kuna_ppc32piccalls::clear_stale_warnings(&mut arch.commentdb, &func_addr);
+        }
         if arch.mapped_flow_boundary_image {
             crate::kuna_mappedflowboundary::clear_stale_warnings(&mut arch.commentdb, &func_addr);
         }
-        for (tp, ad, txt) in data.drain_pending_comments() {
+        let pending = data.drain_pending_comments();
+        crate::kuna_gottailcall::clear_stale_warnings(arch, &func_addr, &pending);
+        for (tp, ad, txt) in pending {
             arch.commentdb.add_comment_no_duplicate(tp, &func_addr, &ad, &txt);
         }
     }
@@ -977,12 +1063,15 @@ fn follow_flow_on_fd(arch: &mut Architecture, fd: Funcdata) -> KunaResult<Funcda
 /// blocks (seeded with the source flow's `visited`), runs `structureReset` +
 /// `sortCallSpecs` (the `startProcessing` prerequisites), then drives the
 /// "jumptable" action set to simplify it so the BRANCHIND's switch calculation
-/// becomes a straight-line index expression the recovery can emulate.
+/// becomes a straight-line index expression the recovery can emulate.  A panic
+/// in the pipeline leaves the function's error in `panicked`: a budget already
+/// spent when it is caught, or else the panic.
 #[allow(clippy::mutable_key_type)]
 fn run_jumptable_pipeline(
     arch: &mut Architecture,
     partial: &mut Funcdata,
     visited: &crate::flow::VisitedMap,
+    panicked: &mut Option<KunaError>,
 ) -> KunaResult<()> {
     // Build the partial's basic blocks (partialflow.generateBlocks).
     let env = ArchFlowEnv {
@@ -1009,10 +1098,10 @@ fn run_jumptable_pipeline(
             .get_current_mut()
             .ok_or_else(|| KunaError::lowlevel("no current jumptable action"))?;
         root.reset(partial);
-        // catch_unwind so an un-ported pass stub in the sub-pipeline degrades to a
-        // recoverable error (the recovery falls back to truncating the BRANCHIND),
-        // never an abort — same policy as the main `decompile_func_full` drive.
+        // catch_unwind so a panic in the sub-pipeline fails this function, never
+        // the whole batch — same policy as the main `decompile_func_full` drive.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::kuna_jumptablefault::check(partial.get_address().get_offset());
             root.perform(partial, &mut ctx)
         }))
     };
@@ -1028,10 +1117,15 @@ fn run_jumptable_pipeline(
             }
             Ok(())
         }
-        Err(payload) => Err(KunaError::lowlevel(format!(
-            "jumptable pipeline reached an un-ported seam: {}",
-            panic_message(payload)
-        ))),
+        Err(payload) => {
+            let at = FN_TABLE_AT.with(std::cell::Cell::get).map(|at| format!(" at {at:#x}")).unwrap_or_default();
+            let message = format!(
+                "decompile pipeline reached an un-ported seam (LOSS-131) in jump-table recovery{at}: {}",
+                panic_message(payload)
+            );
+            *panicked = Some(budget_error(arch).unwrap_or_else(|| KunaError::lowlevel(message.clone())));
+            Err(KunaError::lowlevel(message))
+        }
     }
 }
 
@@ -1067,6 +1161,7 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
     // root is current, and the caller's tree is paused mid-pass.
     let mut contract_root: Option<Box<dyn Action>> = None;
     let mut contract_budget = MAX_CONTRACT_CALLEES;
+    let restart_early = arch.early_restart;
     loop {
         let res = {
             let deadline = arch.kuna_fn_deadline;
@@ -1081,13 +1176,14 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
             // (kuna decompile-all watchdog) thread the per-function deadline
             // into the action loop (`None` = no budget, the parity default).
             ctx.deadline = deadline;
+            ctx.restart_early = restart_early && reflows < MAX_REFLOW;
             let r = root.perform(fd, &mut ctx);
             if let Some(error) = ctx.error {
                 return Err(error);
             }
-            (r, ctx.reflow_requested)
+            (r, ctx.reflow_requested, ctx.abandoned_for_restart)
         };
-        let (r, reflow_requested) = res;
+        let (r, reflow_requested, abandoned) = res;
         if let Some(error) = fd.kuna_call_mechanisms.failure.as_ref() {
             return Err(KunaError::lowlevel(error.clone()));
         }
@@ -1132,8 +1228,8 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
         // guard needs is analyzed again from scratch without it by the drive.
         // The deadline is checked again after the layout checks: their walks
         // give up once it passes, which would otherwise keep the guard.
-        let spoiled =
-            fd.stack_store_guard_spoiled() || crate::p6_variables::kuna_storereach::withdraw_spoiled_guard(fd);
+        let spoiled = !abandoned
+            && (fd.stack_store_guard_spoiled() || crate::p6_variables::kuna_storereach::withdraw_spoiled_guard(fd));
         if let Some(err) = budget_error(arch) {
             return Err(err);
         }
@@ -1156,6 +1252,11 @@ fn run_pipeline(arch: &mut Architecture, fd: &mut Funcdata) -> KunaResult<int4> 
             return Ok(total);
         }
         reflows += 1;
+        // (kuna `persistcalls`) The last pass cannot restart, so it guards
+        // every persistent global at every call.
+        if reflows >= MAX_REFLOW {
+            fd.get_override_mut().set_persist_calls_off();
+        }
         // Re-follow flow against the same Funcdata (its Override — incl. the
         // deindirect's indirect override — survives `clear()`), then loop to
         // re-perform.  `clear()` resets the restart flag, so a fresh request must
@@ -2076,10 +2177,13 @@ fn decompile_func_full_with_objects_inner(
         break result;
     };
     // (kuna decompile-all watchdog) Disarm the deadline once the drive is over so
-    // no later, non-drive pipeline run (console sub-queries) consults a stale one.
+    // no later, non-drive pipeline run (console sub-queries) consults a stale one;
+    // what is left of it goes with the function to bound its rendering.
+    let left = arch.kuna_fn_deadline.map(|d| d.saturating_duration_since(std::time::Instant::now()));
     arch.kuna_fn_deadline = outer_deadline;
-    result.and_then(|fd| {
+    result.and_then(|mut fd| {
         crate::kuna_stackobjectasserts::validate(&fd).map_err(KunaError::lowlevel)?;
+        fd.set_render_budget(left);
         Ok(fd)
     })
 }
@@ -2192,18 +2296,16 @@ pub fn print_c(arch: &mut Architecture, fd: &Funcdata) -> String {
     // the structured-block body (the if/else hierarchy + per-statement RPN
     // expressions) when `sblocks` is present.  `doc_function_full` needs both the
     // printer (`arch.print_mut()`) and the architecture (for register-name
-    // resolution); split the borrows by moving the printer out, driving it, and
-    // moving it back (the printer is owned by `arch`).
-    let mut printer = arch.take_print();
-    let out = if cookie_calls.is_empty() {
-        printer.doc_function_full(fd, arch)
-    } else {
-        let (out, mut markup) =
-            printer.doc_function_full_with_statement_provenance(fd, arch);
-        rewrite_cookie_literal_returns(out, &cookie_calls, &mut markup)
-    };
-    arch.put_print(printer);
-    out
+    // resolution); `with_print` splits the borrows.
+    arch.with_print(|printer, arch| {
+        if cookie_calls.is_empty() {
+            printer.doc_function_full(fd, arch)
+        } else {
+            let (out, mut markup) =
+                printer.doc_function_full_with_statement_provenance(fd, arch);
+            rewrite_cookie_literal_returns(out, &cookie_calls, &mut markup)
+        }
+    })
 }
 
 /// Inline the caller's literal return assignment across a checker call only
@@ -2370,10 +2472,9 @@ pub fn print_c_with_provenance(
     fd: &Funcdata,
 ) -> (String, CodeProvenance) {
     let cookie_calls = exact_cookie_call_evidence(fd, arch);
-    let mut printer = arch.take_print();
-    let out = printer.doc_function_full(fd, arch);
-    let mut markup = printer.doc_function_provenance(fd, arch);
-    arch.put_print(printer);
+    let (out, mut markup) = arch.with_print(|printer, arch| {
+        (printer.doc_function_full(fd, arch), printer.doc_function_provenance(fd, arch))
+    });
     let out = rewrite_cookie_literal_returns(out, &cookie_calls, &mut markup);
     align_markup_to_trimmed(&mut markup, &out);
     (
@@ -2404,10 +2505,9 @@ pub fn print_c_with_srcmap(
     fd: &Funcdata,
 ) -> (String, CodeProvenance, Vec<crate::prettyprint::EmitToken>) {
     let cookie_calls = exact_cookie_call_evidence(fd, arch);
-    let mut printer = arch.take_print();
-    let out = printer.doc_function_full(fd, arch);
-    let (mut markup, mut tokens) = printer.doc_function_tokens(fd, arch);
-    arch.put_print(printer);
+    let (out, (mut markup, mut tokens)) = arch.with_print(|printer, arch| {
+        (printer.doc_function_full(fd, arch), printer.doc_function_tokens(fd, arch))
+    });
     let (out, edits) = rewrite_cookie_literal_returns_with_edits(out, &cookie_calls, &mut markup);
     crate::kuna_srcmap::apply_cookie_rewrites(&mut tokens, &edits);
     align_markup_to_trimmed(&mut markup, &out);
@@ -2418,12 +2518,9 @@ pub fn print_c_with_srcmap(
 /// factory as C definitions (the `PrintC::docTypeDefinitions` port,
 /// [`crate::printc::PrintC::doc_type_definitions`]) — the type-definition
 /// block of the `kuna decompile-project` `.h` artifact.  Same
-/// take/put split-borrow dance as [`print_c`] (the printer is owned by `arch`).
+/// [`Architecture::with_print`] split borrow as [`print_c`].
 pub fn print_c_types(arch: &mut Architecture) -> String {
-    let mut printer = arch.take_print();
-    let out = printer.doc_type_definitions(arch);
-    arch.put_print(printer);
-    out
+    arch.with_print(|printer, arch| printer.doc_type_definitions(arch))
 }
 
 /// (kuna) Render ONLY the decompiled function's prototype declaration —
@@ -2434,10 +2531,7 @@ pub fn print_c_types(arch: &mut Architecture) -> String {
 /// render of the same `Funcdata`).  A function whose prototype was never
 /// recovered (no proto store) renders as `void <name>(void);`.
 pub fn print_c_prototype(arch: &mut Architecture, fd: &Funcdata) -> String {
-    let mut printer = arch.take_print();
-    let out = printer.doc_prototype(fd, arch);
-    arch.put_print(printer);
-    out
+    arch.with_print(|printer, arch| printer.doc_prototype(fd, arch))
 }
 
 /// (kuna) The generated recompile prelude for a `kuna decompile-project` `.h`:
@@ -2623,7 +2717,7 @@ pub fn extract_type_definitions(arch: &Architecture, fd: &Funcdata) -> Vec<TypeI
         .iter()
         .map(|ct| TypeInfo {
             name: ct.get_name().to_string(),
-            definition: crate::kuna_structdefs::definition_text(ct, rt),
+            definition: crate::kuna_structdefs::definition_text(ct, rt.clone()),
             size: ct.get_size() as i64,
         })
         .collect()
@@ -2685,7 +2779,7 @@ pub fn extract_global_objects(arch: &Architecture) -> Vec<GlobalInfo> {
         let declarator = if array { format!("{name}[]") } else { name.clone() };
         GlobalInfo {
             address,
-            declaration: crate::printc::declaration_text(ty, &declarator, rt),
+            declaration: crate::printc::declaration_text(ty, &declarator, rt.clone()),
             size: i64::from(ty.get_size()),
             name,
             unknown,
@@ -2710,7 +2804,7 @@ pub fn extract_global_objects(arch: &Architecture) -> Vec<GlobalInfo> {
             let g = GlobalInfo {
                 address,
                 name: name.to_string(),
-                declaration: crate::printc::declaration_text(decl_type, name, rt),
+                declaration: crate::printc::declaration_text(decl_type, name, rt.clone()),
                 size: i64::from(ty.get_size()),
                 unknown,
                 // Whole named objects must retain the independent-storage overlap guard.
@@ -3355,7 +3449,12 @@ thread_local! {
     static FN_DEADLINE: std::cell::Cell<Option<std::time::Instant>> = const { std::cell::Cell::new(None) };
     static FN_BUDGET_SITE: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
     static FN_TABLE_AT: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+    static FN_PROBES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static FN_SPENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
+
+/// How many [`budget_probe`] calls between clock reads.
+const PROBE_STRIDE: u32 = 256;
 
 /// The wall-clock budget, in seconds, of a drive whose architecture sets none
 /// (`decomp_dbg --max-fn-seconds N`, which `kuna decompile` passes); 0 arms none.
@@ -3382,6 +3481,27 @@ fn fn_budget(arch: &Architecture) -> Option<std::time::Duration> {
 /// boundary interrupts, to give up early.
 pub(crate) fn deadline_passed() -> bool {
     FN_DEADLINE.with(|d| d.get().is_some_and(budget_spent))
+}
+
+/// (kuna decompile-all watchdog) [`deadline_passed`] for a walk that recurses
+/// or loops too often to read the clock at every step: every
+/// [`PROBE_STRIDE`]th call reads it, and once one has seen the budget spent
+/// every call answers `true` at once until the drive ends. It names no site;
+/// the loop that drives the walk does.
+pub(crate) fn budget_probe() -> bool {
+    if FN_SPENT.with(std::cell::Cell::get) {
+        return true;
+    }
+    let n = FN_PROBES.with(|c| {
+        let n = c.get().wrapping_add(1);
+        c.set(n);
+        n
+    });
+    if n % PROBE_STRIDE != 0 || !deadline_passed() {
+        return false;
+    }
+    FN_SPENT.with(|s| s.set(true));
+    true
 }
 
 /// [`deadline_passed`], naming `site` (see [`note_budget_site`]) when it has.
@@ -3455,15 +3575,52 @@ fn budget_error(arch: &Architecture) -> Option<KunaError> {
     Some(KunaError::lowlevel(format!("per-function decompile budget exceeded ({secs} s){at}")))
 }
 
+/// (kuna decompile-all watchdog) Bounds the rendering of a function by what
+/// its drive left of the per-function budget ([`Funcdata::render_budget`]):
+/// until dropped, that is the deadline the printer's probes read, counted from
+/// when rendering starts. A function decompiled with no budget renders
+/// unbounded.
+pub struct RenderBudget {
+    scope: Option<DeadlineScope>,
+    secs: u64,
+}
+
+impl RenderBudget {
+    pub fn enter(arch: &Architecture, fd: &Funcdata) -> Self {
+        let deadline = fd.render_budget().map(|left| std::time::Instant::now() + left);
+        RenderBudget {
+            scope: deadline.map(|d| DeadlineScope::enter(Some(d))),
+            secs: fn_budget(arch).map_or(0, |b| b.as_secs()),
+        }
+    }
+
+    /// Has the budget run out? Names `site` when it has and no probe named one.
+    pub fn spent_in(&self, site: &str) -> bool {
+        self.scope.is_some() && deadline_passed_in(site)
+    }
+
+    /// The per-function error once rendering ran past the budget, naming
+    /// where it ran out.
+    pub fn error(&self) -> Option<KunaError> {
+        if !self.spent_in("rendering C") {
+            return None;
+        }
+        let site = FN_BUDGET_SITE.with(|s| s.borrow().clone()).unwrap_or_default();
+        Some(KunaError::lowlevel(format!("per-function decompile budget exceeded ({} s) in {site}", self.secs)))
+    }
+}
+
 /// Publishes a drive's deadline to [`deadline_passed`], with no budget site
-/// named yet, and restores the ones before it when the drive ends.
-struct DeadlineScope(Option<std::time::Instant>, Option<String>);
+/// named yet and no [`budget_probe`] spent, and restores the ones before it
+/// when the drive ends.
+struct DeadlineScope(Option<std::time::Instant>, Option<String>, bool);
 
 impl DeadlineScope {
     fn enter(deadline: Option<std::time::Instant>) -> Self {
         DeadlineScope(
             FN_DEADLINE.with(|d| d.replace(deadline)),
             FN_BUDGET_SITE.with(|s| s.borrow_mut().take()),
+            FN_SPENT.with(|s| s.replace(false)),
         )
     }
 }
@@ -3472,5 +3629,6 @@ impl Drop for DeadlineScope {
     fn drop(&mut self) {
         FN_DEADLINE.with(|d| d.set(self.0));
         FN_BUDGET_SITE.with(|s| *s.borrow_mut() = self.1.take());
+        FN_SPENT.with(|s| s.set(self.2));
     }
 }

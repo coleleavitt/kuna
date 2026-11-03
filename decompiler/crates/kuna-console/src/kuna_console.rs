@@ -250,6 +250,9 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         "swiftstr" => kuna_decomp::kuna_fatstr::FatStrMode::from_u8(conf.swift_str).as_str(),
         // (kuna `gobool`) Three-valued, so it reports its own token.
         "gobool" => kuna_decomp::kuna_gobool::GoBoolMode::from_u8(conf.go_bool).as_str(),
+        // (kuna `fpuemu`) Three-valued, so it reports its own token.
+        "fpuemu" => kuna_decomp::kuna_fpuemu::FpuEmuMode::from_u8(conf.fpu_emu).as_str(),
+        "rustprobestack" => conf.rust_probestack.as_str(),
         // (kuna `gomorestack`) Three-valued, so it reports its own token.
         "gomorestack" => kuna_decomp::kuna_gomorestack::GoMorestackMode::from_u8(conf.go_morestack).as_str(),
         // (kuna `gowritebarrier`) Three-valued, so it reports its own token.
@@ -262,6 +265,7 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         },
         // (kuna `bejoin`) Three-valued, so it reports its own token.
         "bejoin" => conf.be_join.as_str(),
+        "bejoinpass" => conf.be_join_pass.as_str(),
         "condexeplace" => on_off(conf.condexe_block_placement),
         "sparcstructret" => on_off(conf.sparc_struct_return),
         "arraystride" => on_off(conf.recover_array_stride),
@@ -291,6 +295,8 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         // with no program loaded these never reach (kuna_live_value's caller passes
         // None), so the no-program catalog byte-compat fixture is untouched.
         "noreturn_known" => on_off(conf.analysis_noreturn_known),
+        "godwarfsig" => on_off(conf.analysis_godwarfsig),
+        "gopairreturns" => on_off(conf.analysis_gopairreturns),
         "libproto" => on_off(conf.analysis_libproto),
         "libcsigs" => on_off(conf.analysis_libcsigs),
         "libgccsigs" => on_off(conf.analysis_libgccsigs),
@@ -312,6 +318,7 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         "exporttrie" => on_off(kuna_decomp::kuna_exporttrie::exporttrie_enabled()),
         "arm_markers" => on_off(conf.analysis_arm_markers),
         "mips_gp" => on_off(conf.analysis_mips_gp),
+        "ppc32picimports" => conf.analysis_ppc32picimports.as_str(),
         "i386_pie_plt" => on_off(conf.analysis_i386_pie_plt),
         "ifuncfpret" => on_off(conf.analysis_ifuncfpret),
         "relocrebase" => on_off(conf.analysis_relocrebase),
@@ -360,6 +367,7 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         "thunkentry" => on_off(conf.analysis_thunkentry),
         "addrtakenentry" => on_off(conf.analysis_addrtakenentry),
         "ppclocalentry" => on_off(conf.analysis_ppclocalentry),
+        "gowalkprune" => on_off(conf.analysis_gowalkprune),
         // (kuna `flowmode`) Valued `on|aftercall|off`, so it reports its own token.
         "flowmode" => match (conf.analysis_flowmode, conf.analysis_flowmode_aftercall) {
             (false, _) => "off",
@@ -376,6 +384,7 @@ pub fn kuna_live_value(conf: &Architecture, option: &str) -> Option<Cow<'static,
         "rawdiscover" => on_off(conf.analysis_rawdiscover),
         "objectview" => on_off(conf.analysis_objectview),
         "mapglobalsyms" => on_off(conf.mapglobalsyms),
+        "mzsweep" => on_off(conf.analysis_mzsweep),
         "gopclntab" => on_off(conf.analysis_gopclntab),
         "gotypes" => on_off(conf.analysis_gotypes),
         "gonoreturn" => on_off(conf.analysis_gonoreturn),
@@ -1469,9 +1478,13 @@ impl IfaceCommandAction for IfcKunaFunctionBounds {
         let name = prog
             .declare_function(addr, name.as_deref(), size)
             .map_err(|e| IfaceError::execution(e.explain().to_string()))?;
+        let unmapped = prog.declaration_note(start);
         status.out(&format!(
             "Declared {name} at {display_start:#x} spanning {size} bytes\n"
         ));
+        if let Some(sentence) = unmapped {
+            status.out(&crate::kuna_declaredbytes::transcript_line(&sentence));
+        }
         Ok(())
     }
 

@@ -42,6 +42,7 @@ pub mod kuna_funcchunks;
 pub mod kuna_accesswidth;
 pub mod kuna_calltable;
 pub mod kuna_pdecode;
+pub mod kuna_mzsweep;
 pub mod kuna_rawdiscover;
 pub mod kuna_tailcallentry;
 pub mod kuna_thunkentry;
@@ -51,9 +52,11 @@ mod kuna_flowmode;
 mod kuna_armwalkmode;
 pub(crate) mod kuna_framemode;
 pub(crate) mod kuna_decodereuse;
+mod kuna_pcform;
 mod kuna_picbase;
 mod kuna_picpool;
 mod kuna_poolref;
+mod kuna_regcarry;
 mod kuna_ppclocalentry;
 mod kuna_switchtable;
 mod kuna_thumbswitch;
@@ -61,6 +64,7 @@ mod kuna_a32switch;
 mod kuna_x86listingswitch;
 pub(crate) mod kuna_decodememo;
 mod kuna_unmappedentry;
+pub mod kuna_unflaggedcode;
 pub mod model;
 pub mod walk;
 // (kuna) The read-only cross-reference query behind `kuna xrefs` -- a consumer of
@@ -424,7 +428,8 @@ impl Listing {
                 )
             })
             .flatten();
-        let a32_tables = kuna_a32switch::A32Tables::new(file, arch);
+        let a32_pool = kuna_a32switch::applies(file, arch).then(|| kuna_poolref::PoolImage::new(file)).flatten();
+        let a32_tables = a32_pool.as_ref().map(|pool| kuna_a32switch::A32Tables::new(arch, pool));
         let x86_tables = arch
             .analysis_x86listingswitch
             .then(|| kuna_x86listingswitch::X86Tables::new(file, arch))

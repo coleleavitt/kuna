@@ -1,6 +1,6 @@
 //! (kuna `dynrelocs`, Mach-O arm) Apply a linked Mach-O image's chained-fixup
-//! rebases into the loaded image, and report the slots `SG_READ_ONLY` freezes
-//! as constant — the twin of the ELF walk in [`super::kuna_dynrelocs`].
+//! rebases (and a zero for each bind) into the loaded image, and report the
+//! slots `SG_READ_ONLY` freezes as constant — the twin of the ELF walk in [`super::kuna_dynrelocs`].
 //!
 //! A chained-fixup Mach-O (`LC_DYLD_CHAINED_FIXUPS`, every arm64 image since
 //! macOS 12 / iOS 15) stores no pointer in a fixed-up slot: the word is a packed
@@ -17,12 +17,12 @@
 //! reference slots there get their own, metadata-backed constancy from the
 //! `objc` pass (`analyzers/objc/kuna_objcrefs.rs`).
 //!
-//! Bind slots (imports) have no static value and are left as the linker wrote
-//! them; the `__stubs`/`__got` import naming covers those calls. A classic
+//! Bind slots (imports) have no static value: each is written as zero (never
+//! declared constant), the word every other format's loader leaves in an import
+//! slot; the `__stubs`/`__got` import naming covers those calls. A classic
 //! `LC_DYLD_INFO` image already holds its unslid pointers in the file, so the
 //! resolver yields nothing and the image is untouched.
 
-use object::read::Object;
 
 use super::format::macho::resolve_chained_fixups;
 use super::kuna_dynrelocs::{DynRelocWrite, DynRelocs};
@@ -35,15 +35,15 @@ pub fn resolve(file: &object::File, bytes: &[u8]) -> DynRelocs {
         return out;
     }
     let fixups = resolve_chained_fixups(file, bytes);
-    let width: u8 = if file.is_64() { 8 } else { 4 };
-    let mut rebases: Vec<(u64, u64)> = fixups.rebases().collect();
-    rebases.sort_unstable();
-    for (vma, value) in rebases {
+    let width = fixups.slot_width();
+    for (vma, value) in fixups.rebases() {
         out.writes.push(DynRelocWrite { vma, value, width });
         if fixups.in_readonly_segment(vma) {
             out.const_ranges.push((vma, vma.wrapping_add(width as u64 - 1)));
         }
     }
+    out.writes.extend(fixups.binds().map(|(vma, _)| DynRelocWrite { vma, value: 0, width }));
+    out.writes.sort_unstable_by_key(|w| w.vma);
     out
 }
 
