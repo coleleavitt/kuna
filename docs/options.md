@@ -528,6 +528,9 @@ Three tiers:
 | Rust literal output remains a runtime formatting call | [`rustfmtliteral`](#rustfmtliteral) |
 | Rust primitive decimal output exposes a runtime template pointer | [`rustfmtargs`](#rustfmtargs) |
 | Rust print calls retain stack formatter descriptor arrays | [`rustfmtargs`](#rustfmtargs) |
+| an os_log call prints a stack buffer address and a byte count instead of its arguments | [`oslog`](#oslog) |
+| _os_log_impl(0x100000000,...,&v1,8) with v1 = 0x4000100 before it | [`oslog`](#oslog) |
+| the first argument of _os_log_impl or _os_log_internal is a raw image address | [`oslog`](#oslog) |
 | Rust hexadecimal or padded integer printing retains runtime descriptors | [`rustfmtflags`](#rustfmtflags) |
 | Rust static format specifications remain opaque template bytes | [`rustfmtflags`](#rustfmtflags) |
 | Rust integer String construction retains format_inner with an output pointer | [`rustfmtresult`](#rustfmtresult) |
@@ -2608,6 +2611,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** Leave on to read verified primitive decimal printing as source macros. Turn off to inspect the runtime template and descriptor array. The rustfmtflags extension adds static integer specifications; generic reference callbacks and format!/write! remain outside this feature.
 - **Where / provenance:** P9/primitive-format · angr · opt-in-tool · angr-rust-format-arguments
 - **Example:** `option rustfmtargs off`
+
+### `oslog` -- on | off, default `on`
+
+- **Symptoms:** an os_log call prints a stack buffer address and a byte count instead of its arguments; _os_log_impl(0x100000000,...,&v1,8) with v1 = 0x4000100 before it; the first argument of _os_log_impl or _os_log_internal is a raw image address.
+- **What it does:** Print an Apple unified-logging call with its decoded arguments. The os_log macros pack the arguments into a stack buffer filled right before `_os_log_impl` (and the `_error`/`_fault`/`_debug` variants, `_os_signpost_emit_with_name_impl`): byte 0 summary flags, byte 1 the count, then per argument a descriptor byte, a size byte and the value. When the call's INDIRECT effects show every byte of that buffer, every header, descriptor and size byte is a constant, each non-constant value fills exactly its own slot, and the items end at the constant size argument, the buffer and size arguments print as the values (`_os_log_impl(&__mh_execute_header,log,0x10,"fmt %d",v2)`) and the statements that only fill the buffer are not printed. The dso argument of these calls and of the kernel's `_os_log_internal` prints as the Mach-O header symbol (`__mh_execute_header`, `__mh_dylib_header`) at that address. Anything else keeps the raw call.
+- **When to flip:** On by default: the decode is exact or refused, and no datatest moves. Turn off to see the packed buffer, its size and the raw header address, for example to check a descriptor byte or a privacy flag.
+- **Where / provenance:** P9/os-log-format · kuna · presentation-default · ios-survey-oslog
+- **Example:** `option oslog off`
 
 ### `rustfmtflags` -- on | off, default `on`
 

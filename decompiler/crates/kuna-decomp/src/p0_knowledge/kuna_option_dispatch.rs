@@ -891,6 +891,7 @@ kuna_options! { self, p1;
     "gojumpchain" => on_off!(go_jump_chain, "Early Go jump-chain normalization"),
     "rustfmtliteral" => on_off!(rust_fmt_literal, "Rust literal print macros"),
     "rustfmtargs" => on_off!(rust_fmt_args, "Rust primitive print arguments"),
+    "oslog" => on_off!(os_log_args, "Apple os_log call arguments"),
     "rustfmtflags" => on_off!(rust_fmt_flags, "Rust static integer format specifications"),
     "rustfmtresult" => on_off!(rust_fmt_result, "Rust format String results"),
     "rustfmtpanic" => on_off!(rust_fmt_panic, "Rust panic formatting"),

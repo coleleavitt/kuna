@@ -1683,3 +1683,28 @@ below `0x1000`, where an address formed from the PC (`adrp` + `add`/`ldr`, `adr`
 `rust_store_value_harness.c` and `.rs` compare 33 complete Rust bodies emitted from the existing `go_store_value_x86_64` fixture with C at O0/O2. They check all destination and guard bytes, sibling fields, nested fields, and exact pointer/value callback counts over 324 boundary pairs. `array_store` retains an existing raw-pointer indexing error and is excluded from native compilation.
 
 `array_address_x86_64` is an authored x86-64 ELF built with `cc -O2 -g -fno-inline -fno-pie -no-pie array_address.c array_address_helpers.c -o array_address_x86_64` (SHA-256 `477ee45558cae15d4412e642e4a6ec3bc0afbed8d1bba3d425cb17fb9b80edbc`). Its 33 functions cover array addresses and pointer-to-integer array decay. `array_address.kuna` supplies prototypes; `array_address_harness.c` and `.rs` compare complete emitted bodies at O0/O2 over readable and PROT_NONE memory, with one-past addresses, nested arrays, callback order and modular pointer bits.
+
+### `macho_oslog_arm64` — Apple unified-logging call sites (`oslog`)
+
+`macho_oslog_arm64` (arm64, ~34 KB) is a self-contained Mach-O whose four
+functions log through `_os_log_impl` the way the SDK's `os_log` macros do, for
+`tests/stages/kuna-oslog.xml`. Source `macho_oslog.c` restates the macro: an
+`os_log_type_enabled` guard, the format string in
+`__TEXT,__oslogstring,cstring_literals`, a buffer filled by clang's
+`__builtin_os_log_format`, and `_os_log_impl(&__dso_handle, log, type, fmt, buf,
+size)`. No SDK is needed; `ld64.lld` keeps the separate literal section only with
+`--separate-cstring-literal-sections`:
+
+```bash
+clang -target arm64-apple-macos11 -O1 -c macho_oslog.c -o oslog.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -undefined dynamic_lookup \
+       --separate-cstring-literal-sections -e _log_plain -o macho_oslog_arm64 oslog.o
+```
+
+**Pinned VMAs:** `_log_code`@`0x100000418` (one int, 8-byte buffer),
+`_log_pair`@`0x1000004a8` (a long and a string, the string an unaligned store at
+buffer offset 14), `_log_private`@`0x100000554` (a private string and an int),
+`_log_plain`@`0x100000600` (no arguments); the format strings start at
+`0x10000067c` in `__oslogstring`; `__mh_execute_header`@`0x100000000`.
+

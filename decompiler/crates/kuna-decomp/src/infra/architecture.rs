@@ -1493,6 +1493,8 @@ pub struct Architecture {
     pub rust_fmt_literal: bool,
     /// Render verified primitive Rust formatting arguments as print macros.
     pub rust_fmt_args: bool,
+    /// (kuna `oslog`) Print decoded os_log buffer arguments at the call.
+    pub os_log_args: bool,
     /// Extend primitive Rust print recovery to static integer format specifications.
     pub rust_fmt_flags: bool,
     /// Render verified Rust format_inner initialization as a String-producing macro.
@@ -3298,6 +3300,7 @@ impl Architecture {
             go_jump_chain: true,
             rust_fmt_literal: true,
             rust_fmt_args: true,
+            os_log_args: true,
             rust_fmt_flags: true,
             rust_fmt_result: true,
             rust_fmt_panic: true,
@@ -3733,6 +3736,7 @@ impl Architecture {
         self.go_jump_chain = true;
         self.rust_fmt_literal = true;
         self.rust_fmt_args = true;
+        self.os_log_args = true;
         self.rust_fmt_flags = true;
         self.rust_fmt_result = true;
         self.rust_fmt_panic = true;
