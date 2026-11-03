@@ -1,0 +1,39 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A">
+<!--
+    A jump-table guard whose tested value has no set bit below bit 31 aborted
+    the decompile.
+
+    widemask (source: tests/stages/src/nzmask_wide_stride.s) tests bit 61 of a
+    word, Swift's small-string flag, before an indirect tail jump through a
+    relative pointer. Recovering that jump as a switch pulls the guard
+    (x21 & 0x2000000000000000) == 0 back through the value's non-zero mask, and
+    CircleRange::set_nz_mask used the mask's lowest set bit, 61, as the shift of
+    its int4 stride: 1 << 61 overflows (a panic with overflow checks, a garbage
+    or negative stride without them; C++ rangeutil.cc setNZMask has the same
+    int4 shift). The stride is now capped at 1 << 30, which still holds every
+    value the mask allows.
+
+    Stage: S2 flow classification (jump-table guard ranges). No option: a strict
+    fix. Single pass, since an abort discards every assertion: the function now
+    decompiles to the full body with both tail jumps.
+
+    Build: clang -target aarch64-linux-gnu -c nzmask_wide_stride.s; the .text
+    bytes are the chunk below.
+-->
+<bytechunk space="ram" offset="0x100000">
+fd7bbea9f35701a9fd030091135453a9d50100b468be4092a9ee78d3bf0243f2
+0801899a280100b4080441f9090180b92501088be00313aae10315aaf35741a9
+fd7bc2a8a0001fd6000440f9f35741a9fd7bc2a800001fd6
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="widemask"/>
+</binaryimage>
+<script>
+  <com>lo fu widemask</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="nzmask wide stride #1: the bit-61 guard survives" min="1" max="1">if \(.* &amp; 0x2000000000000000\)</stringmatch>
+<stringmatch name="nzmask wide stride #2: both tail jumps are emitted" min="2" max="2">// jump-as-call</stringmatch>
+</decompilertest>

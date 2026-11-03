@@ -118,6 +118,17 @@ pub struct BitRange {
     pub is_big_endian: bool,
 }
 
+/// `v << n`, zero when `n` is negative or at least 64: the bits a field
+/// position past the 64-bit `uintb` shifts in are gone.
+pub(crate) fn shl_bits(v: uintb, n: int4) -> uintb {
+    u32::try_from(n).ok().and_then(|n| v.checked_shl(n)).unwrap_or(0)
+}
+
+/// `v >> n`, zero when `n` is negative or at least 64.
+pub(crate) fn shr_bits(v: uintb, n: int4) -> uintb {
+    u32::try_from(n).ok().and_then(|n| v.checked_shr(n)).unwrap_or(0)
+}
+
 impl BitRange {
     /// Construct an \e undefined range (C++ `BitRange(void)`, address.hh:264).
     ///
@@ -363,17 +374,7 @@ impl BitRange {
     /// Get the bit-mask describing `this` range, aligned with the byte container
     /// (C++ `getMask`, address.cc:816-829).
     pub fn get_mask(&self) -> uintb {
-        let mut res: uintb;
-        // C++: numBits >= sizeof(uintb)*8  (uintb is uint8 => 64 bits)
-        if self.num_bits >= (std::mem::size_of::<uintb>() as int4) * 8 {
-            res = 0;
-        } else {
-            res = 1;
-            res <<= self.num_bits;
-        }
-        res = res.wrapping_sub(1);
-        res <<= self.least_sig_bit;
-        res
+        shl_bits(shl_bits(1, self.num_bits).wrapping_sub(1), self.least_sig_bit)
     }
 
     /// Return `true` if the range begins and ends on byte boundaries (C++

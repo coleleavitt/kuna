@@ -36,9 +36,6 @@ use crate::dtype::{type_metatype, Datatype, TypeBitField};
 use crate::funcdata::Funcdata;
 use crate::context::{OpId, VarnodeId};
 
-/// `sizeof(uintb)` — the C++ `uintb` is `uint8`, i.e. 8 bytes.
-const SIZEOF_UINTB: int4 = 8;
-
 /// A container for an expression manipulating a bitfield (C++
 /// `BitFieldExpression`, expression.hh:181-192).
 ///
@@ -228,11 +225,7 @@ impl InsertExpression {
         let o = data.obank().get(insert).expect("get_range_mask: stale op");
         let least_bit_off = data.vbank().get(o.get_in(2).unwrap()).unwrap().get_offset() as int4;
         let bit_size = data.vbank().get(o.get_in(3).unwrap()).unwrap().get_offset() as int4;
-        let mut res: uintb = !0u64;
-        if bit_size < 8 * SIZEOF_UINTB {
-            res = !(res << bit_size);
-        }
-        res << least_bit_off
+        super::shl_bits(super::shl_bits(1, bit_size).wrapping_sub(1), least_bit_off)
     }
 
     /// Get the mask of the least significant bits (C++
@@ -240,11 +233,7 @@ impl InsertExpression {
     pub fn get_lsb_mask(data: &Funcdata, insert: OpId) -> uintb {
         let o = data.obank().get(insert).expect("get_lsb_mask: stale op");
         let bit_size = data.vbank().get(o.get_in(3).unwrap()).unwrap().get_offset() as int4;
-        let mut res: uintb = !0u64;
-        if bit_size < 8 * SIZEOF_UINTB {
-            res = !(res << bit_size);
-        }
-        res
+        super::shl_bits(1, bit_size).wrapping_sub(1)
     }
 }
 

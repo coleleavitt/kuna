@@ -766,3 +766,22 @@ fn zero_extension_constraints_preserve_both_branch_domains() {
     let strided = CircleRange::new(0x80, 6, 1, 2);
     assert!(ValueSetSolver::zext_constraint(&strided, 1, 2).is_none());
 }
+
+#[test]
+fn circlerange_nzmask_wide_stride() {
+    let mut r = CircleRange::new_empty();
+    assert!(r.set_nz_mask(0xff00, 2));
+    assert_eq!((r.get_step(), r.left, r.right), (0x100, 0, 0));
+
+    for (nz, size) in [(0xffff_ffff_0000_0000u64, 8), (0x8000_0000_0000_0000, 8), (0x0000_0f00_0000_0000, 8), (0x8000_0000, 4)] {
+        let mut r = CircleRange::new_empty();
+        assert!(r.set_nz_mask(nz, size), "{nz:#x}");
+        assert_eq!(r.get_step(), 1 << 30, "{nz:#x}");
+        let low = nz & nz.wrapping_neg();
+        for v in [0, low, nz] {
+            assert!(r.contains_val(v), "{nz:#x} holds {v:#x}");
+        }
+        assert!(!r.contains_val(1));
+        assert!(r.get_step() > 0 && (r.right.wrapping_sub(r.left) & r.mask) % (r.get_step() as u64) == 0);
+    }
+}

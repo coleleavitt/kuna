@@ -3302,7 +3302,11 @@ circlerange_pull_back)` pulls the branch condition back to the switch variable
 to bound the case count (chapter 02), and (b) the boolean-expression melding
 rule `decompiler/crates/kuna-decomp/src/p3_dataflow/ruleaction_1.rs
 (RuleRangeMeld)`, which pulls two comparison ranges back to a common Varnode
-and intersects/unions them into one comparison.
+and intersects/unions them into one comparison. A range built from a
+non-zero mask (`set_nz_mask`) takes the mask's lowest set bit as its stride;
+a stride that would not fit a positive `int4` (bit 31 or above, as in a
+guard on Swift's bit-61 small-string flag) is capped at `1 << 30`, which still
+holds every value the mask allows.
 
 **The value-set solver.** On top of `CircleRange` sits an abstract
 interpretation layer (`ValueSet`, `ValueSetSolver`, same file): a
@@ -3662,7 +3666,9 @@ bit numbering is where big/little endian diverge, and getting it wrong scrambles
 adjacent fields. Failure mode: any trace step the transform cannot prove
 (e.g. a masked value escaping to an op outside the recognized web) declines
 before mutation, leaving the raw shift/mask expressions in the output; the
-type is never consulted speculatively, so untyped code is untouched.
+type is never consulted speculatively, so untyped code is untouched. Masks
+built from a field position or width past the 64-bit word are zero (the bits
+shift out), never a shift overflow.
 
 **Preferred splits**
 (`decompiler/crates/kuna-decomp/src/p5_types/prefersplit.rs

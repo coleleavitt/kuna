@@ -859,7 +859,7 @@ impl BitFieldPullTransform {
                 )
             };
             let mut val = orig_val & mask;
-            val >>= left_shift;
+            val = super::shr_bits(val, left_shift);
             let read_size = data.vbank().get(read_vn).unwrap().get_size();
             if dt.get_metatype() == type_metatype::TYPE_INT {
                 val = extend_signbit(val, num_bits, read_size);

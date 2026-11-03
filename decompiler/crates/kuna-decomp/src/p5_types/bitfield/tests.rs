@@ -553,3 +553,12 @@ fn specs_definition_order() {
         assert_eq!(s.group, "");
     }
 }
+
+#[test]
+fn bitrange_get_mask_past_the_word() {
+    assert_eq!(BitRange::new(0, 16, 60, 8, false).get_mask(), 0xf000_0000_0000_0000);
+    assert_eq!(BitRange::new(0, 16, 64, 8, false).get_mask(), 0);
+    assert_eq!(BitRange::new(0, 16, 200, 8, false).get_mask(), 0);
+    assert_eq!(BitRange::new(0, 16, 0, 100, false).get_mask(), !0);
+    assert_eq!((shl_bits(1, -1), shr_bits(!0, 64), shr_bits(0xf0, 4)), (0, 0, 0xf));
+}

@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3819,
-    3819
+    3821,
+    3821
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3123,6 +3123,8 @@
     "data:noreturn_extern #1: neighbour call leaks past the no-return call (pass 1 off only)",
     "data:noreturn_extern #3: __stack_chk_fail is the bounding call (both passes)",
     "data:null syntax is not a recovered identifier",
+    "data:nzmask wide stride #1: the bit-61 guard survives",
+    "data:nzmask wide stride #2: both tail jumps are emitted",
     "data:odd destination reaches the halfword store",
     "data:off and custom formatting preserve runtime writes",
     "data:off and nondefault specifications retain the runtime sink",

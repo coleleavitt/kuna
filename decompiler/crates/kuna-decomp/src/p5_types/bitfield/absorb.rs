@@ -395,8 +395,9 @@ fn pull_absorb_and(data: &mut Funcdata, and_op: OpId, pull_op: OpId) -> int4 {
         Some(v) => vn_offset(data, v) as int4,
         None => return 0,
     };
-    let mut match_val: uintb = 1;
-    match_val <<= bitsize - 1; // Mask for sign-bit
+    let Some(match_val) = u32::try_from(bitsize - 1).ok().and_then(|b| 1u64.checked_shl(b)) else {
+        return 0;
+    };
     if match_val != vn_offset(data, mask_vn) {
         return 0;
     }
@@ -522,8 +523,7 @@ fn pull_absorb_compare(
             return 1;
         }
     }
-    let mut mask: uintb = 1;
-    mask = (mask << sa).wrapping_sub(1);
+    let mask: uintb = u32::try_from(sa).ok().and_then(|b| 1u64.checked_shl(b)).unwrap_or(0).wrapping_sub(1);
     if sa > 0 && sa < UINTB_BITS && in_vn == less_vn0 && vn_is_constant(data, less_vn1) {
         let orig_val = vn_offset(data, less_vn1);
         let low_bits = mask & orig_val;

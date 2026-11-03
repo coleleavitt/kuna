@@ -73,6 +73,9 @@ use crate::funcdata::Funcdata;
 const ARRANGE: &[u8; 64] =
     b"gcgbegdagggggggeggggcgbggggggggcdfgggggggegdggggbgggfggggcgbegda";
 
+/// The widest stride shift whose power of two is a positive `int4` step.
+const MAX_STRIDE_SHIFT: int4 = 30;
+
 /// A class for manipulating integer value ranges (C++ `CircleRange`,
 /// `rangeutil.hh:50`).
 ///
@@ -854,7 +857,9 @@ impl CircleRange {
     }
 
     /// Set the range based on a putative mask (C++ `setNZMask`, `rangeutil.cc:672`).
-    /// Returns `true` if the mask is valid.
+    /// Returns `true` if the mask is valid. A mask whose lowest set bit is past
+    /// [`MAX_STRIDE_SHIFT`] takes stride `1 << MAX_STRIDE_SHIFT`, which still holds
+    /// every value the mask allows; C++ shifts its `int4` step out of range there.
     pub fn set_nz_mask(&mut self, nzmask: uintb, size: int4) -> bool {
         let trans = bit_transitions(nzmask, size);
         if trans > 2 {
@@ -880,9 +885,8 @@ impl CircleRange {
             }
             return true;
         }
-        let shift = leastsigbit_set(nzmask);
-        self.step = 1;
-        self.step <<= shift; // step <<= shift (int4 shift)
+        let shift = leastsigbit_set(nzmask).min(MAX_STRIDE_SHIFT);
+        self.step = 1 << shift;
         self.mask = calc_mask(size);
         self.left = 0;
         self.right = (nzmask.wadd(self.step as uintb)) & self.mask;

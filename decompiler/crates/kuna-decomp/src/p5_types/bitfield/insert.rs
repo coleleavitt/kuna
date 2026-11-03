@@ -36,11 +36,7 @@ fn insert_range_mask(data: &Funcdata, insert: OpId) -> uintb {
     let o = data.obank().get(insert).unwrap();
     let least_bit_off = data.vbank().get(o.get_in(2).unwrap()).unwrap().get_offset() as int4;
     let bit_size = data.vbank().get(o.get_in(3).unwrap()).unwrap().get_offset() as int4;
-    let mut res: uintb = !0u64;
-    if bit_size < 8 * SIZEOF_UINTB {
-        res = !(res << bit_size);
-    }
-    res << least_bit_off
+    super::shl_bits(super::shl_bits(1, bit_size).wrapping_sub(1), least_bit_off)
 }
 
 /// Info about a Varnode that can be treated as a write to a single bitfield (C++
@@ -267,7 +263,7 @@ impl BitFieldInsertTransform {
         }
         let mask = state.bits_field.get_mask();
         value &= mask;
-        value >>= state.bits_field.least_sig_bit;
+        value = super::shr_bits(value, state.bits_field.least_sig_bit);
         if field.field_type.get_metatype() == type_metatype::TYPE_INT {
             value = extend_signbit(value, state.bits_field.num_bits, state.bits_field.byte_size);
         }
@@ -986,14 +982,7 @@ impl BitFieldInsertTransform {
     fn construct_original_value_mask(&self, data: &Funcdata) -> uintb {
         let mut mask: uintb = 0;
         for rec in &self.insert_list {
-            let mut val: uintb = 0;
-            if rec.num_bits < 8 * SIZEOF_UINTB {
-                val = 1;
-                val <<= rec.num_bits;
-            }
-            val = val.wrapping_sub(1);
-            val <<= rec.pos;
-            mask |= val;
+            mask |= super::shl_bits(super::shl_bits(1, rec.num_bits).wrapping_sub(1), rec.pos);
         }
         let orig_size = data.vbank().get(self.original_value.unwrap()).unwrap().get_size();
         !mask & calc_mask(orig_size)

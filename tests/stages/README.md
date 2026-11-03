@@ -381,3 +381,7 @@ callers against boundary values and check that each helper is called once.
 `ghangr-go-store-value.xml` checks Go integer destination conversions for fields,
 plain/indexed pointers and a side-effectful call, with all integer widths and
 complete native bodies covered by the CLI integration fixture.
+
+`kuna-nzmask-wide-stride.xml` checks that a jump-table guard on bit 61 of a word
+(Swift's small-string flag) before an indirect tail jump decompiles instead of
+overflowing the range stride. Source: `src/nzmask_wide_stride.s`.
