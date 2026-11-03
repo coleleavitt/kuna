@@ -96,6 +96,17 @@ fn locate_arm64(img: &MachoImage, accessor: u64) -> Option<u64> {
         i = 2;
     }
     let adrp = words[i]?;
+    // A linker that relaxes `adrp; add` to `adr; nop` (lld) leaves the
+    // address in one instruction.
+    if adrp & 0x9f00_001f == 0x1000_0000 && words[i + 1] == Some(0xd503_201f) {
+        let imm = ((((adrp >> 5) & 0x7_ffff) << 2) | ((adrp >> 29) & 3)) as i64;
+        let imm = if imm & (1 << 20) != 0 { imm - (1 << 21) } else { imm };
+        let next = words[i + 2]?;
+        let plain = next == 0x5280_0001 || next == 0xd280_0001 || next == 0xd65f_03c0;
+        let call = next & 0xfc00_0000 == 0x9400_0000 || next & 0xfc00_0000 == 0x1400_0000;
+        let at = accessor + 4 * i as u64;
+        return (plain || call).then_some(at.wrapping_add(imm as u64));
+    }
     if adrp & 0x9f00_0000 != 0x9000_0000 || adrp & 31 != 0 {
         return None;
     }

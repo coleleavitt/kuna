@@ -4294,7 +4294,8 @@ every other binary's pass list is byte-identical to before the pass existed):
   descriptor's `MetadataInitialization` is none: no resilient superclass, no
   foreign or singleton initialization) has that metadata laid out statically,
   and its accessor is the one-line function that returns the address — `adrp
-  x0, …; add x0, x0, …; mov x1, #0; ret` on arm64, `lea rax, [rip + …]; xor
+  x0, …; add x0, x0, …; mov x1, #0; ret` on arm64 (`adr x0, …; nop` where
+  the linker relaxed the pair, as lld does), `lea rax, [rip + …]; xor
   edx, edx; ret` on x86-64, a class with Objective-C heritage tail-calling the
   runtime with the same address — which the pass decodes and checks: the
   metadata's descriptor word must point back at the descriptor (through the
@@ -4353,6 +4354,71 @@ every other binary's pass list is byte-identical to before the pass existed):
   vtable getters and 2,821 witness getters, for about 0.1 s and 3 MB over the
   naming arm. The stage test `tests/stages/kuna-swifttypes.xml` runs the
   stripped swiftc-built `swift_types_elf` with the arm off and on.
+- **Swift names from code shape** (`swiftnames`, the naming arm of the
+  metadata pass, default-on and inert unless `swiftmetadata` is on;
+  `decompiler/crates/kuna-analysis/src/analyzers/swift/kuna_swiftnames.rs`):
+  where a record gives only a position, the code at it is read (A64 only; the
+  decoder knows the handful of load/store, add, move and branch forms the
+  matchers need). *Stored-property accessors*: a class vtable run of getter,
+  setter and modify slots is one property's, and a stored property's getter
+  addresses its field first — `add x0, x20, #off` for the exclusivity check,
+  a direct `ldr`/`str` off `x20` (the `swiftself` register), or a register
+  offset whose value the body loads from a field offset global (`adrp; ldr`,
+  read statically: a class whose layout another module fixes). The offset
+  picks the field record through the static metadata's field offset vector
+  (the type-layout arm's metadata location), which must be a `var`; the
+  property is the record's name, a lazy property's `$__lazy_storage_$_`
+  storage naming the property itself (`Module.Class.cells.getter`). A
+  computed property dispatches through the isa or calls before it touches a
+  field, so it never matches. The evidence must agree: a setter or modify the
+  optimizer kept addresses the same field (a stored modify yields the field's
+  address; a lazy one calls the getter), a lazy getter stores the storage
+  back, each field is claimed by one run, and the matched getters follow the
+  field records' order — any failure leaves the class's slots positional. An
+  override of a slot so named takes the member too (`Module.Sub.width.getter`).
+  *Protocol requirements*: a local requirement takes the member name of what
+  a class conformance's witness thunk forwards to — the vtable slot it loads
+  through the isa (`ldr x8, [x20]; ldr x8, [x8, #off]; blr x8`, the offset
+  mapped through the class's and its local superclasses' vtable positions) or
+  the slot implementation it calls — or of a surviving witness symbol, when
+  every conformance agrees and the member's kind matches the requirement's; a
+  settable property's modify requirement follows a getter and setter so
+  named. That names the requirement for every conformer, struct witnesses
+  included (`<Module.Dot:Module.Shape>.id.getter`). A requirement left unnamed
+  has its witnesses carry the requirement kind (`<T:P>.requirement#2.getter`,
+  `.method`, `.init`, `.setter`, `.modify`, `.read`), on every architecture.
+  *Value witnesses*: each statically laid-out struct and enum names the
+  functions its value witness table points at
+  (`Module.Token.destroy_value_witness`, and an enum's `getEnumTag`,
+  `destructiveProjectEnumData`, `destructiveInjectEnumTag`); a copy witness
+  that is a bitwise copy of exactly the type's size (loads off `x1` stored off
+  `x0` covering `[0, size)`) is the shared `__swift_memcpy<size>_<align>`, a
+  `destroy` that only returns is `__swift_noop_void_return`, and an enum's
+  `destroy` / `initializeWithCopy` whose one call is a local function names
+  that function its `outlined_consume` / `outlined_copy`. *Runtime helpers*:
+  the functions IRGen emits into every Swift image are matched by their fixed
+  arm64 bodies (branch displacements cleared) and the import each call's stub
+  reaches — `__swift_instantiateConcreteTypeFromMangledName` (the swiftc 5 and
+  6 forms and a split form taking the cache and the mangled-name reference
+  apart, each calling `swift_getTypeByMangledNameInContext` or its `2`
+  variant), `__swift_project_boxed_opaque_existential_1`,
+  `__swift_mutable_project_boxed_opaque_existential_1` (calling
+  `swift_makeBoxUnique`) and `__swift_destroy_boxed_opaque_existential_1`
+  (tail-calling `swift_release`); a C name takes the format's prefix (`_` on
+  a Mach-O). These claims join the record claims before any name is given, so
+  folded code resolves as above. The pass runs at load, ahead of the option
+  commands, so the claims carry their plain names too and the analysis commit
+  restores those under `option swiftnames off`. On the stripped fixture
+  `swift_names_macho` every name the arm gives equals the unstripped twin's
+  symbol or is the kind-tagged position of it
+  (`kuna-console/tests/verify_swiftnames.rs`). On the Toyota iOS app the arm
+  turns 9,775 `sub_<addr>` into names (7,860 value witnesses, 1,398 runtime
+  helpers and memcpy/noop witnesses, 292 outlined copies, 227 folded value
+  witnesses), names 2,140 vtable accessors by property (the lazy getter at
+  `0x102a4c104` is `MyDestinationsFeature.MyDestinationsContainer.createTripStateNotifier.getter`)
+  and 59 witnesses by member, and tags 4,476 witnesses with their kind; two
+  witnesses folded with a value witness lose their name. The stage test
+  `tests/stages/kuna-swiftnames.xml` runs the fixture with the arm off and on.
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the

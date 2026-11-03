@@ -2675,6 +2675,11 @@ pub struct Architecture {
     /// typed metadata records, accessor prototypes and the register-pinned
     /// `self` of getters. Default-on; inert unless `swiftmetadata` is on.
     pub analysis_swifttypes: bool,
+    /// (kuna) Gate the naming arm of the Swift metadata pass (`swiftnames`):
+    /// stored-property accessors, local protocol requirements, value
+    /// witnesses and runtime helpers named from code shape. Default-on;
+    /// inert unless `swiftmetadata` is on.
+    pub analysis_swiftnames: bool,
     /// (kuna `swifttypes`) Register-pinned parameters the analysis tier
     /// declared, by function entry: `(slot, name, storage + type)`, the
     /// shape of a console `map param`. The decompile drive seeds a
@@ -3489,6 +3494,7 @@ impl Architecture {
             analysis_objc: false,
             analysis_swiftmetadata: false,
             analysis_swifttypes: true,
+            analysis_swiftnames: true,
             loader_param_locks: std::collections::BTreeMap::new(),
             analysis_pdb: true,
             macho_arm64e: false,
@@ -3980,6 +3986,7 @@ impl Architecture {
         self.analysis_objc = false; // Mach-O Objective-C metadata recovery default-off (Mach-O-only pass)
         self.analysis_swiftmetadata = false; // Swift runtime-metadata recovery default-off (inert without swift5_* sections)
         self.analysis_swifttypes = true; // Swift type layouts default-on, inert unless swiftmetadata is on
+        self.analysis_swiftnames = true; // Swift shape-derived names default-on, inert unless swiftmetadata is on
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
         self.macho_arm64e = false; // arm64e Apple-Silicon spec selection default-off (opt-in)
     }

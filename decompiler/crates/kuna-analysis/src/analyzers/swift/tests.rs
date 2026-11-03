@@ -67,14 +67,18 @@ fn folded_functions_are_named_without_a_false_owner() {
         memo: Default::default(),
         code: vec![(0x1000, 0x2000)],
         claims: Default::default(),
+        names: Default::default(),
+        demangled: Default::default(),
     };
     let claim = |addr: u64, name: &str, owner: &str, req: Option<(&str, &str)>, getter: bool| {
+        let req = req.map(|(p, m)| (p.to_string(), m.to_string()));
         namer.claim(
             addr,
             name.to_string(),
             owner,
-            req.map(|(p, m)| (p.to_string(), m.to_string())),
+            req.clone(),
             getter,
+            Some((name.to_string(), req)),
         );
     };
     claim(0x1000, "M.A.vtable#0.getter", "M.A", None, true);
@@ -138,13 +142,9 @@ fn folded_functions_are_named_without_a_false_owner() {
     claim(0x1050, "M.E.vtable#1.getter", "M.E", None, true);
     claim(0x1050, "M.E.vtable#2.getter", "M.E", None, true);
     claim(0x3000, "M.F.vtable#0.getter", "M.F", None, true);
-    let mut out = AnalysisOutput::default();
-    namer.resolve_claims(&mut out);
-    let names: Vec<(u64, &str)> = out
-        .fid_names
-        .iter()
-        .map(|f| (f.addr, f.name.as_str()))
-        .collect();
+    let resolved = namer.resolve_claims(false);
+    assert_eq!(resolved, namer.resolve_claims(true), "every claim has its plain twin");
+    let names: Vec<(u64, &str)> = resolved.iter().map(|(a, n)| (*a, n.as_str())).collect();
     assert_eq!(
         names,
         vec![

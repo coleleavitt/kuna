@@ -4829,6 +4829,31 @@ fn commit_analysis_output(
     } else {
         out.swift_types = Default::default();
     }
+    // 0c. (kuna `swiftnames`) The Swift naming arm's names are in the streams;
+    //     off, every function it named differently gets its plain name back
+    //     (or none, for one only the arm names).
+    let swift_names = std::mem::take(&mut out.swift_names);
+    if !prog.arch().analysis_swiftnames && !swift_names.plain.is_empty() {
+        let derived: std::collections::HashMap<u64, &str> = swift_names
+            .plain
+            .iter()
+            .filter_map(|(addr, with, _)| Some((*addr, with.as_deref()?)))
+            .collect();
+        let is_derived = |addr: u64, name: &str| derived.get(&addr) == Some(&name);
+        out.symbols
+            .retain(|s| s.kind != SymKind::Function || !is_derived(s.addr, &s.name));
+        out.fid_names.retain(|f| !is_derived(f.addr, &f.name));
+        for (addr, _, plain) in swift_names.plain {
+            if let Some(name) = plain {
+                out.symbols.push(kuna_analysis::pass::SymFact {
+                    addr,
+                    name: name.clone(),
+                    kind: SymKind::Function,
+                });
+                out.fid_names.push(kuna_analysis::pass::FidMatch { addr, name });
+            }
+        }
+    }
     // 0a. (kuna `cppsig`) The demangled-signature arm's prototypes. Same deferred
     //     shape as `cppproto` above, but the gate is three-valued, so the mode
     //     selects WHICH certainty tiers survive: `proven` only the prototypes the

@@ -2158,7 +2158,8 @@ mod tests {
         // and kuna-persistcalls / a persistent global's guards next to its accesses (option persistcalls)
         // and kuna-swiftdemangle / Swift symbols and ObjC runtime class names demangle
         // and kuna-swiftmetadata / stripped Swift functions named from the swift5_* metadata
-        assert_eq!(count, 695, "corpus file count drifted");
+        // and kuna-swiftnames / Swift accessors, witnesses and runtime helpers named from code shape
+        assert_eq!(count, 696, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

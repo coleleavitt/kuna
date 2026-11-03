@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3838,
-    3838
+    3845,
+    3845
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1051,7 +1051,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 379 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 380 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -3646,6 +3646,13 @@
     "data:swiftmetadata on: the vtable slot is named by class, position and kind",
     "data:swiftmetadata on: the witness is named by conformance and requirement",
     "data:swiftmetadata on: two members of one type sharing a body are named after the first with the count",
+    "data:swiftnames off: the lazy getter is named by its vtable slot",
+    "data:swiftnames off: the runtime helper is a placeholder",
+    "data:swiftnames off: the witness is named by position",
+    "data:swiftnames on: a computed requirement's witness carries its kind",
+    "data:swiftnames on: the lazy getter is named by its property",
+    "data:swiftnames on: the runtime helper is named",
+    "data:swiftnames on: the witness takes the member a class witness dispatches to",
     "data:swifttypes off: the accessor returns a bare constant",
     "data:swifttypes off: the field is an offset off an unnamed register",
     "data:swifttypes off: the getter takes no self and reads a raw offset",

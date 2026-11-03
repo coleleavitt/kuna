@@ -223,6 +223,15 @@ pub struct ParamLockFact {
 /// register-pinned `self` parameters. (The layouts themselves are interned
 /// in the type factory as the pass builds them; unreferenced, they change
 /// nothing.)
+/// (kuna `swiftnames`) The function names the Swift metadata pass gives
+/// without its code-shape naming arm, kept apart so the commit can restore
+/// them under `option swiftnames off`: `(address, the arm's name, the plain
+/// name)` for every function the two namings disagree on.
+#[derive(Default, Clone, Debug)]
+pub struct SwiftNameFacts {
+    pub plain: Vec<(u64, Option<String>, Option<String>)>,
+}
+
 #[derive(Default, Clone, Debug)]
 pub struct SwiftTypeFacts {
     pub typed_data: Vec<TypedDataFact>,
@@ -527,6 +536,8 @@ pub struct AnalysisOutput {
     pub typed_data: Vec<TypedDataFact>,
     /// (kuna `swifttypes`) The Swift type-layout facts. See [`SwiftTypeFacts`].
     pub swift_types: SwiftTypeFacts,
+    /// (kuna `swiftnames`) See [`SwiftNameFacts`].
+    pub swift_names: SwiftNameFacts,
     /// (kuna `formatstring static`) Per-call-site prototype overrides the
     /// LOAD-TIME format-string resolver recovered — a printf/scanf-family call
     /// whose format constant the image itself answers for. Committed onto
@@ -691,6 +702,7 @@ impl AnalysisOutput {
         self.swift_types.typed_data.extend(other.swift_types.typed_data);
         self.swift_types.prototypes.extend(other.swift_types.prototypes);
         self.swift_types.param_locks.extend(other.swift_types.param_locks);
+        self.swift_names.plain.extend(other.swift_names.plain);
         self.entries.extend(other.entries);
         self.fde_bodies.extend(other.fde_bodies);
         self.fde_interior_entries.extend(other.fde_interior_entries);

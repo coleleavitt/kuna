@@ -896,6 +896,9 @@ Three tiers:
 | swift struct and class fields render as raw offsets off self | [`swifttypes`](#swifttypes) |
 | swift getters named by swiftmetadata take no self parameter | [`swifttypes`](#swifttypes) |
 | type metadata accessors return undefined16 | [`swifttypes`](#swifttypes) |
+| swift class property accessors named by vtable slot instead of the property | [`swiftnames`](#swiftnames) |
+| swift protocol witnesses named requirement#N | [`swiftnames`](#swiftnames) |
+| swift value witness functions and runtime helpers render as sub_<addr> | [`swiftnames`](#swiftnames) |
 | stripped windows pe functions stay FUN_<addr> although a matching .pdb exists | [`pdb`](#pdb) |
 | pdb symbol names not applied to a pe | [`pdb`](#pdb) |
 | a .pdb beside the exe is ignored | [`pdb`](#pdb) |
@@ -3392,6 +3395,14 @@ Program-prep enablement: what is discovered, decoded, and named before any funct
 - **When to flip:** Off only to see a swiftmetadata-named binary without layouts: fields render as raw offsets, getters take no self, the accessors return undefined16. On (default) when swiftmetadata is on: self->field through the recovered struct, typed metadata records.
 - **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swifttypes
 - **Example:** `option swifttypes off`
+
+### `swiftnames` -- on | off, default `on`
+
+- **Symptoms:** swift class property accessors named by vtable slot instead of the property; swift protocol witnesses named requirement#N; swift value witness functions and runtime helpers render as sub_<addr>.
+- **What it does:** The naming arm of the Swift metadata pass (inert unless swiftmetadata is on): names the metadata gives only by position are refined from what the code at them does. A class vtable getter/setter/modify run whose bodies address one self (x20) field - add x0, x20, #off for the access check, a direct load/store, or a register offset whose static field offset global the body loads - is that stored property's accessor set, named from the reflection field record at the offset (Module.Class.width.getter; a lazy property's $__lazy_storage_$_ storage names the property itself, and its getter must store the storage back). A computed property dispatches through the isa or calls first, so it never matches; the setter and modify must agree when the optimizer kept them, a stored modify yields the field address while a lazy one calls the getter, every field is named once, and the matched getters must follow the field order. An override of such a slot takes the member name too. A local protocol requirement takes the member a class conformance's witness thunk forwards to (the vtable slot it loads through the isa, or the implementation it calls) or a surviving witness symbol names, when every witness agrees and the kind matches (a settable property's modify follows its getter and setter); otherwise its witnesses carry the requirement kind (<T:P>.requirement#2.getter). Each statically laid-out struct and enum names the functions of its value witness table (Module.Token.destroy_value_witness, the enum witnesses too); a copy witness that is a bitwise copy of the type's size is the shared __swift_memcpy<size>_<align>, a lone-ret destroy __swift_noop_void_return, and an enum's destroy / initializeWithCopy single local callee its outlined_consume / outlined_copy. The compiler-emitted runtime helpers are matched by their fixed arm64 bodies and the runtime function each call reaches (__swift_instantiateConcreteTypeFromMangledName calling swift_getTypeByMangledNameInContext{,2}, __swift_project / __swift_mutable_project / __swift_destroy_boxed_opaque_existential_1). The code-shape readers decode A64 only; another architecture gets just the requirement kinds and surviving-symbol members. The pass runs at load, so it keeps the plain naming beside its own and the commit restores it under off. Default-ON because it is inert unless swiftmetadata is on (default-off), every name it gives on the stripped fixture equals the unstripped symbol or is strictly less specific, and it adds well under a second on an 84 MB app.
+- **When to flip:** Off to see the metadata pass's positional names only (vtable#21.getter, requirement#6, value witnesses and runtime helpers as sub_<addr>). On (default) when swiftmetadata is on: stored and lazy property accessors by property name, protocol witnesses by member or kind, value witnesses and the compiler's runtime helpers named.
+- **Where / provenance:** P1/external-refinement · kuna · analysis-enablement · kuna-analysis-swiftnames
+- **Example:** `option swiftnames off`
 
 ### `pdb` -- on | off, default `on`
 
