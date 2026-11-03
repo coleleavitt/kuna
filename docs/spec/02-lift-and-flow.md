@@ -2628,6 +2628,32 @@ entry alone and `--from` an instruction proves every entry. Pointer-only and
 non-call kind filters prove none. An entry whose flow fails or exceeds the
 budget is reported as a coverage note, since its import calls are then missing.
 
+**(kuna) A `brk` is a trap — `option brktrap`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_brktrap.rs (find, rewrite)`.**
+The AArch64 spec lifts `brk #imm` to `tmp = imm; pc = SoftwareBreakpoint(tmp,
+inst_next); goto [pc];`. A user-op result is no address jump-table recovery can
+resolve, so `truncate_indirect_jump` turned the jump into an indirect call that
+returns, and the trap printed as `(*(void *)SoftwareBreakpoint(1,0x100003f8c))();
+// jump-as-call` followed by a `return` the program never reaches. Compilers plant
+`brk` only as a trap: clang lowers `__builtin_trap()` to `brk #1` (Swift's
+`fatalError`, precondition and arithmetic-overflow checks, Rust's `abort`) and
+`__builtin_arm_trap(imm)` to `brk #imm` (arm64e's pointer-authentication failure
+is `brk #0xc47x`). Decision rule: in `xrefControlFlow`'s BRANCHIND arm, before the
+jump is queued for table recovery, a BRANCHIND whose target storage is written,
+in the same instruction, by a CALLOTHER of `SoftwareBreakpoint` is a trap. The
+BRANCHIND becomes the artificial no-return halt (a RETURN with the `noreturn` halt
+bit, which prints nothing), so the block ends at the trap; the CALLOTHER loses its
+output and calls the synthetic user-op `__builtin_trap` when the immediate the
+instruction copies is 1, or `__builtin_arm_trap` with the immediate otherwise.
+Both user-ops are registered after the translator's own when the language
+declares `SoftwareBreakpoint` (`register_trap_ops`, from
+`Architecture::init_userops_and_fixups`), so no other language changes. The
+instruction after a `brk` was never followed in either mode, so no code is
+removed; only the trap's rendering and the spurious return change, and a
+function whose value was the call's result gets its own return type back.
+`off` restores the call fallback. Pinned by `tests/stages/kuna-brktrap.xml` (two
+passes over the `brk_trap_arm64` fixture).
+
 ## 2.5 Arch quirks
 
 **(kuna) SPARC struct return — `option sparcstructret`, default off,

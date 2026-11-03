@@ -897,6 +897,11 @@ impl UserOpManage {
         NameLookup { map }
     }
 
+    /// (kuna) The index a newly registered op takes after every existing one.
+    pub fn next_index(&self) -> int4 {
+        self.useroplist.len() as int4
+    }
+
     /// Number of segment operations supported (C++ `numSegmentOps`).
     pub fn num_segment_ops(&self) -> int4 {
         self.segmentop.len() as int4

@@ -2443,6 +2443,28 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "brktrap"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P2"
+subphase = "flow-classification"
+strength = "HARD"
+rewind = "P2"
+issue = "kuna-brk-trap"
+summary = "An AArch64 `brk #imm` is a trap: it prints as `__builtin_trap()` (immediate 1, what clang's `__builtin_trap()` and Swift's `fatalError`, precondition and overflow checks emit) or `__builtin_arm_trap(imm)` (any other immediate, such as arm64e's pointer-authentication failure `brk #0xc471`), and its path ends there. The AArch64 spec lifts `brk` to `pc = SoftwareBreakpoint(imm, inst_next); goto [pc];`; jump-table recovery cannot resolve a user-op result, so the jump fell back to an ordinary indirect call that returns: `(*(void *)SoftwareBreakpoint(1,0x100003f8c))(); // jump-as-call` followed by `return;`, with a `Treating indirect jump as call` warning. On: at flow classification, the jump whose target the `SoftwareBreakpoint` CALLOTHER of the same instruction writes becomes the artificial no-return halt, and the CALLOTHER a call of the synthetic user-op `__builtin_trap` / `__builtin_arm_trap` (registered after the translator's user-ops on any language that declares `SoftwareBreakpoint`) with no output. Code the flow never followed stays unfollowed; only the rendering of the trap and the spurious `return` change. Off restores the call fallback."
+use_when = "On by default: a Swift, Rust or C trap ends its path as `__builtin_trap();`. Off keeps the upstream jump-as-call form."
+example = "option brktrap off"
+source_decompiler = "kuna"
+inspiration = "clang lowers __builtin_trap() to brk #1 and __builtin_arm_trap(imm) to brk #imm on AArch64; C++ FlowInfo::truncateIndirectJump's fail_callother mode marks a user-op jump no-return"
+change_kind = "structure-recovery"
+tier = "transform"
+symptoms = "(*(void *)SoftwareBreakpoint(1,0x...))(); // jump-as-call|a Swift fatalError or overflow trap printed as a call followed by return|Treating indirect jump as call warning on a brk"
+live_field = "brk_trap"
+live_true = "on"
+live_false = "off"
+
+[[settable]]
 option = "int3pad"
 values = "off|warn|halt"
 default = "warn"

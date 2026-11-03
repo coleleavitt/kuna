@@ -419,6 +419,18 @@ impl FlowEnvironment for ArchFlowEnv {
                 .get_space()
                 .is_some_and(|space| locked.contains(&(space.get_index(), entry.get_offset())))
     }
+    fn brk_trap_ops(&self) -> Option<crate::kuna_brktrap::TrapOps> {
+        let arch = self.arch();
+        if !arch.brk_trap {
+            return None;
+        }
+        let id = |nm: &str| arch.userops.get_op_by_name(nm.as_bytes()).map(|u| u.get_index() as u32);
+        Some(crate::kuna_brktrap::TrapOps {
+            breakpoint: id(crate::kuna_brktrap::BREAKPOINT_USEROP)?,
+            trap: id(crate::kuna_brktrap::TRAP_USEROP)?,
+            arm_trap: id(crate::kuna_brktrap::ARM_TRAP_USEROP)?,
+        })
+    }
     fn is_fastfail_callind(&self, fd: &Funcdata, op: crate::context::OpId) -> bool {
         // (kuna `fastfailnoreturn`) wire the `int 0x29` predicate.  The gate is the
         // architecture-owned `fastfail_noreturn` flag (`option fastfailnoreturn

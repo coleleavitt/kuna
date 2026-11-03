@@ -117,6 +117,9 @@ Three tiers:
 | Win32/API call arguments come out as *(unsigned long long *)&v66[0x50] stack blobs instead of values | [`fastfailnoreturn`](#fastfailnoreturn) |
 | (*(void *)swi(0x29))(5); is followed by a stack-pointer bump such as v62 = &v61[8] | [`fastfailnoreturn`](#fastfailnoreturn) |
 | an MSVC C++ function emits hundreds of lines and a hundred-plus anonymous variables | [`fastfailnoreturn`](#fastfailnoreturn) |
+| (*(void *)SoftwareBreakpoint(1,0x...))(); // jump-as-call | [`brktrap`](#brktrap) |
+| a Swift fatalError or overflow trap printed as a call followed by return | [`brktrap`](#brktrap) |
+| Treating indirect jump as call warning on a brk | [`brktrap`](#brktrap) |
 | an int3 pad renders as (*(void *)swi(3))() - a call through a pointer nothing assigns | [`int3pad`](#int3pad) |
 | a function returns the result of a call through swi(3) | [`int3pad`](#int3pad) |
 | nothing in the C says control ran into a run of 0xcc padding bytes | [`int3pad`](#int3pad) |
@@ -1664,6 +1667,14 @@ The control surface: each of these can make output worse on the wrong source sha
 - **When to flip:** On by default. A modern MSVC C++ binary whose stack locals render as offsets off a `char *` (`*(unsigned int *)&v66[0x30] = 0;`), whose calls are preceded by a store of their own return address (`*(unsigned long long *)&v66[-8] = 0x140003e16;`), or whose Win32 call arguments are stack blobs rather than values - all downstream of `(*(void *)swi(0x29))(5);` followed by a stack-pointer bump. Flip OFF to restore the upstream fall-through past the interrupt. MEASURED on a 240 KB MSVC PE32+ (crackme `selam.exe`): the checker at 0x140002d50 holds ELEVEN `int 0x29` and goes 1267 -> 1171 lines, 63 -> 0 return-address stores, 159 -> 144 declarations, and `BCryptGenerateSymmetricKey(*(unsigned long long *)&v66[0x50],&v53,v60,v51)` becomes `BCryptGenerateSymmetricKey(v52,&v55,v62,v54)`; across all 24 functions in that image that contain one, 2802 -> 2583 lines and 85 -> 0 return-address stores. Gated on the Windows compiler spec (`windows`/`clangwindows`) and on the exact lifted shape - the CALLIND must read the storage a `swi` CALLOTHER with the 1-byte constant `0x29` wrote in the same instruction - so `int 0x80` (Linux, see `linuxsyscall`), `int1`/`int3`/`into` (which carry their own `return` and genuinely do return) and every non-Windows image are untouched. Byte-identical (0/675) on the datatest corpus.
 - **Where / provenance:** P2/flow-classification · kuna · correctness-fix · kuna-fastfail-stack-unbalance
 - **Example:** `option fastfailnoreturn on`
+
+### `brktrap` -- on | off, default `on`
+
+- **Symptoms:** (*(void *)SoftwareBreakpoint(1,0x...))(); // jump-as-call; a Swift fatalError or overflow trap printed as a call followed by return; Treating indirect jump as call warning on a brk.
+- **What it does:** An AArch64 `brk #imm` is a trap: it prints as `__builtin_trap()` (immediate 1, what clang's `__builtin_trap()` and Swift's `fatalError`, precondition and overflow checks emit) or `__builtin_arm_trap(imm)` (any other immediate, such as arm64e's pointer-authentication failure `brk #0xc471`), and its path ends there. The AArch64 spec lifts `brk` to `pc = SoftwareBreakpoint(imm, inst_next); goto [pc];`; jump-table recovery cannot resolve a user-op result, so the jump fell back to an ordinary indirect call that returns: `(*(void *)SoftwareBreakpoint(1,0x100003f8c))(); // jump-as-call` followed by `return;`, with a `Treating indirect jump as call` warning. On: at flow classification, the jump whose target the `SoftwareBreakpoint` CALLOTHER of the same instruction writes becomes the artificial no-return halt, and the CALLOTHER a call of the synthetic user-op `__builtin_trap` / `__builtin_arm_trap` (registered after the translator's user-ops on any language that declares `SoftwareBreakpoint`) with no output. Code the flow never followed stays unfollowed; only the rendering of the trap and the spurious `return` change. Off restores the call fallback.
+- **When to flip:** On by default: a Swift, Rust or C trap ends its path as `__builtin_trap();`. Off keeps the upstream jump-as-call form.
+- **Where / provenance:** P2/flow-classification · kuna · structure-recovery · kuna-brk-trap
+- **Example:** `option brktrap off`
 
 ### `int3pad` -- off | warn | halt, default `warn`
 

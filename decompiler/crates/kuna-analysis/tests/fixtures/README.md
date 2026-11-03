@@ -1683,3 +1683,12 @@ below `0x1000`, where an address formed from the PC (`adrp` + `add`/`ldr`, `adr`
 `rust_store_value_harness.c` and `.rs` compare 33 complete Rust bodies emitted from the existing `go_store_value_x86_64` fixture with C at O0/O2. They check all destination and guard bytes, sibling fields, nested fields, and exact pointer/value callback counts over 324 boundary pairs. `array_store` retains an existing raw-pointer indexing error and is excluded from native compilation.
 
 `array_address_x86_64` is an authored x86-64 ELF built with `cc -O2 -g -fno-inline -fno-pie -no-pie array_address.c array_address_helpers.c -o array_address_x86_64` (SHA-256 `477ee45558cae15d4412e642e4a6ec3bc0afbed8d1bba3d425cb17fb9b80edbc`). Its 33 functions cover array addresses and pointer-to-integer array decay. `array_address.kuna` supplies prototypes; `array_address_harness.c` and `.rs` compare complete emitted bodies at O0/O2 over readable and PROT_NONE memory, with one-past addresses, nested arrays, callback order and modular pointer bits.
+
+### AArch64 brk traps
+
+`brk_trap_arm64` (1.5 KB, SHA-256
+`19b911a05bdd0e7630538655c40626c4e29014841dabff9c56e6fd88342bf940`) is built from
+`brk_trap.c` with clang 22:
+`clang --target=aarch64-linux-gnu -O2 -nostdlib -fuse-ld=lld -Wl,--no-dynamic-linker -static -o brk_trap_arm64 brk_trap.c`.
+`checked_div` traps on a zero divisor with `__builtin_trap()` (`brk #1`) and
+`auth_fail` is a lone `brk #0xc471`. Used by `tests/stages/kuna-brktrap.xml`.

@@ -346,6 +346,12 @@ pub trait FlowEnvironment {
         None
     }
 
+    /// (kuna `brktrap`) The user-op ids of the `brk` trap rewrite, when it is on
+    /// and the language lifts `brk` ([`crate::kuna_brktrap`]).
+    fn brk_trap_ops(&self) -> Option<super::kuna_brktrap::TrapOps> {
+        None
+    }
+
     /// (kuna `fastfailnoreturn`) Is `op` the CALLIND half of a Windows `int 0x29`
     /// (`__fastfail`), which never returns?  See
     /// [`kuna_fastfailnoreturn`](crate::kuna_fastfailnoreturn).  The default shell
@@ -1423,6 +1429,19 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
                         op = None;
                         *isfallthru = true;
                         break;
+                    }
+                    if let Some(trap) = self
+                        .env
+                        .brk_trap_ops()
+                        .and_then(|ops| super::kuna_brktrap::find(&self.data, curop, ops.breakpoint).map(|t| (ops, t)))
+                    {
+                        super::kuna_brktrap::rewrite(&mut self.data, curop, &trap.1, trap.0)?;
+                        if self.data.obank().get(curop).expect("xref").get_time() >= maxtime {
+                            self.delete_remaining_ops(cursor)?;
+                            cursor = None;
+                        }
+                        *startbasic = true;
+                        continue;
                     }
                     self.tablelist.push(curop); // Put off trying to recover the table
                     if self.data.obank().get(curop).expect("xref").get_time() >= maxtime {

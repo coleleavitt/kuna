@@ -1,0 +1,55 @@
+<decompilertest>
+<binaryimage arch="AARCH64:LE:64:v8A:default">
+<!--
+    brk trap as __builtin_trap() (`option brktrap on|off`).
+
+    Issue: the AArch64 spec lifts `brk #imm` to
+    `pc = SoftwareBreakpoint(imm, inst_next); goto [pc];`. Jump-table recovery
+    cannot resolve a user-op result, so the jump fell back to an indirect call
+    that returns: `v2 = SoftwareBreakpoint(1,0x2101e4); return (*v2)();`.
+
+    Stage / sub-stage: P2 flow-classification (`xrefControlFlow`, BRANCHIND arm):
+    the jump through the `SoftwareBreakpoint` CALLOTHER of its own instruction is
+    the artificial no-return halt, and the CALLOTHER calls `__builtin_trap` (brk #1)
+    or `__builtin_arm_trap(imm)`.
+
+    The XML wrapper only supplies the harness architecture. Both passes load the
+    `brk_trap_arm64` fixture (source `brk_trap.c`, recipe in the fixtures README):
+    `checked_div` traps on a zero divisor with `__builtin_trap()`, `auth_fail` is a
+    lone `brk #0xc471`.
+
+    Pass 1 (`option brktrap off`) reproduces the BUG. Pass 2 (the shipped default)
+    is the FIX.
+-->
+<bytechunk space="ram" offset="0x100000" readonly="true">
+c0035fd6
+</bytechunk>
+<symbol space="ram" offset="0x100000" name="harness_stub"/>
+</binaryimage>
+<script>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/brk_trap_arm64</com>
+  <com>option brktrap off</com>
+  <com>read symbols</com>
+  <com>load function checked_div</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function auth_fail</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>clear architecture</com>
+  <com>load file decompiler/crates/kuna-analysis/tests/fixtures/brk_trap_arm64</com>
+  <com>read symbols</com>
+  <com>load function checked_div</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>load function auth_fail</com>
+  <com>decompile</com>
+  <com>print C</com>
+  <com>quit</com>
+</script>
+<stringmatch name="BRKTRAP #1: off: the trap is an indirect call through the user-op result" min="2" max="2">SoftwareBreakpoint\(</stringmatch>
+<stringmatch name="BRKTRAP #2: on: brk #1 is __builtin_trap()" min="1" max="1">^\s*__builtin_trap\(\);</stringmatch>
+<stringmatch name="BRKTRAP #3: on: brk #0xc471 is __builtin_arm_trap(0xc471)" min="1" max="1">^\s*__builtin_arm_trap\(0xc471\);</stringmatch>
+<stringmatch name="BRKTRAP #4: on: the divide keeps its int return" min="1" max="1">^int4 checked_div\(</stringmatch>
+</decompilertest>
