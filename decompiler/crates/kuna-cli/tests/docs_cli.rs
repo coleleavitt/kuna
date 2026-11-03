@@ -45,8 +45,15 @@ fn index() -> Vec<Value> {
     serde_json::from_str(&docs(&["--json"])).expect("JSON topic list")
 }
 
+fn path(topic: &str) -> String {
+    match topic {
+        "agents" => "CLAUDE.md".to_string(),
+        _ => format!("docs/{topic}.md"),
+    }
+}
+
 fn source(topic: &str) -> String {
-    std::fs::read_to_string(repo_root().join(format!("docs/{topic}.md"))).unwrap()
+    std::fs::read_to_string(repo_root().join(path(topic))).unwrap()
 }
 
 fn assert_document(topic: &str, actual: &[u8]) {
@@ -126,7 +133,7 @@ fn all_concatenates_every_document_verbatim() {
             "missing {topic}"
         );
         assert!(
-            all.contains(&format!("docs/{topic}.md")),
+            all.contains(&path(topic)),
             "missing {topic} label"
         );
     }
