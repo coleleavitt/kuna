@@ -1183,6 +1183,11 @@ pub(crate) fn validate_pointer_targets(
     exec_ranges: &[(u64, u64)],
     candidates: impl IntoIterator<Item = u64>,
 ) -> Vec<u64> {
+    let candidates: Vec<u64> =
+        candidates.into_iter().filter(|&target| listing.is_undefined(target)).collect();
+    if candidates.is_empty() {
+        return Vec::new();
+    }
     let mut decoder = GapDecoder::new(translate, code_space, exec_ranges);
     let hist = build_fingerprint_histogram(listing, &mut decoder);
     if !hist.values().any(|&count| count >= FINGERPRINT_THRESHOLD) {
@@ -1192,7 +1197,7 @@ pub(crate) fn validate_pointer_targets(
     let mut accepted = BTreeSet::new();
     let mut claimed = BTreeSet::new();
     for target in candidates {
-        if !listing.is_undefined(target) || claimed.contains(&target) {
+        if claimed.contains(&target) {
             continue;
         }
         let Some(fp) = decoder.fingerprint(target) else { continue };
