@@ -53,3 +53,23 @@ fn call_table_targets_are_functions_and_switch_cases_are_not() {
     assert_eq!(list(&[]), [false, true, true]);
     assert_eq!(list(&["--option", "calltable", "off"]), [true, false, false]);
 }
+
+/// An arm64e hardened jump table: the `cmp`/`csel` clamp bounds the switch,
+/// and the inline table `LC_FUNCTION_STARTS` lists is read as data, not code.
+#[test]
+fn a_hardened_arm64e_jump_table_is_a_switch_and_no_entry() {
+    let binary = common::fixture("relswitch_arm64e");
+    let (c, stderr, rc) = common::run_kuna(&["decompile", &binary, "_dispatch"]);
+    assert_eq!(rc, 0, "{stderr}");
+    assert!(c.contains("switch(a0 >> 0x3e)") && c.contains("case 3:"), "{c}");
+    assert!(!c.contains("jump-as-call") && !c.contains("sub_4060"), "{c}");
+    let list = |extra: &[&str]| {
+        let mut args = vec!["functions", binary.as_str(), "--json"];
+        args.extend_from_slice(extra);
+        let (out, stderr, rc) = common::run_kuna(&args);
+        assert_eq!(rc, 0, "{stderr}");
+        out.contains("\"0x4060\"")
+    };
+    assert!(list(&["--option", "aifdataveto", "off"]), "the start is listed without the veto");
+    assert!(!list(&[]), "the veto drops the table");
+}

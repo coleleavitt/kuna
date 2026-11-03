@@ -2732,7 +2732,17 @@ must read its own table entry, above the previous row's, so a range opened on
 a value that is not the table index (the loaded entry itself, when the index
 feeds an image-base add) reads no table at all. Fewer than two rows is no
 table, and the jump stays a computed call. A bounded table
-never reaches this arm.
+never reaches this arm. A trimmed basic model is only a fallback: the
+default-path model (`JumpBasic2`) is tried first and wins when it bounds the
+switch (`jumptable.rs (recover_model)`). An AArch64 hardened jump table
+(arm64e, clang `-faarch64-jump-table-hardening`, Swift enum dispatch) clamps
+its index with `cmp x16, #N-1; csel x16, x16, xzr, ls` instead of branching to
+a default, so the switch variable is a `MULTIEQUAL` of the index and the
+constant 0: the basic model sees no guard, and before this ordering the
+trimmed arm accepted the unbounded `MULTIEQUAL`, read past the table into the
+next function's code, failed its sanity check, and left the switch a
+`(*(code *)(*(int *)&table[i * 4] + base))()` computed call that model 2
+recovers as `switch(a0 >> 0x3c)` with every case.
 
 **`fdeflowbound`, default on** (`flow.rs (leaves_own_fde)`). An unwind-table
 extent (an `.eh_frame` FDE or a Go `functab` entry: the extents the analysis tier

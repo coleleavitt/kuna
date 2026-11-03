@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    4504,
-    4504
+    4508,
+    4508
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3920,6 +3920,10 @@
     "data:relocs #7: PPC32 REL24 calls the extern",
     "data:relocs #8: MIPS PIC GOT16 page + LO16 reaches the local table",
     "data:relocs #9: MIPS PIC global GOT16 through _gp reaches the global",
+    "data:relswitch #1: the hardened table is a switch on the clamped index, with or without switchtrim",
+    "data:relswitch #2: every case is recovered",
+    "data:relswitch #3: no computed jump remains",
+    "data:relswitch #4: case 1 passes a1 + 5 to sink",
     "data:rename after rebuilding updates initializer fields",
     "data:rename after rebuilding updates the call view",
     "data:retsplitglobal #1: the shared epilogue is cloned into all three predecessors with the option off and emitted once with it on",
