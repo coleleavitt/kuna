@@ -66,7 +66,7 @@ fn settable_count_is_486() {
 }
 
 #[test]
-fn tier_counts_are_148_core_194_transform_143_analysis() {
+fn tier_counts_are_148_core_195_transform_143_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -78,7 +78,7 @@ fn tier_counts_are_148_core_194_transform_143_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (148, 194, 143));
+    assert_eq!((core, transform, analysis), (148, 195, 143));
 }
 
 #[test]
@@ -1373,7 +1373,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `switchrunon`; its P2 row sits after `switchsharedcase`.
     // +1 for `bejoinpass`; its P4 row sits after `bejoin`.
     // +1 for `persistcalls`; its P3 row sits after `readonlycalls`.
-    assert_eq!(json.matches("},\n").count(), 484);
+    // +1 for `objcblocks`; its P1 row sits beside `objcivars`.
+    assert_eq!(json.matches("},\n").count(), 485);
 }
 
 #[test]
