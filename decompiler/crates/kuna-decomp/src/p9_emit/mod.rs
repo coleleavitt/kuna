@@ -24,6 +24,7 @@ pub(crate) mod kuna_ruststorevalue;
 pub(crate) mod kuna_rustptradd;
 pub(crate) mod kuna_rustarrayindex;
 pub(crate) mod kuna_rustarrayaddr;
+pub(crate) mod kuna_rustarraydecay;
 pub mod kuna_unsignedread; // (kuna) an unsigned read of an expression C evaluates as signed casts it
 pub mod kuna_narrowselector; // (kuna) a switch on a narrow expression casts it to its own width
 pub mod stringmanage;
@@ -60,6 +61,7 @@ pub(crate) mod kuna_bytearrayslice;
 pub mod kuna_armregistershift; // (kuna) defined C for ARM register-controlled LSL
 mod kuna_armconstantshift;
 pub mod kuna_emptystrconst;
+pub mod kuna_cfstr; // (kuna) CFSTR("...") for a Mach-O __cfstring entry
 pub mod kuna_renderfault; // (kuna) test-only: panic one function's render partway through
 pub mod kuna_truncarg;
 pub mod kuna_pointerargs; // (kuna) a scalar's address passed to a character-pointer parameter

@@ -1620,7 +1620,16 @@ kuna_options! { self, p1;
     },
     "swiftmetadata" => on_off!(analysis_swiftmetadata, "Swift runtime-metadata recovery pass"),
     "swifttypes" => on_off!(analysis_swifttypes, "Swift type layouts from static metadata"),
-    "cfstrings" => on_off!(analysis_cfstrings, "Mach-O __cfstring constant-string recovery pass"),
+    "cfstrings" => {
+        let (pass, annotate) = match p1 {
+            "annotate" => (true, true),
+            other => (on_or_off(other)?, false),
+        };
+        self.analysis_cfstrings = pass;
+        self.cfstrings_annotate = annotate;
+        let state = if annotate { "on, annotated" } else if pass { "on" } else { "off" };
+        Ok(format!("Mach-O __cfstring constant-string recovery pass turned {state}"))
+    },
     "iokitclasses" => on_off!(analysis_iokitclasses, "IOKit class and vtable recovery"),
     "xnutables" => on_off!(analysis_xnutables, "XNU kalloc_type / external-method / pointer-slot naming"),
     "osclassinfo" => on_off!(analysis_osclassinfo, "DriverKit __osclassinfo class records"),

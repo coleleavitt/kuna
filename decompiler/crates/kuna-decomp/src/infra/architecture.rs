@@ -2995,9 +2995,15 @@ pub struct Architecture {
     /// function's own decompile with them ahead of the console's.
     pub loader_param_locks: std::collections::BTreeMap<Address, Vec<(int4, String, crate::fspec::ParameterPieces)>>,
     /// (kuna) Gate the Mach-O `__cfstring` constant-string recovery pass
-    /// (`cfstrings`); default **off** (output-changing: renders CFString constants
-    /// as string literals + adds `char[N]` symbols). Mach-O-only pass.
+    /// (`cfstrings`); default **on** (renders CFString constants as
+    /// `CFSTR("...")` typed `CFStringRef`). Mach-O-only pass.
     pub analysis_cfstrings: bool,
+    /// (kuna `cfstrings annotate`) Follow each rendered `CFSTR("...")` with a
+    /// comment naming its `__cfstring` entry address. Default **off**.
+    pub cfstrings_annotate: bool,
+    /// (kuna `cfstrings`) The `__cfstring` entry addresses the commit seeded, so
+    /// the printer renders a literal at one of them as `CFSTR("...")`.
+    pub cfstring_entries: std::collections::BTreeSet<u64>,
     /// (kuna) `iokitclasses`: IOKit class and vtable recovery on an XNU kernel
     /// or kext (a commit-gated analysis pass, default on).
     pub analysis_iokitclasses: bool,
@@ -3961,6 +3967,8 @@ impl Architecture {
             analysis_swifttypes: true,
             loader_param_locks: std::collections::BTreeMap::new(),
             analysis_cfstrings: false,
+            cfstrings_annotate: false,
+            cfstring_entries: std::collections::BTreeSet::new(),
             analysis_iokitclasses: false,
             analysis_xnutables: false,
             analysis_osclassinfo: false,
@@ -4568,7 +4576,8 @@ impl Architecture {
         self.analysis_iokitclasses = true; // (kuna) IOKit class recovery, XNU images only
         self.analysis_xnutables = true; // (kuna) XNU data tables, XNU images only
         self.analysis_osclassinfo = true; // (kuna) DriverKit class records
-        self.analysis_cfstrings = true; // Mach-O __cfstring constant-string recovery default-on (Mach-O-only pass)
+        self.analysis_cfstrings = true; // (kuna) Mach-O __cfstring constant-string recovery default-on: Mach-O-only and real-binary-path only, so the XML datatest corpus never runs it (0/675); on the 80 MB Toyota arm64 app one decompile is within noise (min 2.324 s off, 2.359 s on, medians 2.442 / 2.372 over 6 interleaved runs)
+        self.cfstrings_annotate = false;
         self.analysis_swiftcall = true; // Swift calling convention default-on, inert unless swiftmetadata is on
         self.analysis_swiftruntime = true; // Swift runtime prototypes default-on (Swift-detected images only)
         self.analysis_pdb = true; // (kuna) DIV-129 default-on: a PE whose CodeView record names a .pdb that is actually beside it decompiles with its real function names; the GUID/age fingerprint gate keeps a wrong or stale .pdb from ever being applied. PE-only, and the XML datatest path never runs an analysis pass (0/675)
