@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    4493,
-    4493
+    4504,
+    4504
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -3614,6 +3614,7 @@
     "data:nested PPC operand: full rotation and mask",
     "data:nested namespace address",
     "data:no fabricated zero multiplication",
+    "data:no literal is pieced from two arms' words",
     "data:no shifted field store",
     "data:no unrecovered transfer",
     "data:nodejoin #1: shared exit emits a complete body in both passes",
@@ -4248,7 +4249,9 @@
     "data:swiftruntime off: the allocation's arguments are the call site's",
     "data:swiftruntime on: the allocation returns the object",
     "data:swiftruntime on: the allocation takes the metadata",
+    "data:swiftstr off: the selected object words are constants",
     "data:swiftstr off: the small string's object word is a constant (on: it is the text)",
+    "data:swiftstr off: the stored empty string is a constant",
     "data:swiftstr off: the stored string's object word is a constant",
     "data:swiftstr on: the returned small string is its text",
     "data:swiftstr on: the stored small string is its text",
@@ -4294,6 +4297,8 @@
     "data:tee-O2 tail-jumps #3: tail call resolves to named setlocale (pass 2 on only)",
     "data:tee-O2 tail-jumps #4: the recovered tail call is logged (pass 2 on only)",
     "data:terminal call has a local contract",
+    "data:the csel-picked and switched literal of the first arm",
+    "data:the csel-picked and switched literal of the second arm",
     "data:the helper forwards the double unchanged",
     "data:the helper negates the shared double",
     "data:the loaded pair reaches the first call as two slots",
@@ -4303,7 +4308,13 @@
     "data:the non-dominated value reaches the split callee",
     "data:the null store targets the pointer slot",
     "data:the other valid relocation never supplies a contract",
+    "data:the second select's arms",
+    "data:the second select's other arm",
     "data:the split register delivers a scalar double parameter",
+    "data:the stored empty literal",
+    "data:the stored selected literal, paired through the store beside it",
+    "data:the switch's 15-byte literal",
+    "data:the switch's 8-byte literal",
     "data:the whole-register object is gone",
     "data:transient helper spill leaves the complete caller buffer",
     "data:truncarg #10: a sum that provably fits its byte gets no cast",

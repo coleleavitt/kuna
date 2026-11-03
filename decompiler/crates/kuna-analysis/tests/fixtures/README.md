@@ -1518,6 +1518,34 @@ LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin
 `$s4main10countWords2ofS2i_tF`. The `_OBJC_CLASS_$__TtC4main7Greeter` data
 symbol keeps the linker's spelling either way.
 
+### `macho_swift_strsel_arm64` — Swift string literals picked per branch (`swiftstr`)
+
+`macho_swift_strsel_arm64` (arm64, ~51 KB, stripped) is the fixture for
+`tests/stages/kuna-swiftstrcsel.xml`: Swift string literals whose two words
+(count word, object word) are chosen per branch, by `csel` pairs or a switch,
+so each arm's words live in registers that are not numbered next to each other.
+Its source `macho_swift_strsel.swift` is built with swiftc 6.3 for
+`arm64-apple-macosx13.0` against a macOS SDK (an SDK is only a build input:
+the binary imports `libswiftCore` and `libSystem` and carries nothing from it):
+
+```bash
+SDK=/path/to/MacOSX13.3.sdk          # any macOS SDK with usr/lib/swift
+RES=/path/to/XcodeDefault.xctoolchain/usr/lib/swift
+swiftc -target arm64-apple-macosx13.0 -sdk "$SDK" -resource-dir "$RES" -O \
+       -module-name strsel -c macho_swift_strsel.swift -o m.o
+ld64.lld -arch arm64 -platform_version macos 13.0 13.3 -syslibroot "$SDK" \
+       -L "$SDK/usr/lib/swift" -lSystem -lswiftCore -o strsel m.o
+llvm-strip --strip-all -o macho_swift_strsel_arm64 strsel
+```
+
+**Pinned VMAs** (the unstripped `strsel` symbol table): `strsel.pick(_:_:)`
+(`$s6strsel4pickySiSb_SbtF`)@`0x100000d30` (two `csel` pairs per literal:
+"serviceItems"/"serviceDate", "shape"/"animal"), `strsel.tag(_:_:)`@`0x100000e30`
+("enabled"/"disabled" selected and stored into `Box.label`),
+`strsel.blank(_:)`@`0x100000eb0` (the empty literal stored),
+`Field.hash(into:)`@`0x100000f1c` (a switch over "serviceItems", "serviceDate",
+"serviceProvider", "odoMeter").
+
 ### `macho_swift_classnames_arm64` — Swift runtime class names in the types (`swiftdemangle` + `objcivars`)
 
 `macho_swift_classnames_arm64` (arm64, ~50 KB) is the fixture for
