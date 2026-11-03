@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3816,
-    3816
+    3822,
+    3822
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -2666,6 +2666,12 @@
     "data:disabled pair partition drops the loaded pair at the first call",
     "data:disabled retains biased literal",
     "data:double is stored in its declared field",
+    "data:dyldcrossdata #1: off leaves the bound GOT slot load unnamed",
+    "data:dyldcrossdata #2: off leaves the interior read of the other image unnamed",
+    "data:dyldcrossdata #3: off leaves the other image's address bare",
+    "data:dyldcrossdata #4: on folds the bound slot to the named target",
+    "data:dyldcrossdata #5: on names an interior read by the symbol holding it",
+    "data:dyldcrossdata #6: on names the address formed by adrp/add",
     "data:dyldcrossrefs #1: off leaves the island call unnamed",
     "data:dyldcrossrefs #2: off leaves the GOT slot call unnamed",
     "data:dyldcrossrefs #3: on names the island after its target in the other image",

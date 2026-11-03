@@ -4289,9 +4289,12 @@ with arm64e auth pointers, v5) to their targets. Its local symbols come from the
 `.symbols` file, in place of the `<redacted>` placeholders in its own symbol
 table. Calls into other images name their targets: a `bl` to a `__TEXT_STUBS`
 stub island, or to another image's stub, renders as the callee
-(`os_unfair_lock_lock_with_options(...)`), and so does a load through a `__got`
-slot the cache builder coalesced. `--option dyldcrossrefs off` shows the raw
-island addresses instead. `--image` is global: it applies to every subcommand
+(`os_unfair_lock_lock_with_options(...)`), and so does a call through a `__got`
+slot the cache builder bound. Data in other images is named too: a load through
+a bound slot pointing at another image's data folds to that data's address, and
+a direct `adrp` reference or a data pointer into another image names the symbol
+holding the address (`&_$s10Foundation12DataProtocolTL` for `dat_1dc6827b8`).
+`--option dyldcrossrefs off` shows the raw island and data addresses instead. `--image` is global: it applies to every subcommand
 and is passed to the `decomp_dbg` subprocess through `KUNA_DYLD_IMAGE`. The
 console spells it `option dyldimage NAME`, given before `load file`; it is
 accepted before any image is loaded.

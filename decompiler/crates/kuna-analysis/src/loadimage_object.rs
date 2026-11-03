@@ -967,6 +967,22 @@ impl ObjectLoadImage {
             }
         }
 
+        // A dyld cache image's data references into other images, from its
+        // `kuna.dyld.xrefs` note (`dyldcrossrefs`), named as the image's own.
+        if is_macho && kuna_decomp::kuna_dyldcache::dyldcrossrefs_enabled() {
+            for (addr, name, size) in crate::loader::kuna_dyldcache::xrefs::data_symbols(bytes) {
+                let name = match std::str::from_utf8(&name).ok().and_then(crate::demangle::demangle_name) {
+                    Some(demangled) => demangled.into_bytes(),
+                    None => name,
+                };
+                let data_mode = if namechars == NameChars::Ident { NameChars::Safe } else { namechars };
+                let name = sanitize_symbol_name_bytes(&name, data_mode).into_owned();
+                if !name.is_empty() && seen_data.insert(addr) {
+                    datasyms.push(DataSym { addr, name, size });
+                }
+            }
+        }
+
         // 2. PLT stubs → imported library names.
         // (F) Per-format import resolution goes through the boundary; for ELF
         // `ElfFormat::resolve_imports` just calls the unchanged
@@ -1065,8 +1081,13 @@ impl ObjectLoadImage {
                 applied.insert(w.vma);
             }
         }
-        let dynreloc_const: Vec<(u64, u64)> =
+        let mut dynreloc_const: Vec<(u64, u64)> =
             dynrelocs.const_ranges.into_iter().filter(|(lo, _)| applied.contains(lo)).collect();
+        // A dyld cache image's GOT slots the cache builder bound to other images'
+        // data hold constants (`dyldcrossrefs`).
+        if is_macho && kuna_decomp::kuna_dyldcache::dyldcrossrefs_enabled() {
+            dynreloc_const.extend(crate::loader::kuna_dyldcache::xrefs::bound_slots(bytes));
+        }
 
         Ok(ObjectLoadImage {
             filename: filename.to_string(),

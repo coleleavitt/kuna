@@ -1005,10 +1005,15 @@ dyld shared cache, split the way iOS 16 splits one: `dyld_shared_cache_arm64e`
 (header, image table, `__TEXT`/`__DATA`/`__LINKEDIT` mappings, v3 slide info),
 `.01` (a `__TEXT_STUBS` stub island), and `.symbols` (the local symbols).
 `/usr/lib/libcaller.dylib` calls `/usr/lib/libcallee.dylib`'s `callee_add`
-through the island at `0x180008800` and through a coalesced `__got` slot. That
-slot's v3 chain links a plain pointer to an authenticated one. Its `helper_local`
-is a `<redacted>` placeholder in its own symbol table, named only by `.symbols`.
-It drives the `kuna_dyldcache` unit tests and `tests/stages/kuna-dyldcrossrefs.xml`.
+through the island at `0x180008800` and through a `__got` slot. That `__got` is
+bound in place as iOS 16 leaves one (`S_NON_LAZY_SYMBOL_POINTERS`, its
+indirect-symbol entries `INDIRECT_SYMBOL_LOCAL|ABS`), and its v3 chain links a
+plain pointer (to `callee_counter`) to an authenticated one (to `callee_add`).
+`caller_table` reads `callee_table[1]` with `adrp`/`ldr` and `caller_addr` forms
+`&callee_table` with `adrp`/`add`. Its `helper_local` is a `<redacted>`
+placeholder in its own symbol table, named only by `.symbols`. It drives the
+`kuna_dyldcache` unit tests, `tests/stages/kuna-dyldcrossrefs.xml` and
+`tests/stages/kuna-dyldcrossdata.xml`.
 No Apple toolchain is needed: `dyld_cache_arm64e.py` assembles the files from
 the public `dyld_cache_format.h` layouts and hand-encodes the A64 bodies.
 Regenerate with:

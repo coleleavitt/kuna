@@ -64,7 +64,7 @@ impl Section {
         self.flags & 0x8000_0400 != 0
     }
 
-    fn is_zerofill(&self) -> bool {
+    pub fn is_zerofill(&self) -> bool {
         matches!(self.section_type(), 0x1 | 0xc | 0x12)
     }
 }
@@ -302,7 +302,7 @@ impl DyldCache {
                 let start = (off + (va - layout.segments[*i].vmaddr)) as usize;
                 out.get(start..start + len)
             };
-            super::xrefs::collect(self, &layout, cputype == CPU_TYPE_ARM64, &view)
+            super::xrefs::collect(self, index, &layout, cputype == CPU_TYPE_ARM64, &view)
         };
 
         let linkedit = self.build_linkedit(index, &layout, &xrefs)?;
