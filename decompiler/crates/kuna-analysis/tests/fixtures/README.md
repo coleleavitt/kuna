@@ -1538,6 +1538,17 @@ three calls and ignores it after `scale`. With `callerreads` off a single-functi
 decompile prints all four `void`; on, `triple`, `keep` and `same` return `int` and `scale`
 stays `void`. Used by `tests/stages/kuna-callerreads.xml`.
 
+### An element-copy run beside a global its stores may alias
+
+`copyrun_global_x86_64` (9,344 bytes, static non-PIE x86-64, not stripped, SHA-256
+`71d4fb9280d2e889879ec1737d5f06b8e8510a21988d321f6b016ce6b241abf1`) is built from `copyrun_global.c` with gcc (Gentoo 15.3.0 p8) 15.3.0:
+`gcc -O2 -fno-pic -nostdlib -static -Wl,-e,copy_guarded copyrun_global.c -o copyrun_global_x86_64`.
+`copy_guarded` calls `init_token(&token)` unless the global `token` is `-1`, copies a 64-byte
+struct with four SSE moves through a pointer, and tail-calls `consume` with `token` read before
+the copy. Heritage hangs an INDIRECT of `token` on each of the copy's stores; `copyrun` folds them
+into one on the `memcpy`, so the default prints no `token = token;` around the copy. Used by
+`tests/stages/kuna-copyrunself.xml`.
+
 ### Functions reached only through a pointer the program takes
 
 `pe_addrtaken_x86_64.exe` (4,096 bytes, PE32+/x86-64, SHA-256

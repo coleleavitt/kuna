@@ -2116,7 +2116,8 @@ mod tests {
         // and kuna-sparc-delay-condition / a flag-writing delay slot cannot change its branch
         // and kuna-repstring / rep movs/stos loops print as memcpy/memset
         // and kuna-copyrun / unrolled element copies print as memcpy
-        assert_eq!(count, 594, "corpus file count drifted");
+        // and kuna-copyrunself / a copy run's INDIRECTs of a global fold to one on the memcpy
+        assert_eq!(count, 595, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
