@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 pub mod extract;
 pub mod slide;
@@ -135,6 +136,9 @@ struct LocalSymbols {
     keyed_by_vm_offset: bool,
 }
 
+/// The most slid pages [`DyldCache::read_slid`] keeps.
+const MAX_SLID_PAGES: usize = 256;
+
 /// An opened dyld shared cache.
 pub struct DyldCache {
     files: Vec<CacheFile>,
@@ -142,7 +146,9 @@ pub struct DyldCache {
     images: Vec<CacheImage>,
     base: u64,
     locals: Option<LocalSymbols>,
-    slides: RefCell<HashMap<usize, Option<slide::SlideInfo>>>,
+    slides: RefCell<HashMap<usize, Option<Rc<slide::SlideInfo>>>>,
+    /// Slid pages by (mapping, page index), for the small reads stub following makes.
+    slid_pages: RefCell<HashMap<(usize, u64), Rc<[u8]>>>,
     layouts: RefCell<HashMap<usize, Option<std::rc::Rc<extract::ImageLayout>>>>,
 }
 
@@ -286,6 +292,7 @@ impl DyldCache {
             base,
             locals,
             slides: RefCell::default(),
+            slid_pages: RefCell::default(),
             layouts: RefCell::default(),
         })
     }
@@ -401,26 +408,54 @@ impl DyldCache {
     }
 
     /// The bytes at `[va, va + len)` with the slide info of their mapping applied
-    /// at slide zero, so every rebased pointer reads as its unslid target.
+    /// at slide zero, so every rebased pointer reads as its unslid target. A read
+    /// within one page goes through a bounded cache of slid pages.
     pub fn read_slid(&self, va: u64, len: usize) -> Result<Vec<u8>, String> {
-        let m = self
-            .mapping_of(va, len as u64)
-            .ok_or_else(|| format!("address range {va:#x}+{len:#x} is not mapped by the cache"))?
-            .clone();
-        let index = self.mappings.iter().position(|x| x.address == m.address).unwrap_or(0);
+        let index = self
+            .mappings
+            .iter()
+            .position(|m| m.contains(va, len as u64))
+            .ok_or_else(|| format!("address range {va:#x}+{len:#x} is not mapped by the cache"))?;
+        let m = &self.mappings[index];
         let Some(info) = self.slide_info(index)? else {
             return self.read_va(va, len);
         };
         let page = info.page_size as u64;
-        let lo = m.address + (va - m.address) / page * page;
-        let hi = (m.address + (va + len as u64 - m.address).div_ceil(page) * page).min(m.address + m.size);
+        let first = (va - m.address) / page;
+        let last = (va + len as u64 - m.address).div_ceil(page);
+        if last <= first + 1 {
+            let bytes = self.slid_page(index, first, &info)?;
+            let start = (va - m.address - first * page) as usize;
+            return Ok(bytes[start..start + len].to_vec());
+        }
+        let lo = m.address + first * page;
+        let hi = (m.address + last * page).min(m.address + m.size);
         let mut pages = self.read_va(lo, (hi - lo) as usize)?;
-        info.apply(&mut pages, ((lo - m.address) / page) as usize);
+        info.apply(&mut pages, first as usize);
         let start = (va - lo) as usize;
         Ok(pages[start..start + len].to_vec())
     }
 
-    fn slide_info(&self, mapping: usize) -> Result<Option<slide::SlideInfo>, String> {
+    /// Page `number` of mapping `mapping`, slid, from the cache when it holds it.
+    fn slid_page(&self, mapping: usize, number: u64, info: &slide::SlideInfo) -> Result<Rc<[u8]>, String> {
+        if let Some(bytes) = self.slid_pages.borrow().get(&(mapping, number)) {
+            return Ok(bytes.clone());
+        }
+        let m = &self.mappings[mapping];
+        let page = info.page_size as u64;
+        let lo = m.address + number * page;
+        let mut bytes = self.read_va(lo, page.min(m.address + m.size - lo) as usize)?;
+        info.apply(&mut bytes, number as usize);
+        let bytes: Rc<[u8]> = bytes.into();
+        let mut pages = self.slid_pages.borrow_mut();
+        if pages.len() >= MAX_SLID_PAGES {
+            pages.clear();
+        }
+        pages.insert((mapping, number), bytes.clone());
+        Ok(bytes)
+    }
+
+    fn slide_info(&self, mapping: usize) -> Result<Option<Rc<slide::SlideInfo>>, String> {
         if let Some(cached) = self.slides.borrow().get(&mapping) {
             return Ok(cached.clone());
         }
@@ -429,7 +464,7 @@ impl DyldCache {
             None
         } else {
             let raw = self.files[m.file].read_at(m.slide_offset, m.slide_size as usize)?;
-            slide::SlideInfo::parse(&raw)?
+            slide::SlideInfo::parse(&raw)?.map(Rc::new)
         };
         self.slides.borrow_mut().insert(mapping, info.clone());
         Ok(info)

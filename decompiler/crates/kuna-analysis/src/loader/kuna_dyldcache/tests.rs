@@ -103,3 +103,17 @@ fn without_its_symbols_file_a_redacted_local_stays_nameless() {
     assert_eq!(at_helper, [""]);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn a_small_slid_read_matches_the_slid_segment_and_repeats() {
+    let cache = DyldCache::open(&fixture()).unwrap();
+    let segment = cache.read_slid(0x1_8001_0000, 0x110).unwrap();
+    for (va, len) in [(0x1_8001_0000, 8), (0x1_8001_0008, 8), (0x1_8001_0004, 8), (0x1_8001_0100, 4)] {
+        let at = (va - 0x1_8001_0000) as usize;
+        for _ in 0..2 {
+            assert_eq!(cache.read_slid(va, len).unwrap(), segment[at..at + len], "{va:#x}+{len}");
+        }
+    }
+    assert_eq!(u64_at(&cache.read_slid(0x1_8001_0000, 8).unwrap(), 0), 0x1_8001_0100);
+    assert!(cache.read_slid(0x1_8001_0ffc, 8).is_err(), "a read past the mapping end");
+}
