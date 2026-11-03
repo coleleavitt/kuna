@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3854,
-    3854
+    3859,
+    3859
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1051,7 +1051,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 380 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 381 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1501,6 +1501,11 @@
     "data:OBJCSDK #7: a CGRect argument is spread over its members",
     "data:OBJCSDK #8: a two-argument method keeps both",
     "data:OBJCSDK #9: the stub itself returns the struct",
+    "data:OBJCSTUBAGREE #1: off, the protocol's double return types the stub",
+    "data:OBJCSTUBAGREE #2: off, the call after the send loses its arguments",
+    "data:OBJCSTUBAGREE #3: on, the send's integer result reaches the next call",
+    "data:OBJCSTUBAGREE #4: an implemented double tag types the stub on or off without headers",
+    "data:OBJCSTUBAGREE #5: headers declaring an integer tag drop the double prototype",
     "data:OBJCTYPES #1: off reads the inner object's field through casts",
     "data:OBJCTYPES #2: the property's class types the getter's return, in both arms",
     "data:OBJCTYPES #3: the stub of a property getter returns the class, in both arms",

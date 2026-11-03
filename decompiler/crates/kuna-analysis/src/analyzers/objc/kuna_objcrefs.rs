@@ -62,6 +62,11 @@ pub struct Selectors {
     /// The SDK headers' declarations (`objcsdk`), consulted for a selector this
     /// image declares nowhere.
     sdk: HashMap<String, Option<String>>,
+    /// Selectors a class or category of the image declares, as opposed to only
+    /// a protocol.
+    implemented: HashSet<String>,
+    /// `objcstubagree`: a stub is typed only from declarations that agree.
+    agree: bool,
     /// Per `(class, selector)`, the class-naming spelling that class's own
     /// property gave the selector — what its IMP is typed with, so another
     /// class's `view` returning a different class cannot reach it.
@@ -71,14 +76,22 @@ pub struct Selectors {
 }
 
 impl Selectors {
-    pub fn with_sdk(sdk: HashMap<String, Option<String>>) -> Selectors {
-        Selectors { sdk, ..Selectors::default() }
+    pub fn with_sdk(sdk: HashMap<String, Option<String>>, agree: bool) -> Selectors {
+        Selectors { sdk, agree, ..Selectors::default() }
+    }
+
+    /// Record a class's or category's declaration (see [`Self::record_declared`]).
+    pub fn record(&mut self, selector: &str, types: Option<&str>) {
+        self.implemented.insert(selector.to_string());
+        self.record_declared(selector, types);
     }
 
     /// Record one declaration's selector and type encoding. Two spellings
     /// agree when they match with frame offsets and class names erased; of
     /// two that agree the one naming classes (`@"Base"`, a property's) is kept.
-    pub fn record(&mut self, selector: &str, types: Option<&str>) {
+    /// A protocol's declaration is recorded here directly: it promises the
+    /// selector to conformers the image need not hold.
+    pub fn record_declared(&mut self, selector: &str, types: Option<&str>) {
         let Some(new) = types else {
             self.encodings.entry(selector.to_string()).or_insert(None);
             return;
@@ -119,6 +132,34 @@ impl Selectors {
         match self.encodings.get(selector) {
             Some(e) => e.as_deref(),
             None => self.sdk.get(selector).and_then(|e| e.as_deref()),
+        }
+    }
+
+    /// The encoding a `objc_msgSend$<sel>` stub is typed with. The stub serves
+    /// every receiver, so under `objcstubagree` the image's agreed spelling is
+    /// used only when the SDK headers, if they spell the selector, place its
+    /// return and arguments in the same register classes ([`registers`]), and a
+    /// selector only a protocol of the image declares with a floating-point or
+    /// struct return needs the headers to spell it alike (a framework class
+    /// answering it in `x0` would lose the result the next call passes); the
+    /// headers' own spelling still types a selector the image declares nowhere.
+    /// Off, the image's spelling wins outright ([`Self::encoding`]).
+    pub fn stub_encoding(&self, selector: &str) -> Option<&str> {
+        if !self.agree {
+            return self.encoding(selector);
+        }
+        match (self.encodings.get(selector), self.sdk.get(selector)) {
+            (Some(None), _) => None,
+            (Some(Some(e)), Some(Some(sdk))) => {
+                let agree = registers(e).is_some_and(|r| registers(sdk) == Some(r));
+                agree.then_some(e.as_str())
+            }
+            (Some(Some(e)), _) => {
+                let trusted = self.implemented.contains(selector)
+                    || registers(e).is_some_and(|r| matches!(r[0].as_str(), "x" | "v"));
+                trusted.then_some(e.as_str())
+            }
+            (None, sdk) => sdk.as_ref().and_then(|e| e.as_deref()),
         }
     }
 
@@ -209,7 +250,7 @@ pub(super) fn emit(
                 selectors.name(out, sel_va, &sel);
                 let name = format!("objc_msgSend${sel}");
                 out.symbols.push(SymFact { addr: stub_va, name: name.clone(), kind: SymKind::Function });
-                if let Some(enc) = selectors.encoding(&sel) {
+                if let Some(enc) = selectors.stub_encoding(&sel) {
                     if let Some(pieces) = stub_prototype(&name, enc, file.architecture(), arch, tctx) {
                         out.prototypes_at.push((stub_va, pieces));
                     }
@@ -233,6 +274,26 @@ fn push_slot(ranges: &mut Vec<(u64, u64)>, va: u64, ps: u64) {
         Some((_, end)) if *end == va => *end = va + ps,
         _ => ranges.push((va, va + ps)),
     }
+}
+
+/// Where a method encoding's return and arguments travel: `x` for an integer,
+/// pointer, object or selector, `d` for a floating-point value, `v` for no
+/// value, and a by-value struct as its own text with class names erased.
+/// `Q16@0:8` and `q@:` agree (`x x x`), `d16@0:8` differs from both.
+fn registers(enc: &str) -> Option<Vec<String>> {
+    let (ret, args) = encoding::split_method(enc)?;
+    std::iter::once(ret)
+        .chain(args)
+        .map(|t| {
+            let t = t.trim_start_matches(['r', 'n', 'N', 'o', 'O', 'R', 'V', 'A']);
+            match t.chars().next()? {
+                'f' | 'd' | 'D' => Some("d".to_string()),
+                'v' => Some("v".to_string()),
+                '{' | '(' => Some(t.split('"').step_by(2).collect()),
+                _ => Some("x".to_string()),
+            }
+        })
+        .collect()
 }
 
 /// An encoding's shape: its types with frame offsets and class names erased
@@ -523,5 +584,45 @@ mod tests {
         sel.record_for_class("B", "view", "@\"NSView\"@:");
         assert_eq!(sel.encoding_for_class("B", "view"), Some("@\"NSView\"@:"), "each class keeps its own class");
         assert_eq!(sel.encoding_for_class("C", "view"), Some("@\"UIView\"@:"), "a class with no property takes the agreed spelling");
+    }
+
+    #[test]
+    fn stub_encoding_needs_agreeing_declarations() {
+        let sdk: HashMap<String, Option<String>> = [
+            ("tag".to_string(), Some("q@:".to_string())),
+            ("count".to_string(), Some("Q@:".to_string())),
+            ("width".to_string(), None),
+            ("depth".to_string(), None),
+            ("index".to_string(), Some("Q@:".to_string())),
+            ("alpha".to_string(), Some("d@:".to_string())),
+        ]
+        .into_iter()
+        .collect();
+        let mut sel = Selectors::with_sdk(sdk.clone(), true);
+        sel.record_declared("length", Some("d16@0:8"));
+        sel.record("tag", Some("d16@0:8"));
+        sel.record("count", Some("Q16@0:8"));
+        sel.record("width", Some("d16@0:8"));
+        sel.record("size", Some("d16@0:8"));
+        sel.record_declared("depth", Some("d16@0:8"));
+        sel.record_declared("wave", Some("v16@0:8"));
+        sel.record("index", Some("q16@0:8"));
+        assert_eq!(sel.stub_encoding("length"), None, "a protocol-only double return the headers do not confirm");
+        assert_eq!(sel.stub_encoding("tag"), None, "the headers return an integer");
+        assert_eq!(sel.stub_encoding("count"), Some("Q16@0:8"), "the headers agree");
+        assert_eq!(sel.stub_encoding("width"), Some("d16@0:8"), "headers that cannot spell it leave an implemented one");
+        assert_eq!(sel.stub_encoding("depth"), None, "headers that cannot spell it confirm no protocol-only one");
+        assert_eq!(sel.stub_encoding("index"), Some("q16@0:8"), "signedness is the same register");
+        assert_eq!(sel.stub_encoding("wave"), Some("v16@0:8"), "a protocol-only void return");
+        assert_eq!(sel.stub_encoding("size"), Some("d16@0:8"), "implemented here, unknown to the headers");
+        assert_eq!(sel.stub_encoding("alpha"), Some("d@:"), "declared only by the headers");
+        sel.record_declared("count", Some("Q16@0:8"));
+        assert_eq!(sel.stub_encoding("count"), Some("Q16@0:8"), "a protocol may repeat an implemented selector");
+
+        let mut off = Selectors::with_sdk(sdk, false);
+        off.record_declared("length", Some("d16@0:8"));
+        off.record("tag", Some("d16@0:8"));
+        assert_eq!(off.stub_encoding("length"), Some("d16@0:8"));
+        assert_eq!(off.stub_encoding("tag"), Some("d16@0:8"), "off, the image wins");
     }
 }

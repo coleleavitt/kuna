@@ -118,7 +118,7 @@ impl AnalysisPass for ObjcMetadataPass {
             Some(root) => kuna_objcsdk::signatures(&root, &kuna_objcsdk::linked_frameworks(ctx.file, ctx.bytes)),
             None => HashMap::new(),
         };
-        let mut selectors = kuna_objcrefs::Selectors::with_sdk(sdk);
+        let mut selectors = kuna_objcrefs::Selectors::with_sdk(sdk, kuna_decomp::kuna_objcstubagree::objcstubagree_enabled());
 
         // Walk `__objc_classlist`: an array of `class_t*` (stride = ptr size). The
         // classes are read first so every instance layout is known before any
@@ -181,10 +181,10 @@ impl AnalysisPass for ObjcMetadataPass {
         let protocols = kuna_objcprotos::protocols(&img, ctx.file);
         for proto in &protocols {
             for m in &proto.methods {
-                selectors.record(&m.selector, m.types.as_deref());
+                selectors.record_declared(&m.selector, m.types.as_deref());
             }
             for (sel, enc) in &proto.properties {
-                selectors.record(sel, Some(enc));
+                selectors.record_declared(sel, Some(enc));
             }
         }
 

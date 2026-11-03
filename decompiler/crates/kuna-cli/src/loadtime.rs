@@ -11,7 +11,7 @@ use std::process::Command;
 use kuna_decomp::{
     kuna_calltargettype, kuna_dwarfstructs, kuna_dwarfvariants, kuna_dynrelocs, kuna_i386_pie_plt,
     kuna_ifuncfpret, kuna_libctypes, kuna_msvcfpconst, kuna_pdatachained, kuna_peordinal,
-    kuna_goabi, kuna_goreg, kuna_gotypes, kuna_objcivars, kuna_objcsdk, kuna_relocrebase, kuna_rexthunk, kuna_sourcelang, kuna_swiftdemangle,
+    kuna_goabi, kuna_goreg, kuna_gotypes, kuna_objcivars, kuna_objcsdk, kuna_objcstubagree, kuna_relocrebase, kuna_rexthunk, kuna_sourcelang, kuna_swiftdemangle,
     kuna_symbolnamebound, kuna_symbolnamechars,
     kuna_variantnames,
     kuna_symbolnamerepair, kuna_typedepth, options::RELOC_OBJECTS_ENV,
@@ -60,6 +60,7 @@ fn binding(name: &str) -> Option<(&'static str, Encoding)> {
         "swiftdemangle" => (kuna_swiftdemangle::SWIFTDEMANGLE_ENV, DefaultOn),
         "objcivars" => (kuna_objcivars::OBJCIVARS_ENV, DefaultOn),
         "objcsdk" => (kuna_objcsdk::OBJCSDK_ENV, Trimmed),
+        "objcstubagree" => (kuna_objcstubagree::OBJCSTUBAGREE_ENV, DefaultOn),
         _ => return None,
     })
 }

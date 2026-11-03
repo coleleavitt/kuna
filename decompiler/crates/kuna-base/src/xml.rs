@@ -2160,7 +2160,8 @@ mod tests {
         // and kuna-objcmeta / ObjC categories, protocols and ivar structs (option objcivars)
         // and kuna-objcsdk / ObjC method signatures read from SDK headers (option objcsdk)
         // and kuna-objctypes / ObjC getters, setters and ivars typed by the class their property names
-        assert_eq!(count, 695, "corpus file count drifted");
+        // and kuna-objcstubagree / ObjC selector stubs typed only from agreeing declarations
+        assert_eq!(count, 696, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors

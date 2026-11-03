@@ -35,6 +35,8 @@ pub mod kuna_swiftdemangle;
 pub mod kuna_objcivars;
 // (kuna) The Objective-C SDK header directory (`objcsdk`, load-time, env-bridged).
 pub mod kuna_objcsdk;
+// (kuna) Selector stubs typed only from agreeing declarations (load-time, env-bridged).
+pub mod kuna_objcstubagree;
 // (kuna) The Go runtime-type harvest gate (load-time, env-bridged).
 pub mod kuna_gotypes;
 // (kuna) golang cspec auto-selection + the .abi0 stack-ABI model binding
