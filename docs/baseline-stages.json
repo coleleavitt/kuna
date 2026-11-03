@@ -1,7 +1,7 @@
 {
   "data_footer": [
-    3819,
-    3819
+    3824,
+    3824
   ],
   "passing": [
     "data:64-bit logical shift retains unsigned destination",
@@ -1051,7 +1051,7 @@
     "data:KUNA-CATALOG #12: scalar ARM inputs are a default-off opt-in",
     "data:KUNA-CATALOG #13: validated A32 inventory frames are the default",
     "data:KUNA-CATALOG #14: full ARM frames are explicitly enabled",
-    "data:KUNA-CATALOG #15: 378 registry rows plus six individual queries",
+    "data:KUNA-CATALOG #15: 379 registry rows plus six individual queries",
     "data:KUNA-CATALOG #16: standard C byte-array rendering is explicitly opt-in",
     "data:KUNA-CATALOG #17: standard C byte-array rendering exposes its live state",
     "data:KUNA-CATALOG #18: bounded local views are default-on and live",
@@ -1076,6 +1076,11 @@
     "data:KUNA-CONSOLE #6: phase map resolves the GH-558 sub-phase",
     "data:KUNA-CONSOLE #7: phase status reports the active pipeline variant",
     "data:KUNA-CONSOLE #8: phase status reports kuna sub-phase option defaults (DIV-2: original)",
+    "data:KUNA-DARWINVARARGS #1: option off drops the stack-passed variadic arguments (bug reproduced)",
+    "data:KUNA-DARWINVARARGS #2: the default recovers both arguments the caller stored at [sp] and [sp+8]",
+    "data:KUNA-DARWINVARARGS #3: AAPCS64 ELF keeps its register-passed variadic arguments",
+    "data:KUNA-DARWINVARARGS #4: the non-variadic callee keeps its stack argument in every pass",
+    "data:KUNA-DARWINVARARGS #5: the catalog documents it as a default-on P4 option",
     "data:KUNA-DECLAREDLIBCPROTO #1: the declared name renders in both passes",
     "data:KUNA-DECLAREDLIBCPROTO #2: so naming is not what moved, in either pass",
     "data:KUNA-DECLAREDLIBCPROTO #3: off, the arguments carry no type",

@@ -1083,6 +1083,13 @@ pub struct Architecture {
     /// fixed parameters and the varargs stop deactivating them (option
     /// `varargstackargs`).  See [`crate::p4_calls::kuna_varargstackargs`].
     pub vararg_stack_args: bool,
+    /// (kuna) Treat a callee whose body runs Apple's `va_start` as variadic at
+    /// its call sites (option `darwinvarargs`).  See
+    /// [`crate::p4_calls::kuna_darwinvarargs`].
+    pub darwin_varargs: bool,
+    /// (kuna `darwinvarargs`) Per-run cache of the callee `va_start` probe, keyed
+    /// by the callee's `(space index, entry offset)`.
+    pub kuna_darwin_variadic_cache: std::collections::HashMap<(int4, uintb), bool>,
     /// (kuna) Keep a declared parameter the function forwards unchanged, in its
     /// own register, to a variadic call's variable part (option
     /// `varargforward`).  See [`crate::p4_calls::kuna_varargforward`].
@@ -3228,6 +3235,8 @@ impl Architecture {
             narrow_signed: false,
             stack_arg_gap: true,
             vararg_stack_args: true,
+            darwin_varargs: true,
+            kuna_darwin_variadic_cache: std::collections::HashMap::new(),
             vararg_forward: true,
             vararg_shared_float: false,
             callee_arity: true,
@@ -3671,6 +3680,7 @@ impl Architecture {
         self.narrow_signed = false; // (kuna) option regsigned default-off: rebuilding a sign-extended register-local web at its low 1, 2 or 4 bytes moves decbench type_match by +0 to +4 perfect functions and adds casts elsewhere
         self.narrow_locals = true; // (kuna) option regnarrow default-on: a register-local web whose values the nonzero-bit analysis proves fit a low 1, 2 or 4 bytes, entered only through zero extensions, masks, constants and copies, is rebuilt at that width
         self.narrow_ret = true; // (kuna) option narrowret default-on: a call to a callee that returns a narrow value zero-extended reads that value
+        self.darwin_varargs = true; // (kuna) default-on: a callee whose body runs Apple's va_start is variadic at its call sites on an Apple AArch64 image (0/675 datatests)
         self.vararg_stack_args = true; // (kuna) DIV-101 default-on: a variadic call's stack tail is its own fillinMap section (0/675 ablation)
         self.vararg_forward = true; // (kuna) default-on: a declared parameter forwarded unchanged in its own register to a variadic call's variable part is an argument (0/675 ablation)
         self.vararg_shared_float = false; // (kuna) default-off: the register-choice reading holds only for -O0 code (post-RA scheduling defeats it at -O1+)
