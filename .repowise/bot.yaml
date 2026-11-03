@@ -1,0 +1,4 @@
+bot:
+  # A fork's git history makes upstream maintainers the suggested reviewers;
+  # don't @-mention them on fork pull requests.
+  show_ownership: false
