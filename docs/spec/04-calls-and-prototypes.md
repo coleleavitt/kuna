@@ -3908,6 +3908,12 @@ printed `target(); // tail-call` while `kuna decompile` printed
 `target(a0,a1,a2,a3,a4)`. Their batch now arms the same bootstrap for each
 function (`Architecture::kuna_tail_contract_batch`, set around the loop by
 `decompile_entries`); a whole-program run, callee-first or not, does not.
+A selection pays that nested decompile for every function, so there it is
+bounded: `option tailcontractmax <n>` (default 256, `off` for no bound) caps the
+nested drive's instruction count, with the too-many-instructions flow error on,
+so a larger callee stops while its flow is followed, states nothing, and its
+tail call forwards only what the caller's own body shows. The text
+`kuna decompile` drive is not bounded.
 
 ### (kuna) `importvote` — an undeclared import takes what its callers pass
 

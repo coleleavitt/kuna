@@ -60,13 +60,13 @@ fn surface_count_is_121() {
 }
 
 #[test]
-fn settable_count_is_485() {
-    assert_eq!(kuna_num_settables(), 485);
-    assert_eq!(SETTABLE_TABLE.len(), 485);
+fn settable_count_is_486() {
+    assert_eq!(kuna_num_settables(), 486);
+    assert_eq!(SETTABLE_TABLE.len(), 486);
 }
 
 #[test]
-fn tier_counts_are_148_core_194_transform_143_analysis() {
+fn tier_counts_are_149_core_194_transform_143_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -78,7 +78,7 @@ fn tier_counts_are_148_core_194_transform_143_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (148, 194, 143));
+    assert_eq!((core, transform, analysis), (149, 194, 143));
 }
 
 #[test]
@@ -900,6 +900,9 @@ fn option_values_live_value_present_for_237() {
                             // (kuna) `jumptablemax` takes an INTEGER; its
                             // live value is `Architecture::max_jumptable_size`.
                             | "jumptablemax"
+                            // (kuna) `tailcontractmax` takes an INTEGER; its
+                            // live value is `Architecture::tail_contract_max`.
+                            | "tailcontractmax"
                             // (kuna) `signedness` takes FOUR values
                             // (`upstream|auto|prefer-signed|prefer-unsigned`)
                             // over an enum field, which the codegen live reader
@@ -1369,7 +1372,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `switchrunon`; its P2 row sits after `switchsharedcase`.
     // +1 for `bejoinpass`; its P4 row sits after `bejoin`.
     // +1 for `persistcalls`; its P3 row sits after `readonlycalls`.
-    assert_eq!(json.matches("},\n").count(), 484);
+    // +1 for `tailcontractmax`; its P4 row sits after `tailcontract`.
+    assert_eq!(json.matches("},\n").count(), 485);
 }
 
 #[test]

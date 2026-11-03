@@ -1587,6 +1587,10 @@ fn recover_one_contract(
     let saved_format_sites = std::mem::take(&mut arch.format_override_callpoints);
     let saved_readonly = arch.readonlypropagate;
     let name = format!("sub_{:x}", entry.get_offset());
+    if arch.kuna_tail_contract_batch && arch.tail_contract_max > 0 {
+        arch.max_instructions = arch.max_instructions.min(arch.tail_contract_max);
+        arch.flowoptions |= crate::flow::flow_flags::error_toomanyinstructions;
+    }
     CONTRACT_DEPTH.with(|depth| depth.set(depth.get() + 1));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let callee = decompile_func(arch, &name, entry.clone(), 0).ok()?;

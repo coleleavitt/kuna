@@ -177,6 +177,24 @@ kuna_options! { self, p1;
     "outlinedinline" => on_off!(outlined_inline, "MachineOutliner fragment inlining"),
     "calleeretpurge" => on_off!(callee_ret_purge, "Callee `ret imm16` extrapop"),
     "tailcontract" => on_off!(tail_contract, "Tail-callee prototype bootstrap"),
+    "tailcontractmax" => {
+        let field = p1.trim();
+        let val = if field == "off" {
+            0
+        } else {
+            field
+                .parse::<uint4>()
+                .ok()
+                .filter(|_| field.bytes().all(|b| b.is_ascii_digit()))
+                .ok_or_else(|| KunaError::parse("Must specify an instruction count or off"))?
+        };
+        self.tail_contract_max = val;
+        Ok(if val == 0 {
+            "Batch tail-callee size limit turned off".to_string()
+        } else {
+            format!("Batch tail-callee size limit set to {val} instructions")
+        })
+    },
     "stackexitanchor" => on_off!(stack_exit_anchor, "Stack-solver return anchor"),
     "fdeflowbound" => on_off!(fde_flow_bound, "Unwind-extent fall-through bound"),
     "int3pad" => {

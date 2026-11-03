@@ -5083,6 +5083,25 @@ live_true = "on"
 live_false = "off"
 
 [[settable]]
+option = "tailcontractmax"
+values = "256|<n>|off"
+default = "256"
+destructive = false
+phase = "P4"
+subphase = "callee-prototype-stack-contract"
+strength = "HARD"
+rewind = "P4"
+issue = "ida95-extra-tail-thunk"
+summary = "The most instructions a tail callee may have for a narrowed decompile-all (`--addr`, `--functions`, `--filter`, `--limit`) or `kuna decompile --json` to decompile it first under tailcontract. A larger callee stops at this bound while its flow is followed, states nothing, and its tail call forwards what the caller's own body shows. `kuna decompile` (text) and whole-program runs are not limited. With no bound a selection pays one extra decompile per large tail callee: +37% user instructions on a 39-function kernelcache sample (+2.3% at 256) and +2.3% on a 2000-function iOS app selection (within noise at 256, where 145 of its 149 functions that gain tail-call arguments unbounded still gain them)."
+use_when = "Raise it (or `off`) when a selected function's tail call prints with no arguments, `sub_X(); // tail-call`, where `kuna decompile` of the same function prints them, and the selection is small enough to pay for decompiling the large callee. Lower it to trim the cost of a large selection."
+example = "option tailcontractmax 2048"
+source_decompiler = "kuna"
+inspiration = "kernelcache vnode_initialize: decompile-all --addr printed `sub_fffffff007f25aa4(); // tail-call` while kuna decompile printed four arguments; the 5.7 KB callee dominated the batch's cost"
+change_kind = "opt-in-tool"
+tier = "core"
+symptoms = "a selected function's tail call has no arguments in decompile-all --addr but has them in kuna decompile|decompile-all --limit is slower than the functions it selects should cost|kuna decompile --json drops tail-call arguments the text output shows"
+
+[[settable]]
 option = "stackexitanchor"
 values = "on|off"
 default = "on"

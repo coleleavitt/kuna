@@ -1507,6 +1507,9 @@ Three tiers:
 | a tail-calling thunk returns a value in decompile-all but not in a single decompile | [`tailcontract`](#tailcontract----on--off-default-on) |
 | a forwarder's tail call drops an argument it passes through unchanged | [`tailcontract`](#tailcontract----on--off-default-on) |
 | return helper(a0,a1 + 1) for a helper that takes three arguments | [`tailcontract`](#tailcontract----on--off-default-on) |
+| a selected function's tail call has no arguments in decompile-all --addr but has them in kuna decompile | [`tailcontractmax`](#tailcontractmax----256--n--off-default-256) |
+| decompile-all --limit is slower than the functions it selects should cost | [`tailcontractmax`](#tailcontractmax----256--n--off-default-256) |
+| kuna decompile --json drops tail-call arguments the text output shows | [`tailcontractmax`](#tailcontractmax----256--n--off-default-256) |
 | locals after an indirect callee-cleans call are off by the arguments it popped | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
 | a stdcall callee reached through a pointer shifts every stack slot after it | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
 | the stack pointer at the epilogue disagrees with the one the guesses produced | [`stackexitanchor`](#stackexitanchor----on--off-default-on) |
@@ -5119,6 +5122,14 @@ Part of the decompiler; not the control surface. Flip only to reproduce upstream
 - **When to flip:** On by default. Keep it on when `kuna decompile` of a small thunk or forwarder disagrees with decompile-all about its return value or its argument count. Flip OFF to see the thunk decompiled from its own body only, or to save the nested callee decompiles on a hot path.
 - **Where / provenance:** P4/callee-prototype-stack-contract · kuna · correctness-fix · ida95-extra-tail-thunk
 - **Example:** `option tailcontract off`
+
+### `tailcontractmax` -- 256 | `<n>` | off, default `256`
+
+- **Symptoms:** a selected function's tail call has no arguments in decompile-all --addr but has them in kuna decompile; decompile-all --limit is slower than the functions it selects should cost; kuna decompile --json drops tail-call arguments the text output shows.
+- **What it does:** The most instructions a tail callee may have for a narrowed decompile-all (`--addr`, `--functions`, `--filter`, `--limit`) or `kuna decompile --json` to decompile it first under tailcontract. A larger callee stops at this bound while its flow is followed, states nothing, and its tail call forwards what the caller's own body shows. `kuna decompile` (text) and whole-program runs are not limited. With no bound a selection pays one extra decompile per large tail callee: +37% user instructions on a 39-function kernelcache sample (+2.3% at 256) and +2.3% on a 2000-function iOS app selection (within noise at 256, where 145 of its 149 functions that gain tail-call arguments unbounded still gain them).
+- **When to flip:** Raise it (or `off`) when a selected function's tail call prints with no arguments, `sub_X(); // tail-call`, where `kuna decompile` of the same function prints them, and the selection is small enough to pay for decompiling the large callee. Lower it to trim the cost of a large selection.
+- **Where / provenance:** P4/callee-prototype-stack-contract · kuna · opt-in-tool · ida95-extra-tail-thunk
+- **Example:** `option tailcontractmax 2048`
 
 ### `stackexitanchor` -- on | off, default `on`
 

@@ -122,6 +122,10 @@ fn parse_int(s: &str) -> Option<uintb> {
     }
 }
 
+/// Default of option `tailcontractmax`: the instruction count above which a
+/// batch drive does not decompile a tail callee first.
+pub const TAIL_CONTRACT_MAX_DEFAULT: uint4 = 256;
+
 // ---------------------------------------------------------------------------
 // Warning sink (the CommentDatabase slice the Funcdata warning path needs)
 // ---------------------------------------------------------------------------
@@ -1156,6 +1160,9 @@ pub struct Architecture {
     /// callees first as a single-function drive does.  Driver state, not an
     /// option: the front-end sets it around such a batch.
     pub kuna_tail_contract_batch: bool,
+    /// (kuna) The most instructions a tail callee may have for a batch drive
+    /// to state its prototype first (option `tailcontractmax`, 0 = no limit).
+    pub tail_contract_max: uint4,
     /// (kuna) Tie each return's stack pointer to the entry one in the stack
     /// solver (option `stackexitanchor`).
     pub stack_exit_anchor: bool,
@@ -3642,6 +3649,7 @@ impl Architecture {
             callee_ret_purge: true,
             tail_contract: true,
             kuna_tail_contract_batch: false,
+            tail_contract_max: TAIL_CONTRACT_MAX_DEFAULT,
             stack_exit_anchor: true,
             fde_flow_bound: true,
             kuna_fde_extents: Rc::new(Vec::new()),
@@ -4202,6 +4210,7 @@ impl Architecture {
         self.global_call_ranges = true;
         self.callee_ret_purge = true;
         self.tail_contract = true;
+        self.tail_contract_max = TAIL_CONTRACT_MAX_DEFAULT;
         self.stack_exit_anchor = true;
         self.fde_flow_bound = true; // (kuna) default-on: fall-through stops at the end of the function's own FDE // (kuna) default-on: the stack solver ties each return's stack pointer to the entry one // (kuna) default-on: `kuna decompile` of a tail-calling thunk sees its callee's recovered prototype, as decompile-all does // (kuna) default-on: a direct callee's `ret imm16` is its extrapop, so an i386 struct-returning callee's `ret $4` no longer shifts the caller's frame
         self.x87_depth = true;
