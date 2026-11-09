@@ -3312,6 +3312,11 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // (kuna) Swift runtime-metadata recovery — default-OFF (output-changing:
         // names stripped functions and descriptor records).
         "swiftmetadata" => arch.analysis_swiftmetadata,
+        // (kuna) Mach-O `__cfstring` constant-string recovery — default-on,
+        // output-changing (renders CFString constants as `CFSTR("...")` typed
+        // `CFStringRef`). Registered here so `off` really skips it; `off`
+        // renders the entry exactly as before.
+        "cfstrings" => arch.analysis_cfstrings,
         // (kuna) PE PDB metadata recovery — default-OFF (output-changing: renames
         // stripped functions to their real PDB names). PE-only + externally gated on
         // a fingerprint-matching `.pdb` (the `kuna_pdb_path` env var). Registered
@@ -4862,6 +4867,18 @@ fn commit_analysis_output(
     out.symbols.extend(go_prototypes.iter().map(|(addr, pieces)| kuna_analysis::pass::SymFact {
         addr: *addr, name: pieces.name.clone(), kind: SymKind::Function,
     }));
+    // 0b. (kuna `swifttypes`) The Swift type-layout arm's facts, the same
+    //     deferred shape: on, the typed metadata records and the accessor
+    //     prototypes fold into their streams (the register-pinned parameters
+    //     are parked at step 7b); off, all three are dropped.
+    if prog.arch().analysis_swifttypes {
+        let swift = std::mem::take(&mut out.swift_types);
+        out.typed_data.extend(swift.typed_data);
+        out.prototypes.extend(swift.prototypes);
+        out.swift_types.param_locks = swift.param_locks;
+    } else {
+        out.swift_types = Default::default();
+    }
     // 0a. (kuna `cppsig`) The demangled-signature arm's prototypes. Same deferred
     //     shape as `cppproto` above, but the gate is three-valued, so the mode
     //     selects WHICH certainty tiers survive: `proven` only the prototypes the
@@ -5380,6 +5397,64 @@ fn commit_analysis_output(
         arch.symboltab.set_attribute(sid, kuna_decomp::varnode::varnode_flags::typelock);
     }
 
+    // 4a'. (kuna `cfstrings`) Mach-O Core Foundation constant strings. Each
+    //     `__cfstring` entry is typed a typelocked opaque `struct __CFString`
+    //     symbol, whose pointer the factory spells `CFStringRef`, so a reference
+    //     to the entry is a `CFStringRef`; AND the StringManager is seeded at the
+    //     entry address with the string its char pointer resolved to, so the
+    //     printer renders the literal (`CFSTR("launch-report")`) instead of
+    //     `dat_<addr>`, across the CFString struct indirection it cannot follow
+    //     on its own. The type spans the entry, never the string: a string-sized
+    //     type would overrun the next entry and hide it behind this one's symbol.
+    //     The seed goes in before the symbol, at char width 1, the width the
+    //     printer reads an entry's string with. The entry ranges were marked
+    //     read-only by the pass (arm 1b), which the route requires. Empty under
+    //     `--option cfstrings off`.
+    let cfstring_record = match out.cfstrings.first() {
+        Some(fact) => kuna_decomp::kuna_cfstr::declare_types(
+            prog.arch().types(),
+            fact.size as i32,
+            code_space.get_word_size(),
+        )?,
+        None => None,
+    };
+    for fact in &out.cfstrings {
+        let addr = Address::new(Rc::clone(code_space), fact.addr);
+        let occupied = {
+            let arch = prog.arch();
+            match arch.symboltab.get_global_scope() {
+                Some(global) => {
+                    arch.symboltab.find_function(global, &addr).is_some()
+                        || arch.is_lazy_entry(addr.get_offset())
+                        || arch
+                            .symboltab
+                            .find_container(global, &addr, 1, &Address::new_invalid())
+                            .is_some()
+                }
+                None => false,
+            }
+        };
+        if occupied {
+            continue;
+        }
+        let ty = match &cfstring_record {
+            Some(record) if record.get_size() == fact.size as i32 => Rc::clone(record),
+            _ => {
+                let ch = prog.arch().types().get_type_char(prog.arch().types().get_size_of_char())?;
+                prog.arch().types().get_type_array(fact.size as i32, ch)?
+            }
+        };
+        let name = format!("s_{:x}", fact.addr);
+        prog.arch().string_manager.borrow_mut().base.register_string_at(&addr, &fact.bytes, 1);
+        let arch = prog.arch_mut();
+        arch.cfstring_entries.insert(fact.addr);
+        let (scope, base) =
+            arch.symboltab.find_create_scope_from_symbol_name(&name, "::", None, num_spaces)?;
+        let (sid, _) =
+            arch.symboltab.add_symbol_mapped(scope, &base, ty, &addr, &Address::new_invalid())?;
+        arch.symboltab.set_attribute(sid, kuna_decomp::varnode::varnode_flags::typelock);
+    }
+
     // 4b. (kuna `libctypes`) Data symbols the analysis tier types outright — the
     //     stdio stream slots. Installed `typelock|namelock`: the name so the slot
     //     renders `stdout` rather than `dat_c088`, the TYPE because a dynamic
@@ -5705,6 +5780,30 @@ fn commit_analysis_output(
             *track = def;
             track.push(kuna_sleigh::globalcontext::TrackedContext { loc, val });
         });
+    }
+
+    // 7b. (kuna `swifttypes`) Register-pinned parameters: each resolved through
+    //     the language's register table and parked on the function's entry in
+    //     the shape of a console `map param`, which the decompile drive seeds
+    //     the function's own decompile with. A register the language does not
+    //     define is a silent no-op, as for the tracked registers above.
+    if prog.arch().analysis_swifttypes {
+        for fact in &out.swift_types.param_locks {
+            let Ok(loc) = prog.arch().get_register_varnode(fact.reg.as_bytes()) else {
+                continue;
+            };
+            let Some(space) = loc.space.clone() else { continue };
+            let piece = kuna_decomp::fspec::ParameterPieces {
+                addr: Address::new(space, loc.offset),
+                type_: Some(Rc::clone(&fact.type_)),
+                flags: kuna_decomp::fspec::parameter_pieces_flags::TYPELOCK
+                    | kuna_decomp::fspec::parameter_pieces_flags::NAMELOCK,
+            };
+            let entry = Address::new(Rc::clone(code_space), fact.func_addr);
+            let locks = prog.arch_mut().loader_param_locks.entry(entry).or_default();
+            locks.retain(|(i, _, _)| *i != fact.index);
+            locks.push((fact.index, fact.name.clone(), piece));
+        }
     }
 
     // 8. Call-fixups (the kuna analog of CallFixupAnalyzer's install loop): for
