@@ -8269,6 +8269,24 @@ inspiration = "Ghidra ObjectiveC2_ClassAnalyzer (Objc2InstanceVariable, the per-
 change_kind = "analysis-enablement"
 tier = "transform"
 symptoms = "an objective-c method reads *(long *)((long)self + dat_<addr>) instead of self->_ivar|self is objc_object * in every -[Class sel] although the class declares ivars|objc_storeStrong((long)self + <Class>::_ivar, x) instead of &self->_ivar"
+[[settable]]
+option = "objcsdk"
+values = "<directory>|off"
+default = "off"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-analysis-objc"
+summary = "Read Objective-C method signatures from SDK headers for the selectors an image only sends. A selector stub `objc_msgSend$setAlpha:` gets a prototype only when something in the image declares the selector (a class, category or protocol of its own), so a send to a framework method kept the untyped call-site inference and lost its arguments (`objc_msgSend$setHidden:();`). The declarations exist in the SDK the app was built against, and Apple's headers are never shipped with kuna, so this names a directory to read at load: an SDK root (`.../iPhoneOS.sdk`) contributes the `Headers/` of every framework the image links (LC_LOAD_DYLIB), any other directory every `.h` under it. The reader takes the declaration subset of the grammar — `@interface`/`@protocol`/category bodies, `- (ret)sel:(T)a ...;` methods, `@property (attrs) T name;` with `getter=`/`setter=`/`readonly` honoured, `typedef`s so NSInteger, CGFloat, NS_ENUM names and NSString-backed typed enums resolve — and turns each into the type encoding the runtime metadata would carry (`v@:d`), which rides the existing selector-to-prototype path: scalars and pointers pinned to their x/d registers, an HFA struct such as CGRect spread over d0..d3 as `arg_x, arg_y, arg_width, arg_height`, NSRange over two x registers, a larger struct (CGAffineTransform) the pointer the caller passes, a struct return the flat struct the model places in d0..d3. A type the reader cannot encode (an unknown struct, a function pointer) makes the selector unusable rather than guessed; one selector declared two ways across classes is dropped (a differing class-pointer argument is not a disagreement). The image's own declarations always win over the headers. Load-time, env-bridged (KUNA_OBJCSDK): set it before the `load file` it should apply to; nothing derived from the headers is written anywhere."
+use_when = "Off (default): only the image's own metadata types a send. Point it at the SDK the app was built against (`--option objcsdk ~/sdks/iPhoneOS16.5.sdk`) to type every UIKit/Foundation send; on a 1.9 MB iOS app that takes argument-less stub calls from 2,897 to 1,221 of 25,084 and renders `objc_msgSend$setAlpha:(v, 1.0)`, `objc_msgSend$setFrame:(v, r.x, r.y, r.width, r.height)`. A directory of your own headers works the same way. Inert unless `objc` is on."
+example = "option objcsdk /path/to/iPhoneOS.sdk"
+source_decompiler = "kuna"
+inspiration = "IDA's ObjC type library (objc.til) and Ghidra's objc_class.gdt archives, which ship typed selectors; here the user's own SDK stands in"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "objc_msgSend$setFoo:() renders with no argument although the caller sets one|objc_msgSend$setAlpha: shows 0x3ff0000000000000 instead of 1.0|objc_msgSend$setFrame: passes one word where a CGRect was built|a framework method's stub returns undefined16 or unsigned long instead of its declared type"
 
 [[settable]]
 option = "swiftmetadata"
@@ -8326,6 +8344,25 @@ inspiration = "The Swift ABI type metadata layouts (swift/include/swift/ABI/Meta
 change_kind = "analysis-enablement"
 tier = "analysis"
 symptoms = "swift struct and class fields render as raw offsets off self|swift getters named by swiftmetadata take no self parameter|type metadata accessors return undefined16"
+
+[[settable]]
+option = "swiftcall"
+values = "on|off"
+default = "on"
+destructive = false
+phase = "P1"
+subphase = "external-refinement"
+strength = "HARD"
+rewind = "P1"
+issue = "kuna-analysis-swiftcall"
+summary = "The calling-convention arm of the Swift metadata pass (inert unless swiftmetadata is on; it reads the type-layout arm, so swifttypes off turns it off too). Swift passes a method's self in the swiftself register (x20 on arm64, r13 on x86-64) when it is one pointer - a class instance, the address of a mutating or indirect value, a thick metatype - and returns a throwing function's error in the swifterror register (x21 / r12), which the caller zeroes before the call and tests after it. Under the C model neither register is a parameter, so a method's self is an unnamed register read, a call drops the self it passes, and the caller's test reads the zero it stored, so the error path of try? folds away. Every AArch64 and x86-64 compiler spec gains __swiftcall (its default model with swiftself as an input resource section of its own, so self is a parameter exactly when the body reads it and never forces the argument registers around it) and __swiftcall_throws (the same, handing the error register back to the caller), derived when the spec is read unless it declares models of those names, so they need no edit to the vendored specs and a spec a Ghidra host sends carries them too. The arm binds __swiftcall to every function it can place in a type, with no signature so the arity stays recovered: a class's vtable slots and overrides, a conformance's witnesses, a protocol's default implementations, and in an image that kept its symbols each method, accessor, initializer and deinitializer the demangler places in a class, struct or enum (throws read off the function type selects __swiftcall_throws; a struct's static member, whose metatype is thin, takes none). Its self is named and, where the type is known, typed as an unlocked hint the recovered parameter takes: Class * for an instance member, swift.class_metadata * for a class member or allocating initializer, the address of the value for a witness (T * for a struct, Class ** for a class, the reference itself under a class-bound protocol), swift.type_metadata * for a static requirement; a body two types share (identical code folding) keeps the name and drops the type. A direct call to a bound function recovers its arguments under the model, so it passes self; a call to a struct member, which may take self exploded into its trailing arguments instead, keeps a swiftself argument only when the caller set the register after its last call that may read it (a runtime helper with a C name, such as swift_retain, preserves the register and reads none of it). A method's own self handed on untouched (x20 / r13 never rewritten) is passed at a direct call, and an indirect call passes swiftself exactly when its target is loaded through the isa of the value the register holds (obj->isa[k](obj, ...)), so a virtual call on an object shows that object and a value-witness call shows none. Any call, direct or indirect, whose block zeroes the error register as its last write before it and whose next read of the register compares it with zero is given __swiftcall_throws, so the test after it reads the callee's error; a register zeroed for its own sake and read back as a value keeps its value. Default-ON because it is inert unless swiftmetadata is on (default-off, but ON in the `aggressive` preset, which `auto` selects for any binary under 500 KiB, so this arm runs with no flags on small Swift binaries), the XML corpus never runs the pass (0/675), and on a large third-party iOS app (84 MB) the arm adds no measurable load time and about 8 MB, and decompiling the 42,240 functions it binds takes 2.5% longer (1:13:53 against 1:12:07)."
+use_when = "Off to see a swiftmetadata-named binary under the C model: methods without self, calls without the self they pass, and try? error paths folded away. On (default) when swiftmetadata is on: self typed in methods, initializers, accessors and witnesses, passed at direct calls, and the error a throwing call returns tested where the binary tests it."
+example = "option swiftcall off"
+source_decompiler = "kuna"
+inspiration = "The Swift calling convention (swift/docs/ABI/CallingConventionSummary.rst; LLVM's swiftself/swifterror parameter attributes) and IDA Pro 9.5's Swift support (its swift plugin's __swiftcall/__swiftthrows flags, Hex-Rays keeping a __swiftself argument only when the register is read, and its callee-throws inference from a caller zeroing the error register); Ghidra's AARCH64_swift.cspec __thiscall puts x20 first in the integer list instead, which forces it whenever x0 is used"
+change_kind = "analysis-enablement"
+tier = "analysis"
+symptoms = "swift methods named by swiftmetadata read self from an unnamed x20 or r13|calls to swift methods drop the self they pass|a try? error path or a do/catch after a throwing call folds away|swift struct mutating methods write through an untyped register"
 
 [[settable]]
 option = "pdb"
