@@ -16,10 +16,15 @@ pub mod kuna_i386_pie_plt;
 pub mod kuna_ppc32picimports;
 // (kuna) x86-64 IFUNC (IRELATIVE) PLT-stub naming option gate (load-time, env-bridged).
 pub mod kuna_ifuncfpret;
+// (kuna) PowerPC APU-note language selection option gate (load-time, env-bridged).
+pub mod kuna_ppcapu;
 // (kuna) Relocatable-object analysis-fact rebase option gate (load-time, env-bridged).
 pub mod kuna_relocrebase;
 // (kuna) Linked-image dynamic-relocation application option gate (load-time, env-bridged).
 pub mod kuna_dynrelocs;
+// (kuna) Apple firmware container / kernel-collection entry selection (load-time,
+// env-bridged).
+pub mod kuna_kernelcache;
 // (kuna) PE chained-`UNWIND_INFO` `.pdata` entry suppression option gate
 // (load-time, env-bridged).
 pub mod kuna_pdatachained;
@@ -31,6 +36,13 @@ pub mod kuna_rexthunk;
 pub mod kuna_sourcelang;
 // (kuna) Swift symbol demangling gate (load-time, env-bridged).
 pub mod kuna_swiftdemangle;
+// (kuna) The Objective-C instance-layout gate's load-time half (env-bridged).
+pub mod kuna_objcivars;
+// (kuna) The Objective-C SDK header directory (`objcsdk`, load-time, env-bridged).
+pub mod kuna_objcsdk;
+// (kuna) dyld shared cache image selection + cross-image naming gates
+// (load-time, env-bridged).
+pub mod kuna_dyldcache;
 // (kuna) The Go runtime-type harvest gate (load-time, env-bridged).
 pub mod kuna_gotypes;
 // (kuna) golang cspec auto-selection + the .abi0 stack-ABI model binding

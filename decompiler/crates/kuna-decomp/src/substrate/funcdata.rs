@@ -275,6 +275,9 @@ pub struct Funcdata {
     /// dead-op removal took out and the Varnodes it read
     /// (`infra/action.rs (ActionPool::apply_wave)`).
     dead_wave_log: Option<(Vec<OpId>, Vec<VarnodeId>)>,
+    /// (kuna `deadcascade`) Does dead-op removal in the running pool pass take
+    /// the dead chain behind the removed op out with it?
+    dead_cascade_now: bool,
     /// (kuna decompile-all watchdog) What was left of the per-function budget
     /// when the drive handed this function back; rendering it may use no more.
     render_budget: Option<std::time::Duration>,
@@ -636,6 +639,9 @@ pub struct Funcdata {
     /// (kuna `elfmain`) The C runtime's `main` declaration this function's inputs
     /// take, when it is an executable's own `main`. See [`crate::kuna_elfmaindecl`].
     kuna_elfmain: Option<std::rc::Rc<crate::kuna_elfmaindecl::Runtime>>,
+    /// (kuna `swiftcall`) Names and types for the inputs this function's
+    /// analysis recovers. See [`crate::kuna_inputhints`].
+    kuna_input_hints: Option<std::rc::Rc<Vec<crate::kuna_inputhints::InputHint>>>,
     /// (kuna `calleevote fields`) Every caller of this function is a known direct call.
     kuna_calleevote_closed: bool,
     /// (kuna `elemptr`) The globals this function must not type as element
@@ -794,6 +800,7 @@ impl Funcdata {
             kuna_condstmts_hits: std::collections::BTreeSet::new(),
             kuna_restart_now: false,
             dead_wave_log: None,
+            dead_cascade_now: false,
             render_budget: None,
             flow_spent: std::time::Duration::ZERO,
             jumpvec: Vec::new(),
@@ -884,6 +891,7 @@ impl Funcdata {
             kuna_calleevote_inputs: None,
             kuna_callerargs: None,
             kuna_elfmain: None,
+            kuna_input_hints: None,
             kuna_calleevote_closed: false,
             kuna_elemptr_blocked: None,
             kuna_elemptr_adopt: None,
@@ -1608,6 +1616,16 @@ impl Funcdata {
     /// (kuna `elfmain`) The C runtime's `main` declaration for this function.
     pub fn kuna_elfmain(&self) -> Option<&crate::kuna_elfmaindecl::Runtime> {
         self.kuna_elfmain.as_deref()
+    }
+
+    /// (kuna `swiftcall`) Seed the input hints. See [`crate::kuna_inputhints`].
+    pub fn kuna_set_input_hints(&mut self, hints: Option<std::rc::Rc<Vec<crate::kuna_inputhints::InputHint>>>) {
+        self.kuna_input_hints = hints;
+    }
+
+    /// (kuna `swiftcall`) The input hints of this function.
+    pub fn kuna_input_hints(&self) -> Option<&[crate::kuna_inputhints::InputHint]> {
+        self.kuna_input_hints.as_deref().map(Vec::as_slice)
     }
 
     /// (kuna `calleevote fields`) Mark every caller of this function as known.
@@ -2515,6 +2533,18 @@ impl Funcdata {
         self.kuna_restart_now = true;
     }
 
+    /// (kuna `deadcascade`) Set whether dead-op removal in the running pool
+    /// pass cascades.
+    pub(crate) fn set_dead_cascade_now(&mut self, on: bool) {
+        self.dead_cascade_now = on;
+    }
+
+    /// (kuna `deadcascade`) Does dead-op removal in the running pool pass
+    /// cascade?
+    pub(crate) fn dead_cascade_now(&self) -> bool {
+        self.dead_cascade_now
+    }
+
     /// (kuna `deadwaves`) Start recording dead-op removals for a pool pass.
     pub(crate) fn start_dead_wave_log(&mut self) {
         self.dead_wave_log = Some((Vec::new(), Vec::new()));
@@ -2551,6 +2581,26 @@ impl Funcdata {
         };
         log.0.push(op);
         log.1.extend((0..o.num_input()).filter_map(|k| o.get_in(k)));
+    }
+
+    /// (kuna `copywaves`) Record that `op`'s input `old` is being replaced by
+    /// `new`: the op and each Varnode it touches, its inputs, the one replaced,
+    /// the one replacing it and its output.
+    pub(crate) fn note_wave_input_change(&mut self, op: OpId, old: VarnodeId, new: VarnodeId) {
+        let Some(log) = self.dead_wave_log.as_mut() else {
+            return;
+        };
+        let Some(o) = self.obank.get(op) else {
+            return;
+        };
+        log.0.push(op);
+        let mut vns: Vec<VarnodeId> = (0..o.num_input()).filter_map(|k| o.get_in(k)).collect();
+        vns.push(old);
+        vns.push(new);
+        vns.extend(o.get_out());
+        vns.sort_unstable();
+        vns.dedup();
+        log.1.extend(vns);
     }
 
     /// (kuna decompile-all watchdog) What the drive left of the budget for rendering.

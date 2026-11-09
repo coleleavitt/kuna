@@ -14,6 +14,8 @@ mod verify_gobyteview;
 mod octeon_n64_arguments;
 #[path = "octeon_abi.rs"]
 mod octeon_abi;
+#[path = "mips_import_flow.rs"]
+mod mips_import_flow;
 #[path = "n32_stack.rs"]
 mod n32_stack;
 
@@ -34,6 +36,9 @@ mod verify_aifpoolslide;
 
 #[path = "verify_aifstrict.rs"]
 mod verify_aifstrict;
+
+#[path = "verify_armderef.rs"]
+mod verify_armderef;
 
 #[path = "verify_arm_context.rs"]
 mod verify_arm_context;
@@ -275,6 +280,9 @@ mod verify_macho_imports;
 #[path = "verify_machomain.rs"]
 mod verify_machomain;
 
+#[path = "verify_unwindstarts.rs"]
+mod verify_unwindstarts;
+
 #[path = "verify_mappedflowboundary.rs"]
 mod verify_mappedflowboundary;
 
@@ -319,6 +327,19 @@ mod verify_noreturn_propagate;
 
 #[path = "verify_objc.rs"]
 mod verify_objc;
+#[path = "verify_swiftmetadata.rs"]
+mod verify_swiftmetadata;
+#[path = "verify_swifttypes.rs"]
+mod verify_swifttypes;
+
+#[path = "verify_importdata.rs"]
+mod verify_importdata;
+
+#[path = "verify_cfstring.rs"]
+mod verify_cfstring;
+
+#[path = "verify_elfgotimports.rs"]
+mod verify_elfgotimports;
 
 #[path = "verify_object_formats.rs"]
 mod verify_object_formats;
@@ -466,6 +487,9 @@ mod verify_w11_elf_plt_names;
 
 #[path = "verify_widestrings.rs"]
 mod verify_widestrings;
+
+#[path = "verify_xreffp.rs"]
+mod verify_xreffp;
 
 #[path = "wrapped_stack_encode.rs"]
 mod wrapped_stack_encode;

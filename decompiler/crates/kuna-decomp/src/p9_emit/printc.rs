@@ -7384,6 +7384,7 @@ impl PrintC {
         };
         if self.out_lang == crate::kuna_lang::OutLang::Rust {
             if let (Some(ct), Some(vn)) = (cast_ty.as_ref(), fd.obank().get(op).and_then(|o| o.get_in(0))) {
+                if self.push_rust_boolean_conversion(fd, arch, vn, op, ct) { return; }
                 if self.push_rust_array_address_cast(fd, arch, vn, op, ct) { return; }
                 if self.push_rust_integer_conversion(fd, arch, vn, op, ct, true) { return; }
             }
@@ -7831,6 +7832,14 @@ impl PrintC {
         // is restored.
         use crate::kuna_boolbyte::TruncationForm;
         match self.subpiece_cast_form(fd, arch, op) {
+            Some(TruncationForm::Cast | TruncationForm::CastThroughByte)
+                if self.out_lang == crate::kuna_lang::OutLang::Rust
+                    && fd.obank().get(op).and_then(|operation| operation.get_out())
+                        .is_some_and(|value| fd.vn_type_def_facing(value).get_metatype()
+                            == crate::dtype::type_metatype::TYPE_BOOL) =>
+            {
+                self.op_bool_truncation_ir(fd, arch, op)
+            }
             Some(TruncationForm::CastThroughByte) => self.op_bool_truncation_ir(fd, arch, op),
             Some(_) => {
                 let implied = self.implied_cast_drops(fd, arch, op, read_op);
@@ -7924,6 +7933,11 @@ impl PrintC {
             (Some(o), Some(b)) if !self.options.nocasts => (o, b),
             _ => return self.op_type_cast_ir(fd, arch, op),
         };
+        if self.out_lang == crate::kuna_lang::OutLang::Rust
+            && self.push_rust_truncated_boolean_conversion(fd, arch, op, &out_ty, &byte_ty)
+        {
+            return;
+        }
         self.push_cast_open(&out_ty, op);
         self.push_cast_open(&byte_ty, op);
         if let Some(vn) = fd.obank().get(op).and_then(|o| o.get_in(0)) {
@@ -8436,6 +8450,7 @@ impl PrintC {
         let nin = fd.obank().get(op).map(|o| o.num_input()).unwrap_or(0);
         let proto = fd.get_call_specs_index(op).map(|index| fd.get_call_specs(index).proto());
         self.push_word_result_open(fd, arch, op);
+        let result_conversion = self.push_call_result_open(fd, arch, op);
         self.push_op(&tokens::FUNCTION_CALL, Some(op_key(op)));
 
         if opc == OpCode::CPUI_CALLIND {
@@ -8493,6 +8508,7 @@ impl PrintC {
                     crate::printlanguage::SyntaxHighlight::no_color,
                 ));
             }
+            self.push_call_result_close(result_conversion, op);
             return;
         }
 
@@ -8539,6 +8555,7 @@ impl PrintC {
                 crate::printlanguage::SyntaxHighlight::no_color,
             ));
         }
+        self.push_call_result_close(result_conversion, op);
     }
 
     fn emit_indirect_input_aliases(&mut self, fd: &Funcdata) {
@@ -8588,6 +8605,7 @@ impl PrintC {
         &mut self, fd: &Funcdata, arch: &Architecture, vn: VarnodeId, op: OpId, slot: i32,
         proto: Option<&crate::fspec::FuncProto>,
     ) {
+        if self.push_extended_call_argument(fd, arch, vn, op, slot) { return; }
         if self.out_lang == crate::kuna_lang::OutLang::Go {
             if let Some(target) = proto.filter(|p| p.has_store()).and_then(|p| p.get_param(slot - 1)).and_then(|p| p.get_type()) {
                 self.push_go_value_as(fd, arch, vn, op, target);
@@ -8596,7 +8614,9 @@ impl PrintC {
         }
         if self.out_lang == crate::kuna_lang::OutLang::Rust && !self.options.nocasts {
             if let Some(target) = proto.filter(|p| p.has_store()).and_then(|p| p.get_param(slot - 1)).and_then(|p| p.get_type()) {
-                if self.push_rust_array_pointer(fd, arch, vn, op, target) { return; }
+                if self.push_rust_array_pointer(fd, arch, vn, op, target)
+                    || self.push_rust_integer_as(fd, arch, vn, op, target)
+                { return; }
             }
         }
         if self.out_lang != crate::kuna_lang::OutLang::C
@@ -8874,6 +8894,16 @@ impl PrintC {
             Some(v) => v,
             None => return,
         };
+        if let Some(name) = arch.import_data.then(|| import_slot_name(fd, ptr)).flatten() {
+            self.push_atom(&Atom::with_op_vn(
+                name,
+                TagType::VarToken,
+                crate::printlanguage::SyntaxHighlight::global_color,
+                op_key(op),
+                vn_key(ptr),
+            ));
+            return;
+        }
         let usearray = self.check_array_deref(fd, ptr) || self.is_value_indirect_input(fd, ptr);
         let mut m = self.context.mods();
         if usearray && !self.context.is_set(modifiers::FORCE_POINTER) {
@@ -9733,6 +9763,7 @@ impl PrintC {
         // taken out of.
         let mut unnamed_in: Option<std::rc::Rc<crate::dtype::Datatype>> = None;
         let volatile_annotation = fd.vbank().get(vn).is_some_and(|v| v.is_annotation() && v.is_volatile());
+        let facing_type = crate::kuna_aggregatefields::edge_type(fd, vn, op, slot);
 
         while let Some(cur) = ct.clone() {
             // (kuna arraycoverwidth) The upstream whole-symbol break exits the
@@ -9761,18 +9792,18 @@ impl PrintC {
                 && (sz == 0
                     || (sz == cur.get_size()
                         && (!cur.needs_resolution()
-                            || cur.get_metatype() == type_metatype::TYPE_PTR)))
+                            || cur.get_metatype() == type_metatype::TYPE_PTR
+                            || (cur.get_metatype() == type_metatype::TYPE_STRUCT
+                                && facing_type.as_ref().is_some_and(|ty| std::rc::Rc::ptr_eq(ty, &cur))))))
             {
                 break;
             }
             let mut succeeded = false;
             let meta = cur.get_metatype();
             if meta == type_metatype::TYPE_STRUCT {
-                // TypeStruct::findTruncation walks the field table (no cache).
-                // (printc.cc:2044-2056; the needsResolution()/findResolve guard at
-                // 2039-2043 only applies to a struct that itself needsResolution,
-                // which the corpus structs do not — it would require the union
-                // cache and is a no-op for a plain struct.)
+                if crate::kuna_aggregatefields::resolves_whole_struct(fd, &cur, sz, op, slot) {
+                    break;
+                }
                 match cur.find_truncation(off, sz, op, slot) {
                     Ok(Some((idx, newoff))) => {
                         if let Some(f) = cur.get_field(idx) {
@@ -10602,7 +10633,9 @@ impl PrintC {
                 // are indexed, never that they end at a zero byte.
                 if off != 0 && !crate::kuna_elemptr::reaches_element_pointer(fd, vn) {
                     if let Some(sub) = ct.get_ptr_to() {
-                        if sub.is_char_print() {
+                        // (kuna `cfstrings`) An entry reads as its string whatever its type.
+                        let sub = if sub.is_char_print() { Some(sub) } else { cfstring_char(arch, off) };
+                        if let Some(sub) = sub {
                             // point = op->getAddr() (the using op's address; used only
                             // by a segmented resolver — flat spaces ignore it).
                             let point = fd
@@ -11472,8 +11505,10 @@ impl PrintC {
             // with a readonly char-array spacebase symbol.
             if sym_off == 0 && !arrayvalue {
                 if let Some(st) = &sym_type {
-                    if st.get_metatype() == crate::dtype::type_metatype::TYPE_ARRAY {
-                        if let Some(elem) = st.get_array_base() {
+                    // (kuna `cfstrings`) A `__cfstring` entry reads as its string.
+                    let cfstr = if valueon { None } else { cfstring_char(arch, in1const) };
+                    if st.get_metatype() == crate::dtype::type_metatype::TYPE_ARRAY || cfstr.is_some() {
+                        if let Some(elem) = cfstr.or_else(|| st.get_array_base()) {
                             if elem.is_char_print() {
                                 let point = fd
                                     .obank()
@@ -12142,6 +12177,11 @@ impl PrintC {
             let Ok(pointer) = arch.types().get_type_pointer(ptr_size, subct.clone(), 1) else { return false };
             if !self.push_go_string_pointer(&mut s, &pointer, op) { return false; }
         }
+        if self.out_lang == crate::kuna_lang::OutLang::C
+            && arch.cfstring_entries.contains(&stringaddr.get_offset())
+        {
+            s = crate::kuna_cfstr::wrap(&s, stringaddr.get_offset(), arch.cfstrings_annotate);
+        }
         self.push_atom(&Atom::with_op_vn(
             s,
             TagType::VarToken,
@@ -12215,6 +12255,51 @@ impl PrintC {
         }
         true
     }
+}
+
+/// The import a `LOAD` reads through when its pointer is a loader-marked
+/// external-reference slot. The slot holds the import's address, so `*slot` is
+/// the import itself. Resolved like `ActionDeindirect` resolves a call through
+/// the same slot: `query_function` on the externref persist address. A pointer
+/// held in a named local resolves only while another statement still reads that
+/// local, so naming the import never leaves the local's assignment dead.
+fn import_slot_name(fd: &Funcdata, mut vn: VarnodeId) -> Option<String> {
+    let mut named = None;
+    while let Some(v) = fd.vbank().get(vn).filter(|v| v.is_written()) {
+        if named.is_none() && !v.is_implied() {
+            named = Some(vn);
+        }
+        let o = fd.obank().get(v.get_def()?)?;
+        if o.code() != OpCode::CPUI_COPY {
+            break;
+        }
+        vn = o.get_in(0)?;
+    }
+    let v = fd.vbank().get(vn)?;
+    if !(v.is_persist() && v.is_external_ref()) {
+        return None;
+    }
+    if named.is_some_and(|local| local != vn && !read_beyond_loads(fd, local, 4)) {
+        return None;
+    }
+    fd.get_arch().query_function(v.get_addr()).map(|(name, _, _)| name)
+}
+
+/// Does a printed op other than a `LOAD` through `vn` (directly or through
+/// inline COPYs) read `vn`?
+fn read_beyond_loads(fd: &Funcdata, vn: VarnodeId, depth: u32) -> bool {
+    fd.vbank().get(vn).is_some_and(|v| {
+        v.descend_iter().any(|d| {
+            fd.obank().get(d).is_some_and(|o| {
+                if o.not_printed() || (o.code() == OpCode::CPUI_LOAD && o.get_in(1) == Some(vn)) {
+                    return false;
+                }
+                let inline_copy = o.code() == OpCode::CPUI_COPY
+                    && o.get_out().and_then(|out| fd.vbank().get(out)).is_some_and(|out| out.is_implied());
+                !inline_copy || depth == 0 || o.get_out().is_some_and(|out| read_beyond_loads(fd, out, depth - 1))
+            })
+        })
+    })
 }
 
 /// A same-width scalar a byte-copy helper can copy into or out of without conversion.
@@ -13095,6 +13180,15 @@ fn ptrsub_value_access(fd: &Funcdata, op: OpId, value: bool) -> Option<(VarnodeI
     })
 }
 
+/// (kuna `cfstrings`) The character type a `__cfstring` entry's seeded string is
+/// read with, when `val` is the address of one.
+fn cfstring_char(arch: &Architecture, val: uintb) -> Option<std::rc::Rc<crate::dtype::Datatype>> {
+    if !arch.cfstring_entries.contains(&val) {
+        return None;
+    }
+    arch.types().get_type_char(1).ok()
+}
+
 /// C++ `TypeSpacebase::getAddress` (type.cc:3542): the storage a
 /// `PTRSUB(spacebase, in1const)` names.  A global spacebase (invalid localframe)
 /// must be a full pointer encoding, which the C++ signals by suppressing the
@@ -13173,7 +13267,7 @@ pub(crate) fn op_key(op: OpId) -> crate::printlanguage::IrKey {
 }
 
 /// A stable per-varnode key for the `Atom` varnode slot (the C++ `Varnode *`).
-fn vn_key(vn: VarnodeId) -> crate::printlanguage::IrKey {
+pub(crate) fn vn_key(vn: VarnodeId) -> crate::printlanguage::IrKey {
     use slotmap::Key;
     vn.data().as_ffi()
 }
