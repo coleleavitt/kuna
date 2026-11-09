@@ -1370,6 +1370,67 @@ string longer than one entry"), `_get_after`@`0x100000550` → entry@`0x10000404
 `CFSTR("...")` of its string (`annotate` adds `/* cfstring@0x<entry> */`); off, it
 returns the entry by its data symbol (`&_kGreeting`).
 
+### `elf_gotdata_x86_64.so` / `elf_gotdata_aarch64.so` — ELF GOT data imports
+
+Two `-fPIC` shared objects (~3.5 KB each) built from `elf_gotdata.c`, for the ELF
+half of `importdata` (pass `elfgotimports`; `kuna-console/tests/verify_elfgotimports.rs`,
+`tests/stages/kuna-elfgotimports.xml`). Each reads `imported_counter`, `environ` and
+`stdout` through `R_*_GLOB_DAT` slots it leaves undefined, and `exported_value`,
+which it defines (a `GLOB_DAT` to a defined, preemptible symbol). The committed
+files were built with clang and LLD 22.1.8 (their `.comment` section says so), no
+libc; the devcontainer's older clang + lld take the same recipe but may lay the
+image out differently, so the pinned VMAs below are the committed files':
+
+```
+clang --target=x86_64-linux-gnu  -O1 -fPIC -shared -fuse-ld=lld -nostdlib \
+      -Wl,--build-id=none -o elf_gotdata_x86_64.so  elf_gotdata.c
+clang --target=aarch64-linux-gnu -O1 -fPIC -shared -fuse-ld=lld -nostdlib \
+      -Wl,--build-id=none -o elf_gotdata_aarch64.so elf_gotdata.c
+```
+
+**Pinned VMAs.** x86-64: `get_counter`@`0x1580`, `get_env`@`0x1590`,
+`get_out`@`0x15a0`, `get_exported`@`0x15b0`, `addr_exported`@`0x15c0`; GOT slots
+`imported_counter`@`0x2680`, `environ`@`0x2688`, `stdout`@`0x2690`. AArch64:
+`get_counter`@`0x104e4` … `addr_exported`@`0x10524` (stride 0x10); GOT slots
+`0x205c0`/`0x205c8`/`0x205d0`. With `--option importdata on` the three reads are
+`imported_counter` / `environ` / `stdout`; off they are `*dat_<slot>`.
+`exported_value` / `&exported_value` read the same either way.
+
+### `macho_objc_meta_arm64` — categories, a protocol, ivars
+
+`macho_objc_meta_arm64` (arm64, ~51 KB) is the fixture for the ObjC category /
+protocol / instance-layout recovery (`analyzers/objc/kuna_objccats.rs`,
+`kuna_objcprotos.rs`, `kuna_objcivars.rs`; stage test `tests/stages/kuna-objcmeta.xml`).
+Source `macho_objc_meta.m`: root class `Base { Class isa; int count; double ratio;
+id name; }` with `-count`/`-setCount:`/`-ratio`; protocol `Greeter` (`-greet:`
+required, `-wave` optional); category `Base(Extra) <Greeter>` (`-greet:`,
+`+extraTag`); `@interface Remote` with **no implementation** and its category
+`Remote(Extra)` (`-remoteGreet:`, `+remoteTag`), so the category's class is an
+imported (bind) class; `Sub : Remote { int x; id tag; }` whose `-[Sub x]` reads
+`x` through the `__objc_ivar` offset variable (non-fragile, the superclass being
+external) while `Base`'s own methods use direct offsets; `use` sends `wave` through
+a linker stub. The committed `.s` is `clang -S` output with that one send routed
+through `_objc_msgSend$wave` and the `.globl` dropped from the `_OBJC_IVAR_$_`
+symbols so `-x` strips them as a shipped app does:
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_meta.m -o macho_objc_meta_arm64.s
+# edit: route the `wave` send through `_objc_msgSend$wave`; delete the `.globl _OBJC_IVAR_$_*` lines
+clang -target arm64-apple-macos11 -c macho_objc_meta_arm64.s -o meta.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_meta_arm64 meta.o
+```
+
+**Pinned VMAs:** `-[Base ratio]`@`0x100000830`, `-[Base(Extra) greet:]`@`0x10000083c`,
+`-[Sub x]`@`0x100000860` (reads the offset variable `Sub::x`@`0x100008388`),
+`objc_msgSend$wave`@`0x1000008e0`, `__objc_catlist`@`0x100004020` (two entries),
+`__objc_protolist`@`0x100004008` (`Greeter`), `__objc_ivar`@`0x100008378` (six
+offset variables). With `objc on` the categories render `-[Base(Extra) greet:]` /
+`+[Remote(Extra) remoteTag]`, `self` is `Base *` / `Sub *` and the ivars read
+`self->ratio`, `self->x`; with `objcivars off` `self` stays `objc_object *` and
+`-[Sub x]` reads `(int8)self + (int8)Sub::x`; with `objc off` the category methods
+are `sub_10000083c`… and the ivar load is `dat_100008388`.
+
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
 The multi-format **entry-discovery** gate
@@ -1974,3 +2035,145 @@ self->count; }` and the accessor as `swift.type_metadata *
 typefix.Point.type_metadata_accessor(long request) { return
 &typefix.Point.type_metadata; }`; with `swifttypes off` the getter takes no
 parameter and reads `*(long *)(v2 + 0x60)`.
+
+### `swift_icf_elf` — a stripped Swift executable with folded code (`swiftmetadata`)
+
+`swift_icf_elf` (x86-64 ELF, 12 KB) is the identical-code-folding fixture
+(`tests/stages/kuna-swifticf.xml`). Its source `swift_icf_elf.swift` declares
+protocols `Tagged` and `Keyed` and structs whose witnesses the linker folds:
+`Alpha.tag` and `Beta.tag` are both `{ 7 }` (one protocol member, two types),
+`Delta.tag` and `Delta.describe()` are both `{ d * 3 }` (one type, two
+members), and `Gamma.key` is its own `{ k + 11 }`. Built with function sections
+and the linker's folding:
+
+```bash
+swiftc -O -module-name icffix -use-ld=lld -Xfrontend -function-sections \
+  -Xlinker --icf=all swift_icf_elf.swift -o icffix
+llvm-strip --strip-all -o swift_icf_elf icffix
+```
+
+Its `DT_RUNPATH` was blanked after the build the same way as
+`swift_metadata_elf`'s (`$ORIGIN` padded with NULs in `.dynstr`).
+
+**Pinned VMAs** (the unstripped `icffix` symbol table): the `Tagged.tag.getter`
+witnesses of `Alpha` and `Beta` both at `0x27f0`, `Delta`'s `tag.getter` and
+`describe()` witnesses both at `0x2ab0`, `Gamma`'s `Keyed.key.getter` witness
+at `0x2850`, `Alpha`'s `describe()` at `0x2800`. With `swiftmetadata on` they
+decompile as `<*:icffix.Tagged>.requirement#0(void)`,
+`<icffix.Delta:icffix.Tagged>.requirement#0.merged#2(void)` and
+`<icffix.Gamma:icffix.Keyed>.requirement#0(swift.type_metadata *Self, void
+*witness_table, icffix.Gamma *self)`.
+### `swift_call_elf` / `swift_call_syms_elf` — Swift methods, witnesses and a throwing call (`swiftcall`)
+
+`swift_call_elf` (x86-64 ELF, 16 KB, stripped) and `swift_call_syms_elf` (the
+same link with its symbols, 29 KB) are the Swift calling-convention fixtures
+(`tests/stages/kuna-swiftcall.xml`, `kuna-cli/tests/swift_call_cli.rs`). Their
+source `swift_call_elf.swift` declares a class method of two arguments
+(`Account.deposit(_:fee:)`), a throwing one (`Account.withdraw(_:)`), a final
+method that calls another on its own `self` (`Account.settle(_:)` calling
+`fee(for:)`), a mutating struct method (`Counter.advance(by:times:)`, `self` in
+r13) and a non-mutating one (`Counter.peek(_:)`, `self` exploded into its
+trailing arguments), and a protocol whose witnesses a struct and a class
+provide; `run` calls them and wraps the throwing call in `try?`. Built with the
+swiftly 6.3 toolchain:
+
+```bash
+swiftc -O -module-name callfix swift_call_elf.swift -o swift_call_syms_elf
+llvm-strip --strip-all -o swift_call_elf swift_call_syms_elf
+```
+
+Both blobs' `DT_RUNPATH` was blanked after the build the same way as
+`swift_metadata_elf`'s (`$ORIGIN` padded with NULs in `.dynstr`); the checksums
+are of the blanked files.
+
+SHA-256: `swift_call_elf` `7daa276007f3cd21a6d9a35c4557507f7efc6713f595240e94c9b6e8da72dc30`,
+`swift_call_syms_elf` `e7e52786c446aa427673fbcf192d71bd7111578421f556c4efa43ff27b848b1a`.
+
+**Pinned VMAs** (the symbol table of `swift_call_syms_elf`):
+`$s7callfix7AccountC7deposit_3feeS2i_SitF` (vtable slot 7)@`0x3830`,
+`$s7callfix7AccountC8withdrawyS2iKF` (slot 8, throws)@`0x3870`,
+`$s7callfix7AccountC6settleyS2iF`@`0x35e0`, `$s7callfix7AccountC3fee3forS2i_tF`@`0x38f0`,
+`$s7callfix7CounterV7advance2by5timesySi_SitF`@`0x3660`,
+`$s7callfix7CounterV4peekyS2iF`@`0x3680`, the `bump` witnesses
+`$s7callfix7CounterVAA8PingableA2aDP4bumpyySiFTW`@`0x2ff0` and
+`$s7callfix7AccountCAA8PingableA2aDP4bumpyySiFTW`@`0x3060`, and
+`$s7callfix3runySiAA7AccountC_AA7CounterVzSitF`@`0x3490`, which sets r13 for
+the virtual `deposit` call at `0x34c5`, zeroes r12 (`xor %r12d,%r12d`) before
+the throwing virtual call at `0x34de` and tests it after. With `swiftmetadata
+on` (`swiftcall` is on by default) the class method decompiles as
+`callfix.Account.vtable#7.method(callfix.Account *self,long a1,long a2)` and
+passes `self` to the virtual calls it makes on itself, the struct witness
+writes `self->step`, the class witness takes `callfix.Account **self`, and
+`run` passes `a0` to both virtual calls and keeps `if (v5) {
+swift_release(v5); v3 = -1; }`; with symbols, `advance` takes `callfix.Counter
+*self` and `run` passes it `a1`, `peek` gains no `self`, and `settle` hands its
+own `self` to both `fee(for:)` calls. With `swiftcall off` the methods read
+`self` from an unnamed r13, the calls pass none, and `run` returns the throwing
+call's result unchecked.
+
+### `swift_call_helper_elf` — a mutating struct call after a runtime helper (`swiftcall`)
+
+`swift_call_helper_elf` (x86-64 ELF, 17 KB, with symbols) is the fixture for the
+`swiftself` value a runtime helper call preserves (`tests/stages/kuna-swiftcall.xml`).
+Its source `swift_call_helper_elf.swift` calls the mutating
+`Counter.bump()` after `swift_beginAccess`, which runs between the caller
+setting r13 and the call, straight-line in `once` and in a loop in `loop`:
+
+```bash
+swiftc -O -module-name helperfix swift_call_helper_elf.swift -o swift_call_helper_elf
+```
+
+Its `DT_RUNPATH` was blanked after the build the same way; the checksum is of the
+blanked file.
+
+SHA-256: `aac515b2332292701091ea7e55a4044ecb884eed10e0dd9819a862597bac942f`.
+
+**Pinned VMAs:** `$s9helperfix4onceySiAA7CounterVz_AA3BoxCtF`@`0x2440`,
+`$s9helperfix4loopySiAA7CounterVz_AA3BoxCSitF`@`0x2480`,
+`$s9helperfix7CounterV4bumpyyF`@`0x2640`. With `swiftmetadata on` both calls
+decompile as `helperfix.Counter.bump()(a0)`; with `swiftcall off` they pass
+nothing.
+
+### `swift_call_native_elf` — a Swift executable with C code using r12 and a class-bound protocol (`swiftcall`)
+
+`swift_call_native_elf` (x86-64 ELF, 12 KB, SHA-256
+`364ca3ac1ba7169e7f94cb680cb56d4cd8b5b3b73448a2c97560be7083f65b8a`) is built
+from `swift_call_native_elf.swift` and `swift_call_native_helper.c`:
+
+```bash
+gcc -c -O1 swift_call_native_helper.c -o helper.o
+swiftc -O -wmo -module-name nativefix -no-toolchain-stdlib-rpath \
+  swift_call_native_elf.swift helper.o -o nativefix
+llvm-objcopy --strip-all nativefix swift_call_native_elf
+```
+
+(swiftc 6.4.2, gcc 11.4.0.) `native_counter` (`0x10dc`) and `native_arm`
+(`0x10fe`) zero r12, make an unrelated call and read r12 back as a value,
+which no throwing call's caller does: `tests/stages/kuna-swiftcall.xml` pins
+that their `__swiftcall_throws` rule stays off, so the zero stays a zero.
+`<nativefix.Impl:nativefix.ClassOnly>.requirement#0` (`0xe70`) is the witness
+of a class-bound protocol on a class, whose `self` is the reference itself.
+
+### `swift_call_arm64_elf` — arm64 callers that test x21 after a throwing call (`swiftcall`)
+
+`swift_call_arm64_elf` (arm64 ELF shared object, 11 KB, SHA-256
+`5e58fe72a4d5881da74cbfc03126d367e293b6be4c2a1f077d5664a35feb813c`) is built
+from `swift_call_arm64_elf.swift` and `swift_call_arm64_select.s` with the
+x86-64 Linux swiftc 6.4.2 toolchain, which carries no arm64 standard library,
+so the Swift part is compiled as its own minimal standard library:
+
+```bash
+swiftc -frontend -c -parse-stdlib -module-name Swift \
+  -target aarch64-unknown-linux-gnu -Onone swift_call_arm64_elf.swift -o swiftpart.o
+clang --target=aarch64-linux-gnu -c swift_call_arm64_select.s -o select.o
+ld.lld -shared -o swift_call_arm64_elf swiftpart.o select.o
+```
+
+`Swift.doCatch(_:)` (`0x1120c`) is swiftc's debug-build caller: after the call
+it copies x21 to x8, stores x8 and then tests x21 itself with `cbnz`.
+`select_error` (`0x112d4`) is hand-written: the select an optimized build makes
+on the error register (swiftc's x86-64 output for `(try? f(x)) ?? 7` on a typed
+throw is `test r12, r12; cmovne`), here `cmp x21, #0; csel`, whose zero the
+arm64 instruction loads into a temporary before comparing. With `swiftmetadata
+on` both keep their error path: `doCatch` releases the error and calls `altv`,
+and `select_error` returns 7 when x21 is set.
