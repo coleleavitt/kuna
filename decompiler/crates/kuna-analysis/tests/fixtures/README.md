@@ -1003,6 +1003,25 @@ adrnext_sh4.py`; no SuperH toolchain here). Recipe, toolchains and SHA-256s in
 `kuna-cli/tests/xrefs_cli.rs (an_address_of_the_next_instruction_is_a_data_reference,
 no_link_references_the_return_address_it_leaves)`.
 
+## dyld shared cache (`dyld_cache_arm64e/`)
+
+`dyld_cache_arm64e/` (about 29 KB in three files) is a synthetic two-image arm64e
+dyld shared cache, split the way iOS 16 splits one: `dyld_shared_cache_arm64e`
+(header, image table, `__TEXT`/`__DATA`/`__LINKEDIT` mappings, v3 slide info),
+`.01` (a `__TEXT_STUBS` stub island), and `.symbols` (the local symbols).
+`/usr/lib/libcaller.dylib` calls `/usr/lib/libcallee.dylib`'s `callee_add`
+through the island at `0x180008800` and through a coalesced `__got` slot. That
+slot's v3 chain links a plain pointer to an authenticated one. Its `helper_local`
+is a `<redacted>` placeholder in its own symbol table, named only by `.symbols`.
+It drives the `kuna_dyldcache` unit tests and `tests/stages/kuna-dyldcrossrefs.xml`.
+No Apple toolchain is needed: `dyld_cache_arm64e.py` assembles the files from
+the public `dyld_cache_format.h` layouts and hand-encodes the A64 bodies.
+Regenerate with:
+
+```bash
+python3 dyld_cache_arm64e.py
+```
+
 ## Mach-O fat/universal + arm64e (PR-8)
 
 The fat/universal + arm64e gate (`kuna-console/tests/verify_macho_fat.rs`, design
@@ -1461,6 +1480,24 @@ alone `style` reads `objc_msgSend$setAlpha:();`; with `option objcsdk
 decompiler/crates/kuna-analysis/tests/fixtures/objc_sdk` it reads
 `objc_msgSend$setAlpha:(a1,a0);`, `v1 = objc_msgSend$frame(a1);` as a `CGRect` and
 `objc_msgSend$setFrame:(a1,v1.x,v1.y,v1.width + 10.0,v1.height);`.
+
+### `macho_objc_types_arm64` — declarations typed by class
+
+`macho_objc_types_arm64` (arm64, ~50 KB) is the fixture for class-typed
+declarations (`analyzers/objc/kuna_objcprops.rs`, stage test
+`tests/stages/kuna-objctypes.xml`). Source `macho_objc_types.m`: `Base { Class
+isa; int count; }` with a synthesized `count` property (attributes `Ti,N,Vcount`),
+`Holder : Base { Base *inner; }` with a synthesized `inner` property
+(`T@"Base",N,Vinner`), and `-[Holder innerCount]` reading `inner->count`,
+`[inner count]` and `[[self inner] count]`; the `.s` routes the `inner` send
+through `_objc_msgSend$inner` (same recipe as `macho_objc_meta_arm64`, `-x`
+link). **Pinned VMAs:** `-[Holder innerCount]`@`0x100000740`, `-[Holder
+inner]`@`0x100000798`, `-[Holder setInner:]`@`0x1000007a0`, `objc_msgSend$inner`@
+`0x1000007c0`. With `objc on` the body reads `v1 = self->inner->count;`, the
+getter is `Base * -[Holder inner](Holder *self, …)` and the setter takes `Base
+*arg1`; with `objcivars off` the getter keeps its `Base *` return (the property
+declares it) but `self` is untyped; with `objc off` everything is
+`sub_<addr>(void *a0)`.
 
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
