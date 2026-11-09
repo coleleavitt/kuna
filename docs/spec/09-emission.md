@@ -1670,6 +1670,17 @@ walk that renders `name.field`, `name[index]`, a `(int4)name` truncation cast,
 or the artificial `name._8_4_` member when a Varnode covers only part of its
 mapped symbol (`printc.rs (PrintC::push_partial_symbol_ir)`).
 
+With `option aggregatefields` on (the default; §5 describes the option),
+a single-field struct covering the whole access consults the operation's
+cached type resolution before descending into that field. A resolution to the
+whole struct stops the walk; a field resolution still emits the member. This
+keeps aggregate copies and returns whole and prevents an implied field access
+from being appended twice (for example, `x.a.d.d` instead of `x.a.d`).
+The walk also stops when it reaches the value's type at the current operation;
+a nested single-field container must not be resolved a second time through a
+cache lookup for a type that is not the value on that edge. Off keeps the
+upstream walk, which descends into every single-field struct.
+
 (kuna) The character formatter prints a byte above 0x7f of a `signed char` or
 `unsigned char` type (a character type that is not the target's own `char`,
 chapter 01's DWARF reader makes them) as a number of the type's sign, not as
@@ -2217,6 +2228,31 @@ returns: `param_N`, type-prefixed `iVar1`/`uVar2`-style locals
 (kuna_default_local_name)`), `func_`/`code_` addresses. Both schemes are
 recognized as "generated" by `kuna_naming.rs (kuna_is_generated_name)` so
 cross-function name recommendation never propagates a default name.
+
+A data read through an import slot is the exception to `dat_<addr>` (`importdata`,
+`naming-policy`). The option is off in the shipped catalog but on in the `aggressive`
+preset, which `auto` selects below 500 KiB, so on a small binary this is the default
+rendering. A data import — a Mach-O `__got`/`__auth_got`
+entry, a dyld-cache coalesced GOT slot, a PE IAT entry — is reached through a slot
+the dynamic loader fills with the import's address (`ldr x8,[slot]; ldr w8,[x8]`).
+The loader already names that slot for the import and paints it `externref`, which
+is how `ActionDeindirect` turns a *call* through it into a direct call to the
+import. A *data* read is not a call, so it printed as a dereference of the
+anonymous slot, `*dat_<slot>`. With the option on, `PrintC::op_load`
+(`decompiler/crates/kuna-decomp/src/p9_emit/printc.rs (import_slot_name)`) renders
+a LOAD whose pointer is such a slot as the import itself — `*slot` where the slot
+holds `&imported_counter` is `imported_counter` — resolving it exactly as
+`ActionDeindirect` resolves a call through the same slot (`query_function` on the
+externref persist address, after a plain COPY chain). Calls never reach this path,
+since deindirection consumes them first, and a read through anything that is not an
+externref import slot keeps `*dat_<addr>`. It depends on the slot being painted, so
+it is a no-op when `peimportcall` is off and on any format whose import slots are
+not painted (ELF GOT data imports today); a pointer that reaches the LOAD through a
+phi rather than a COPY chain is left as the dereference. A slot pointer the body
+holds in a named local (`v2 = stdout_ptr;`, then several reads through `v2`) names
+the import only while some other printed statement still reads that local: when
+every read of it is such a load, the loads keep `*v2`, so naming the import never
+leaves the local's assignment dead.
 
 (kuna) **The ghidra-mode third style (Phase 3, DIV-77).** The ghidra-mode
 process sets a separate `name_style_ghidra` flag alongside (not instead of)
@@ -3337,6 +3373,25 @@ Variadic tails use the blank identifier so they cannot capture a source name.
 This is a presentation of the recovered ABI: it does not infer missing Go
 multi-results, receivers, strings, slices or interfaces.
 
+`p9_emit/kuna_gopointerarith.rs` preserves the live pointer base of byte
+arithmetic emitted as Go. When a pointer result or conversion contains an
+integer addition with exactly one declared pointer operand, it emits
+`unsafe.Add(unsafe.Pointer(base), offset)` followed by the required pointer
+conversion. Both operands and the result must have the architecture's native
+four- or eight-byte pointer width. A bounded chain of implied same-width
+copies and casts may be removed to expose the addition and its operands.
+The base must be a non-implied pointer value and the offset a named integer or constant;
+volatile values, globals, annotations, effectful expressions, two-pointer
+additions and other widths retain their existing handling. Negative constant
+offsets use the signed interpretation of the native word, and named signed
+offsets retain their type. No operand is evaluated twice. This avoids losing
+Go allocation provenance by converting the pointer through an integer, while
+leaving genuinely integer addresses on the existing conversion path.
+This does not repair an unsupported artificial pointer member of a byte-array
+carrier; that member retains its existing type error even when its surrounding
+pointer arithmetic is corrected.
+The diagnostic `nocastprinting` setting retains its existing behavior.
+
 `p9_emit/kuna_gobyteview.rs` makes bounded artificial members of byte-array
 storage usable under Go output. A final unnamed piece covering the whole array
 reads or writes the array value directly. A one-, two-, four- or eight-byte
@@ -3953,7 +4008,20 @@ as read at two types and left undeclared, the existing rule for `dat_<addr>`.
 The header exporter diagnoses one name at multiple addresses and multiple names
 sharing one address instead of silently combining or splitting their storage.
 Whole named objects also retain the independent-storage overlap guard; overlapping
-views require shared storage instead of separate declarations. With `globalref`
+views require shared storage instead of separate declarations. A connected group
+of consistently typed, fixed-size character arrays can share its earliest array
+when that array contains every byte of the group
+(`decompiler/crates/kuna-console/src/kuna_stringoverlaps.rs (declarations)`). The
+header declares that owner once and defines each contained name as an array
+lvalue at its byte offset into the owner. This preserves array extents, address
+taking, shared writes, and relocation when the owner is linked. A conflicting
+name or type, a name used by a parameter, local, or member elsewhere in the
+emitted C, an uncertain extent, a non-character view, or a group extending
+beyond the owner keeps the existing diagnostic; no independent overlapping
+objects are declared. Streaming exports retain the name evidence before discarding
+each function body, so the same collision checks apply regardless of arrival
+order. A header built without complete body evidence keeps the diagnostic.
+With `globalref`
 on, a native `void *` constant into a complete mapped object is rendered relative
 to its base, including interior field addresses. Requesting type definitions
 (`structdefs on` or the shared header of a C project export) extends this to
@@ -4331,6 +4399,132 @@ suppression disables these conversions. C and Go emission are unchanged.
 Native validation uses wrapping arithmetic, with Rust overflow checks disabled,
 to match the binary's integer operations. The conversion does not itself select
 checked versus wrapping arithmetic for a source build.
+
+### Rust Boolean conversions
+
+`kuna_rustboolcast.rs` renders a primitive byte consumed as a Boolean as
+`value != 0`, because Rust does not permit an integer `as bool` cast. The same
+conversion serves explicit casts, COPY assignments, returns and typed STORE
+values. It uses the printed source type and requires a one-byte integer value
+and a one-byte Boolean destination. Enum values, nonintegers and inconsistent
+storage widths retain their existing handling. An implied call must have a
+compatible byte result in its call prototype or the verified scalar call-result
+conversion described below. Wider results must retain their
+separate narrowing operation: a byte extracted from a callback result becomes
+`callback() as u8 != 0`, not a comparison of the complete result. The expression
+also replaces the outer Boolean cast when the `boolbyte` SUBPIECE path inserts
+an intermediate unsigned-byte cast. Rust retains the intermediate cast even
+when the upper bits are proven zero, so both truncation forms yield a valid
+Boolean expression. The source is evaluated once, and the normal
+operator stack preserves surrounding Boolean and arithmetic precedence.
+Cosmetic cast suppression disables the conversion.
+C and Go emission are unchanged.
+
+An implied integer expression composed of untyped literals retains its byte
+context through `::core::convert::identity::<u8>` or `::<i8>` before comparison.
+For example, `!0xff` must stay an unsigned byte with value zero rather than
+becoming an inferred `i32` with a nonzero value. The same bounded context walk
+used by integer conversions decides whether the annotation is needed.
+
+An implied bitwise expression can still render as Boolean when a merged local's
+printed type is Boolean but its individual p-code value has an integer type.
+Before inserting the comparison, a bounded walk recognizes Boolean operands of
+`&`, `|`, `^` and logical negation, including comparison results and calls with a
+known Boolean result. Such expressions retain their Boolean identity cast instead of
+acquiring the invalid comparison `bool != 0`. Named leaves use their printed
+type; byte storage alone is insufficient evidence. Unknown leaves, integer
+constants, byte complements and enum types do not establish a Boolean expression.
+The walk checks at most eight levels and preserves the original operators, so eager bitwise
+operands remain eager and callbacks are neither duplicated nor short-circuited.
+
+Native validation compiles complete emitted C and Rust functions under the same
+asserted Boolean prototypes. Every byte value, signed-byte interpretation,
+masked value and low-byte callback result agrees, including nonzero upper words
+with a zero low byte. Callback counters check single evaluation. These checks
+validate the asserted source-type conversion; they do not execute an original
+function with a potentially noncanonical machine Boolean representation.
+Additional loop probes check merged Boolean locals at assignments, returns and
+stores, with independent result formulas, ordered callback traces and adjacent
+store canaries at both optimization levels zero and two.
+
+### Narrow recovered scalar call results
+
+`kuna_callresult.rs` makes the conversion explicit when a Go or Rust caller keeps
+the low part of a wider integer returned by an already-decompiled callee.
+The callee's recorded return statement describes the emitted function's type
+and storage, even when the caller's unlocked output prototype is still void.
+The emitter reads that statement from the caller's analysis snapshot, including
+statements withdrawn from type inference. It does not change the inference rule
+that requires identical return storage and width before propagating a type.
+When no return-type statement exists, the emitter can use the computed return
+recorded with callee-first parameter recovery under `passthrough`. This includes
+untyped scalar returns that print as integers, such as an identity function's
+eight-byte result. The storage-only result record is insufficient: the return
+must have a recorded type and be computed on every live return path.
+
+The source and target must be primitive integers of 1, 2, 4 or 8 bytes, with a
+strictly smaller target. The target uses its printed local type. Both types must
+match their recorded storage widths, and the target must occupy the exact low
+slice of the source in the same byte-addressed processor space. Big-endian
+storage places that slice at the source's end. Overflowing ranges, other spaces,
+enums, pointers, floats and aggregates are excluded. A nonvoid call prototype
+must agree with the recorded source type. Locked prototypes keep their existing
+cast handling, and recursive calls cannot use a prior statement about their own
+function. Aggregate result adapters and Rust formatting calls keep their
+specialized rendering.
+
+A one-byte Boolean destination first narrows the call result to an unsigned
+byte and then compares that byte with zero. This preserves a false result for
+nonzero upper bytes with a zero low byte. The call is evaluated once. Numeric
+destinations use Rust's `as` or Go's typed conversion, preserving the retained
+bits and target signedness. C emission is unchanged; Rust cosmetic cast
+suppression bypasses the conversion, while Go retains its required conversions.
+
+Native checks compile complete emitted callees and callers with signed and
+unsigned 8-, 16- and 32-bit destinations, Boolean results and full-width
+forwarding. Typed and untyped callee returns are both covered. The CLI test
+requests `protoorder types` explicitly because its function selection is
+filtered; an ordinary whole-program callee-first run already records this
+metadata. Console-only decompilation without recorded returns is a negative
+control, and asserted callee prototypes retain their existing conversion path.
+
+### Integer arguments at recovered call boundaries
+
+`kuna_callargextend.rs` makes primitive Go and Rust arguments agree with an
+already-decompiled callee's parameter type. A direct call must have final input
+storage for each argument, and the parameter's position and storage address must
+match the recorded callee input. Its type must occupy the recorded parameter
+width. Same-width arguments receive an explicit signedness conversion when their
+printed type differs from the callee's type. Rust also applies this conversion
+when the call already has a parameter prototype.
+When the printed argument already matches the recorded callee, it is retained
+without applying a conflicting unlocked call-site type guess.
+
+Subvariable flow may remove a zero extension from a call input. If the callee
+still prints a wider parameter, the emitter restores that extension only when
+the call retains a zero-extension marker matching the argument slot, retained
+width and current argument count. It first converts the value to an unsigned
+integer of the retained width, then to the callee's wider integer type. This
+keeps a negative signed low word from being sign-extended. A constant instead
+prints its masked, nonnegative low bits, which fit either wider signedness.
+Expressions are evaluated once. Without the marker, widening follows the
+existing expression and prototype paths, preserving genuine sign extension.
+
+Both types must be primitive integers of 1, 2, 4 or 8 bytes. Enums, pointers,
+Booleans, floats, aggregates, narrowing contracts, recursive calls and indirect
+calls do not use a recovered parameter snapshot here. The storage range must
+fit in a byte-addressed processor space. A locked parameter or closed locked
+prototype takes precedence over a recovered snapshot. Missing or stale storage
+and extension evidence leave existing rendering in control. C output is
+unchanged, and Rust's cosmetic cast suppression retains its existing behavior.
+
+Complete emitted C, Go and Rust callers and their unmodified recovered callees
+are checked against independent bit-mask and sign-extension formulas. The
+fixture covers byte, halfword and word inputs, signed low words, signed wider
+parameters, full-width forwarding, and eight-byte stores with adjacent canaries.
+Filtered CLI tests explicitly request `protoorder types` to collect the callee
+contracts. Console tests without that snapshot exercise the ordinary prototype
+path; they do not stand in for the positive recovered-callee checks.
 
 ### Rust machine-operation names
 

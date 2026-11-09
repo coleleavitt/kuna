@@ -32,6 +32,7 @@ real ELF parser.
 | `arm_noreturn_site_le32` | 5.3 KB stripped armel shared object built from `arm_noreturn_site_le32.c` (`-DPART=1` and `3` with `-marm`, `3` also with `-fno-inline`, `-DPART=2` and `4` with `-mthumb`, each `arm-linux-gnueabi-gcc -O2 -fPIC -march=armv7-a -c`; linked 1,2,3,4 with `-shared -march=armv7-a -Wl,-z,max-page-size=0x1000 -Wl,-z,common-page-size=0x1000 -Wl,--hash-style=gnu`, then `arm-linux-gnueabi-strip -s`; Debian gcc 14.2.0, binutils 2.44, SHA-256 `c832480ef0f57ab580941f67d670a91c05601e37c9f1325eaf74200403cbcbd9`), `.dynsym` only: the A32 exports `api` and `api2`, the Thumb `th_helper` and `t2`, the A32 `report_bad` and `a_last` at `0x50c`, which calls `report_bad` (it returns) and then `__builtin_unreachable()`, and the Thumb `u` at `0x524`, called only from `t2` | a call whose callee returns but which does not return at its site: `flowmode on` proves nothing after it, so `u` keeps the Thumb decode the walk gives it, alone and in `decompile-all`. `kuna-cli/tests/arm_interwork_cli.rs` |
 | `arm_exception_end_le32` | 5.3 KB stripped armel shared object built from `arm_exception_end_le32.c` (`-DPART=1`, `2` and `4` with `-marm`, `-DPART=3` and `5` with `-mthumb`, each `arm-linux-gnueabi-gcc -O0 -fPIC -march=armv7-a -c`; linked 1,2,3,4,5 with `-shared -march=armv7-a -Wl,-z,max-page-size=0x1000 -Wl,-z,common-page-size=0x1000 -Wl,--hash-style=gnu`, then `arm-linux-gnueabi-strip -s`; Debian gcc 14.2.0, binutils 2.44, SHA-256 `86906d13431ac65fa5d39ea03cc93521e212956c92698ebd5a6b9a150d9fc0dc`), `.dynsym` only: the A32 export `api2`, which calls `puts` and then the static Thumb `u` and `v` with `blx`; the A32 export `my_exit`, which ends in `svc #0` and `__builtin_unreachable()`, followed by `u` at `0x510`; and the A32 export `my_trap`, which ends in `bkpt #1` and `__builtin_unreachable()`, followed by its literal pool and `v` at `0x56c` | an exception-generating instruction the compiler emits nothing after: `flowmode` never proves the instruction after a user-defined p-code operation, so `u` and `v` keep the Thumb decode the walk gives them under every value, alone and in `decompile-all`. `kuna-cli/tests/arm_interwork_cli.rs` |
 | `arm_unsized_export_le32` | 5.2 KB stripped armel shared object built from `arm_unsized_export_le32.c` (`-DPART=1,3` with `-mthumb`, `-DPART=2` with `-marm`, each `arm-linux-gnueabi-gcc -O2 -fPIC -march=armv7-a -c`; linked 1,2,3 as above, then `arm-linux-gnueabi-strip -s`; SHA-256 `959350e06e8b801eb02b34d459f1fd873c772725a8f2fc4ea51c45b8b746fbac`): the Thumb export `thumb_first`, the A32 assembly export `asm_nosz` with no `.size`, then the static Thumb `tsum` at `0x410` and `tpop` at `0x430` | an A32 symbol with no size paints nothing over the static Thumb code after it, so both statics decompile in `decompile-all`. `kuna-cli/tests/arm_interwork_cli.rs` |
+| `armderef_arm_le32` | 1.8 KB static A32 executable with a `.got`, built from `armderef_arm_le32.c` (GCC 14.2 `arm-linux-musleabihf-gcc`: `-DPART=1` with `-O2 -marm -march=armv7-a -fPIC`, `-DPART=2` with `-O2 -marm -march=armv6 -fno-pic`, linked `-nostdlib -static -no-pie`; commands in the source; SHA-256 `0fa6146b0a6de7d6b38d91688fa883ba19d3426121b6eb3b0ce1149e4cb4e564`), not stripped | **Accesses through a held address** (`armderef`, `listing/kuna_picpool.rs`; e2e `kuna-console/tests/verify_armderef.rs`, `tests/stages/kuna-armderef.xml`). `pic_read`@`0x10098`, `pic_write`@`0x100cc` and `pic_keep`@`0x100f0` load `g_cfg`@`0x111d8` and `g_tab`@`0x11198` from their GOT slots (`ldr rX,[r3,r2]`) and read and write them at constant offsets, `pic_keep` after a `bl` from r4; `abs_read`@`0x1011c`, `abs_write`@`0x1012c` and `_start`@`0x10158` (ARMv6, no `movw`/`movt`) load `g_cfg` from a literal-pool word, `abs_write` into r5 across two calls |
 | `armv4t_thumb_pe.exe` | project-authored ARMv4T Thumb PE32 image from `armv4t_thumb_pe.s` | PE machine `0x01c2` architecture recovery, odd Thumb entry normalization, container-derived `TMode=1`, explicit `--target` compatibility checks, and ARM/Thumb CLI override behavior |
 | `armveneeralias_le32` | 1.7 KB ARM32 shared object built from `armveneeralias_le32.s` (`clang --target=armv7a-linux-gnueabihf -c` + `ld.lld -shared`, LLD 14.0.0, SHA-256 `5e1e6da0a68538079ea4caa6f222ace0b11555bdd5b1ebe65fdd1d128d9fe746`): the exported `answer` shares its address with the local ARM veneer name `__answer_from_arm`, which `.symtab` lists first, and a Thumb `caller` reaches `answer` through the PLT | ELF names that share an address: the loader keeps the later ones as aliases (`ObjectLoadImage::func_symbol_aliases`), so `answer` selects the veneer's body instead of its PLT stub while the reported name stays `__answer_from_arm`. `tests/stages/kuna-elfaliasnames.xml` is the stage test; `kuna-cli/tests/elf_symbol_aliases.rs` covers the synthetic linked/relocatable matrix built by `arm_aliases.rs` |
 | `elfaliasclash_x86_64` | 16 KB dynamic x86-64 PIE built from `elfaliasclash_x86_64.c` + `elfaliasclash_b_x86_64.c` (`gcc -O1`, Ubuntu gcc 11.4.0, SHA-256 `3b99d2b6ec4ad89d8301c41ac0973eee8132ca6f748b10a55f0b361e9cf926a3`): `shared` is both a global alias of `twin` (same address) and a static function of its own | a same-address alias spelled like another function's own name never takes that name over: `shared` still selects the static function at `0x1155`. `tests/stages/kuna-elfaliasnames.xml` and `kuna-cli/tests/elf_symbol_aliases.rs` |
@@ -154,6 +155,9 @@ real ELF parser.
 | `gotxref_arm_le32` | 71 KB static A32 ARM ELF built from `gotxref_arm_le32.c` (GCC 14.2 `arm-linux-musleabihf-gcc -O2 -marm -fPIC -no-pie`, command in the source; SHA-256 `7fd54d44cf3d1e1464abd08a9d593f59d2ac94225a50dc2f2eff311b0aaecfb2`), a fixed-address executable mapped at 0x10000 | **GOT bases and mapped-looking displacements** in `picpool` (`listing/kuna_picpool.rs`; e2e `kuna-console/tests/verify_gotxref.rs`). `arm_timers`@`0x100cc` makes the GOT base in r6 around a call, keeps it across a call and a branch join, and reads the slots of `on_expire` and `on_rearm` through it (`ldr r3,[r6,r3]`), which the linker filled with no relocation; `_start` reads `table`'s slot the same way. `table` sits between the code and the strings so every string displacement is itself a mapped address, which must be composed with the PC and never filed as a pointer |
 | `gotxref_thumb_le32` | 73 KB static Thumb-2 ARM ELF built from `gotxref_thumb_le32.c` (GCC 14.2 `arm-linux-musleabihf-gcc -O2 -mthumb -march=armv7-a+fp -fPIC -no-pie`, command in the source; SHA-256 `1c40aee5537ecf6b073a3278ca0bf5ba27eba51afd4a7188b95b3fbd5bf56047`), a fixed-address executable mapped at 0x10000 | The Thumb counterpart of `gotxref_arm_le32` for `picpool` (e2e `kuna-console/tests/verify_gotxref_thumb.rs`). Thumb's literal loads (16-bit and `ldr.w`) lift as copies out of the image, not loads. `arm_timers`@`0x100f8` makes the GOT base in r6 and reads the slots of `on_expire` and `on_rearm` across a call and a join; `pick_timer`@`0x10164` dispatches through a `tbb` table whose cases each read a callback slot through the dispatch's base; `far_timer`@`0x10218` makes its base and a string with `ldr.w`; the slot words carry the Thumb bit |
 | `picodd_thumb_le32` | 67 KB static Thumb-2 ARM ELF built from `picodd_thumb_le32.c` and `picodd_thumb_le32.ld` (GCC 10.3.1 `arm-none-eabi-gcc -Os -mcpu=cortex-m4 -mthumb -fPIC -nostdlib`, command in the source; SHA-256 `57b53ac8260b2286f2f5de5d4986f97a35c59c42bbd35a6ed647054af8048fb4`), `.rodata` linked into `.text` at 0x10000 | **The Thumb bit of a PC-composed address** in `picpool` (e2e `kuna-console/tests/verify_gotxref_thumb.rs`). The strings `"ab"`@`0x100a9` and `"ij"`@`0x100af` sit at odd addresses inside the executable section under a `$d` mapping symbol and must be filed at those addresses, not one byte low; `local_cb`'s PC-composed pointer and `f3`'s GOT slot word carry bit 0 and must name the even entries |
+| `xreffp_arm_le32` | 77 KB dynamic ARM ELF (A32, one Thumb-2 function) built from `xreffp_arm_le32.c` (GCC 14.2 `arm-linux-musleabihf-gcc -O2 -marm -march=armv7-a+fp -fPIC -no-pie`, command in the source; SHA-256 `33c2504a9e043837b83c7668ab36b4e602bff2bb198728af6980a96839ff8e92`), a fixed-address executable mapped at 0x10000 that links musl's `libc.so` | **Reference-walk false positives on ARM** (`listing/kuna_pltstub.rs`, `listing/xrefs.rs`; e2e `kuna-console/tests/verify_xreffp.rs`). Each import is called through a GNU ld PLT stub (`printf@plt`@`0x10310`: `add ip,pc,#0,12; add ip,ip,#0x12000; ldr pc,[ip,#0xcf4]!`, slot `0x2300c`); `table` sits between the stubs and the GOT, so the stub's `0x12000` lands in it. `clamp`@`0x1054c` and `pick`@`0x10560` hold predicated A32 instructions (`movlt`, `ldrne`), `pick_t`@`0x10570` a Thumb-2 `it ne; ldrne`, and `main` two `movle`/`movgt` pairs; `next_branch`@`0x1057c` holds a real `bne` whose label is the next instruction |
+| `xreffp_strip_arm_le32` | 420 B stripped static ARM ELF (A32, three Thumb-2 functions) built from `xreffp_strip_arm_le32.S` (GCC 14.2 `arm-linux-musleabihf-gcc -march=armv7-a+fp -nostdlib -static -Wl,--build-id=none -s`, command in the source; SHA-256 `ca57e3366b1d95b19b80690d4c2b1a73e1d5da0afe895955fe1a26f4ca2e727a`), mapped at 0x10000; `_start`@`0x10054` is its only seed | **Condition skips on a stripped ARM image** (`listing/xrefs.rs`; e2e `kuna-console/tests/verify_xreffp.rs`). Every function but `_start` is found from a call. `falls_in`@`0x10070` ends in `moveq` whose skip runs into `found_by_call`@`0x10078`; `dispatch_last`@`0x10080` is an A32 table dispatch (`addls pc,pc,r0,lsl #2`@`0x10084`) whose skip runs into `after_dispatch`@`0x10088`; `it_branch`@`0x100a4` (Thumb) holds `it eq; beq.w`@`0x100a8` whose label is the next instruction, and calls `it_return`@`0x100ba` (Thumb), whose `it ne; bxne lr`@`0x100be` has no fall-through, so its skip is the one way into `thumb_next`@`0x100c0` |
+| `xrefiplt_arm_le32` | 532 B stripped static ARM ELF (A32) built from `xrefiplt_arm_le32.S` (GCC 14.2 `arm-linux-musleabihf-gcc -march=armv7-a+fp -nostdlib -static -Wl,--build-id=none -s`, command in the source; SHA-256 `10d395e9877830a902ad724f910d50b5994f4b20ccb623380f0979bda48f253c`), mapped at 0x10000 | **An IFUNC stub in `.iplt`** (`listing/kuna_pltstub.rs`; e2e `kuna-console/tests/verify_xreffp.rs`). `pick` is a GNU IFUNC declared in assembly, so the static link puts its stub at `0x1007c` in `.iplt` (`add ip,pc,#0,12; add ip,ip,#0x1000; ldr pc,[ip,#0x20]!`, slot `0x110a4` in `.got`); `_start`@`0x10088` calls it |
 | `retpushedhalf_x86_64` | 4.8 KB static ELF assembled from `retpushedhalf_x86_64.s` (`as && ld`), holding `xordec` -- the WeeperVM four-argument decryptor reduced to its prologue/epilogue, with an alignment `push %r8` popped into `RDX` -- and the control `regmove`, whose `RDX = R8` is an ordinary `mov` | the push-only placement rejection (`retpushedhalf`, default-on, DIV-156; `--option retpushedhalf off` restores the defect, where `xordec` grows a fifth argument and a 128-bit return). `tests/stages/kuna-retpushedhalf.xml` is the two-pass stage test; `tests/cli/alignment-push-pop-invents.json` the promoted RE-friction probe |
 | `raw_compat_int80_x86_64` | deterministic 17-byte headerless x86-64 image generated by `raw_compat_int80_x86_64.py`: `ENDBR64; MOV EAX,1; MOV EBX,0; INT 0x80; RET`, mapped at `0x1000` by the CLI probe | Linux's i386 compatibility entry from long mode (`linuxsyscall`): syscall 1 must render as standalone `sys_exit(0);`, never native x86-64 `write` or a generic `syscall()`. `tests/cli/linux-compatibility-int-0x80.json` is the promoted probe; `tests/stages/kuna-linuxsyscall-x64-compat.xml` adds a native `SYSCALL` control |
 | `raw_endptrbound_x86_64` | deterministic 271-byte headerless Win64 image generated by `raw_endptrbound_x86_64.py`, mapped at `0x140001000` by the CLI probes: `walk`@`0x140001000` walks an 8-byte stack buffer bytewise to one past its end, and that end address is also the object handed to `push_back`@`0x140001100`; `midpoint`@`0x140001080` counts its loop in `EBX` and compares the pointer against the same address only to skip a call inside the loop | the pointer-walk end bound (`endptrbound`): `walk`'s bound must render on its own buffer (`&v1[8]`), never as the neighbour, while `midpoint`'s comparison, which controls no loop exit, must not invent an 8-byte array. `tests/cli/endptrbound-walk-bound.json` and `tests/cli/endptrbound-midpoint-compare.json` are the probes; `tests/stages/kuna-endptrbound.xml` is the two-pass stage test |
@@ -181,6 +185,7 @@ real ELF parser.
 | `castsign_dwarf_gcc_O0_x86_64` | 18 KB dynamic x86-64 ELF with DWARF, built from `castsign_dwarf_x86_64.c` (`gcc -O0 -g`, SHA-256 `cf4de1b0a10d2698c4833efd223cf98a6e0ee53ddf989fe72fec2d368cf75cc3`); `sign_of` keeps a value the source declares `unsigned long` and only compares signed | kuna locks a DWARF local's type, so `castsign` must leave `unsigned long n;` and its `(long)n` alone; with the debug info stripped the same slot is declared `long`. `kuna-cli/tests/decompile_all_cli.rs` `castsign_leaves_a_locked_declaration_alone` |
 | `dwarf2_members_x86_64.o` | 3.1 KB x86-64 relocatable object with DWARF 2, built from `dwarf2_members_x86_64.c` (`gcc -O1 -gdwarf-2 -gno-record-gcc-switches -fdebug-prefix-map=$PWD=. -c`, Ubuntu gcc 15.2.0, SHA-256 `ad0d89864a97e343d0f94891e192883df869b7eb778337526a9b5bc0ac636a99`); every member location is a `DW_OP_plus_uconst` expression | DWARF 2 member and bitfield offsets: `second` returns `p->b` and `high_bits` returns `f->hi`. `kuna-cli/tests/dwarf_member_layout.rs` |
 | `dwarf_static_member_x86_64.o` | 2.9 KB x86-64 relocatable object with DWARF 4, built from `dwarf_static_member_x86_64.cpp` (`g++ -O1 -gdwarf-4 -gno-record-gcc-switches -fdebug-prefix-map=$PWD=. -c`, Ubuntu g++ 15.2.0, SHA-256 `57c9cacf1bf9ba9605bc901cd15f3e6e7a7238c15a76bcd7031250909bdbb557`); `Counter::instances` is an external, declaration-only `DW_TAG_member` without a location | a static data member is not part of the layout: `first_of` returns `c->first`, not the static member at offset 0. `kuna-cli/tests/dwarf_member_layout.rs` |
+| `dwarf_bitfields_ppc_dwarf4.o`, `dwarf_bitfields_mips_dwarf5.o`, `dwarf_bitfields_x86_64.o` | 3.8, 4.2 and 4.5 KB relocatable objects built from `dwarf_bitfields.c`: 32-bit PowerPC with DWARF 4 (`powerpc-linux-gnu-gcc -O1 -gdwarf-4 -gno-record-gcc-switches -fdebug-prefix-map=$PWD=. -c`, Ubuntu gcc 15.2.0, SHA-256 `7684e2a4934584a26b95c990d4475a106b12e5862d390303d27c33b9819ca7ff`), MIPS32 o32 big-endian with DWARF 5 (`clang --target=mips-linux-gnu -O1 -gdwarf-5 -fdebug-prefix-map=$PWD=. -c`, Ubuntu clang 21.1.8, SHA-256 `603c18cdae57e34ba1a3594c60a2b39118b08fc17e573d6d9722be4a981bb36a`) and x86-64 with DWARF 4 (`gcc -O1 -gdwarf-4 -gno-record-gcc-switches -fdebug-prefix-map=$PWD=. -c`, Ubuntu gcc 15.2.0, SHA-256 `2ec71912032709d4abb8023735601913f60f4915f22f6cc09803b7eb8e0b0327`); GCC spells each bitfield with `DW_AT_bit_offset`, clang with `DW_AT_data_bit_offset` | bitfields are placed in the target's bit order and listed in memory order: `get_lo`, `get_hi`, `get_b`, `get_count` and `get_c` return `p->lo`, `p->hi`, `p->b`, `p->count` and `s->c`, and `set_b` stores `p->b = v`. Before, big-endian reads printed masks (PowerPC `get_hi` and `get_wide` failed with LOSS-131) and x86-64 `get_c` printed `ZPULL(*s,6,4)`. `kuna-cli/tests/dwarf_member_layout.rs` |
 | `castsign_wrap_gcc_O0_x86_64`, `castsign_wrap_clang_O0_x86_64`, `castsign_wrap_gcc_O1_x86_64` | 16 KB dynamic x86-64 ELFs built from `castsign_wrap_x86_64.c` (`gcc -O0`, SHA-256 `739ef7f2259678d34d3d3a9f5090b987d1de4bdbd0af481e8a1c37a6761b5cf0`; `clang -O0`, `5f532b0625b03bfa8b9638014e63b2f571659e5fbdb6499e3cc53c6638d5fbd2`; `gcc -O1`, `5fc9e77bf29f3d58058f599cadf70654df131e15d82151fafe6c4f16c62094a5`); values read with `strtoul` and compared signed. Five do unsigned arithmetic on the value (`(long)(v - 1) >= 0`, `(long)(v + 1) > (long)v`, `(long)(deadline - now) > 0`, `(long)--v >= 0`, and a 32-bit `(int)(v - 1) >= 0`); `sign_of` and `sign_of32` only compare it; `peek` also indexes a string with it | `castsign` must leave the five arithmetic shapes unsigned, since declaring them signed turns wrapping arithmetic into signed overflow that gcc (at `-O0`) and clang (at `-O2`) fold, and must declare `sign_of`'s, `sign_of32`'s and `peek`'s value signed (at `-O1` `peek`'s is a register local). `a_signed_only_variable_round_trips_through_the_printed_c` feeds them `2^63 - 1`, `2^63`, `2^63 + 1` and the 32-bit edges and checks every gcc/clang `-O0`/`-O2` build of the printed C prints what the binary prints; `castsign_leaves_a_locked_declaration_alone` asserts types on `sign_of` and `peek` |
 | `castsign_eq_gcc_O0_x86_64`, `castsign_eq_clang_O0_x86_64` | 16 KB dynamic x86-64 ELFs built from `castsign_eq_x86_64.c` (`gcc -O0`, SHA-256 `89a76af97c5a0fc3d3e9eff3eaa263acdcc9e93d56a3d235448cf16c30ad49e3`; `clang -O0`, `48223377293e92e4aa464b148a558cd65cc85d9725bbfde0fe90c1945184e114`); values read with `ntohl` or `strtoul`, compared signed, and compared for equality with a constant whose top bit is set (`v == 3000000000u`, `v == 10000000000000000000UL`, `v != ...`, `(v \| 0x80000) == ...`); `c_eq7` compares with `7` instead | kuna prints those constants as decimal literals, whose C type is wider than the declaration, so `castsign` must leave the four values unsigned: declared signed, `v` is sign-extended to the literal's type and the comparison is false for every input. `c_eq7` is still declared `long`. `a_signed_only_variable_round_trips_through_the_printed_c` checks every gcc/clang `-O0`/`-O2` build of the printed C prints what the binary prints |
 | `castobject_gcc_O0_x86_64`, `castobject_clang_O0_x86_64`, `castobject_gcc_O2_x86_64`, `castobject_clang_O2_x86_64` | 16 KB dynamic x86-64 ELFs built from `castobject_x86_64.c` (`gcc -O0`, SHA-256 `fcd6501b6b1c2a81af5771825dd5dffb37d606e1d994c25d2ef4b60ffbb3a32d`; `clang -O0`, `ecbe4ab912f646d6b79c0bfa96c811c39c730d4811177230838698fcd9b41d55`; `gcc -O2 -U_FORTIFY_SOURCE`, so `getgroups` is not the `__getgroups_chk` no header declares, `3db01795141767cae8083a64f1f04f0ca759753025e60606257c155044f6c361`; `clang -O2`, `876b9749b0ba82ea8e38a57681577dbd2e9277ee53d1375d055adafa8de56196`); an `int status` filled by `waitpid`/`wait` and read with the `WIFEXITED`/`WEXITSTATUS` tests, compared and divided signed, kept in a pointer before the call, read one byte at a time, incremented as `unsigned int`; an `int` that two `pthread_setcancelstate` calls fill; and objects that start with a parameter's value (`waitpid` on a pid with no child and `getgroups` with a size of 0 leave it in place) read signed only, or also by a logical shift, an unsigned compare, a zero-extension, a signed compare of a `gid_t`, or a logical shift of the value stored into the object | `castobject` must declare `exit_code`'s status and `init_signed`'s object `int` at `-O0` (`waitpid(a0,&v1,0)` instead of `(int *)&v1`) and leave every other function as it was: at `-O2` the status is shifted right logically, which an `int` would cast back, and every other object has a reader that wants it unsigned. `kuna-cli/tests/decompile_all_cli.rs` `an_out_parameter_local_round_trips_through_the_printed_c` compiles the printed functions with the option off and on, with gcc and clang at `-O0` and `-O2`, and checks each build prints what the binary prints over values with the top bit set |
@@ -1123,7 +1128,60 @@ and falls back, never a wrong address). The container's in-tree `ld64.lld` emits
 `DYLD_CHAINED_PTR_64` (format 2) arm64 fixture; the arm64e auth-rebase path is
 covered by the resolver's synthetic-bit-pattern unit tests
 (`decode_arm64e_auth_rebase_strips_pac` et al.) since the in-container linker does
-not emit an arm64e auth-fixup slice.
+not emit an arm64e auth-fixup slice; `macho_arm64e_auth` below converts an arm64
+link into one.
+
+### `macho_arm64e_auth` — arm64e authenticated fixups and pointer-auth code
+
+`macho_arm64e_auth` (~49 KB) is a real `CPU_SUBTYPE_ARM64E | PTRAUTH_ABI` image
+(`llvm-objdump` prints `E PAC00`) with `DYLD_CHAINED_PTR_ARM64E_USERLAND24`
+fixups. `ld64.lld` cannot link arm64e, so `macho_arm64e_auth.s` is linked as arm64
+and `macho_arm64e_auth.py` converts the result: it flips the cpusubtype and
+re-encodes every `DYLD_CHAINED_PTR_64` chain entry in the arm64e layout (8-byte
+stride) in place. The code is the assembler's own pointer-auth instructions.
+
+```bash
+clang -target arm64-apple-macos11 -march=armv8.5-a -c macho_arm64e_auth.s -o a.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+         -undefined dynamic_lookup -e _main -o a_arm64 a.o
+python3 macho_arm64e_auth.py a_arm64 macho_arm64e_auth
+```
+
+ImageBase `0x100000000`, `SG_READ_ONLY` on `__DATA_CONST`, no `LC_DYSYMTAB`
+indirect entries (nothing goes through a stub). **Pinned VMAs:** `_helper`
+`0x100000410`, `_helper2` `0x100000418`, `_tail_auth` `0x100000420` (an
+`autibsp; eor x16,x30,x30,lsl #1; tbz x16,#62; brk #0xc471` check before its
+tail call), `_call_auth_ptr` `0x100000448` (`blraaz` through `__auth_ptr`),
+`_call_table` `0x100000468` (`blraa x8, x9` through `__const[0]`),
+`_strip_check` `0x10000048c` (`autda; xpacd; cmp; b.eq; brk #0xc472`), `_main`
+`0x1000004b0`. Fixups: `__const[0]`@`0x100004000` an authenticated rebase to
+`_helper` (key IA, address-diversified, diversifier `0x1234`),
+`__const[1]`@`0x100004008` an authenticated bind of `_ext_func`,
+`__const[2]`@`0x100004010` a plain bind of `_ext_data` with addend 16,
+`__auth_ptr[0]`@`0x100004018` an authenticated bind of `_ext_func`,
+`__data[0]`@`0x100008000` a plain rebase to `_helper2`.
+
+### `macho_arm64e_brk` — pointer-auth trap immediates behind ordinary guards
+
+`macho_arm64e_brk` (16,912 bytes) is an arm64e image whose `brk #0xc47x` traps
+are NOT pointer-auth checks: `_check` (`0x100000290`) is `cmp w0, #0x2a; b.ne;
+mov w0, #1; ret; brk #0xc470`, `_check_x0` (`0x1000002a4`) is the bit test of
+`x0` rather than `x30` (`eor x16, x0, x0, lsl #1; tbz x16, #62; brk #0xc472`),
+and `_main` (`0x1000002b8`) returns 0. `ptrauthtrap` must leave both guards
+(stage test `tests/stages/kuna-ptrauthtrap.xml`). It has no fixups, so only the
+header's cpusubtype is flipped to `CPU_SUBTYPE_ARM64E | CPU_SUBTYPE_PTRAUTH_ABI`
+after an arm64 link (Ubuntu clang 14.0.0, the rustup toolchain's `rust-lld`
+20.1.8 in its `darwin` flavor standing in for `ld64.lld`):
+
+```bash
+clang -target arm64-apple-macos11 -c macho_arm64e_brk.s -o b.o
+rust-lld -flavor darwin -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+         -undefined dynamic_lookup -e _main -o b_arm64 b.o
+python3 -c "import struct; d = bytearray(open('b_arm64', 'rb').read()); \
+struct.pack_into('<I', d, 8, 0x80000002); open('macho_arm64e_brk', 'wb').write(d)"
+```
+
+SHA-256 `3a7043abd1cdf6452a49b7fd82877aa7bb9b195c9dd9ec01cba3aa5ef9eca9d2`.
 
 `macho_ptrslots_arm64` and `macho_ptrslots_offset_arm64` (arm64, 33 KB each)
 are GH #1333's source plus one imported pointer, so their `__DATA,__data` holds
@@ -1136,6 +1194,181 @@ layout, whose rebase words hold image-base offsets. Source `macho_ptrslots.c`;
 recipe, toolchain and SHA-256s in `macho_ptrslots_arm64.provenance`. Pinned by
 `loadimage_object.rs (macho_chained_fixups_are_applied_to_the_image)`,
 `chained.rs (fixture_rebases_and_binds)` and `tests/verify_dynrelocs_gate.rs`.
+
+### `macho_objc_refs_arm64` — selector, class and super references + `__objc_stubs`
+
+`macho_objc_refs_arm64` (arm64, ~50 KB) is the fixture for the ObjC reference-slot
+naming (`analyzers/objc/kuna_objcrefs.rs`, stage test `tests/stages/kuna-objcrefs.xml`).
+Source `macho_objc_refs.m`: two root classes (`Base` with `+tag`, `-greet:`,
+`-count`; `Derived : Base` whose `-greet:` calls `[super greet:n]`), an `@interface
+Remote` with **no implementation** (so its `_OBJC_CLASS_$_Remote` is an undefined
+symbol resolved by dynamic lookup — a chained **bind** slot in `__objc_classrefs`),
+and four plain functions: `use` (a selref send + a stub send), `tag` (a classref
+receiver through a stub), `use2` (a stub send with an argument), `remote` (the bind
+classref). The committed `macho_objc_refs_arm64.s` is `clang -S` output with three
+sends hand-routed through linker stubs — the open-source clang has no
+`-fobjc-msgsend-selector-stubs`, so the `adrp/ldr x1` selref load is deleted and the
+`bl _objc_msgSend` replaced by `bl "_objc_msgSend$count"` (likewise `$tag`,
+`$greet:`); `ld64.lld -objc_stubs_fast` then synthesizes the `__objc_stubs` section
+and the selrefs the stubs load:
+
+```bash
+clang -target arm64-apple-macos11 -fno-objc-arc -O1 -S macho_objc_refs.m -o macho_objc_refs_arm64.s
+# edit: route the `count`, `tag` and second `greet:` sends through `_objc_msgSend$<sel>`
+clang -target arm64-apple-macos11 -c macho_objc_refs_arm64.s -o refs.o
+ld64.lld -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains -objc_stubs_fast \
+         -undefined dynamic_lookup -x -e _main -o macho_objc_refs_arm64 refs.o
+```
+
+ImageBase `0x100000000`, `DYLD_CHAINED_PTR_64` chained fixups, `SG_READ_ONLY` on
+`__DATA_CONST`. **Pinned VMAs:** `__objc_stubs`@`0x1000008c0` (three 32-byte
+entries: `objc_msgSend$count`@`0x1000008c0`, `$greet:`@`0x1000008e0`,
+`$tag`@`0x100000900`), `__objc_methname`@`0x100000942` (`count`, `tag`, `greet:`,
+`isa`), `__objc_superrefs`@`0x1000081f0` (one slot → `class_t Derived`@`0x100008050`),
+`__objc_selrefs`@`0x1000081f8` (six slots), `__objc_classrefs`@`0x100008228` (slot 0 a
+rebase → `Derived`, slot 1 `0x100008230` a bind → `_OBJC_CLASS_$_Remote`),
+`-[Derived greet:]` IMP@`0x1000007ec`. With `objc on` the super send reads
+`objc_msgSendSuper2(&v1, sel_greet_, arg1)` with `_OBJC_CLASS_$_Derived` in the super
+struct, `_use` calls `objc_msgSend$count(a0)`, `_use2` calls
+`objc_msgSend$greet:(a0, 5)` and `_remote` sends to `classRef_Remote`; off, the slots
+are `dat_1000081f8`/`dat_1000081f0`/`dat_100008230` and the stub is `sub_1000008c0`.
+
+### `macho_bind_only_arm64` — a chained-fixup image with no rebase
+
+`macho_bind_only_arm64` (arm64, ~33 KB) carries `LC_DYLD_CHAINED_FIXUPS` whose only
+fixup is a **bind**: `macho_bind_only.c` is `extern int ext; void *p = &ext;` plus an
+empty `main`, so the `__data` slot `p`@`0x100004000` binds `_ext` by dynamic lookup
+and nothing else in the image holds a pointer. It pins that a bind-only image is
+still *chained* (its slot words are packed entries, never pointers) even though the
+rebase overlay is empty. Build: `clang -target arm64-apple-macos11 -O1 -c
+macho_bind_only.c -o bo.o` then the `macho_objc_refs_arm64` link line without
+`-objc_stubs_fast`.
+
+### `macho_swift_names_arm64` — Swift runtime class name + Swift 5 symbol (`swiftdemangle`)
+
+`macho_swift_names_arm64` (arm64, ~50 KB) is the Swift name-demangling fixture
+(`tests/stages/kuna-swiftdemangle.xml`). No Swift toolchain is needed: its source
+`macho_swift_names.m` is the `macho_objc.m` root class with two additions. The
+class carries the Swift runtime name `_TtC4main7Greeter` through
+`__attribute__((objc_runtime_name(...)))` — the spelling swiftc gives an `@objc
+class Greeter` in module `main`, so `class_ro_t.name` is a `_Tt` name the way it
+is in every Swift app — and the exported C function `count_words` carries the
+Swift 5 symbol `_$s4main10countWords2ofS2i_tF` (`main.countWords(of: Swift.Int)
+-> Swift.Int`, checked against `swift-demangle`) through an `asm` label. Same
+recipe as `macho_objc_arm64` (chained fixups, `-x`):
+
+```bash
+clang -target arm64-apple-macos11 -fobjc-arc -O1 -c macho_swift_names.m -o m.o
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -fixup_chains \
+       -undefined dynamic_lookup -x -e _main -o macho_swift_names_arm64 m.o
+```
+
+**Pinned VMAs:** IMP `-[... greet:]`@`0x1000005f0`,
+`$s4main10countWords2ofS2i_tF`@`0x1000005fc`, `_main`@`0x100000608`. With
+`swiftdemangle` on (default) the two functions decompile as
+`-[main.Greeter greet:]` (`--option objc on`) and `main.countWords(of:)`; with
+`--option swiftdemangle off` they keep `-[_TtC4main7Greeter greet:]` and
+`$s4main10countWords2ofS2i_tF`. The `_OBJC_CLASS_$__TtC4main7Greeter` data
+symbol keeps the linker's spelling either way.
+
+### `macho_gotdata` — data imports read through `__got` (`importdata`)
+
+`macho_gotdata` (arm64, ~50 KB) reads two imported **data** symbols through
+`__DATA_CONST,__got`, for the `importdata` option
+(`kuna-console/tests/verify_importdata.rs`). Source `macho_gotdata.c` declares
+`extern int imported_counter;` and `extern const char *imported_name;`; at `-O1`
+both readers inline into `_main`. It was built with `zig cc`, which the
+devcontainer does not ship, then `llvm-strip -x` to drop the STABS debug map and
+local symbols, which named the build directories:
+
+```
+zig cc -target aarch64-macos -O1 -Wl,-undefined,dynamic_lookup \
+       -o macho_gotdata macho_gotdata.c
+llvm-strip -x macho_gotdata
+```
+
+Each read is `adrp/ldr` of the `__got` slot (the slot holds the import's address)
+followed by `ldr` through it. **Pinned VMAs:** `_main`@`0x100000448`, the `__got`
+slots `imported_counter`@`0x100004000` and `imported_name`@`0x100004008`. With
+`--option importdata on`, `_main` reads `imported_counter` / `imported_name`; off,
+it reads `*dat_100004000` / `*dat_100004008`.
+
+`macho_gotdata_local` (arm64, ~50 KB, from `macho_gotdata_local.c`) is the case
+where the slot pointer is a named local: `_read_thrice`@`0x100000510` loads the
+`imported_counter` slot (`__got`@`0x100004000`) into `x19` and reads through it
+across three calls. With `importdata` on, the first read is of the slot itself and
+renders `imported_counter`; the two reads through the local stay `*v1`, so the
+local's assignment keeps its readers. Built with clang 14 and the `ld64.lld` that
+ships with the Rust toolchain:
+
+```bash
+LLD=$(rustc --print sysroot)/lib/rustlib/$(rustc -vV | sed -n 's/host: //p')/bin/gcc-ld/ld64.lld
+clang -target arm64-apple-macos11 -O1 -c macho_gotdata_local.c -o m.o
+"$LLD" -arch arm64 -platform_version macos 11.0 11.0 -undefined dynamic_lookup \
+       -e _main -o macho_gotdata_local m.o
+```
+
+### `swift_metadata_elf` — a stripped Swift executable (`swiftmetadata`)
+
+`swift_metadata_elf` (x86-64 ELF, 14 KB) is the Swift runtime-metadata fixture
+(`tests/stages/kuna-swiftmetadata.xml`, `kuna-console/tests/verify_swiftmetadata.rs`).
+Its source `swift_metadata_elf.swift` declares a struct, an enum, a protocol
+with a default, a class hierarchy with an override, and a struct conforming
+to a local protocol and to `Hashable`, and a `main` that uses them all (so
+`-O` keeps them). Built with the swiftly 6.3 toolchain and stripped of every
+symbol, so only the `swift5_*` sections can name its functions:
+
+```bash
+swiftc -O -module-name metafix swift_metadata_elf.swift -o metafix
+llvm-strip --strip-all -o swift_metadata_elf metafix
+```
+
+The build records the toolchain's library directory as `DT_RUNPATH`. After the
+build that `.dynstr` string was overwritten in place with `$ORIGIN` padded with
+NULs, so no offset or section size moved.
+
+**Pinned VMAs** (the unstripped `metafix` symbol table, the oracle the tests
+hold the pass to): `$s7metafix5PointVMa` (Point's metadata accessor)@`0x30b0`,
+`$s7metafix6AnimalCMa`@`0x30d0`, `$s7metafix6AnimalC4legsSivg` (vtable slot 0,
+a getter)@`0x2f60`, `$s7metafix6AnimalCACycfC` (slot 3, init)@`0x3100`,
+`$s7metafix6AnimalC5soundSSyF` (slot 4)@`0x2fe0`, `$s7metafix3DogC5soundSSyF`
+(Dog's slot 4)@`0x3000`, the `Square: Hashable` witnesses `hash(into:)`@`0x2ab0`
+and `==`@`0x2b00`. With `--option swiftmetadata on` they decompile as
+`metafix.Point.type_metadata_accessor`, `metafix.Animal.vtable#4.method`,
+`<metafix.Square:Swift.Hashable>.hash(into:)`, …; off, they are `sub_<addr>`.
+The `Square: Shape` (local protocol) witness table is a relocated pointer table,
+which an ELF file carries as addends, so its slots are not named here — the
+Mach-O form (chained fixups) is.
+
+### `macho_cfstring` — Core Foundation constant strings (`cfstrings`)
+
+`macho_cfstring` (arm64, ~50 KB) is a self-contained Mach-O carrying three
+`__builtin_CFString` constants in `__DATA_CONST,__cfstring`, for the `cfstrings`
+pass (`kuna-console/tests/verify_cfstring.rs`, `tests/stages/kuna-cfstrings.xml`).
+Source `macho_cfstring.c` hand-builds each struct `{ ___CFConstantStringClassReference,
+0x7c8 (8-bit), "<text>", <length> }` and a getter returning its address. The second
+string (39 characters) is longer than one 32-byte entry and the third entry sits
+right behind it: the guard that a long string never hides its neighbour. It was
+built with `zig cc`, which bundles its own Mach-O linker and needs no macOS SDK
+(the devcontainer does not ship zig), then `llvm-strip -S` from LLVM 20 to drop
+the STABS debug map, which named the build directories (LLVM 14's `-S` leaves
+Mach-O STABS in place):
+
+```
+zig cc -target aarch64-macos -O0 -Wl,-undefined,dynamic_lookup \
+       -o macho_cfstring macho_cfstring.c
+llvm-strip -S macho_cfstring
+```
+
+`zig cc` links a classic `LC_DYLD_INFO` image, so each entry's `char *` (into
+`__TEXT,__cstring`) is a raw word (the chained path has no fixture here; it was
+checked on arm64 and arm64e iOS binaries). **Pinned VMAs:** `_get_greeting`@`0x100000538` → entry@`0x100004008`
+("cfstring hello"), `_get_long`@`0x100000544` → entry@`0x100004028` ("a constant
+string longer than one entry"), `_get_after`@`0x100000550` → entry@`0x100004048`
+("after the long one"). With `--option cfstrings on` each getter returns
+`CFSTR("...")` of its string (`annotate` adds `/* cfstring@0x<entry> */`); off, it
+returns the entry by its data symbol (`&_kGreeting`).
 
 ## Stripped-PE / stripped-Mach-O entry discovery (PR-12+13)
 
@@ -1168,6 +1401,22 @@ above are reused, plus one new stripped Mach-O:
   `[0x100000550 (_main, still symboled — the entry), 0x100000590 (helper,
   stripped)]`. `collect_entries` skips the symboled `_main` and **discovers
   `0x100000590`** — the never-symboled `helper` — the load-bearing PR-13 proof.
+
+- **Mach-O, `__unwind_info` only:** `macho_unwind_only_arm64` (arm64, 16 KB) is
+  linked with `-no_function_starts -x`, so neither `LC_FUNCTION_STARTS` nor a
+  symbol names its four `static` `uw_*` functions; only `__TEXT,__unwind_info`
+  records their starts (each has its own stack size, so the linker does not fold
+  their entries). It is the `unwindstarts` witness
+  (`kuna-console/tests/verify_unwindstarts.rs`, `tests/stages/kuna-unwindstarts.xml`):
+  off, the inventory is `__mh_execute_header` + `_main`; on, the four starts are
+  added. Source and recipe in `macho_unwind_only_arm64.c`:
+
+  ```bash
+  clang -target arm64-apple-macos11 -O1 -fno-stack-protector -funwind-tables \
+        -c macho_unwind_only_arm64.c -o t.o
+  ld64.lld -arch arm64 -platform_version macos 11.0 11.0 \
+        -no_function_starts -x -e _main -o macho_unwind_only_arm64 t.o
+  ```
 
 ## DWARF on MinGW-PE / Mach-O (PR-11)
 
