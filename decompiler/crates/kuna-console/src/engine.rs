@@ -3141,6 +3141,7 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         "peimportcall" => arch.analysis_peimportcall,
         // Metadata alone has no output effect; the live flow option gates its use.
         "ppc32_pic_slots" => true,
+        "authptrcall" => arch.analysis_authptrcall,
         "libproto" => arch.analysis_libproto,
         // (kuna) The measured libc signature extension — the ~200 prototypes the
         // 27-entry base table does not carry, seeded onto IMPORTED names only. The
@@ -3308,6 +3309,9 @@ fn analysis_pass_enabled(arch: &Architecture, pass_id: &str) -> bool {
         // renames IMP functions + adds class/selector symbols). Registered here so it
         // is gated by `analysis_objc` rather than running by the fail-open default.
         "objc" => arch.analysis_objc,
+        // (kuna) Swift runtime-metadata recovery — default-OFF (output-changing:
+        // names stripped functions and descriptor records).
+        "swiftmetadata" => arch.analysis_swiftmetadata,
         // (kuna) PE PDB metadata recovery — default-OFF (output-changing: renames
         // stripped functions to their real PDB names). PE-only + externally gated on
         // a fingerprint-matching `.pdb` (the `kuna_pdb_path` env var). Registered
