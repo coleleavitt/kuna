@@ -25,11 +25,21 @@
 //!
 //! # Gating & faithfulness
 //!
-//! Registered only for a Mach-O target (`passes.rs`), default-OFF (`--option
+//! Registered only for a Mach-O target (`passes.rs`), default-on (`--option
 //! cfstrings`), output-changing. The whole pass output is dropped at commit when
-//! the gate is off, so a default run is byte-identical. A non-Mach-O image, an
-//! image with no `__cfstring`, or an unreadable entry yields nothing — additive,
-//! never wrong.
+//! the gate is off, so `cfstrings off` renders each entry as before. A non-Mach-O
+//! image, an image with no `__cfstring`, or an unreadable entry yields nothing —
+//! additive, never wrong.
+//!
+//! # Bounds
+//!
+//! The walk stops at the end of the file, not the section header, and the string
+//! bytes read over all entries are capped at the file's length. Entries are 32
+//! bytes but each may point at the same 64 KiB run, so without that cap a crafted
+//! section would make every entry an owned copy of the run (twice, once more in
+//! the `StringManager`), about 4096x the file. Each entry's reads scan the image's
+//! section spans, so the walk is entries x sections, both sized by the file; a
+//! budget of span checks ends it long before a real image would reach it.
 
 use object::read::{Object, ObjectSection};
 
@@ -47,9 +57,9 @@ const CFSTRING_UNICODE: u32 = 0x10;
 /// cannot drive an unbounded read/allocation.
 const MAX_CFSTRING_BYTES: u64 = 1 << 16;
 
-/// Upper bound on the bytes read for all entries together, so many entries
-/// sharing one long string cannot multiply it.
-const MAX_CFSTRING_TOTAL_BYTES: u64 = 1 << 26;
+/// Span checks the walk may spend: an entry makes four reads, and each read scans
+/// the image's section spans in turn.
+const MAX_SPAN_CHECKS: u64 = 1 << 30;
 
 /// The `__cfstring` constant-string recovery pass.
 pub struct CFStringPass;
@@ -68,8 +78,23 @@ impl AnalysisPass for CFStringPass {
     }
 }
 
-/// The pass body over a parsed image and its raw bytes.
+/// The pass body over a parsed image and its raw bytes. The walk is bounded by
+/// the file, not the section header. `flags` (the 32-bit info word at the start
+/// of the second slot) and `length` are scalars, so
+/// `read_ptr`'s fixup overlay misses and returns the raw word, while `data` is the
+/// rebase the overlay resolves on an arm64(e) chained image (a raw pointer on a
+/// classic `LC_DYLD_INFO` one). 8-bit data is kept only when it is UTF-8 (the
+/// printer would cut an invalid one short), and a string holding a NUL is skipped
+/// because a C literal stops there, trailing NULs included. Every string read is
+/// charged to a budget of the file's length. Each entry is marked read-only: a CFString
+/// constant is immutable, and the printer's constant-string route needs that on the
+/// historical writable `__DATA,__cfstring` layout.
 fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
+    collect_bounded(file, bytes, MAX_SPAN_CHECKS)
+}
+
+/// [`collect`] with an explicit budget of section-span checks.
+fn collect_bounded(file: &object::File, bytes: &[u8], max_span_checks: u64) -> AnalysisOutput {
     let mut out = AnalysisOutput::default();
     if file.format() != object::BinaryFormat::MachO {
         return out;
@@ -77,29 +102,24 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
     let Some(sec) = file.section_by_name(SEC_CFSTRING) else {
         return out;
     };
-    // The chained-fixup overlay resolves each entry's `data` pointer on an
-    // arm64(e) image; empty (raw reads) on a classic LC_DYLD_INFO image.
     let fixups = resolve_chained_fixups(file, bytes);
     let img = MachoImage::with_fixups(file, fixups);
     let base = sec.address();
-    // A header can declare a size far past the file; no entry lies outside it.
     let size = sec.size().min(bytes.len() as u64);
     let ps = img.ptr_size();
-    // One entry is four pointer-width words (isa, flags, data, length).
     let stride = ps.saturating_mul(4);
     if stride == 0 {
         return out;
     }
 
+    let max_entries = max_span_checks / (4 * file.sections().count().max(1) as u64);
+    let mut budget = bytes.len() as u64;
     let mut off: u64 = 0;
-    let mut total: u64 = 0;
-    while off.saturating_add(stride) <= size {
+    let mut walked: u64 = 0;
+    while off.saturating_add(stride) <= size && walked < max_entries {
+        walked += 1;
         let entry = base.wrapping_add(off);
         off += stride;
-        // `flags` is the 32-bit info word at the start of the second slot and
-        // `length` a scalar (never a fixup), so `read_ptr`'s overlay misses and
-        // returns the raw word; `data` is a rebase/auth-rebase the overlay
-        // resolves on a chained image and a raw pointer on a classic one.
         let (Some(flags), Some(data), Some(length)) = (
             img.read_u32(entry.wrapping_add(ps)),
             img.read_ptr(entry.wrapping_add(ps.wrapping_mul(2))),
@@ -114,41 +134,37 @@ fn collect(file: &object::File, bytes: &[u8]) -> AnalysisOutput {
         let Some(byte_len) = (if unicode { length.checked_mul(2) } else { Some(length) }) else {
             continue;
         };
-        if byte_len == 0 || byte_len > MAX_CFSTRING_BYTES {
+        if byte_len == 0 || byte_len > MAX_CFSTRING_BYTES || byte_len > budget {
             continue;
-        }
-        total += byte_len;
-        if total > MAX_CFSTRING_TOTAL_BYTES {
-            break;
         }
         let Some(raw) = img.read(data, byte_len as usize) else {
             continue;
         };
+        budget -= byte_len;
         let text = if unicode {
             match decode_utf16(raw, file.is_little_endian()) {
                 Some(b) => b,
                 None => continue,
             }
         } else {
-            // 8-bit storage is the literal byte sequence; render it only when it is
-            // UTF-8 (the printer would cut an invalid one short).
             match std::str::from_utf8(raw) {
                 Ok(_) => raw.to_vec(),
                 Err(_) => continue,
             }
         };
-        // The printer ends a literal at its first NUL, so one holding a NUL
-        // would render cut short.
-        if text.contains(&0) {
+        if nul_inside(&text) {
             continue;
         }
         out.cfstrings.push(CFStringFact { addr: entry, bytes: text, size: stride as u32 });
-        // A CFString constant is immutable; marking the struct read-only lets the
-        // printer's constant-string route fire even on the historical writable
-        // `__DATA,__cfstring` layout (it is already read-only in `__DATA_CONST`).
         out.readonly.push((entry, entry.wrapping_add(stride)));
     }
     out
+}
+
+/// Does `text` hold a NUL? The printed literal would end there, so even a
+/// trailing one (`CFSTR("a\0\0")`, length 3) would print as a shorter string.
+fn nul_inside(text: &[u8]) -> bool {
+    text.contains(&0)
 }
 
 /// Decode a UTF-16 char buffer to UTF-8 bytes. `None` on an odd length or an
@@ -214,12 +230,101 @@ mod tests {
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
+    /// A minimal arm64 Mach-O whose `__cfstring` holds `n` entries that all point
+    /// at one `run`-byte `__cstring` run.
+    fn shared_run_image(n: usize, run: usize) -> Vec<u8> {
+        let (cmds, data_off) = (72 + 2 * 80, 32 + 72 + 2 * 80);
+        let cf_off = data_off + run;
+        let mut b = vec![0u8; cf_off + n * 32];
+        let total = b.len() as u64;
+        let base = 0x1_0000_0000u64;
+        let put32 = |b: &mut Vec<u8>, at: usize, v: u32| b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+        let put64 = |b: &mut Vec<u8>, at: usize, v: u64| b[at..at + 8].copy_from_slice(&v.to_le_bytes());
+        let name = |b: &mut Vec<u8>, at: usize, s: &str| b[at..at + s.len()].copy_from_slice(s.as_bytes());
+        for (at, v) in [(0, 0xfeed_facf), (4, 0x0100_000c), (12, 2), (16, 1), (20, cmds as u32)] {
+            put32(&mut b, at, v);
+        }
+        put32(&mut b, 32, 0x19);
+        put32(&mut b, 36, cmds as u32);
+        name(&mut b, 40, "__DATA");
+        put64(&mut b, 56, base);
+        put64(&mut b, 64, total);
+        put64(&mut b, 80, total);
+        for at in [88, 92] {
+            put32(&mut b, at, 3);
+        }
+        put32(&mut b, 96, 2);
+        for (i, (sect, off, size)) in [("__cstring", data_off, run), ("__cfstring", cf_off, n * 32)].into_iter().enumerate() {
+            let at = 104 + i * 80;
+            name(&mut b, at, sect);
+            name(&mut b, at + 16, "__DATA");
+            put64(&mut b, at + 32, base + off as u64);
+            put64(&mut b, at + 40, size as u64);
+            put32(&mut b, at + 48, off as u32);
+        }
+        b[data_off..cf_off].fill(b'a');
+        for e in 0..n {
+            let at = cf_off + e * 32;
+            put64(&mut b, at + 8, 0x7c8);
+            put64(&mut b, at + 16, base + data_off as u64);
+            put64(&mut b, at + 24, run as u64);
+        }
+        b
+    }
+
+    #[test]
+    fn entries_sharing_one_run_read_no_more_than_the_file() {
+        let bytes = shared_run_image(1024, MAX_CFSTRING_BYTES as usize);
+        let file = object::File::parse(&*bytes).unwrap();
+        let out = collect(&file, &bytes);
+        let total: usize = out.cfstrings.iter().map(|f| f.bytes.len()).sum();
+        assert!(!out.cfstrings.is_empty());
+        assert!(total <= bytes.len(), "{total} string bytes from a {}-byte file", bytes.len());
+    }
+
+    #[test]
+    fn the_walk_stops_at_its_budget_of_span_checks() {
+        let bytes = shared_run_image(64, 16);
+        let file = object::File::parse(&*bytes).unwrap();
+        assert_eq!(collect(&file, &bytes).cfstrings.len(), 64);
+        let budget = 4 * file.sections().count() as u64 * 10;
+        assert_eq!(collect_bounded(&file, &bytes, budget).cfstrings.len(), 10);
+    }
+
+    #[test]
+    fn a_string_holding_a_nul_is_skipped_not_cut_short() {
+        assert!(!nul_inside(b"plain"));
+        assert!(nul_inside(b"a\0b"));
+        let mut bytes = fixture();
+        let at = bytes.windows(14).position(|w| w == b"cfstring hello").unwrap();
+        bytes[at + 8] = 0;
+        assert_eq!(texts(&bytes), ["a constant string longer than one entry", "after the long one"]);
+    }
+
+    #[test]
+    fn a_string_ending_in_a_nul_is_skipped_too() {
+        assert!(nul_inside(b"trailing\0"));
+        let mut bytes = fixture();
+        let at = bytes.windows(14).position(|w| w == b"cfstring hello").unwrap();
+        bytes[at + 13] = 0;
+        assert_eq!(texts(&bytes), ["a constant string longer than one entry", "after the long one"]);
+    }
+
     /// The chained-fixup image: each `data` pointer is a chained rebase, the
     /// UTF-16 entry decodes, and the entry holding a NUL is skipped.
     #[test]
     fn reads_a_chained_image_with_a_utf16_entry() {
         let bytes = std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/macho_cfstring_chained_arm64")).unwrap();
         assert_eq!(texts(&bytes), ["chained hello", "café \u{2192} ok"]);
+    }
+
+    #[test]
+    fn utf16_decodes_in_either_byte_order_and_refuses_a_lone_surrogate() {
+        let snowman_le = [0x03, 0x26, 0x20, 0x00];
+        let snowman_be = [0x26, 0x03, 0x00, 0x20];
+        assert_eq!(decode_utf16(&snowman_le, true).unwrap(), "\u{2603} ".as_bytes());
+        assert_eq!(decode_utf16(&snowman_be, false).unwrap(), "\u{2603} ".as_bytes());
+        assert_eq!(decode_utf16(&[0x00, 0xd8], true), None);
     }
 
     #[test]

@@ -332,6 +332,9 @@ pub trait FlowEnvironment {
         Ok(None)
     }
 
+    /// A PC-capture transfer to an interior the loader assigned to this function.
+    fn is_ppc_pc_capture(&self, _fd: &Funcdata, _op: OpId) -> bool { false }
+
     /// (kuna) GH-8817: is `op` a V850 `jmp [reg]` CALLIND to reclassify as
     /// BRANCHIND? (C++ `kunaIsV850IndirectJmp`).
     ///
@@ -673,6 +676,8 @@ pub struct FlowInfo<'a, E: FlowEnvironment> {
     /// Does the function have registered flow override instructions
     /// (C++ `flowoverride_present`).
     flowoverride_present: bool,
+    /// Whether `stubtailcall` applies to this run.
+    loader_transfers_present: bool,
     /// Exact instruction addresses where a `BRANCH` override applied during
     /// this flow follow.
     applied_branch_overrides: std::collections::BTreeSet<Address>,
@@ -775,6 +780,7 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
             .as_ref()
             .filter(|_| data.get_arch().java_try)
             .map(|model| (crate::kuna_javatry::JavaTryPlan::new(model, entry.get_offset()), std::rc::Rc::clone(model)));
+        let loader_transfers_present = crate::kuna_stubtailcall::active(data.get_arch());
         FlowInfo {
             data,
             env,
@@ -795,6 +801,7 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
             minaddr: entry.clone(),
             maxaddr: entry,
             flowoverride_present,
+            loader_transfers_present,
             applied_branch_overrides: std::collections::BTreeSet::new(),
             flags: 0,
             qlst_count: 0,
@@ -1348,6 +1355,25 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
         Ok(())
     }
 
+    /// Follow a CALL whose return continuation is not code as a BRANCH to `dest`.
+    fn follow_call_as_branch(
+        &mut self,
+        curop: OpId,
+        dest: &Address,
+        maxtime: uintm,
+        cursor: &mut Option<OpId>,
+        startbasic: &mut bool,
+    ) -> KunaResult<()> {
+        self.data.op_set_opcode_code(curop, OpCode::CPUI_BRANCH);
+        self.new_address(curop, dest)?;
+        if self.data.obank().get(curop).expect("call-transfer: stale call op").get_time() >= maxtime {
+            self.delete_remaining_ops(*cursor)?;
+            *cursor = None;
+        }
+        *startbasic = true;
+        Ok(())
+    }
+
     /// Analyze control-flow within p-code for a single instruction (C++
     /// `xrefControlFlow`, `flow.cc:266`).
     ///
@@ -1487,7 +1513,9 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
                     let destaddr = self.branch_in0_addr(curop);
                     let popret = !destaddr.is_constant()
                         && self.env.pops_return_address(&destaddr);
-                    if !destaddr.is_constant()
+                    if self.env.is_ppc_pc_capture(&self.data, curop) {
+                        self.follow_call_as_branch(curop, &destaddr, maxtime, &mut cursor, startbasic)?;
+                    } else if !destaddr.is_constant()
                         && (popret || self.env.is_return_discarding_trampoline(&destaddr))
                     {
                         // (kuna calltrampoline / callpopret) The callee throws
@@ -1502,7 +1530,6 @@ impl<'a, E: FlowEnvironment> FlowInfo<'a, E> {
                         // which claims it (the fragment is a known function
                         // entry precisely because it is a CALL target) and ends
                         // the caller at a synthetic tail call.
-                        self.data.op_set_opcode_code(curop, OpCode::CPUI_BRANCH);
                         let site = self
                             .data
                             .obank()
@@ -1520,12 +1547,7 @@ following this call as a branch"
                             ),
                             &site,
                         );
-                        self.new_address(curop, &destaddr)?;
-                        if self.data.obank().get(curop).expect("xref").get_time() >= maxtime {
-                            self.delete_remaining_ops(cursor)?;
-                            cursor = None;
-                        }
-                        *startbasic = true;
+                        self.follow_call_as_branch(curop, &destaddr, maxtime, &mut cursor, startbasic)?;
                     } else if self.setup_call_specs(curop)? {
                         // The C++ `--oiter` backs up to the op *after* the call —
                         // the noreturn halt `checkForFlowModification` just inserted
@@ -1836,10 +1858,15 @@ following this call as a branch"
         let marker: Option<OpId> = if emptyflag { None } else { self.dead_tail() };
 
         // (the per-function Override lives on the Funcdata; `localoverride`).
-        let flowoverride: uint4 = if self.flowoverride_present {
+        let explicit: uint4 = if self.flowoverride_present {
             self.data.get_override().get_flow_override(curaddr)
         } else {
             crate::overrides::flow_type::NONE
+        };
+        let flowoverride = if self.loader_transfers_present {
+            crate::kuna_stubtailcall::flow_override(self.data.get_arch(), curaddr, explicit)
+        } else {
+            explicit
         };
 
         let eh_table = self.data.get_arch().eh_table.clone();
@@ -1993,13 +2020,11 @@ truncating the fall-through here"
             // (kuna retpushedhalf) The push/pop stack-maintenance shape is only
             // visible here: copy propagation later collapses the store and the
             // load into a bare register-to-register COPY.
-            if self.data.get_arch().ret_pushed_half {
-                let mut insn_ops = vec![firstop];
-                while let Some(next) = self.dead_next(*insn_ops.last().expect("non-empty")) {
-                    insn_ops.push(next);
-                }
-                crate::kuna_retpushedhalf::observe_instruction(&mut self.data, &insn_ops);
+            let mut insn_ops = vec![firstop];
+            while let Some(next) = self.dead_next(*insn_ops.last().expect("non-empty")) {
+                insn_ops.push(next);
             }
+            crate::kuna_retpushedhalf::observe_instruction(&mut self.data, &insn_ops);
             let seq = self.data.obank().get(firstop).expect("process: stale firstop").get_seq_num().clone();
             if let Some(stat) = self.visited.get_mut(curaddr) {
                 stat.seqnum = seq;
@@ -3245,7 +3270,6 @@ truncating the fall-through here"
                     }
                     if self.env.msvc_locked_entry(&entry) {
                         crate::p4_calls::kuna_calleeprotostack::resolve_declared_extra_pop(
-                            self.data.get_arch().callee_proto_stack,
                             fc.proto_mut(),
                         );
                     }

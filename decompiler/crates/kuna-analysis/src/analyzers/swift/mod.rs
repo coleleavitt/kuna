@@ -115,7 +115,7 @@ impl AnalysisPass for SwiftMetadataPass {
             img: &img,
             bind_slots: &bind_slots,
         };
-        let md = reader.read_all(ctx.file, names);
+        let md = reader.read_all(ctx.file, names, ctx.bytes.len());
         // Only a code address may be named as a function: a base-protocol
         // or associated-type witness row points at data.
         let code: Vec<(u64, u64)> = ctx
@@ -130,6 +130,7 @@ impl AnalysisPass for SwiftMetadataPass {
             memo: Default::default(),
             code,
             claims: Default::default(),
+            budget: std::cell::Cell::new(NAME_BYTES.saturating_add(ctx.bytes.len())),
         };
         namer.emit(&mut out);
         if ctx.arch.analysis_swifttypes {
@@ -170,24 +171,7 @@ impl AnalysisPass for SwiftMetadataPass {
                     .filter(|s| s.kind() == object::SymbolKind::Text && s.is_definition())
                     .filter_map(|s| Some((s.address(), s.name().ok()?.to_string())))
                     .collect();
-                let stats = kuna_swiftcall::bind(&types, regs, &symbols, &mut out);
-                if let Ok(path) = std::env::var("KUNA_SWIFTCALL_DUMP") {
-                    let mut dump = format!("{stats:?}\n");
-                    let hinted: std::collections::HashMap<u64, String> = out
-                        .swift_types
-                        .input_hints
-                        .iter()
-                        .filter_map(|h| {
-                            Some((h.func_addr, h.type_.as_ref()?.get_name().to_string()))
-                        })
-                        .collect();
-                    for f in &out.swift_types.models {
-                        let maybe = if f.maybe_self { " maybe_self" } else { "" };
-                        let hint = hinted.get(&f.func_addr).map_or("", String::as_str);
-                        dump.push_str(&format!("{:#x} {}{maybe} {hint}\n", f.func_addr, f.model));
-                    }
-                    let _ = std::fs::write(path, dump);
-                }
+                kuna_swiftcall::bind(&types, regs, &symbols, &mut out);
             }
         }
         out
@@ -256,6 +240,11 @@ fn member_after_protocol(name: &str) -> Option<String> {
     Some(member.to_string())
 }
 
+/// The bytes of names the pass builds beyond the image's own length. A
+/// real image's names come to a fraction of its size; the budget stops a
+/// crafted one whose long paths repeat across many records.
+const NAME_BYTES: usize = 16 << 20;
+
 /// Strings in order with each run of digits compared as a number, so
 /// `requirement#2` comes before `requirement#10`.
 fn natural_cmp(a: &str, b: &str) -> std::cmp::Ordering {
@@ -306,6 +295,8 @@ pub struct Namer<'a> {
     code: Vec<(u64, u64)>,
     /// Every claim on each function address, in record order.
     claims: std::cell::RefCell<std::collections::BTreeMap<u64, Vec<Claim>>>,
+    /// Name bytes left to build ([`NAME_BYTES`] plus the image length).
+    budget: std::cell::Cell<usize>,
 }
 
 impl Namer<'_> {
@@ -319,7 +310,9 @@ impl Namer<'_> {
             return cached.clone();
         }
         let ctx = self.md.contexts.get(&addr);
-        let result = ctx.and_then(|c| self.path_of(c, depth));
+        let result = ctx
+            .and_then(|c| self.path_of(c, depth))
+            .filter(|p| self.spend(p));
         self.memo.borrow_mut().insert(addr, result.clone());
         result
     }
@@ -376,6 +369,21 @@ impl Namer<'_> {
         self.code.iter().any(|&(lo, hi)| addr >= lo && addr < hi)
     }
 
+    /// Charge `name` to the budget; `false` (and nothing more is named)
+    /// once it is spent.
+    fn spend(&self, name: &str) -> bool {
+        match self.budget.get().checked_sub(name.len()) {
+            Some(left) => {
+                self.budget.set(left);
+                true
+            }
+            None => {
+                self.budget.set(0);
+                false
+            }
+        }
+    }
+
     /// Record a metadata record's claim on the code at `addr`.
     fn claim(
         &self,
@@ -385,7 +393,17 @@ impl Namer<'_> {
         requirement: Option<(String, String)>,
         getter: bool,
     ) {
-        if !self.is_code(addr) {
+        let owner_bytes = match owner {
+            Owner::Local(_) => "",
+            Owner::Imported(s) => s.as_str(),
+        };
+        if !self.is_code(addr)
+            || name.as_deref().is_some_and(|n| !self.spend(n))
+            || !self.spend(owner_bytes)
+            || requirement
+                .as_ref()
+                .is_some_and(|(p, m)| !self.spend(p) || !self.spend(m))
+        {
             return;
         }
         self.claims
@@ -485,6 +503,9 @@ impl Namer<'_> {
             };
             let proto = self.target_path(c.protocol, "protocol_descriptor");
             let cn = self.conformance_parts(c).map(|(ty, proto)| format!("<{ty}:{proto}>"));
+            if cn.as_ref().is_some_and(|cn| !self.spend(cn)) {
+                continue;
+            }
             if let Some(cn) = &cn {
                 data.push(SymFact {
                     addr: c.addr,
@@ -515,7 +536,7 @@ impl Namer<'_> {
                             if !matches!(kind, 1..=6 | 8) {
                                 continue;
                             }
-                            let slot = w + self.md.ptr_size * (1 + k as u64);
+                            let slot = w.wrapping_add(self.md.ptr_size * (1 + k as u64));
                             if let Some(f) = self.md.words.get(&slot) {
                                 witness(
                                     *f,
@@ -563,7 +584,7 @@ impl Namer<'_> {
         // Dedup by address: the first (lowest-addressed descriptor) wins.
         let mut seen = std::collections::HashSet::new();
         for d in data {
-            if seen.insert(d.addr) {
+            if seen.insert(d.addr) && self.spend(&d.name) {
                 out.symbols.push(d);
             }
         }
@@ -577,20 +598,9 @@ impl Namer<'_> {
     /// (`<*:Swift.RawRepresentable>.init(rawValue:)`, a later such body
     /// `.2`, `.3`, …); anything else keeps the engine placeholder.
     fn resolve_claims(&self, out: &mut AnalysisOutput) {
-        let dump = std::env::var("KUNA_SWIFTMETADATA_DUMP").ok();
-        let mut dumped = String::new();
         let mut used: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut next: HashMap<String, usize> = HashMap::new();
         for (&addr, claims) in self.claims.borrow().iter() {
-            if dump.is_some() {
-                for c in claims {
-                    dumped.push_str(&format!(
-                        "{addr:x}\t{}\t{:?}\t{}\n",
-                        c.name.as_deref().unwrap_or("?"),
-                        c.owner,
-                        c.getter
-                    ));
-                }
-            }
             let mut names: Vec<&str> = claims.iter().filter_map(|c| c.name.as_deref()).collect();
             if names.is_empty() {
                 continue;
@@ -611,11 +621,16 @@ impl Namer<'_> {
             } else {
                 continue;
             };
-            let base = name.clone();
-            let mut k = 2;
-            while !used.insert(name.clone()) {
-                name = format!("{base}.{k}");
-                k += 1;
+            if !used.insert(name.clone()) {
+                let k = next.entry(name.clone()).or_insert(2);
+                let base = std::mem::take(&mut name);
+                loop {
+                    name = format!("{base}.{k}");
+                    *k += 1;
+                    if used.insert(name.clone()) {
+                        break;
+                    }
+                }
             }
             out.symbols.push(SymFact {
                 addr,
@@ -623,9 +638,6 @@ impl Namer<'_> {
                 kind: SymKind::Function,
             });
             out.fid_names.push(FidMatch { addr, name });
-        }
-        if let Some(path) = dump {
-            let _ = std::fs::write(path, dumped);
         }
     }
 

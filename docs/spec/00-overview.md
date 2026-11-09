@@ -1537,7 +1537,7 @@ printf-heavy whole binary (DIV-66). That cost is the reason the typing now
 happens at load instead, and the reason `full` — the loop — remains a per-run
 opt-in rather than the default.
 
-The step's last drive answers for a function decompiled alone (`callerreads`,
+The step's last drive answers for a function decompiled alone (`kuna_callerreads.rs`,
 chapter [04](04-calls-and-prototypes.md)): when the finished function returns
 `void` and a direct caller reads one of its return registers after the call, the
 step forces that return and drives the function once more, keeping the redo only
@@ -1704,7 +1704,7 @@ which were otherwise kept for every call site of every function; an inlined
 callee's handles pass to the function it is inlined into, whose cloned call
 ops still name them
 (`decompiler/crates/kuna-decomp/src/p2_lift/flow.rs (FlowInfo::inline_flow)`), and the
-per-callee summaries a run caches are stored compactly (04, `calleedeadarg`).
+per-callee summaries a run caches are stored compactly (04, `kuna_calleedeadarg.rs`).
 The allocator keeps a function's freed working memory resident, so without
 a release a batch would start every later function at the high-water of the
 largest one before it, and the pages a function cannot reuse would count as
@@ -3025,6 +3025,7 @@ runtime `on_or_off` parser.
 | `KUNA_DYNRELOCS` | `dynrelocs` | linked-image dynamic-relocation application + the `PT_GNU_RELRO` constant slots, `decompiler/crates/kuna-analysis/src/loader/kuna_dynrelocs.rs (resolve)` |
 | `KUNA_RELOCREBASE` | `relocrebase` | relocatable-object analysis-fact rebase, `decompiler/crates/kuna-analysis/src/loader/kuna_relocrebase.rs (rebased_view)` |
 | `KUNA_IFUNCFPRET` | `ifuncfpret` | x86-64 IFUNC (`R_X86_64_IRELATIVE`) stub naming, `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_ifuncfpret.rs (IFUNCFPRET_ENV)` |
+| `KUNA_PPCAPU` | `ppcapu` | PowerPC32 e500 selection from an SPE APU note, `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_ppcapu.rs (PPCAPU_ENV)` |
 | `KUNA_TYPEDEPTH` | `typedepth` | DWARF full-depth type resolution, `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_typedepth.rs (TYPEDEPTH_ENV)` |
 | `KUNA_DWARFSTRUCTS` | `dwarfstructs` | DWARF aggregate-layout import (`DW_AT_byte_size` + `DW_TAG_member` walk), `decompiler/crates/kuna-decomp/src/p0_knowledge/kuna_dwarfstructs.rs (DWARFSTRUCTS_ENV)` |
 | `KUNA_CALLTARGETTYPE` | `calltargettype` | DWARF `DW_TAG_subroutine_type` import as a function prototype (off unless the option, or the `aggressive` preset, is on, and never for Rust output), `decompiler/crates/kuna-decomp/src/p5_types/kuna_calltargettype.rs (CALLTARGETTYPE_ENV)` |

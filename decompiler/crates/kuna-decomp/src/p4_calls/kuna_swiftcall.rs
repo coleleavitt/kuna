@@ -6,9 +6,12 @@
 //! the caller zeroes the register, makes the call and tests it, so under the
 //! C model the test reads the zero it just stored and the error path folds
 //! away. A call whose block writes the constant zero to that register as its
-//! last write before the call is such a call, direct or indirect, and is
-//! given `__swiftcall_throws`, which hands the register back to the caller
-//! ([`throwing_call`]).
+//! last write before the call, and whose next read of the register compares
+//! it with zero, is such a call, direct or indirect, and is given
+//! `__swiftcall_throws`, which hands the register back to the caller
+//! ([`throwing_call`]). Without that test the register is an ordinary
+//! callee-saved variable (a loop counter a C or Swift function zeroes, then
+//! reads back across the call) and the call leaves it alone.
 //!
 //! A struct member takes `self` in `swiftself` only when it is mutating or
 //! its value is passed indirectly; a non-mutating member of a loadable struct
@@ -194,29 +197,105 @@ fn zeroes(data: &Funcdata, id: OpId, depth: u32) -> bool {
     }
 }
 
-/// `__swiftcall_throws` when `call` is a throwing Swift call.
+/// `__swiftcall_throws` when `call` is a throwing Swift call: the error
+/// register is zeroed just before it and compared with zero after it.
 pub fn throwing_call(data: &Funcdata, call: OpId) -> Option<Rc<ProtoModel>> {
     let abi = data.get_arch().swift_abi.as_ref()?;
     let (reg, size) = &abi.error_reg;
+    (zeroed_before(data, call, reg, *size) && tested_after(data, call, reg, *size))
+        .then(|| Rc::clone(&abi.throws))
+}
+
+/// Is `(reg, size)` written with zero as the last write before `call`?
+fn zeroed_before(data: &Funcdata, call: OpId, reg: &Address, size: int4) -> bool {
     let mut cur = data.op_previous_op(call);
     for _ in 0..MAX_SCAN {
-        let id = cur?;
-        let op = data.obank().get(id)?;
-        if matches!(
-            op.code(),
-            OpCode::CPUI_CALL | OpCode::CPUI_CALLIND | OpCode::CPUI_CALLOTHER
-        ) {
-            return None;
+        let Some(id) = cur else { return false };
+        let Some(op) = data.obank().get(id) else { return false };
+        if matches!(op.code(), OpCode::CPUI_CALL | OpCode::CPUI_CALLIND | OpCode::CPUI_CALLOTHER) {
+            return false;
         }
         if let Some(out) = op.get_out().and_then(|o| data.vbank().get(o)) {
-            if overlaps(out.get_addr(), out.get_size(), reg, *size) {
-                let whole = out.get_addr() == reg && out.get_size() == *size;
-                return (whole && zeroes(data, id, 0)).then(|| Rc::clone(&abi.throws));
+            if overlaps(out.get_addr(), out.get_size(), reg, size) {
+                return out.get_addr() == reg && out.get_size() == size && zeroes(data, id, 0);
             }
         }
         cur = data.op_previous_op(id);
     }
-    None
+    false
+}
+
+/// How many places the error register's value is followed through after a
+/// call: the register itself and the copies made of it before the test.
+const MAX_TRACKED: usize = 4;
+
+/// Is `(addr, size)` within one of `set`'s places?
+fn within(set: &[(Address, int4)], addr: &Address, size: int4) -> bool {
+    set.iter().any(|(a, w)| overlaps(addr, size, a, *w))
+}
+
+/// Does the code after `call` examine `(reg, size)` the way a caller of a
+/// throwing function does: its next read compares it with zero? The read may
+/// be of the register or of a copy of it (an arm64 debug build copies x21 and
+/// stores the copy, then tests x21 itself), a store of either is passed over,
+/// and the zero may be a temporary the instruction loaded first (arm64
+/// `cmp x21, #0`).
+fn tested_after(data: &Funcdata, call: OpId, reg: &Address, size: int4) -> bool {
+    let mut tracked = vec![(reg.clone(), size)];
+    let mut zeros: Vec<(Address, int4)> = Vec::new();
+    let mut cur = data.op_next_op(call);
+    for _ in 0..MAX_SCAN {
+        let Some(id) = cur else { return false };
+        let Some(op) = data.obank().get(id) else { return false };
+        let inputs: Vec<_> = (0..op.num_input())
+            .filter_map(|i| op.get_in(i).and_then(|v| data.vbank().get(v)))
+            .collect();
+        let out = op
+            .get_out()
+            .and_then(|o| data.vbank().get(o))
+            .map(|o| (o.get_addr().clone(), o.get_size()));
+        let read = inputs.iter().any(|v| !v.is_constant() && within(&tracked, v.get_addr(), v.get_size()));
+        if read {
+            match op.code() {
+                OpCode::CPUI_INT_EQUAL
+                | OpCode::CPUI_INT_NOTEQUAL
+                | OpCode::CPUI_INT_LESS
+                | OpCode::CPUI_INT_LESSEQUAL
+                | OpCode::CPUI_INT_SLESS
+                | OpCode::CPUI_INT_SLESSEQUAL
+                | OpCode::CPUI_INT_CARRY
+                | OpCode::CPUI_INT_SCARRY
+                | OpCode::CPUI_INT_SBORROW => {
+                    return inputs.iter().any(|v| {
+                        (v.is_constant() && v.get_offset() == 0)
+                            || (!v.is_constant() && within(&zeros, v.get_addr(), v.get_size()))
+                    });
+                }
+                OpCode::CPUI_INT_AND => {
+                    return inputs.len() == 2 && inputs[0].get_addr() == inputs[1].get_addr();
+                }
+                OpCode::CPUI_COPY if tracked.len() < MAX_TRACKED => {
+                    let Some(place) = out.clone() else { return false };
+                    tracked.push(place);
+                }
+                OpCode::CPUI_STORE => {}
+                _ => return false,
+            }
+        } else if let Some((addr, width)) = &out {
+            tracked.retain(|(a, w)| !overlaps(addr, *width, a, *w));
+            if tracked.is_empty() {
+                return false;
+            }
+        }
+        if let Some((addr, width)) = out {
+            zeros.retain(|(a, w)| !overlaps(&addr, width, a, *w));
+            if !read && zeroes(data, id, 1) {
+                zeros.push((addr, width));
+            }
+        }
+        cur = data.op_next_op(id);
+    }
+    false
 }
 
 /// Is the `swiftself` trial of call `idx` (input `slot`, in `addr`/`size`) a

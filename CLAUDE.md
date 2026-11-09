@@ -45,13 +45,17 @@ Each tier only builds on the ones below it; new behavior ships behind a named op
   fork build recipe and worktree layout live in **`CLAUDE.local.md`**. Read both before deep work.
 
 ## Working Rules
-- **Every change that can alter emitted C ships behind a named option** — a `settableTable`
-  row in `decompiler/crates/kuna-decomp/phases.toml` (all fields incl. `tier`+`symptoms`) + a
+- **A judgement call ships behind a named option; a fix does not** (upstream #1521,
+  `docs/option-surface-study.md`). An option is a `settableTable` row in
+  `decompiler/crates/kuna-decomp/phases.toml` (all fields incl. `tier`+`symptoms`) + a
   handler in `src/p0_knowledge/kuna_option_dispatch.rs`; keep `kuna catalog --check` green.
-  New logic goes in a `kuna_<slug>.rs` module in its owning phase folder (template:
-  `p2_lift/kuna_loweredswitch.rs`). A pure bug fix that only corrects wrong output needs no
-  flag (when in doubt, gate it). Adding an option also bumps hard-coded catalog counts
-  (`kuna_phases/tests.rs`, `tests/catalog_bytecompat.rs`, `tests/stages/kuna-catalog.xml`).
+  It exists only where the outcome is questionable (faithfulness vs readability, a
+  speculative recovery, a speed trade, a heuristic scanner); a strict correctness fix
+  ships unconditional, and a refinement extends the option it refines. New logic goes in
+  a `kuna_<slug>.rs` module in its owning phase folder (template:
+  `p2_lift/kuna_loweredswitch.rs`). Adding or dropping an option also changes hard-coded
+  catalog counts (`kuna_phases/tests.rs`, `tests/catalog_bytecompat.rs`,
+  `tests/stages/kuna-catalog.xml`).
 - **The spec is live**: describe every feature/behavior change in prose in the owning
   `docs/spec/` chapter in the same change; run `make check-spec`.
 - **Speed is a core principle**: a new default-ON must change 0/675 datatest assertions and

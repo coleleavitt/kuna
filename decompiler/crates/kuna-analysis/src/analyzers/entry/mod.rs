@@ -1757,10 +1757,9 @@ const DW_EH_PE_OMIT: u8 = 0xff;
 /// byte. `cieId != 0` ⇒ FDE — its CIE is at `(o+4) - cieId`
 /// (`createCiePointer`:225); decode `pcBegin` at `o+8` with that CIE's encoding.
 ///
-/// Default ptr size 8 (x86-64) for the absptr format — fixtures are all
-/// `pcrel|sdata4`, so it is unused there.
+/// Native absolute pointer width follows the ELF class.
 pub fn scan_eh_frame_starts(file: &object::File) -> Vec<u64> {
-    scan_eh_frame_starts_sized(file, 8)
+    scan_eh_frame_starts_sized(file, if file.is_64() { 8 } else { 4 })
 }
 
 /// As [`scan_eh_frame_starts`] but with an explicit absptr pointer size.
@@ -1810,7 +1809,7 @@ fn scan_eh_frame_starts_sized(file: &object::File, ptr_size: usize) -> Vec<u64> 
             continue;
         }
         let next = o + 4 + length;
-        if next > data.len() || o + 8 > data.len() {
+        if next > data.len() || length < 4 {
             break;
         }
         let cie_id = read_u32(&data[o + 4..], le);
@@ -1829,7 +1828,7 @@ fn scan_eh_frame_starts_sized(file: &object::File, ptr_size: usize) -> Vec<u64> 
                     // pcBegin field starts at o+8.
                     let field_vma = sec_vma + (o + 8) as u64;
                     if let Some(pc) =
-                        decode_eh_pointer(enc, field_vma, sec_vma, data, o + 8, ptr_size)
+                        decode_eh_pointer_ordered(enc, field_vma, sec_vma, &data[..next], o + 8, ptr_size, le)
                     {
                         out.push(pc);
                     }
@@ -1909,8 +1908,9 @@ pub fn scan_eh_frame_landing_pads(file: &object::File) -> Vec<u64> {
     let Ok(gcc_data) = gcc.data() else {
         return out;
     };
-    for_each_fde_lsda(file, 8, &mut |pc_begin, lsda_ptr| {
-        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, 8) {
+    let (ptr_size, little) = (if file.is_64() { 8 } else { 4 }, file.is_little_endian());
+    for_each_fde_lsda(file, ptr_size, &mut |pc_begin, lsda_ptr| {
+        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size, little) {
             out.extend(lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| cs.pad));
         }
     });
@@ -1929,8 +1929,9 @@ pub fn scan_eh_frame_landing_pads_owned(file: &object::File) -> Vec<(u64, u64)> 
     let Ok(gcc_data) = gcc.data() else {
         return out;
     };
-    for_each_fde_lsda(file, 8, &mut |pc_begin, lsda_ptr| {
-        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, 8) {
+    let (ptr_size, little) = (if file.is_64() { 8 } else { 4 }, file.is_little_endian());
+    for_each_fde_lsda(file, ptr_size, &mut |pc_begin, lsda_ptr| {
+        if let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size, little) {
             out.extend(lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| (pc_begin, cs.pad)));
         }
     });
@@ -2094,7 +2095,7 @@ pub(crate) fn for_each_fde_lsda_classified(file: &object::File, ptr_size: usize,
             continue;
         }
         let next = o + 4 + length;
-        if next > data.len() || o + 8 > data.len() {
+        if next > data.len() || length < 4 {
             break;
         }
         let cie_id = read_u32(&data[o + 4..], le);
@@ -2104,7 +2105,7 @@ pub(crate) fn for_each_fde_lsda_classified(file: &object::File, ptr_size: usize,
             if let Some(aug) = parse_cie_aug(&data[o..next], ptr_size) {
                 let personality = aug.personality.map_or(Personality::Unknown, |(enc, off)| {
                     let field = o + off;
-                    decode_eh_pointer(enc & 0x7f, sec_vma + field as u64, sec_vma, data, field, ptr_size)
+                    decode_eh_pointer_ordered(enc & 0x7f, sec_vma + field as u64, sec_vma, &data[..next], field, ptr_size, le)
                         .map_or(Personality::Unknown, |v| names.classify(v, enc & 0x80 != 0))
                 });
                 cie_aug.push((o, aug));
@@ -2132,7 +2133,7 @@ pub(crate) fn for_each_fde_lsda_classified(file: &object::File, ptr_size: usize,
             let pc_begin_off = o + 8;
             let pc_begin_vma = sec_vma + pc_begin_off as u64;
             let Some(pc_begin) =
-                decode_eh_pointer(aug.fde_enc, pc_begin_vma, sec_vma, data, pc_begin_off, ptr_size)
+                decode_eh_pointer_ordered(aug.fde_enc, pc_begin_vma, sec_vma, &data[..next], pc_begin_off, ptr_size, le)
             else {
                 o = next;
                 continue;
@@ -2150,13 +2151,14 @@ pub(crate) fn for_each_fde_lsda_classified(file: &object::File, ptr_size: usize,
             // CIE's `L` encoding. Its VMA is needed for a pcrel `L` encoding.
             let lsda_field_off = aug_data_off + aug.fde_lsda_off;
             let lsda_field_vma = sec_vma + lsda_field_off as u64;
-            let Some(lsda_ptr) = decode_eh_pointer(
+            let Some(lsda_ptr) = decode_eh_pointer_ordered(
                 aug.lsda_enc,
                 lsda_field_vma,
                 sec_vma,
-                data,
+                &data[..next],
                 lsda_field_off,
                 ptr_size,
+                le,
             ) else {
                 o = next;
                 continue;
@@ -2204,6 +2206,7 @@ pub(crate) fn decode_lsda(
     lsda_vma: u64,
     func_pc_begin: u64,
     ptr_size: usize,
+    little: bool,
 ) -> Option<Lsda> {
     let base = lsda_vma.checked_sub(gcc_vma)? as usize;
     if base >= gcc_data.len() {
@@ -2216,7 +2219,7 @@ pub(crate) fn decode_lsda(
         func_pc_begin
     } else {
         let field_vma = gcc_vma + p as u64;
-        let v = decode_eh_pointer(lp_enc, field_vma, gcc_vma, gcc_data, p, ptr_size)?;
+        let v = decode_eh_pointer_ordered(lp_enc, field_vma, gcc_vma, gcc_data, p, ptr_size, little)?;
         p += encoded_size(lp_enc, ptr_size, gcc_data.get(p..).unwrap_or(&[]));
         v
     };
@@ -2236,7 +2239,9 @@ pub(crate) fn decode_lsda(
 
     let mut call_sites = Vec::new();
     while p < table_end && call_sites.len() < 10_000 {
-        let field = |p: usize| decode_eh_pointer(cs_enc, gcc_vma + p as u64, gcc_vma, gcc_data, p, ptr_size);
+        let field = |p: usize| {
+            decode_eh_pointer_ordered(cs_enc, gcc_vma + p as u64, gcc_vma, &gcc_data[..table_end], p, ptr_size, little)
+        };
         let Some(start) = field(p) else { break };
         let Some(np) = skip_eh_pointer(cs_enc, gcc_data, p, ptr_size) else { break };
         p = np;
@@ -2478,13 +2483,14 @@ fn encoded_size(enc: u8, ptr_size: usize, rest: &[u8]) -> usize {
 /// absptr = raw as-is — kuna loads at the file vmas so the image-base adjustment
 /// is 0). `indirect` (enc & 0x80) is unresolvable without a runtime relocation —
 /// skipped as a documented LOSS (never in the fixtures).
-fn decode_eh_pointer(
+fn decode_eh_pointer_ordered(
     enc: u8,
     field_vma: u64,
     section_vma: u64,
     bytes: &[u8],
     field_off: usize,
     ptr_size: usize,
+    little: bool,
 ) -> Option<u64> {
     if enc == DW_EH_PE_OMIT {
         return None;
@@ -2496,20 +2502,28 @@ fn decode_eh_pointer(
     let appl = enc & 0x70;
     let slice = bytes.get(field_off..)?;
 
+    let read16 = || {
+        let value: [u8; 2] = slice.get(..2)?.try_into().ok()?;
+        Some(if little {
+            u16::from_le_bytes(value)
+        } else {
+            u16::from_be_bytes(value)
+        })
+    };
     let raw: u64 = match format {
         DW_EH_PE_ABSPTR => {
             if ptr_size == 8 {
-                read_u64_opt(slice)?
+                read_u64(slice.get(..8)?, little)
             } else {
-                read_u32_opt(slice)? as u64
+                read_u32(slice.get(..4)?, little) as u64
             }
         }
-        DW_EH_PE_UDATA2 => read_u16_opt(slice)? as u64,
-        DW_EH_PE_SDATA2 => read_u16_opt(slice)? as i16 as i64 as u64,
-        DW_EH_PE_UDATA4 => read_u32_opt(slice)? as u64,
-        DW_EH_PE_SDATA4 => read_u32_opt(slice)? as i32 as i64 as u64,
-        DW_EH_PE_UDATA8 => read_u64_opt(slice)?,
-        DW_EH_PE_SDATA8 => read_u64_opt(slice)?,
+        DW_EH_PE_UDATA2 => read16()? as u64,
+        DW_EH_PE_SDATA2 => read16()? as i16 as i64 as u64,
+        DW_EH_PE_UDATA4 => read_u32(slice.get(..4)?, little) as u64,
+        DW_EH_PE_SDATA4 => read_u32(slice.get(..4)?, little) as i32 as i64 as u64,
+        DW_EH_PE_UDATA8 => read_u64(slice.get(..8)?, little),
+        DW_EH_PE_SDATA8 => read_u64(slice.get(..8)?, little),
         DW_EH_PE_ULEB128 => read_uleb128(bytes, field_off)?.0,
         DW_EH_PE_SLEB128 => read_sleb128(bytes, field_off)?.0 as u64,
         _ => return None,
@@ -2528,10 +2542,6 @@ fn decode_eh_pointer(
 // Little/big-endian + LEB128 byte readers
 // ===========================================================================
 
-fn read_u16_opt(b: &[u8]) -> Option<u16> {
-    Some(u16::from_le_bytes([*b.first()?, *b.get(1)?]))
-}
-
 fn read_u32(b: &[u8], le: bool) -> u32 {
     let a = [b[0], b[1], b[2], b[3]];
     if le {
@@ -2539,10 +2549,6 @@ fn read_u32(b: &[u8], le: bool) -> u32 {
     } else {
         u32::from_be_bytes(a)
     }
-}
-
-fn read_u32_opt(b: &[u8]) -> Option<u32> {
-    Some(u32::from_le_bytes([*b.first()?, *b.get(1)?, *b.get(2)?, *b.get(3)?]))
 }
 
 fn read_u64(b: &[u8], le: bool) -> u64 {
@@ -2882,7 +2888,7 @@ mod tests {
         ];
         let func_pc_begin = 0x4012d6u64;
         // gcc_vma=0, lsda_vma=0 (section offset 0), ptr_size 8.
-        let lsda = decode_lsda(gcc, 0, 0, func_pc_begin, 8).expect("lsda");
+        let lsda = decode_lsda(gcc, 0, 0, func_pc_begin, 8, true).expect("lsda");
         let mut out: Vec<u64> = lsda.call_sites.iter().filter(|cs| cs.pad != 0).map(|cs| cs.pad).collect();
         out.sort_unstable();
         out.dedup();

@@ -1,6 +1,7 @@
 //! LZFSE decoding (Apple's `lzfse` reference format): the `bvx-` raw, `bvxn`
 //! LZVN and `bvx2` FSE-coded blocks, ended by `bvx$`. Decode only, bounds-checked
-//! throughout; any malformed field is an error rather than a guess.
+//! throughout; any malformed field is an error rather than a guess. The table
+//! decoding follows the BSD-3 lzfse reference implementation (see `NOTICE`).
 
 const MAGIC_END: u32 = u32::from_le_bytes(*b"bvx$");
 const MAGIC_RAW: u32 = u32::from_le_bytes(*b"bvx-");
@@ -49,10 +50,15 @@ pub(super) fn is_lzfse(bytes: &[u8]) -> bool {
 
 /// Decode a whole LZFSE stream. `limit` caps the decoded size; the declared
 /// `size_hint` only sizes the first allocation, never past what the input could
-/// plausibly expand to.
+/// plausibly expand to. A valid block claims more symbols than raw bytes only
+/// by its padding literals and literal-only (M = 0) triples, at most 50 per block
+/// in two real 20 MB kernelcache streams, so the symbols a block claims beyond
+/// its raw size are charged to the input length: an all-header block decoding
+/// 50,000 symbols to nothing would otherwise cost 1,500 steps per byte.
 pub(super) fn decode(src: &[u8], size_hint: usize, limit: usize) -> Result<Vec<u8>, Error> {
     let mut out = Vec::with_capacity(size_hint.min(limit).min(src.len().saturating_mul(8)));
     let mut pos = 0usize;
+    let mut wasted = 0usize;
     loop {
         let magic = rd_u32(src, pos).ok_or("LZFSE stream ends without an end-of-stream block")?;
         match magic {
@@ -75,6 +81,10 @@ pub(super) fn decode(src: &[u8], size_hint: usize, limit: usize) -> Result<Vec<u
             MAGIC_V2 => {
                 let block = BlockV2::parse(src.get(pos..).ok_or(TRUNCATED)?)?;
                 reserve(&out, block.n_raw_bytes, limit)?;
+                wasted += (block.n_literals + block.n_matches).saturating_sub(block.n_raw_bytes);
+                if wasted > src.len() {
+                    return Err("LZFSE blocks claim far more symbols than they decode");
+                }
                 let start = pos.checked_add(block.header_size).ok_or(TRUNCATED)?;
                 let len = block.n_literal_payload_bytes + block.n_lmd_payload_bytes;
                 let payload = slice(src, start, len)?;
@@ -367,12 +377,15 @@ impl ValueTable {
     }
 }
 
-/// The FSE bit stream, read backwards from the end of its payload.
+/// The FSE bit stream, read backwards from the end of its payload. `phantom`
+/// counts the low bits of `accum` loaded from before the payload's start: they
+/// read as zero and pulling them is an error, since no valid stream does.
 struct BitIn<'a> {
     buf: &'a [u8],
     pos: usize,
     accum: u64,
     nbits: u32,
+    phantom: u32,
 }
 
 impl<'a> BitIn<'a> {
@@ -382,17 +395,18 @@ impl<'a> BitIn<'a> {
         }
         let width = if n != 0 { 8 } else { 7 };
         let pos = buf.len().saturating_sub(width);
-        let accum = le_bytes(&buf[pos..]).checked_shl(8 * (width - (buf.len() - pos)) as u32).unwrap_or(0);
+        let missing = (width - (buf.len() - pos)) as u32;
+        let accum = le_bytes(&buf[pos..]).checked_shl(8 * missing).unwrap_or(0);
         let nbits = (n + 8 * width as i32) as u32;
         if nbits < 64 && accum >> nbits != 0 {
             return Err("bad LZFSE bit-stream header");
         }
-        Ok(Self { buf, pos, accum, nbits })
+        Ok(Self { buf, pos, accum, nbits, phantom: 8 * missing })
     }
 
     /// Refill to at least 56 bits. Near the start of the payload the encoder's
     /// stream may refill from bytes before it, which are never consumed; they
-    /// read as zero here.
+    /// read as zero here and are counted in `phantom`.
     fn flush(&mut self) {
         let nbytes = ((63 - self.nbits) >> 3) as usize;
         if nbytes == 0 {
@@ -404,10 +418,11 @@ impl<'a> BitIn<'a> {
         self.pos = from;
         self.accum = (self.accum << (8 * nbytes)) | incoming;
         self.nbits += 8 * nbytes as u32;
+        self.phantom += 8 * missing as u32;
     }
 
     fn pull(&mut self, n: u32) -> Result<u64, Error> {
-        if n > self.nbits {
+        if n > self.nbits.saturating_sub(self.phantom) {
             return Err(TRUNCATED);
         }
         self.nbits -= n;
@@ -477,4 +492,39 @@ fn rd_u32(b: &[u8], off: usize) -> Option<u32> {
 
 fn rd_u64(b: &[u8], off: usize) -> Option<u64> {
     b.get(off..off.checked_add(8)?).map(|s| u64::from_le_bytes(s.try_into().unwrap()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Blocks that claim symbols but decode nothing stop at the input length
+    /// instead of decoding every block: 100,000 32-byte headers, each claiming
+    /// 50,000 symbols, are refused at once.
+    #[test]
+    fn symbols_without_output_are_charged_to_the_input() {
+        let mut block = b"bvx2".to_vec();
+        block.extend_from_slice(&0u32.to_le_bytes());
+        let f0 = 40_000u64 | (10_000u64 << 40) | (7u64 << 60);
+        let f1 = 7u64 << 60;
+        for field in [f0, f1, 32] {
+            block.extend_from_slice(&field.to_le_bytes());
+        }
+        let mut stream = block.repeat(100_000);
+        stream.extend_from_slice(b"bvx$");
+        let start = std::time::Instant::now();
+        assert_eq!(decode(&stream, 0, usize::MAX), Err("LZFSE blocks claim far more symbols than they decode"));
+        assert!(start.elapsed() < std::time::Duration::from_secs(1), "took {:?}", start.elapsed());
+    }
+
+    /// Bits loaded from before the payload's start read as zero but cannot be
+    /// consumed: a stream that needs them is truncated, not zero-padded.
+    #[test]
+    fn bits_from_before_the_payload_cannot_be_pulled() {
+        let mut bits = BitIn::new(&[0xa5], 0).unwrap();
+        assert_eq!(bits.pull(8), Ok(0xa5));
+        assert_eq!(bits.pull(1), Err(TRUNCATED));
+        bits.flush();
+        assert_eq!(bits.pull(1), Err(TRUNCATED));
+    }
 }

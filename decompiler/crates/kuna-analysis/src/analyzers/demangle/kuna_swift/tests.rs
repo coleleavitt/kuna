@@ -288,9 +288,9 @@ const CORPUS: &[(&str, &str, &str)] = &[
         "Swift.AnyBidirectionalCollection.count.property_descriptor",
     ),
     (
-        "_TtC6Toyota24AddMileageViewController",
-        "Toyota.AddMileageViewController",
-        "Toyota.AddMileageViewController",
+        "_TtC6Sample24MainScreenViewController",
+        "Sample.MainScreenViewController",
+        "Sample.MainScreenViewController",
     ),
     (
         "_TtCC8DGCharts26HorizontalBarChartRendererP33_AAB8A416B07B7ABA6A1148A4C00D2BA76Buffer",
@@ -354,7 +354,7 @@ fn out_of_coverage_names_pass_through() {
         // a substitution that does not exist yet
         "$sAAyyF",
         // old mangling outside the runtime-name subset
-        "_TtCZFO6Toyota19PackageConfigurator24didFinishLaunchingPrefixFT_T_L_23AppFeatureContainerGate",
+        "_TtCZFO6Sample19PackageConfigurator24didFinishLaunchingPrefixFT_T_L_23AppFeatureContainerGate",
         "_TtGC7SwiftUI19UIHostingController",
         "_TtC1",
     ] {
@@ -580,4 +580,211 @@ fn symbolic_references_resolve_through_the_hook() {
     assert_eq!(full(b"\x01\x10\x00"), None);
     assert_eq!(full(b"SSSi"), None);
     assert_eq!(full(b""), None);
+}
+
+/// A crafted name whose substitutions share subtrees so a composite type
+/// renders work that doubles with each level. Before the shared name-only
+/// work budget, `demangle_swift_name` on this ~180-byte symbol expanded to
+/// hundreds of megabytes over many seconds; now it returns `None` with the
+/// work bounded. (Each level is `Dictionary<prev, prev>` referencing the
+/// previous substitution twice; a final tuple + type-mangling makes one root
+/// the name path actually renders.)
+#[test]
+fn shared_subtree_blowup_is_bounded() {
+    let mut sym = String::from("$sSDySiSiG_");
+    for k in 1..24 {
+        let idx = (k - 1) as u8;
+        sym.push_str(&format!(
+            "SDyA{}{}G",
+            (b'a' + idx) as char,
+            (b'A' + idx) as char
+        ));
+    }
+    sym.push_str("tD");
+    assert_eq!(demangle_swift_name(&sym), None);
+    assert_eq!(demangle_swift_full(&sym), None);
+}
+
+/// Word-substitution identifiers append a whole earlier identifier per
+/// reference, so an identifier's length is roughly quadratic in the symbol
+/// length. Before the identifier text cap a 12 KB symbol built a 36 MB
+/// identifier; now it is refused. A short word-substitution identifier still
+/// demangles.
+#[test]
+fn word_substitution_identifier_length_is_capped() {
+    let word = format!("A{}", "b".repeat(5_999)); // one 6000-char camel word
+    let hostile = format!("$s4main0{}{}{}0VD", word.len(), word, "b".repeat(6_000));
+    assert_eq!(demangle_swift_name(&hostile), None);
+    assert_eq!(demangle_swift_full(&hostile), None);
+    // A short word-substitution identifier (module word `main` reused) still
+    // demangles.
+    assert_eq!(
+        demangle_swift_name("$s4main010Abcdefghiaa0VD").as_deref(),
+        Some("main.Abcdefghiamain")
+    );
+}
+
+/// Deeply nested bound-generic arguments recurse through the context chain;
+/// an explicit depth cap keeps the parser's call stack bounded instead of
+/// relying on the node budget alone.
+#[test]
+fn deep_bound_generic_nesting_is_refused() {
+    assert_eq!(
+        demangle_swift_full(&format!("$s1a{}y{}GN", "1bV".repeat(20_000), "Si_".repeat(20_000))),
+        None
+    );
+    assert_eq!(
+        demangle_swift_name(&format!("$s4main3FooV{}N", "Sg".repeat(30_000))),
+        None
+    );
+}
+
+/// Every line is `swift-demangle --compact` output (Swift 6.3/6.4): function
+/// types of the Swift-4 `_T0` scheme keep labels off the parameter tuple,
+/// `sending` results print before the result list, conformance references name
+/// their module the way the reference printer does, and an attribute-only
+/// symbol with an unmangled suffix prints no dangling ` for `.
+#[test]
+fn reference_printer_edge_cases() {
+    for (raw, full) in [
+        (
+            "_T08mangling14varargsVsArrayySi3arrd_SS1ntF",
+            "mangling.varargsVsArray(arr: Swift.Int..., n: Swift.String) -> ()",
+        ),
+        (
+            "_T03foo3barC3basyAA3zimCAE_tFTo",
+            "@objc foo.bar.bas(zim: foo.zim) -> ()",
+        ),
+        ("_$sTA.123", "partial apply forwarder with unmangled suffix \".123\""),
+        (
+            "$s4main3fooyyFTA.123",
+            "partial apply forwarder for main.foo() -> () with unmangled suffix \".123\"",
+        ),
+        (
+            "$S3nix8MystructV1x1uACyxGx_qd__tclufc7MyaliasL_ayx_qd___GD",
+            "Myalias #1 in nix.Mystruct<A>.<A1>(x: A, u: A1) -> nix.Mystruct<A>",
+        ),
+        (
+            "$s4null16NonSendableKlassCIegHo_ACs5Error_pIegHTrzo_TR",
+            "reabstraction thunk helper from @escaping @callee_guaranteed @async () -> (@owned null.NonSendableKlass) to @escaping @callee_guaranteed @async () -> sending (@out null.NonSendableKlass, @error @owned Swift.Error)",
+        ),
+        (
+            "$s23variadic_generic_opaque2G2VyAA2S1V_AA2S2VQPGAA1PHPAeA1QHPyHC_AgaJHPyHCHX_HC",
+            "concrete protocol conformance variadic_generic_opaque.G2<Pack{variadic_generic_opaque.S1, variadic_generic_opaque.S2}> to protocol conformance ref (type's module) variadic_generic_opaque.P with conditional requirements: (pack protocol conformance (concrete protocol conformance variadic_generic_opaque.S1 to protocol conformance ref (type's module) variadic_generic_opaque.Q, concrete protocol conformance variadic_generic_opaque.S2 to protocol conformance ref (type's module) variadic_generic_opaque.Q))",
+        ),
+        (
+            "_T03foo6testityyyc_yyctF1a1bTf3pfpf_n",
+            "function signature specialization <Arg[0] = [Constant Propagated Function : a], Arg[1] = [Constant Propagated Function : b]> of foo.testit(() -> (), () -> ()) -> ()",
+        ),
+        (
+            "$s3foo5helloyyF14$s4main3fooyyFTf3psb_n",
+            "function signature specialization <Arg[0] = [Constant Propagated String : u8'$s4main3fooyyF']> of foo.hello() -> ()",
+        ),
+        (
+            "$s3foo5helloyyF14$s4main3fooyyFTf3pf_n",
+            "function signature specialization <Arg[0] = [Constant Propagated Function : main.foo() -> ()]> of foo.hello() -> ()",
+        ),
+        (
+            "$ss6SimpleHr",
+            "protocol descriptor runtime record for Swift.Simple",
+        ),
+        (
+            "$ss5OtherVs6SimplesHc",
+            "protocol conformance descriptor runtime record for Swift.Other : Swift.Simple in Swift",
+        ),
+        (
+            "$ss5OtherVHn",
+            "nominal type descriptor runtime record for Swift.Other",
+        ),
+        (
+            "$s18opaque_return_type3fooQryFQOHo",
+            "opaque type descriptor runtime record for <<opaque return type of opaque_return_type.foo() -> some>>",
+        ),
+        (
+            "$s4main6myFuncyyF1xL_SivpfF",
+            "property wrapped field init accessor of x #1 : Swift.Int in main.myFunc() -> ()",
+        ),
+        (
+            "$s3Bar3FooVAA5DrinkVyxGs5Error_pSeRzSERzlyShy4AbcdAHO6MemberVGALSeHPAKSeAAyHC_HCg_ALSEHPAKSEAAyHC_HCg0_Iseggozo_SgWOe",
+            "outlined consume of (@escaping @callee_guaranteed @substituted <A where A: Swift.Decodable, A: Swift.Encodable> (@guaranteed Bar.Foo) -> (@owned Bar.Drink<A>, @error @owned Swift.Error) for <Swift.Set<Abcd.Abcd.Member>>)?",
+        ),
+        (
+            "$sSRyxG15Synchronization19AtomicRepresentableABRi1_zrlMc",
+            "protocol conformance descriptor for < where A: ~Swift.<bit 2>> Swift.UnsafeBufferPointer<A> : Synchronization.AtomicRepresentable in Synchronization",
+        ),
+        (
+            "$sSiIetAYl_SiIetAYl_TR",
+            "reabstraction thunk helper from @escaping @convention(thin) @yield_once () -> (@yields @inout Swift.Int) to @escaping @convention(thin) @yield_once () -> (@yields @inout Swift.Int)",
+        ),
+        (
+            "$sIeg_BAIegHgL_TR",
+            "reabstraction thunk helper from @escaping @callee_guaranteed () -> () to @escaping @callee_guaranteed @async (@guaranteed sil_implicit_leading_param Builtin.ImplicitActor) -> ()",
+        ),
+        (
+            "$s10Foundation8UnitAreaC17squareCentimetersACvpZ1MV",
+            "static Foundation.UnitArea.squareCentimeters : Foundation.UnitArea.M",
+        ),
+        (
+            "$sBAIeNghHgIL_BAytIeNghHgILr_TR",
+            "reabstraction thunk helper from @escaping @caller_isolated @callee_guaranteed @Sendable @async (@guaranteed Builtin.ImplicitActor) -> () to @escaping @caller_isolated @callee_guaranteed @Sendable @async (@guaranteed Builtin.ImplicitActor) -> (@out ())",
+        ),
+        ("_TtGCC6Sample5Outer5Inner_Si_", "Sample.Outer.Inner<Swift.Int>"),
+        (
+            "_TtGCC6Sample5Outer5InnerSi_Si_",
+            "Sample.Outer<Swift.Int>.Inner<Swift.Int>",
+        ),
+    ] {
+        assert_eq!(demangle_swift_full(raw).as_deref(), Some(full), "{raw}");
+    }
+    assert_eq!(demangle_swift_full("_TtGCC6Sample5Outer5InnerSi_"), None);
+    for (raw, name) in [
+        (
+            "_T08mangling14varargsVsArrayySi3arrd_SS1ntF",
+            "mangling.varargsVsArray(arr:n:)",
+        ),
+        ("$s4main3fooyyFTA.123", "main.foo().partial_apply.123"),
+        ("$ss5OtherVHn", "Swift.Other.nominal_type_descriptor_record"),
+        (
+            "$s4main6myFuncyyF1xL_SivpfF",
+            "main.myFunc().x#1.property_wrapped_field_init_accessor",
+        ),
+    ] {
+        assert_eq!(demangle_swift_name(raw).as_deref(), Some(name), "{raw}");
+    }
+}
+
+/// A Swift symbol can embed another symbol as a constant-propagation payload.
+/// Each level re-enters the parser and printer, so without a shared depth and
+/// budget a long chain would recurse without bound; printing stops at the
+/// depth cap and leaves the deepest payload undemangled.
+#[test]
+fn embedded_symbol_chain_is_bounded() {
+    let mut sym = String::from("$s3foo5helloyyF");
+    for _ in 0..30_000 {
+        sym = format!("$s3foo5helloyyF{}{sym}Tf3pf_n", sym.len());
+        if sym.len() > (1 << 20) {
+            break;
+        }
+    }
+    let _ = demangle_swift_full(&sym);
+    let _ = demangle_swift_name(&sym);
+    // A chain of string-constant payloads never re-enters the parser.
+    let mut sym = String::from("$s3foo5helloyyF");
+    for _ in 0..30_000 {
+        sym = format!("$s3foo5helloyyF{}{sym}Tf3psb_n", sym.len());
+        if sym.len() > (1 << 20) {
+            break;
+        }
+    }
+    assert!(demangle_swift_full(&sym).is_some_and(|s| s.contains("Constant Propagated String")));
+    assert!(demangle_swift_name(&sym).is_some());
+}
+
+/// Punycode decoding is quadratic in the encoded length, so an absurdly long
+/// punycoded identifier is refused rather than decoded.
+#[test]
+fn oversized_punycode_is_refused() {
+    let n = (1 << 16) + 1;
+    let raw = format!("$s00{n}_{}", "a".repeat(n));
+    assert_eq!(demangle_swift_full(&raw), None);
 }

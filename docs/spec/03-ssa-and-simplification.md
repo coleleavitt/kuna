@@ -79,6 +79,36 @@ parameter accounts for. A copy of those pieces to memory was then dead to
 `ActionDeadCode`, and `use3(&s)` printed as `use3(&v1)` with only `v1.z = s.z`
 stored. kuna splits the join on the first pass that heritages any of its pieces.
 
+An ABI join can contain zero constant pieces for logical padding that has no
+physical storage. Reading the join supplies those zeros; splitting a written
+join discards those pieces and writes only its physical fields. Padding must
+not acquire a register input or become a destination for a SUBPIECE. Structured
+PIECE recovery reads a padding leaf as a logical constant input and gives a
+padding assignment temporary storage rather than writing to the constant space;
+real member locations still receive their values, including zero-valued fields. These padding rules are not optional: a constant piece
+has no storage to write. Any output created at a renormalized address that lies
+wholly in padding receives a temporary instead
+(`decompiler/crates/kuna-decomp/src/substrate/funcdata_varnode.rs (varnode_out)`);
+padding renormalizes to constant zero, and any other constant output address is
+still refused. Attaching a constant as an operation's output is refused before
+the operation changes. A struct- or array-typed concatenation with low zero
+bytes stays a PIECE for field recovery rather than becoming an integer shift
+(`RuleConcatZero`'s upstream rewrite applies to every other concatenation).
+Join addresses use the join space's target byte order, including a partial join
+whose first piece is a constant. Byte positions within padding stay separate
+from its zero value, so slicing that padding neither invents nonzero constants
+nor shifts the adjacent physical fields.
+
+Cleanup splitting can extract fields from an already truncated aggregate. Its
+new SUBPIECEs immediately collapse nested truncations through the existing
+double-subpiece rule, preserving their total byte offset. The main
+simplification pool has already finished at this point; leaving the intermediate
+partial aggregate would prevent the emitter from naming the original fields.
+After replacing the original copy or store, the splitter removes unused
+truncations through the normal dead-code rule, retaining live and protected
+values. Off leaves both the nested truncations and the unused ones, as upstream
+does.
+
 **Preferred register splits.** Heritage pass 0 also runs the compiler spec's
 `<prefersplit>` table (`PreferSplitManager`, ported from `prefersplit.cc`): each
 listed whole register is rewritten into two independent pieces, and a free or
@@ -644,7 +674,7 @@ arm answers only processor-space ranges, because a callee's memory writes are `S
 address the walk cannot follow; only *killed by call* is downgraded, never
 promoted; and a prototype carrying its own effect-record override has had a
 deliberate statement made about it and is left alone. A call built past a PLT stub at the
-definition the stub is bound to (`pltlocal`, chapter 04) takes no proof either:
+definition the stub is bound to (`kuna_pltlocal.rs`, chapter 04) takes no proof either:
 the compiler that emitted `bl name@plt` could not rely on what one definition
 leaves alone, since the lazy resolver runs first and another may win.
 
@@ -710,7 +740,7 @@ no write to the return storage proves the call has no return value at all
 (`decompiler/crates/kuna-decomp/src/p4_calls/kuna_calleeretpreserves.rs
 (callee_preserves_return_storage)`). For an exact range the effect is downgraded
 to *unaffected*, the output-active arm is skipped, and the caller's own
-definition flows across the call. A call built past a PLT stub (`pltlocal`) takes no such proof,
+definition flows across the call. A call built past a PLT stub (`kuna_pltlocal.rs`) takes no such proof,
 for the reason given above for `calleepreserves`.
 
 Three conditions bound it. The range must characterize as the call's *output*.
@@ -822,7 +852,21 @@ routine on x86-64: SLEIGH models `PXOR`, `POR`, `PAND`, `MOVDQA`, `MOVDQU`,
 `MOVQ`-to-xmm and `ORPD` as a single 128-bit write to the whole XMM register, so
 the range is never partitioned by refinement (whose gate is `size > 4 && maxw <
 size`) and the 8-byte parameter and return entries inside it are invisible.
-Under `option calloverlap` two dedicated guards recover them.
+Under `option calloverlap` two dedicated guards recover them. Its default
+`auto` mode applies both guards to a named eight-byte register containing the
+named low four-byte general ABI slot, only when the default data space is
+truncated to four-byte addresses. For e500, this retains scalar arguments
+produced by arithmetic as well as moves, and makes the call define its scalar
+result. Argument trials still pass through normal use scoring. The output
+guard kills the surrounding bytes independently; it does not preserve unknown
+upper bits across a call or narrow other uses of the physical register.
+Floating-point slots, ambiguous contained entries, unnamed ranges, other
+address widths and memory ranges are excluded. `off` disables the partial-range
+guards; `in` and `full` retain their broader opt-in behavior.
+
+Trial scoring for this shape has one companion rule, `kuna_exclusivecallret.rs`
+(chapter 04, `ActionActiveParam`), which lets a call and a return on mutually
+exclusive arms keep each other's narrow scalar trial.
 
 With `option multiregargs on` (the default), a physical register range
 completely covered by two or more general ABI input slots receives separate
@@ -883,6 +927,18 @@ rendered with missing arguments and a return value read from a stale pre-call
 definition. At `in` only the input guard runs, which recovers the argument but
 leaves the return value stale; at `full` both run, which is upstream Ghidra's
 behavior.
+
+An explicit ABI slot-to-register extension supplies stronger evidence than this
+overlap heuristic. When a return slot declares that extension and heritage reads
+its whole physical register, `p4_calls/kuna_registerslots.rs (guard_output)`
+creates the logical slot trial and extends it to the register. This applies
+without enabling `calloverlap full`, retains four-byte O32 return slots, and
+leaves a call's preserved ranges alone. Likewise, when heritage reaches a call
+with the whole physical register of an argument slot that declares the
+extension, `p4_calls/kuna_registerslots.rs (input_slot)` passes the slot, a
+truncation of the register, as the argument trial without enabling
+`calloverlap in`. Competing entries that overlap the
+physical register cannot supply this unconditional extension.
 
 `heritage.rs
 (Heritage::guard_returns)` symmetrically appends output-trial varnodes to every
@@ -1016,10 +1072,9 @@ those COPYs in the order upstream built them leaves every Varnode's readers in
 upstream's order. Only the pairs a later read sees build their COPY, and each
 reads the reached Varnode directly where upstream's chains the guard COPYs of
 consecutive LOADs. The read
-locations that branch-scope trimming (chapter 06, `guardedreadtrim`) records
-for the stack guard COPYs are recorded once per block and range
-(`kuna_stackreadscope.rs (mark_guarded_read)`). With the option off, every
-COPY is built as upstream builds it.
+locations that branch-scope trimming (chapter 06, `kuna_guardedreadtrim.rs`)
+records for the stack guard COPYs are recorded once per block and range
+(`kuna_stackreadscope.rs (mark_guarded_read)`).
 
 At `global`, the default, the LOAD guard runs and so does the global half of
 upstream's STORE guard (`heritage.rs (Heritage::guard_global_stores)`): every
@@ -1452,7 +1507,8 @@ rules only the ops
 names: the dead ops (destroyed, as the sweep destroys them), the definition and
 readers of each Varnode a removed op read, every op of an opcode a far-walking
 rule fires on (the sub-variable and split flows, which walk a whole data-flow
-web, `action.rs (Rule::walks_far)`), and the same neighbourhood of each op the
+web, and `RuleIgnoreNan`, which follows a NaN test through three levels of
+boolean readers; `action.rs (Rule::walks_far)`), and the same neighbourhood of each op the
 wave itself removes. Removals are recorded as they happen
 (`decompiler/crates/kuna-decomp/src/substrate/funcdata.rs
 (Funcdata::note_dead_removal)`). The first application other than a removal
@@ -1461,6 +1517,68 @@ breakpoint set always sweeps. A rule whose test reads two or more ops away from
 the op it fires on without walking a web can see a removal the wave does not
 offer it; that rule then fires at the next full sweep instead. With
 `deadwaves off` every pass sweeps every op.
+
+(kuna `copywaves`, default on) `RulePropagateCopy` replaces one input of an op
+with the input of the COPY defining it and stops (upstream's "propagate just a
+single copy"), and a rule applies at most once per op per pass, so a join with
+hundreds of copied inputs takes hundreds of passes. serde-hkx's hkxc.exe
+0x1406198f0 has one: the stack pointer at its shared exit block reads the COPY
+each path's last call left, 626 to 674 of them. Each of those passes also
+removes the COPY the pass before freed, and every one swept the whole
+function. With `copywaves` an input replacement is a change a wave can follow:
+the rule records the op and the Varnodes it touches before and after
+(`decompiler/crates/kuna-decomp/src/substrate/funcdata.rs
+(Funcdata::note_wave_input_change)`; `action.rs (Rule::replaces_inputs_only)`
+marks the rule), so a pass whose only changes were removals and such
+replacements is followed by a wave over the op, its output's readers, and the
+definition and readers of every Varnode it read before and after, and an
+input replacement inside a wave widens the wave instead of ending it. The
+second change makes each wave cheaper: an op the wave reaches only because a
+far-walking rule fires on its opcode is offered just the far-walking rules
+(`action.rs (ActionPool::wave_wants)`), since the others test only what lies
+next to the op and the previous pass changed nothing there; once a rule
+applies to it the rest of its rules are tested as usual. The same limit as
+`deadwaves` applies: a rule reading two or more ops away without walking a web
+can see a change the wave does not offer it, and `RulePropagateCopy`'s own
+`kuna_globalstorekeep` refusal is one, since it reads the readers of the COPY's
+input and walks the blocks after the store
+(`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_globalstorekeep.rs
+(declines)`). Neither mechanism ends a pool run with a full sweep: the run stops
+at its first pass that changes nothing, which can be a wave. Such a rule is
+caught by the schedule around oppool1, the only pool holding `RuleEarlyRemoval`
+and `RulePropagateCopy`: the `stackstall` group repeats oppool1 while it
+changed anything, and the first pass of every pool run is a full sweep (a wave
+needs an earlier change in the same run), so the rule fires one stackstall
+iteration later. With `copywaves off`, `deadwaves` behaves as described above.
+
+(kuna `deadcascade`, default 32) A wave is cheaper than a sweep but still
+walks the whole function, and the far-walking rules still run on every op of
+their opcodes, so a chain of a thousand links still costs a thousand passes.
+Once one run of a pool has made N passes (`action.rs (ActionPool::apply)`
+counts the passes since the run began and sets
+`Funcdata::set_dead_cascade_now`), when
+`RuleEarlyRemoval` removes a join (`MULTIEQUAL`) or a guard (`INDIRECT`), it
+also removes the joins and guards behind the cursor that defined what that op
+read and that nothing reads any more, and theirs in turn
+(`decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_deadcascade.rs`). They go
+in the order the following passes would have removed them: one batch per
+pass, each batch in sequence order; a definition that dies behind the op
+removing it joins the next batch and one ahead of it the same batch. A
+definition at or ahead of the cursor is left to the running pass, which
+removes it when it gets there. Each removal is recorded for `deadwaves` like
+any other, and the checks are `RuleEarlyRemoval`'s own
+(`ruleaction_1.rs (RuleEarlyRemoval::removable)`). What changes is when a
+removal happens relative to the other rules' tests: a rule that counts a
+value's readers sees a dead reader gone passes earlier, and the Varnodes the
+removals free are reused in another order. Cascading from the first pass of
+every run (`deadcascade on`) changed the variable assignment of 346 of
+68,488 corpus functions, and, through every kind of dead op, folded the two
+paths' `v + 1` and `v + 100` of `cons` in the `rustabi` stage test into one
+add after the join. So the cascade is held to joins and guards, whose chains
+are the long ones (a guard per call, a join per merge point), and waits for a
+run that has gone N passes, which is nearly always taking such chains apart;
+the runs of ordinary functions end long before. With `deadcascade off` every
+chain dies one link per pass, as upstream's does.
 
 Three pools exist in the `decompile` tree
 (`decompiler/crates/kuna-decomp/src/infra/universalaction.rs
@@ -2209,7 +2327,7 @@ for the four ARM cspecs, the nine MIPS cspecs, the four Loongarch cspecs and
 8051, and `align="4"` (two word-alignment bits) for the five AARCH64 cspecs;
 AARCH64's own `blr` masks nothing, so there the rule only fires on a mask the
 program itself wrote. `funcptr_align` has two other live readers — the jump-table
-model (chapter 02) and the `thumbfuncptr` const-pointer preservation (chapter 05,
+model (chapter 02) and the Thumb const-pointer preservation (chapter 05,
 §5) — and the three do not interact: this rule only ever removes an `INT_AND`
 that a `CALLIND` consumes.
 
@@ -2869,7 +2987,7 @@ every trial register — rax in slot 1, rdx in slot 2 on x86-64 — and a consta
 known for rdx then replaced the rax slot: a function with a second RETURN
 reached only when `rdx == 0` printed `return 0;` there instead of the entry
 value. That happens whenever the output container outlives the first mainloop
-iteration (a model with a delayed heritage space, or the `condexeret` extra
+iteration (a model with a delayed heritage space, or the `kuna_condexeret.rs` extra
 pass, 04 §4.4). kuna stores the COPY in the slot that actually reads the
 varnode (`condconst.rs (propagate_constant)`); on a trimmed RETURN that is slot
 1, as upstream.
@@ -3076,7 +3194,7 @@ including auto when the input size selects aggressive. An explicit
 INT_CARRY or its const-folded `INT_LESSEQUAL((-b) & mask, a)` form, matched
 through CAST/COPY chains. Rewrite: one wide `INT_ADD(PIECE(hipart, b),
 ZEXT(a))`, recovering the single 16-bit addition the 6502-class ADC pair
-implements. Settable `addcarrychain`, shipped default **on** (DIV-2).
+implements. The rule is always on.
 
 Carry-chain and array-stride helper outputs use
 `decompiler/crates/kuna-decomp/src/substrate/funcdata_varnode.rs (new_unique_out)`
@@ -3594,8 +3712,8 @@ hold that dead-code elimination immediately reinstates would prevent the main
 loop from converging; ordinary temporary holds keep their existing release rule.
 
 
-With `guardedreadtrim on`, a physical stack LOAD lowered by `RuleLoadVarnode`
-retains its original read block and byte range. Indexed frame LOAD guards also
+A physical stack LOAD lowered by `RuleLoadVarnode` retains its original read
+block and byte range. Indexed frame LOAD guards also
 record their conservative range when heritage creates the preserving COPY.
 When copy propagation binds that read to call-written frame memory, the call
 is associated with that provenance before the COPY is removed.
@@ -3668,7 +3786,7 @@ without any restart (§0.7): the next mainloop iteration simply re-heritages
 the smaller graph.
 
 
-`localstackviews` adds only positively proved local byte ranges to
+The bounded local policy (`kuna_localstackviews.rs`) adds only positively proved local byte ranges to
 `decompiler/crates/kuna-decomp/src/p3_dataflow/kuna_stackeffects.rs`.
 The native STORE hook exposes those ranges before the next heritage pass;
 waiting for dead-code preparation can incorrectly fold a later frame read

@@ -34,7 +34,7 @@ pub(crate) fn bound_slots(file: &object::File, bytes: &[u8]) -> Vec<(u64, String
     let mut binds: Vec<(u64, &str)> = chained
         .named_binds()
         .filter(|&(slot, _)| chained.bind(slot).is_some_and(|(_, addend)| addend == 0))
-        .chain(classic.iter().filter(|(_, (_, addend))| *addend == 0).map(|(&slot, (name, _))| (slot, name.as_str())))
+        .chain(classic.iter().filter(|(_, (_, addend))| *addend == 0).map(|(&slot, (name, _))| (slot, name.as_ref())))
         .filter(|&(slot, _)| !named.contains(&slot) && !owned.iter().any(|&(lo, hi)| slot >= lo && slot < hi))
         .collect();
     binds.sort_unstable();

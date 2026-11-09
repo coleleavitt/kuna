@@ -54,19 +54,19 @@ fn subphase_count_is_48() {
 }
 
 #[test]
-fn surface_count_is_121() {
-    assert_eq!(kuna_num_surfaces(), 121);
-    assert_eq!(SURFACE_TABLE.len(), 121);
+fn surface_count_is_113() {
+    assert_eq!(kuna_num_surfaces(), 113);
+    assert_eq!(SURFACE_TABLE.len(), 113);
 }
 
 #[test]
-fn settable_count_is_485() {
-    assert_eq!(kuna_num_settables(), 485);
-    assert_eq!(SETTABLE_TABLE.len(), 485);
+fn settable_count_is_427() {
+    assert_eq!(kuna_num_settables(), 427);
+    assert_eq!(SETTABLE_TABLE.len(), 427);
 }
 
 #[test]
-fn tier_counts_are_148_core_194_transform_143_analysis() {
+fn tier_counts_are_93_core_187_transform_147_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -78,7 +78,7 @@ fn tier_counts_are_148_core_194_transform_143_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (148, 194, 143));
+    assert_eq!((core, transform, analysis), (93, 187, 147));
 }
 
 #[test]
@@ -268,7 +268,7 @@ fn option_values_set_validates_against_values() {
 }
 
 #[test]
-fn option_values_live_value_present_for_237() {
+fn option_values_live_value_present_for_197() {
     let ov = OptionValues::default();
     // 28 options have a codegen live reader (realtypes + dedupvardecls join the
     // field-backed group; switchguardbound is field-backed via switch_guard_bound;
@@ -613,6 +613,9 @@ fn option_values_live_value_present_for_237() {
         // (kuna) x86-64 IFUNC PLT-stub naming: a load-time gate read via the
         // `kuna_ifuncfpret` env var (no codegen live reader), like `i386_pie_plt`.
         "ifuncfpret",
+        // (kuna) PowerPC APU-note language selection: a load-time gate read via
+        // the `kuna_ppcapu` env var, like `ifuncfpret`.
+        "ppcapu",
         // (kuna) Relocatable-object analysis rebase (GH-289): a load-time gate read
         // via the `kuna_relocrebase` env var (the analyzer tier runs inside `load
         // file`), like `i386_pie_plt`. Default-ON (DIV-79).
@@ -723,7 +726,6 @@ fn option_values_live_value_present_for_237() {
                             // (kuna) `foldcallretphi` extends `foldcallret`'s
                             // decision and shares its seam, so it reports its
                             // live state the same way its sibling does.
-                            | "foldcallretphi"
                             // (kuna) `indirectonly` gates an engine-side
                             // Varnode flag read by `HighVariable::has_name` and
                             // `Merge::merge_test_adjacent`, not a printer flag;
@@ -738,11 +740,8 @@ fn option_values_live_value_present_for_237() {
                             | "iteregion"
                             | "iteexpr"
                             | "iteboolean"
-                            | "itecondlist"
                             | "returndup"
-                            | "orchain"
                             | "rettriangle"
-                            | "clonephiorder"
                             | "earlyreturn"
                             | "switchreturn"
                             | "loopbreak_recovery"
@@ -766,6 +765,9 @@ fn option_values_live_value_present_for_237() {
                             // (kuna) `persistcalls` takes `off|on|<n>`, a guard
                             // count; its live value is `Architecture::persist_calls`.
                             | "persistcalls"
+                            // (kuna) `deadcascade` takes `off|on|<n>`, a pass
+                            // count; its live value is `Architecture::dead_cascade`.
+                            | "deadcascade"
                             // (kuna) `retsplitlimit` takes `off|<n>`, an op count;
                             // its live value is `Architecture::ret_split_limit`.
                             | "retsplitlimit"
@@ -819,6 +821,11 @@ fn option_values_live_value_present_for_237() {
                             // same reason.  Its live value is
                             // `Architecture::syscall_regs`.
                             | "syscallregs"
+                            // (kuna) `callmechanisms` takes a MODE
+                            // (`off|auto|on`) over an enum field, for the
+                            // same reason.  Its live value is
+                            // `Architecture::call_mechanism_mode`.
+                            | "callmechanisms"
                             // (kuna) `bejoin` takes a MODE (`off|evidence|on`)
                             // over an enum field, for the same reason.  Its live
                             // value is `Architecture::be_join`.
@@ -826,9 +833,7 @@ fn option_values_live_value_present_for_237() {
                             // (kuna) `bejoinpass` likewise (`off|whole|high`);
                             // its live value is `Architecture::be_join_pass`.
                             | "bejoinpass"
-                            | "arraycoverwidth"
                             | "bytearrayc"
-                            | "emptystrconst"
                             // (kuna) `structdefs` is a PrintC option like
                             // `arraycoverwidth`/`emptystrconst` above: its live
                             // state is `PrintC::options.struct_defs`, which the
@@ -839,7 +844,6 @@ fn option_values_live_value_present_for_237() {
                             // `PrintC::options.global_ref`.
                             | "globalref"
                             | "callsitestackargs"
-                            | "protoranges"
                             | "varargstackargs"
                             | "varargforward"
                             | "calleearity"
@@ -1087,7 +1091,8 @@ fn option_values_live_value_present_for_237() {
     // 175 -> 176: +1 for `highsliceguard` (highslice_guard).
     // 176 -> 177: +1 for `mipsunaligned` (mips_unaligned).
     // 177 -> 178: +1 for `gottailcall` (got_tail_call).
-    assert_eq!(with_live, 237);
+    // Recounted after merging upstream/main, whose #1522/#1523 dropped 66 options.
+    assert_eq!(with_live, 197);
 }
 
 #[test]
@@ -1107,8 +1112,8 @@ fn live_from_arch_matches_cpp_ternaries() {
     assert_eq!(OptionValues::live_from_arch("returnpair", on), Some("single"));
     assert_eq!(OptionValues::live_from_arch("returnpair", off), Some("pair"));
     // a plain on/off option
-    assert_eq!(OptionValues::live_from_arch("thumbfuncptr", on), Some("on"));
-    assert_eq!(OptionValues::live_from_arch("thumbfuncptr", off), Some("off"));
+    assert_eq!(OptionValues::live_from_arch("memsetrecover", on), Some("on"));
+    assert_eq!(OptionValues::live_from_arch("memsetrecover", off), Some("off"));
     // no live reader -> None even with a value-producing closure
     assert_eq!(OptionValues::live_from_arch("namestyle", on), None);
     assert_eq!(OptionValues::live_from_arch("stackguard", on), None);
@@ -1369,7 +1374,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `switchrunon`; its P2 row sits after `switchsharedcase`.
     // +1 for `bejoinpass`; its P4 row sits after `bejoin`.
     // +1 for `persistcalls`; its P3 row sits after `readonlycalls`.
-    assert_eq!(json.matches("},\n").count(), 484);
+    // Upstream/main merged into `all`: 427 rows, the last without a trailing comma.
+    assert_eq!(json.matches("},\n").count(), 426);
 }
 
 #[test]

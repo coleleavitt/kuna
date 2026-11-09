@@ -303,7 +303,7 @@ impl MachoSlots {
         } else {
             crate::loader::format::macho::dyldinfo::resolve_dyld_info_binds(file, bytes)
                 .into_iter()
-                .map(|(va, name)| (va, name, None))
+                .map(|(va, name)| (va, name.to_string(), None))
                 .collect()
         };
         let binds: HashSet<u64> = named_binds.iter().map(|(va, ..)| *va).collect();

@@ -355,3 +355,58 @@ fn short_segment_command_is_refused() {
     bytes[0x100 + 12..0x100 + 16].copy_from_slice(&2u32.to_le_bytes());
     assert!(peel(bytes, &KernelcacheChoice::Entry("all".into())).is_err());
 }
+
+fn declared(size: u32) -> Vec<u8> {
+    tlv(TAG_SEQUENCE, &[tlv(TAG_INTEGER, &[1]), tlv(TAG_INTEGER, &size.to_be_bytes())].concat())
+}
+
+/// A payload larger than its IM4P declares stops decoding at the declared size
+/// instead of decoding in full and comparing afterwards.
+#[test]
+fn a_lying_declared_size_stops_the_decode_at_it() {
+    let body = vec![b'k'; 64 << 10];
+    let raw = [b"bvx-".as_slice(), &(body.len() as u32).to_le_bytes(), &body, b"bvx$"].concat();
+    let err = peel(im4p(&raw, &[declared(16)]), &KernelcacheChoice::Auto).err().unwrap();
+    assert!(err.contains("size limit"), "{err}");
+
+    let mut lzss = lzss::MAGIC.to_vec();
+    lzss.extend_from_slice(&0u32.to_be_bytes());
+    lzss.extend_from_slice(&(1u32 << 20).to_be_bytes());
+    lzss.extend_from_slice(&2u32.to_be_bytes());
+    lzss.resize(0x180, 0);
+    lzss.extend_from_slice(&[0x01, b'a']);
+    let err = peel(im4p(&lzss, &[declared(16)]), &KernelcacheChoice::Auto).err().unwrap();
+    assert!(err.contains("over the 16-byte limit"), "{err}");
+}
+
+/// Without a declared size the limit follows the input: a few bytes may not
+/// claim a gigabyte.
+#[test]
+fn an_undeclared_size_is_capped_by_the_input() {
+    assert_eq!(decode_limit(100, None), MIN_LIMIT);
+    assert_eq!(decode_limit(1 << 20, None), MAX_RATIO << 20);
+    assert_eq!(decode_limit(usize::MAX, None), DECODED_LIMIT);
+    assert_eq!(decode_limit(100, Some(4096)), 4096);
+    assert_eq!(decode_limit(100, Some(usize::MAX)), MIN_LIMIT);
+    assert_eq!(decode_limit(1 << 28, Some(usize::MAX)), DECODED_LIMIT);
+}
+
+/// A declared size is capped by the same ratio as an undeclared one: a small
+/// payload claiming far more output than it could hold is refused, even when
+/// the claim is honest about what the stream decodes to.
+#[test]
+fn a_declared_size_past_the_ratio_is_not_honored() {
+    assert_eq!(decode_limit(600_000, Some(1 << 30)), 600_000 * MAX_RATIO);
+    let matches = (18usize << 20) / 271;
+    let mut body = vec![0xe1, b'a', 0x38, 1];
+    for _ in 0..matches {
+        body.extend_from_slice(&[0xf0, 0xff]);
+    }
+    body.push(0x06);
+    let n_raw = 1 + 10 + matches * 271;
+    let stream =
+        [b"bvxn".as_slice(), &(n_raw as u32).to_le_bytes(), &(body.len() as u32).to_le_bytes(), &body, b"bvx$"].concat();
+    assert!(lzfse::decode(&stream, 0, usize::MAX).is_ok_and(|o| o.len() == n_raw));
+    let err = peel(im4p(&stream, &[declared(n_raw as u32)]), &KernelcacheChoice::Auto).err().unwrap();
+    assert!(err.contains("size limit"), "{err}");
+}

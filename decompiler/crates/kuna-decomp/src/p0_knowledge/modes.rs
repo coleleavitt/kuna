@@ -153,7 +153,6 @@ const AGGRESSIVE_OVERRIDES: &[(&str, &str)] = &[
     ("sparcstructret", "on"), // SPARC-idiom-gated; no-op off-SPARC
     ("regionedgeorder", "on"),
     ("returndup", "on"), // default-ON since DIV-54; kept so the preset owns it
-    ("orchain", "on"),   // the returndup gate DIV-69 measured; must follow returndup
     // (kuna) Decline the returndup split at the join of a one-block `if`, so
     // `if (c) f(); return 0;` is not printed as `if (!c) return 0; f(); return 0;`.
     // Shipped OFF because the decbench O2 sample moved aggregate GED by +60 (it is
@@ -578,9 +577,6 @@ mod tests {
         /// cost of a cast pair on every sign-bit test (`x << 0x18 < 0`), which
         /// firmware uses for nearly every register flag check.
         ///
-        /// `callmechanisms` installs every compiler-spec prototype boundary
-        /// payload, and the stock `ppc_64_le.cspec` one stores `r2Save` to the
-        /// ELFv1 TOC slot `0x28(r1)`, which is a live local in an ELFv2 frame.
         /// `x86listingswitch` reaches valid cases but ordinary tail jumps from
         /// them can hide independent function entries from the AIF gap walk;
         /// the i386 corpus lost seven true starts, so it remains explicit.
@@ -600,12 +596,15 @@ mod tests {
         /// bounds and remains explicit in every preset.
         /// `rustprobestack` did not clear its default wall-time confidence bounds.
         /// `highsliceguard` added 10.8% CPU time when recovering the upstream table.
+        /// `rustarrayzero` missed the initial default-on CPU median budget.
+        /// `ppcapu` selects the e500 model, whose scalar call arguments are not
+        /// yet recovered, so it requires an explicit option.
         const EXCLUDED_ON_PURPOSE: &[&str] =
             &["v850indirectbranch", "dwarf_lines", "ifuncfpret",
               "aifcorroborate", "linuxsyscall", "nulterminator", "msvcstrappend",
               "structdefs", "indirectonly", "protoorder", "stackalias", "stackviews", "bejoin",
               "mixedtailret", "varargsharedfloat", "callarrayextent",
-              "armconstshift", "callmechanisms", "regsigned", "x86listingswitch", "callwide", "ppc32picimports", "rustfmtwrite", "rustfmtio", "rustprobestack", "highsliceguard",
+              "armconstshift", "regsigned", "x86listingswitch", "callwide", "ppc32picimports", "ppcapu", "rustfmtwrite", "rustfmtio", "rustprobestack", "highsliceguard", "rustarrayzero",
               // `lazyfuncs` changes no output, but its saving is a single-function
               // property: the whole-binary surfaces the presets drive (decompile-all,
               // the web front-end, the benchmark) materialize every target they walk
@@ -731,7 +730,7 @@ mod tests {
             // (kuna `unwindstarts`) Mach-O `__unwind_info` function-start discovery.
             // Inert when `LC_FUNCTION_STARTS` is present (every unwind start is
             // already a function-starts entry, a strict subset -- 0 change measured
-            // on the 84 MB Toyota app), so its only gain is on a stripped Mach-O; the
+            // on an 84 MB third-party iOS app), so its only gain is on a stripped Mach-O; the
             // stripped App-Store apps it was measured on exceed the 500 KiB
             // `auto`->`aggressive` threshold, so the default path (`auto` under
             // 500 KiB) would exercise nothing it changes. Promote to the preset

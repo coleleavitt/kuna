@@ -347,8 +347,8 @@ impl ObjcMetadataPass {
             // Best-effort — an unparseable / absent encoding leaves the IMP *named*
             // (above) but untyped, never a failure.
             // The spelling the class's own property gives the selector, else the
-            // agreed one (a property of another class naming the class), else the
-            // method's own.
+            // method's own: another class's property of the same selector says
+            // nothing about this class's return type.
             let enc = selectors.encoding_for_class(owner, &m.selector).map(str::to_string).or_else(|| m.types.clone());
             if let Some(enc) = enc.as_deref() {
                 if let Some(pieces) = encoding::decode_method(&label, enc, tctx, None) {
@@ -379,13 +379,8 @@ fn emit_ivars(ivars: &[classt::Ivar], class: &str, objcivars: bool, out: &mut An
             name: format!("{}::{}", display_class_name(class), iv.name),
             size: 4,
         });
-        if objcivars {
-            out.const_ranges.push(ConstRange {
-                first: iv.offset_va,
-                last_open: iv.offset_va.wrapping_add(4),
-                gate: ConstGate::ObjcIvars,
-            });
-        }
+        let Some(last_open) = iv.offset_va.checked_add(4).filter(|_| objcivars) else { continue };
+        out.const_ranges.push(ConstRange { first: iv.offset_va, last_open, gate: ConstGate::ObjcIvars });
     }
 }
 
@@ -402,6 +397,17 @@ fn sanitize_selector(sel: &str) -> String {
 mod tests {
     use super::*;
 
+    /// An offset variable mapped at the very top of the address space keeps its
+    /// name but is not reported constant: its range would wrap.
+    #[test]
+    fn ivar_offset_variable_at_the_top_of_the_address_space_is_not_folded() {
+        let ivar = classt::Ivar { offset_va: u64::MAX - 1, name: "x".into(), types: None, offset: 8, size: 4 };
+        let mut out = AnalysisOutput::default();
+        emit_ivars(&[ivar], "C", true, &mut out);
+        assert_eq!(out.data_objects.len(), 1);
+        assert!(out.const_ranges.is_empty());
+    }
+
     #[test]
     fn pass_identity() {
         let p = ObjcMetadataPass;
@@ -409,6 +415,14 @@ mod tests {
         assert_eq!(p.phase(), Phase::P1);
     }
 
+
+    #[test]
+    fn swift_runtime_class_names_demangle_for_labels() {
+        assert_eq!(display_class_name("Greeter"), "Greeter");
+        assert_eq!(display_class_name("_TtC6Sample24MainScreenViewController"), "Sample.MainScreenViewController");
+        assert_eq!(display_class_name("_TtCC6Sample5Outer5Inner"), "Sample.Outer.Inner");
+        assert_eq!(display_class_name("_TtC1"), "_TtC1");
+    }
 
     #[test]
     fn sanitize_selector_replaces_colons() {

@@ -23,8 +23,10 @@
 //! - a class's vtable slots and overrides: `Class *` for an instance member,
 //!   `swift.class_metadata *` for a class member or allocating initializer;
 //! - a conformance's witnesses: the address of the value, `T *` for a
-//!   struct and `Class **` for a class, or the metadata for a static
-//!   requirement; a protocol's default implementations take the model only;
+//!   struct and `Class **` for a class (`Class *` under a class-bound
+//!   protocol, which passes the reference itself), or the metadata for a
+//!   static requirement; a protocol's default implementations take the
+//!   model only;
 //! - a symbol the demangler places in a class or struct (an image that kept
 //!   its symbols): a method, accessor, property observer, initializer or
 //!   deinitializer, with
@@ -33,7 +35,7 @@
 //! Only `self` is typed, and only when the body reads the register at its
 //! full width; a struct method whose `self` is exploded declares no `self`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::rc::Rc;
 
 use kuna_decomp::dtype::Datatype;
@@ -109,6 +111,8 @@ struct Binder<'t, 'a> {
     types: &'t Types<'a>,
     bound: BTreeMap<u64, Binding>,
     declared: BTreeMap<u64, (Declared, &'static str)>,
+    /// Dotted paths of the local class-bound protocols.
+    class_bound: HashSet<String>,
 }
 
 impl Binder<'_, '_> {
@@ -161,7 +165,7 @@ impl Binder<'_, '_> {
         let path = types.unique_path(addr)?;
         match is {
             SelfIs::Instance => types.self_pointer(addr, &path),
-            SelfIs::Witness => types.witness_self(addr, &path),
+            SelfIs::Witness => types.witness_self(addr, &path, false),
             SelfIs::Metatype if kind == ContextKind::Class => {
                 types.pointer_to(types.class_metadata_struct()?)
             }
@@ -226,6 +230,10 @@ impl Binder<'_, '_> {
                 continue;
             };
             let local_rows = c.witnesses.is_empty() && c.flags & (1 << 17) == 0;
+            let class_bound = match c.protocol {
+                Target::Direct(p) => md.contexts.get(&p).is_some_and(|p| p.is_class_bound_protocol()),
+                Target::Slot(_) => false,
+            };
             if let (true, Some(w), Target::Direct(p)) = (local_rows, c.witness_table, c.protocol) {
                 let Some(proto) = md.contexts.get(&p) else {
                     continue;
@@ -234,14 +242,9 @@ impl Binder<'_, '_> {
                     let Some(is) = requirement_is(md.requirement_flags.get(req).copied()) else {
                         continue;
                     };
-                    let slot = w + md.ptr_size * (1 + k as u64);
+                    let slot = w.wrapping_add(md.ptr_size * (1 + k as u64));
                     if let Some(&f) = md.words.get(&slot) {
-                        let is = if is == SelfIs::Instance {
-                            SelfIs::Witness
-                        } else {
-                            is
-                        };
-                        let ty = self.self_type(t, is);
+                        let ty = self.self_type(t, witness_is(is, class_bound));
                         self.put(f, SWIFTCALL, ty);
                     }
                 }
@@ -255,12 +258,7 @@ impl Binder<'_, '_> {
                     }
                 };
                 let Some(is) = is else { continue };
-                let is = if is == SelfIs::Instance {
-                    SelfIs::Witness
-                } else {
-                    is
-                };
-                let ty = self.self_type(t, is);
+                let ty = self.self_type(t, witness_is(is, class_bound));
                 self.put(f, SWIFTCALL, ty);
             }
         }
@@ -320,6 +318,11 @@ impl Binder<'_, '_> {
             let Some((owner, is, throws)) = member(entity) else {
                 continue;
             };
+            let is = if is == SelfIs::Witness && self.is_class_bound_witness(entity) {
+                SelfIs::Instance
+            } else {
+                is
+            };
             let model = match (partial || is_async(entity), throws) {
                 (true, true) => SWIFTASYNCCALL_THROWS,
                 (true, false) => SWIFTASYNCCALL,
@@ -366,7 +369,7 @@ impl Binder<'_, '_> {
         self_t: Option<Rc<Datatype>>,
     ) -> Option<Declared> {
         let types = self.types;
-        let any = |node: &NodeRef| types.kuna_type(node, u32::MAX);
+        let any = |node: &NodeRef| types.kuna_type(node, u32::MAX, 0);
         let (mut params, ret) = match entity.kind {
             Kind::Function | Kind::Allocator | Kind::Constructor => {
                 let (params, ret, trailing) = function_signature(entity)?;
@@ -581,6 +584,27 @@ fn is_void(ty: &NodeRef) -> bool {
         .is_some_and(|t| t.kind == Kind::Tuple && t.children.is_empty())
 }
 
+impl Binder<'_, '_> {
+    /// Is `entity` a protocol witness of a local class-bound protocol?
+    fn is_class_bound_witness(&self, entity: &NodeRef) -> bool {
+        (entity.kind == Kind::ProtocolWitness)
+            .then(|| entity.first()?.child(1))
+            .flatten()
+            .and_then(print_full)
+            .is_some_and(|p| self.class_bound.contains(&p))
+    }
+}
+
+/// `self` of a requirement implemented by a witness: `Class **` unless the
+/// protocol is class-bound (an imported protocol is taken as not, which only
+/// Swift's own class-bound protocols get wrong, and those are rare).
+fn witness_is(is: SelfIs, class_bound: bool) -> SelfIs {
+    match is {
+        SelfIs::Instance if !class_bound => SelfIs::Witness,
+        other => other,
+    }
+}
+
 /// `self` of a requirement with these `ProtocolRequirementFlags`: kinds 1-6
 /// (method, initializer, accessors); `IsInstance` is bit 4. An
 /// initializer requirement is static.
@@ -735,16 +759,19 @@ fn throws(entity: &NodeRef) -> bool {
 }
 
 /// Bind the convention to every member the image names, and hint `self`.
-pub fn bind(
-    types: &Types,
-    regs: &Registers,
-    symbols: &[(u64, String)],
-    out: &mut AnalysisOutput,
-) -> Stats {
+pub fn bind(types: &Types, regs: &Registers, symbols: &[(u64, String)], out: &mut AnalysisOutput) -> Stats {
+    let class_bound = types
+        .md
+        .contexts
+        .values()
+        .filter(|c| c.is_class_bound_protocol())
+        .filter_map(|c| types.namer.path(c.addr, 0))
+        .collect();
     let mut b = Binder {
         types,
         bound: BTreeMap::new(),
         declared: BTreeMap::new(),
+        class_bound,
     };
     b.symbols(symbols);
     b.classes();

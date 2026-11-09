@@ -46,7 +46,7 @@ pub fn collect_call_sites(file: &object::File) -> Vec<EhCallSite> {
     let ptr_size = if file.is_64() { 8 } else { 4 };
     let names = TypeNames::new(file);
     for_each_fde_lsda(file, ptr_size, &mut |pc_begin, lsda_ptr| {
-        let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size) else {
+        let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size, file.is_little_endian()) else {
             return;
         };
         for cs in lsda.call_sites.iter().filter(|cs| cs.pad != 0 && cs.len != 0) {
@@ -204,7 +204,7 @@ pub fn eh_notes(file: &object::File) -> Vec<crate::pass::CommentFact> {
             });
             return;
         }
-        let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size) else {
+        let Some(lsda) = decode_lsda(gcc_data, gcc_vma, lsda_ptr, pc_begin, ptr_size, file.is_little_endian()) else {
             return;
         };
         let sites: Vec<_> = lsda.call_sites.iter().filter(|cs| cs.pad != 0 && cs.len != 0).collect();

@@ -1,5 +1,6 @@
 //! (kuna `swiftmetadata`) The name derivations the pass makes from imported
-//! descriptor names; the end-to-end naming is `verify_swiftmetadata`.
+//! descriptor names, and the bounds that keep a crafted image's records
+//! from multiplying; the end-to-end naming is `verify_swiftmetadata`.
 
 use super::*;
 
@@ -69,6 +70,7 @@ fn folded_functions_are_named_without_a_false_owner() {
         memo: Default::default(),
         code: vec![(0x1000, 0x2000)],
         claims: Default::default(),
+        budget: std::cell::Cell::new(usize::MAX),
     };
     let claim = |addr: u64, name: &str, owner: &str, req: Option<(&str, &str)>, getter: bool| {
         namer.claim(
@@ -176,4 +178,192 @@ fn folded_functions_are_named_without_a_false_owner() {
     assert!(!namer.ambiguous_self(0x3000), "not code: never claimed");
     assert!(namer.ambiguous_self(0x1070), "a type with no nameable path shares the body");
     assert!(namer.ambiguous_self(0x1080), "two private types print one path");
+}
+
+/// A repeated name takes the first free `.k`, with names that already
+/// carry a suffix taken into account, and many repeats stay in order.
+#[test]
+fn repeated_names_take_the_next_free_suffix() {
+    let md = Metadata::default();
+    let imports = HashMap::new();
+    let namer = Namer {
+        md: &md,
+        imports: &imports,
+        memo: Default::default(),
+        code: vec![(0x1000, 0x100000)],
+        claims: Default::default(),
+        budget: std::cell::Cell::new(usize::MAX),
+    };
+    let one = |addr: u64, name: &str| {
+        namer.claim(addr, Some(name.to_string()), &Owner::Imported("M.A".to_string()), None, false)
+    };
+    one(0x1000, "X");
+    one(0x1010, "X.2");
+    one(0x1020, "X");
+    one(0x1030, "X");
+    for i in 0..3000u64 {
+        one(0x2000 + i, "Y");
+    }
+    let mut out = AnalysisOutput::default();
+    namer.resolve_claims(&mut out);
+    let names: Vec<&str> = out.fid_names.iter().map(|f| f.name.as_str()).collect();
+    assert_eq!(&names[..4], ["X", "X.2", "X.3", "X.4"]);
+    assert_eq!(names[4], "Y");
+    for (i, n) in names[5..].iter().enumerate() {
+        assert_eq!(*n, format!("Y.{}", i + 2));
+    }
+    assert_eq!(names.len(), 4 + 3000);
+}
+
+/// Global-actor isolation (bit 19) and conformance-of-protocol (bit 18) add
+/// nothing before the witnesses; only the pack shape count in the top byte
+/// does.
+#[test]
+fn only_real_trailing_objects_move_the_witnesses() {
+    use descriptors::witnesses_offset;
+    assert_eq!(witnesses_offset(1 << 16), 16);
+    assert_eq!(witnesses_offset(1 << 16 | 1 << 19), 16);
+    assert_eq!(witnesses_offset(1 << 16 | 1 << 18), 16);
+    assert_eq!(witnesses_offset(1 << 6), 20);
+    assert_eq!(witnesses_offset(3 << 8), 16 + 36);
+    assert_eq!(witnesses_offset(2 << 24), 16 + 16);
+    assert_eq!(witnesses_offset(1 << 6 | 1 << 8 | 1 << 24), 16 + 4 + 12 + 8);
+}
+
+/// The fixture with `bits` set in every resilient conformance's flags.
+fn with_conformance_flags(bits: u32) -> Vec<u8> {
+    let original = fixture();
+    let file = object::File::parse(&*original).unwrap();
+    let conformances = read(&original, original.len()).conformances;
+    let mut bytes = original.clone();
+    for c in conformances.iter().filter(|c| !c.witnesses.is_empty()) {
+        let at = c.addr + 12;
+        let sec = file
+            .sections()
+            .find(|s| s.address() <= at && at < s.address() + s.size())
+            .unwrap();
+        let off = (at - sec.address() + sec.file_range().unwrap().0) as usize;
+        let flags = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        bytes[off..off + 4].copy_from_slice(&(flags | bits).to_le_bytes());
+    }
+    bytes
+}
+
+/// An isolated conformance (`extension T: @MainActor P`) reads the same
+/// witnesses as a plain one.
+#[test]
+fn an_isolated_conformance_keeps_its_witnesses() {
+    let witnesses = |bytes: &[u8]| {
+        let mut v: Vec<(u64, usize)> = read(bytes, bytes.len())
+            .conformances
+            .iter()
+            .filter(|c| c.flags & (1 << 16) != 0)
+            .map(|c| (c.addr, c.witnesses.len()))
+            .collect();
+        v.sort_unstable();
+        v
+    };
+    let plain = witnesses(&fixture());
+    assert!(plain.iter().all(|(_, n)| *n > 0) && !plain.is_empty());
+    assert_eq!(witnesses(&with_conformance_flags(1 << 19)), plain);
+    assert_eq!(witnesses(&with_conformance_flags(1 << 18)), plain);
+}
+
+fn fixture() -> Vec<u8> {
+    std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/swift_metadata_elf"
+    ))
+    .unwrap()
+}
+
+fn read(bytes: &[u8], image_len: usize) -> Metadata {
+    let file = object::File::parse(bytes).unwrap();
+    let img = MachoImage::new(&file);
+    let bind_slots = std::collections::HashSet::new();
+    let reader = Reader {
+        img: &img,
+        bind_slots: &bind_slots,
+    };
+    reader.read_all(&file, &ELF_SECTIONS, image_len)
+}
+
+fn names(bytes: &[u8], budget: usize) -> AnalysisOutput {
+    let file = object::File::parse(bytes).unwrap();
+    let md = read(bytes, bytes.len());
+    let imports = HashMap::new();
+    let namer = Namer {
+        md: &md,
+        imports: &imports,
+        memo: Default::default(),
+        code: file
+            .sections()
+            .filter(|s| s.kind() == object::SectionKind::Text)
+            .map(|s| (s.address(), s.address().saturating_add(s.size())))
+            .collect(),
+        claims: Default::default(),
+        budget: std::cell::Cell::new(budget),
+    };
+    let mut out = AnalysisOutput::default();
+    namer.emit(&mut out);
+    out
+}
+
+/// The fixture with every conformance-section entry pointed at the first
+/// entry's descriptor.
+fn one_conformance_many_entries() -> Vec<u8> {
+    let mut bytes = fixture();
+    let (off, addr, len) = {
+        let file = object::File::parse(&*bytes).unwrap();
+        let sec = file.section_by_name(ELF_SECTIONS.conformances).unwrap();
+        let (off, len) = sec.file_range().unwrap();
+        (off as usize, sec.address(), len as usize)
+    };
+    let first = i32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()) as i64;
+    let target = addr as i64 + first;
+    for i in 0..len / 4 {
+        let rel = (target - (addr as i64 + 4 * i as i64)) as i32;
+        bytes[off + 4 * i..off + 4 * i + 4].copy_from_slice(&rel.to_le_bytes());
+    }
+    bytes
+}
+
+#[test]
+fn a_conformance_named_by_many_entries_is_read_once() {
+    assert_eq!(read(&fixture(), usize::MAX).conformances.len(), 3);
+    let bytes = one_conformance_many_entries();
+    assert_eq!(read(&bytes, bytes.len()).conformances.len(), 1);
+    let out = names(&bytes, usize::MAX);
+    let mut seen = std::collections::HashSet::new();
+    for s in &out.symbols {
+        assert!(seen.insert(s.addr), "{:#x} named twice", s.addr);
+    }
+}
+
+#[test]
+fn record_rows_are_bounded_by_the_image_length() {
+    let bytes = fixture();
+    let full = read(&bytes, bytes.len());
+    assert_eq!(full.contexts.len(), read(&bytes, usize::MAX).contexts.len());
+    assert!(read(&bytes, 0).contexts.is_empty());
+    let few = read(&bytes, 40);
+    let rows: usize = few
+        .contexts
+        .values()
+        .map(|c| 1 + c.vtable.len() + c.overrides.len() + c.requirements.len())
+        .sum();
+    assert!(rows <= 10, "{rows} rows read on a 10-row budget");
+    assert!(few.contexts.len() < full.contexts.len());
+}
+
+#[test]
+fn names_stop_at_the_byte_budget() {
+    let bytes = fixture();
+    let full = names(&bytes, usize::MAX);
+    assert!(full.symbols.len() > 16);
+    assert!(names(&bytes, 0).symbols.is_empty());
+    let few = names(&bytes, 200);
+    let spent: usize = few.symbols.iter().map(|s| s.name.len()).sum();
+    assert!(spent <= 200);
+    assert!(few.symbols.len() < full.symbols.len());
 }

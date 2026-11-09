@@ -13,6 +13,18 @@ use super::punycode;
 const MAX_REPEAT: u64 = 2048;
 const MAX_WORDS: usize = 26;
 const MAX_NODES: usize = 1 << 16;
+/// Ceiling on the combined text of all identifiers in one symbol. Word
+/// substitutions append a whole earlier identifier per reference, so an
+/// identifier's length is roughly quadratic in the symbol length; this bounds
+/// the total so a short symbol cannot build a multi-megabyte identifier.
+const MAX_IDENT_TEXT: usize = 1 << 20;
+/// Call-stack depth limit for the recursive context walk in
+/// [`Parser::bound_generic_args`], mirroring `oldparse`'s `MAX_DEPTH`.
+const MAX_DEPTH: usize = 1024;
+/// Punycode decoding inserts into the output one character at a time, so its
+/// cost is quadratic in the encoded length; no identifier needs anywhere near
+/// this many characters.
+const MAX_PUNYCODE_INPUT: usize = 1 << 16;
 
 /// Resolves a symbolic reference (`Mangling.rst`, "Symbolic references"):
 /// the kind byte (`\x01` a direct context descriptor, `\x02` an indirect
@@ -29,6 +41,8 @@ pub struct Parser<'a> {
     words: Vec<String>,
     old_fn_types: bool,
     budget: usize,
+    ident_budget: usize,
+    depth: usize,
     failed: bool,
     resolver: Option<&'a SymbolicResolver<'a>>,
 }
@@ -49,6 +63,66 @@ pub fn mk_type(child: NodeRef) -> NodeRef {
 
 fn is_protocol_type(n: &Node) -> bool {
     n.kind == Kind::Type && n.first().is_some_and(|c| c.kind == Kind::Protocol)
+}
+
+/// `ty` (a function type, possibly under one generic signature) with the
+/// `TupleElementName` nodes removed from its parameter tuple.
+fn strip_param_labels(ty: &NodeRef) -> Option<NodeRef> {
+    let outer = ty.first()?;
+    let (sig, func) = if outer.kind == Kind::DependentGenericType {
+        (Some(Rc::clone(outer.first()?)), Rc::clone(outer.child(1)?.first()?))
+    } else {
+        (None, Rc::clone(outer))
+    };
+    if !matches!(func.kind, Kind::FunctionType | Kind::NoEscapeFunctionType) {
+        return None;
+    }
+    let mut changed = false;
+    let children = func
+        .children
+        .iter()
+        .map(|c| {
+            if c.kind != Kind::ArgumentTuple {
+                return Rc::clone(c);
+            }
+            let Some(params) = c.first().and_then(|t| t.first()) else {
+                return Rc::clone(c);
+            };
+            if params.kind != Kind::Tuple {
+                return Rc::clone(c);
+            }
+            let elements = params
+                .children
+                .iter()
+                .map(|e| {
+                    if e.child_of_kind(Kind::TupleElementName).is_none() {
+                        return Rc::clone(e);
+                    }
+                    changed = true;
+                    Node::with(
+                        Kind::TupleElement,
+                        e.children
+                            .iter()
+                            .filter(|p| p.kind != Kind::TupleElementName)
+                            .cloned()
+                            .collect(),
+                    )
+                })
+                .collect();
+            Node::with(
+                Kind::ArgumentTuple,
+                vec![mk_type(Node::with(Kind::Tuple, elements))],
+            )
+        })
+        .collect();
+    if !changed {
+        return None;
+    }
+    let rebuilt = Node::with(func.kind, children);
+    Some(mk_type(match sig {
+        Some(sig) => Node::with(Kind::DependentGenericType, vec![sig, mk_type(rebuilt)]),
+        None => rebuilt,
+    }))
 }
 
 impl<'a> Parser<'a> {
@@ -74,6 +148,8 @@ impl<'a> Parser<'a> {
             words: Vec::new(),
             old_fn_types,
             budget: MAX_NODES,
+            ident_budget: MAX_IDENT_TEXT,
+            depth: 0,
             failed: false,
             resolver,
         }
@@ -148,7 +224,6 @@ impl<'a> Parser<'a> {
         self.subs.push(Rc::clone(n));
     }
 
-    // ---- numbers -------------------------------------------------------
 
     /// `NATURAL ::= [1-9][0-9]*`; `None` when no digit follows (a leading
     /// `0` is not a natural) or the value exceeds `i32::MAX`, the reference
@@ -186,7 +261,6 @@ impl<'a> Parser<'a> {
         Some(Node::index(Kind::Number, self.index()?))
     }
 
-    // ---- identifiers ---------------------------------------------------
 
     fn identifier(&mut self) -> Option<NodeRef> {
         let mut has_word_substs = false;
@@ -216,6 +290,7 @@ impl<'a> Parser<'a> {
                 if idx >= self.words.len() {
                     return None;
                 }
+                self.ident_budget = self.ident_budget.checked_sub(self.words[idx].len())?;
                 ident.push_str(&self.words[idx]);
             }
             if self.next_if(b'0') {
@@ -233,7 +308,11 @@ impl<'a> Parser<'a> {
             }
             let slice = &self.text[self.pos..self.pos + num];
             if is_punycoded {
+                if num > MAX_PUNYCODE_INPUT {
+                    return None;
+                }
                 let decoded = punycode::decode_swift(std::str::from_utf8(slice).ok()?)?;
+                self.ident_budget = self.ident_budget.checked_sub(decoded.len())?;
                 ident.push_str(&decoded);
             } else {
                 let s = std::str::from_utf8(slice).ok()?;
@@ -243,6 +322,7 @@ impl<'a> Parser<'a> {
                 {
                     return None;
                 }
+                self.ident_budget = self.ident_budget.checked_sub(s.len())?;
                 ident.push_str(s);
                 self.collect_words(s);
             }
@@ -344,7 +424,6 @@ impl<'a> Parser<'a> {
         Some(Node::with(Kind::LocalDeclName, vec![discriminator, name]))
     }
 
-    // ---- substitutions -------------------------------------------------
 
     fn multi_substitutions(&mut self) -> Option<NodeRef> {
         let mut repeat: Option<u64> = None;
@@ -427,7 +506,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // ---- contexts ------------------------------------------------------
 
     fn pop_context(&mut self) -> Option<NodeRef> {
         if let Some(m) = self.pop_module() {
@@ -487,7 +565,6 @@ impl<'a> Parser<'a> {
         Some(Node::with(Kind::Extension, children))
     }
 
-    // ---- function types ------------------------------------------------
 
     fn clang_type(&mut self) -> Option<NodeRef> {
         let num = usize::try_from(self.natural()?).ok()?;
@@ -611,10 +688,21 @@ impl<'a> Parser<'a> {
         Ok(Some(Node::with(Kind::LabelList, labels)))
     }
 
+    /// Swift-4 (`_T0`) function types carry the argument labels on the
+    /// parameter tuple. Once [`Self::pop_function_param_labels`] has lifted
+    /// them into the `LabelList`, the tuple elements must not repeat them.
+    fn without_old_param_labels(&self, ty: NodeRef) -> NodeRef {
+        if !self.old_fn_types {
+            return ty;
+        }
+        strip_param_labels(&ty).unwrap_or(ty)
+    }
+
     fn plain_function(&mut self, kind: Kind) -> Option<NodeRef> {
         let gen_sig = self.pop_kind(Kind::DependentGenericSignature);
-        let mut ty = self.pop_function_type(Kind::FunctionType, false)?;
+        let ty = self.pop_function_type(Kind::FunctionType, false)?;
         let labels = self.pop_function_param_labels(Some(&ty)).ok()?;
+        let mut ty = self.without_old_param_labels(ty);
         if let Some(sig) = gen_sig {
             ty = mk_type(Node::with(Kind::DependentGenericType, vec![sig, ty]));
         }
@@ -629,6 +717,7 @@ impl<'a> Parser<'a> {
     fn entity(&mut self, kind: Kind) -> Option<NodeRef> {
         let ty = self.pop_kind(Kind::Type)?;
         let labels = self.pop_function_param_labels(Some(&ty)).ok()?;
+        let ty = self.without_old_param_labels(ty);
         let name = self.pop_if(Kind::is_decl_name)?;
         let ctx = self.pop_context()?;
         let mut children = vec![ctx, name];
@@ -646,6 +735,7 @@ impl<'a> Parser<'a> {
         let private_name = self.pop_kind(Kind::PrivateDeclName);
         let ty = self.pop_kind(Kind::Type)?;
         let labels = self.pop_function_param_labels(Some(&ty)).ok()?;
+        let ty = self.without_old_param_labels(ty);
         let ctx = self.pop_context()?;
         let mut children = vec![ctx];
         children.extend(labels);
@@ -709,6 +799,7 @@ impl<'a> Parser<'a> {
             b'A' => (Args::Index, Kind::DefaultArgumentInitializer),
             b'p' => return self.entity(Kind::GenericTypeParamDecl),
             b'P' => (Args::None, Kind::PropertyWrapperBackingInitializer),
+            b'F' => (Args::None, Kind::PropertyWrappedFieldInitAccessor),
             b'W' => (Args::None, Kind::PropertyWrapperInitFromProjectedValue),
             b'Z' => (Args::None, Kind::IsolatedDeallocator),
             b'a' => (Args::ContextArg, Kind::RuntimeAttributeGenerator),
@@ -722,8 +813,9 @@ impl<'a> Parser<'a> {
             Args::None => {}
             Args::TypeAndMaybePrivateName => {
                 name_or_index = self.pop_kind(Kind::PrivateDeclName);
-                param_type = Some(self.pop_kind(Kind::Type)?);
-                labels = self.pop_function_param_labels(param_type.as_ref()).ok()?;
+                let ty = self.pop_kind(Kind::Type)?;
+                labels = self.pop_function_param_labels(Some(&ty)).ok()?;
+                param_type = Some(self.without_old_param_labels(ty));
             }
             Args::TypeAndIndex => {
                 name_or_index = Some(self.index_node()?);
@@ -755,15 +847,9 @@ impl<'a> Parser<'a> {
         Some(Node::with(kind, children))
     }
 
-    // ---- types ---------------------------------------------------------
 
     fn bound_generic_type(&mut self) -> Option<NodeRef> {
-        let mut retro: Vec<NodeRef> = Vec::new();
-        while let Some(rc) = self.pop_kind(Kind::RetroactiveConformance) {
-            retro.push(rc);
-        }
-        retro.reverse();
-        let type_lists = self.bound_generics()?;
+        let (type_lists, retro) = self.bound_generics()?;
         let nominal = self.pop_type_and_get_any_generic()?;
         let mut bound = self.bound_generic_args(&nominal, &type_lists, 0)?;
         if !retro.is_empty() {
@@ -775,8 +861,13 @@ impl<'a> Parser<'a> {
     }
 
     /// Pops `bound-generic-args` into one type list per nesting level,
-    /// innermost first.
-    fn bound_generics(&mut self) -> Option<Vec<NodeRef>> {
+    /// innermost first, along with any retroactive conformances that trail them.
+    fn bound_generics(&mut self) -> Option<(Vec<NodeRef>, Vec<NodeRef>)> {
+        let mut retro: Vec<NodeRef> = Vec::new();
+        while let Some(rc) = self.pop_kind(Kind::RetroactiveConformance) {
+            retro.push(rc);
+        }
+        retro.reverse();
         let mut lists = Vec::new();
         loop {
             let mut tys = Vec::new();
@@ -790,16 +881,30 @@ impl<'a> Parser<'a> {
             }
             self.pop_kind(Kind::FirstElementMarker)?;
         }
-        Some(lists)
+        Some((lists, retro))
     }
 
     fn bound_generic_args(
         &mut self,
         nominal: &NodeRef,
         lists: &[NodeRef],
+        idx: usize,
+    ) -> Option<NodeRef> {
+        if self.depth >= MAX_DEPTH {
+            return None;
+        }
+        self.depth += 1;
+        let r = self.bound_generic_args_inner(nominal, lists, idx);
+        self.depth -= 1;
+        r
+    }
+
+    fn bound_generic_args_inner(
+        &mut self,
+        nominal: &NodeRef,
+        lists: &[NodeRef],
         mut idx: usize,
     ) -> Option<NodeRef> {
-        // Recursion follows the context chain; the node budget bounds it.
         self.tick()?;
         let consumes = !matches!(
             nominal.kind,
@@ -810,6 +915,7 @@ impl<'a> Parser<'a> {
                 | Kind::DefaultArgumentInitializer
                 | Kind::Initializer
                 | Kind::PropertyWrapperBackingInitializer
+                | Kind::PropertyWrappedFieldInitAccessor
                 | Kind::PropertyWrapperInitFromProjectedValue
                 | Kind::Static
         );
@@ -842,7 +948,12 @@ impl<'a> Parser<'a> {
             Kind::Protocol => Kind::BoundGenericProtocol,
             Kind::OtherNominalType => Kind::BoundGenericOtherNominalType,
             Kind::TypeAlias => Kind::BoundGenericTypeAlias,
-            Kind::Function | Kind::Constructor => Kind::BoundGenericFunction,
+            Kind::Function | Kind::Constructor => {
+                return Some(Node::with(
+                    Kind::BoundGenericFunction,
+                    vec![nominal, Rc::clone(args)],
+                ));
+            }
             _ => return None,
         };
         Some(Node::with(kind, vec![mk_type(nominal), Rc::clone(args)]))
@@ -1154,7 +1265,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // ---- generics ------------------------------------------------------
 
     fn generic_param_type(depth: u64, index: u64) -> NodeRef {
         Node::with_text(
@@ -1255,7 +1365,7 @@ impl<'a> Parser<'a> {
             }
             b'o' => {
                 let index = self.index()?;
-                let lists = self.bound_generics()?;
+                let (lists, _) = self.bound_generics()?;
                 let name = self.pop()?;
                 let mut children = vec![name, Node::index(Kind::Index, index)];
                 let mut all = Vec::new();
@@ -1477,7 +1587,6 @@ impl<'a> Parser<'a> {
         })
     }
 
-    // ---- global markers --------------------------------------------------
 
     fn metatype(&mut self) -> Option<NodeRef> {
         let c = self.next();
@@ -1612,7 +1721,6 @@ impl<'a> Parser<'a> {
         let mut ty = self.pop_kind(Kind::Type);
         let mut ident = None;
         if ty.is_none() {
-            // Property behavior conformance: the type is an identifier.
             ident = self.pop_kind(Kind::Identifier);
             ty = self.pop_kind(Kind::Type);
         }
@@ -1855,7 +1963,6 @@ impl<'a> Parser<'a> {
         if !self.next_if(b'n') {
             children.push(self.func_spec_param(Kind::FunctionSignatureSpecializationReturn, 0)?);
         }
-        // The constant / closure payloads are popped in reverse order.
         for i in (0..children.len()).rev() {
             let param = Rc::clone(&children[i]);
             if param.kind != Kind::FunctionSignatureSpecializationParam
@@ -2252,6 +2359,17 @@ impl<'a> Parser<'a> {
                 Kind::PackProtocolConformance,
                 vec![self.pop_any_protocol_conformance_list()?],
             ),
+            b'c' => Node::with(
+                Kind::ProtocolConformanceDescriptorRecord,
+                vec![self.pop_protocol_conformance()?],
+            ),
+            b'n' => Node::with(
+                Kind::NominalTypeDescriptorRecord,
+                vec![self.pop_kind(Kind::Type)?],
+            ),
+            b'o' => Node::with(Kind::OpaqueTypeDescriptorRecord, vec![self.pop()?]),
+            b'r' => Node::with(Kind::ProtocolDescriptorRecord, vec![self.pop_protocol()?]),
+            b'F' => Node::new(Kind::AccessibleFunctionRecord),
             _ => return None,
         })
     }
@@ -2338,7 +2456,7 @@ impl<'a> Parser<'a> {
     fn impl_function_type(&mut self) -> Option<NodeRef> {
         let mut children = Vec::new();
         if self.next_if(b's') {
-            let lists = self.bound_generics()?;
+            let (lists, _) = self.bound_generics()?;
             let sig = self.pop_kind(Kind::DependentGenericSignature)?;
             if lists.len() != 1 {
                 return None;
@@ -2349,7 +2467,7 @@ impl<'a> Parser<'a> {
             ));
         }
         if self.next_if(b'I') {
-            let lists = self.bound_generics()?;
+            let (lists, _) = self.bound_generics()?;
             if lists.len() != 1 {
                 return None;
             }
@@ -2369,10 +2487,7 @@ impl<'a> Parser<'a> {
             children.push(Node::new(Kind::ImplErasedIsolation));
         }
         if self.next_if(b'N') {
-            children.push(Node::text(
-                Kind::ImplFunctionAttribute,
-                "nonisolated(nonsending)",
-            ));
+            children.push(Node::text(Kind::ImplFunctionAttribute, "@caller_isolated"));
         }
         let diff = match self.peek() {
             b'd' => Some(""),
@@ -2468,7 +2583,7 @@ impl<'a> Parser<'a> {
             if self.next_if(b'L') {
                 param.push(Node::text(
                     Kind::ImplParameterImplicitLeading,
-                    "@implicit_leading",
+                    "sil_implicit_leading_param",
                 ));
             }
             children.push(Node::with(Kind::ImplParameter, param));
@@ -2557,7 +2672,6 @@ impl<'a> Parser<'a> {
         Some(attr)
     }
 
-    // ---- the operator loop ----------------------------------------------
 
     fn operator(&mut self) -> Option<NodeRef> {
         self.tick()?;
@@ -2632,8 +2746,6 @@ impl<'a> Parser<'a> {
             ))),
             b'_' => Some(Node::new(Kind::FirstElementMarker)),
             b'.' => {
-                // IRGen's `.<n>` disambiguation suffix: the rest of the text,
-                // kept verbatim.
                 self.push_back();
                 let rest = std::str::from_utf8(&self.text[self.pos..])
                     .ok()?
@@ -2700,9 +2812,6 @@ impl<'a> Parser<'a> {
         if self.failed {
             return None;
         }
-        // The function attributes (specializations, thunk markers) sit on
-        // top of the stack and wrap the entity below them; a partial-apply
-        // forwarder additionally owns everything popped after it.
         let suffix = self.pop_kind(Kind::Suffix);
         let mut groups: Vec<(Option<NodeRef>, Vec<NodeRef>)> = vec![(None, Vec::new())];
         while let Some(attr) = self.pop_if(Kind::is_function_attr) {
@@ -2722,7 +2831,6 @@ impl<'a> Parser<'a> {
                 tail.push(n);
             }
         }
-        tail.extend(suffix);
         let mut children = Vec::new();
         while let Some((pa, mut attrs)) = groups.pop() {
             attrs.extend(std::mem::take(&mut tail));
@@ -2731,6 +2839,7 @@ impl<'a> Parser<'a> {
                 None => children = attrs,
             }
         }
+        children.extend(suffix);
         if children.is_empty() {
             return None;
         }
