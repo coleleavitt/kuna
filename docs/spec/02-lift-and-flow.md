@@ -23,6 +23,51 @@ reaches the architecture only through the
 live implementation is
 `decompiler/crates/kuna-decomp/src/infra/decompile_drive.rs (ArchFlowEnv)`.
 
+With `option stubtailcall` on (the default), loader-validated MIPS
+lazy-binding resolver sites carry call-and-return overrides in the shared
+architecture snapshot
+(`decompiler/crates/kuna-decomp/src/p2_lift/kuna_stubtailcall.rs (flow_override)`). The resolver binds the import
+and jumps to it with the stub caller's return address restored, so the stub is a
+tail call: flow recovery keeps the indirect call, including its delay slot and
+register writes, and ends the stub with a return after it. It is not an
+indirect branch, so no jump-table recovery or fallback warning applies. It does
+not follow a nonexistent local return into the next stub or section padding,
+and does not declare the imported function no-return. Explicit per-function
+flow overrides take precedence. Raw inputs and unvalidated stubs do not acquire
+these facts. The object loader validates the stubs once per image
+(`decompiler/crates/kuna-analysis/src/loader/kuna_mipsstubs.rs (MipsLinkage)`);
+for a MIPS language bootstrap installs their resolver sites, and the Listing and
+`kuna xrefs` walks follow the same sites.
+Off, the resolver call is decoded as an ordinary call that falls through into
+the next stub, as upstream decodes it, and the Listing keeps that fall-through.
+
+With `fdeinterior` enabled, canonical PowerPC `bcl 20,31` PC reads into the
+current function's accepted single-function body follow the taken edge while
+preserving the LR write. The inline literal after the instruction is not a
+return continuation. This avoids dropping the remaining body when its interior
+entry is suppressed. The destination must be forward, skip at most three words,
+lie strictly inside that body and not be a known function. A `bcl` to the next
+instruction cannot be a call. When it skips literal words, the fall-through path
+from the target (following direct unconditional branches inside the body, and
+past conditional ones) must read LR with `mflr` within 32 instructions, before
+any LR return, LR write, call, other unconditional transfer or trap. Within the
+next 32 instructions, a D-form load based on the register that `mflr` wrote
+must read one of the skipped words, with a displacement inside the skip, before
+any instruction that may overwrite that register and before any return, call,
+CTR jump, absolute branch or trap. A load based on r0 does not count, because
+a D-form base field of zero means address zero. In the same window the path must
+not move the `mflr` register back into LR, and must not return through LR
+before `mtlr` from another register restores it. Either of those resumes at the
+skipped words, so they were code returned to, not a literal. A forward
+`bcl 20,31` to a helper that never loads those words, whether it returns
+through LR, restores LR first or tail-jumps away, or to one that loads them and
+then returns into them, is therefore still a call. All 20,573 forward `bcl 20,31`
+sites inside FDE bodies of 135 compiler-built PPC32 images satisfy this rule;
+the 570 that skip literal words load one within 19 instructions of the `mflr`.
+Other calls retain their existing treatment. The rewrite is the same
+CALL-to-BRANCH conversion the call-trampoline rule uses. The recognition
+lives in `decompiler/crates/kuna-decomp/src/p2_lift/kuna_ppcpcread.rs (is_pc_capture)`.
+
 The A32 single-register `POP {pc}` alias (`ldr pc,[sp],#4`) lifts as a return,
 including its conditional forms. Its address mode still advances SP by four
 bytes and its PC write preserves interworking. Other PC loads retain their
@@ -3198,3 +3243,69 @@ The summary declines when `stackviews` or `stackalias` is enabled. Those policie
 retain transient physical stack writes, which can create an independent scalar
 in the tail of a later buffer. Their original call representation remains until
 that overlapping ownership can be represented without shrinking the buffer.
+
+## arm64e pointer-auth failure checks (`ptrauthtrap`)
+
+**(kuna) `option ptrauthtrap on|off`, default on,
+`decompiler/crates/kuna-decomp/src/p2_lift/kuna_ptrauthtrap.rs
+(ActionPtrAuthTrap)`.** The AArch64 SLEIGH spec gives every pointer-auth
+instruction a `ShowPAC` context, off in `AARCH64.pspec`, and with it off the
+instruction lifts to no p-code. `paciasp`, `pacibsp`, `autibsp`, `pacia`,
+`pacda` and `xpaci` vanish. `retab` is a plain return. `braa`, `blraa` and
+`blraaz` branch to their first register exactly like `br` and `blr`, so a
+call target the decompiler resolves through `blr x8` resolves the same way
+through `blraa x8, x9`. `ldraa` is a plain load. The decompiler therefore
+treats every signed pointer as already authenticated.
+
+One construct survives that. A CPU without `FEAT_FPAC` does not trap on a
+failed `aut*`: it returns the pointer with an error code in its top bits, and
+the fault only comes at the next use. So Apple's clang checks the result
+inline and branches to `brk #0xc470 + key` when it is bad. LLVM reserves
+those four immediates for this trap. There are two forms:
+
+- Before a tail call, `eor x16, x30, x30, lsl #1; tbz x16, #62, ok` tests that
+  bits 62 and 61 of the authenticated return address agree.
+- After a data `aut*`, the result is compared with its `xpac`-stripped copy.
+
+The second form folds by itself, because the hidden `xpac` leaves the copy
+equal to the original. The first reads the incoming `x30`, which nothing can
+fold. It printed `if ((v1 ^ v1 << 1) >> 0x3e & 1) { (*SoftwareBreakpoint(0xc471,..))(); return; }`
+before nearly every tail call of an Apple binary: 205 times in an iOS system
+daemon, 1,017 times in a system framework.
+
+**Matching.** The trap block is the anchor. It is a basic block whose ops
+all come from one instruction, and that instruction's `SoftwareBreakpoint`
+`CALLOTHER` carries an immediate in `0xc470..=0xc473`. The immediate alone is
+not evidence: any AArch64 code can branch to a `brk #0xc470` on a condition of
+its own, and cutting that edge would delete a real check. So an in-edge that is
+one arm of a CBRANCH is removed only when the guard's condition is the bit
+test of the return address, `((x30 ^ x30 << 1) >> 62) & 1` compared with 0 or
+1. The shape is what LLVM emits and nothing else does: no image-format gate is
+kept, so the pass runs the same under every front-end (object loader, XML
+`<binaryimage>`, Ghidra, web). Before SSA the reads are not linked to their
+writes, so the test is followed back through the guard block's own ops by
+storage: the CBRANCH condition to the `INT_AND` with 1, the `INT_RIGHT` by 62,
+the `INT_XOR` of `x30` with an `INT_LEFT` of `x30` by 1. The `x30` read must
+see the return address, either unwritten anywhere in the function or reloaded
+from the frame (a `LOAD` whose address is `sp` or `x29` plus constants, directly
+or through one copy of a temporary, as `ldp x29, x30` lifts): a value the code
+itself put in `x30` (`mov x30, x0` in that block or an earlier one,
+`ldr x30, [x0]`) is some other value. The edge cut must be the arm taken when
+the two bits disagree, the failed check; the polarity is followed through the
+`INT_EQUAL`/`INT_NOTEQUAL`/`BOOL_NEGATE` chain and the CBRANCH's boolean flip,
+so a guard that traps when the bits agree, which on any authentic return
+address always traps, keeps its trap. On arm64e hardware a forged `x30` fails
+authentication, so that test only fires on a pointer-auth failure. A trap block entered any other way
+keeps that entry, and so does a CBRANCH whose both arms trap: no arm would be
+left to fall through to.
+
+**The edit and the window.** `remove_branch` plus `remove_unreachable_blocks`,
+pre-SSA, registered after `gowritebarrier` in the same window. The `eor` and
+the `x30` read lose their only reader and die to dead-code elimination.
+`off` keeps the checks, to audit where the compiler authenticates. Pinned by
+`tests/stages/kuna-ptrauthtrap.xml` (two passes over the `macho_arm64e_auth`
+fixture, one over `macho_arm64e_brk`, whose `brk #0xc470` and `brk #0xc472`
+traps sit behind a `w0` compare and an `x0` bit test and stay, and plain-AArch64
+bytechunks of the real check, the same compare, a `mov x30` forgery in the
+guard block and in an earlier block, an `x30` load from a non-frame address, and
+a guard that traps when the bits agree).

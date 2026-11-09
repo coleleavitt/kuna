@@ -343,6 +343,15 @@ impl FlowEnvironment for ArchFlowEnv {
         Ok(Some(proto))
     }
 
+    fn is_ppc_pc_capture(&self, fd: &Funcdata, op: crate::context::OpId) -> bool {
+        let arch = self.arch();
+        if !arch.analysis_fdeinterior || !arch.archid.starts_with("PowerPC:") {
+            return false;
+        }
+        crate::p2_lift::kuna_ppcpcread::is_pc_capture(fd, op, &arch.kuna_function_bodies,
+            |dest| self.query_call(dest).is_some())
+    }
+
     fn is_v850_indirect_jmp(&self, fd: &Funcdata, op: crate::context::OpId) -> bool {
         // (kuna) GH-8817: wire the ported `kunaIsV850IndirectJmp` predicate.  The
         // gate is the architecture-owned `v850_indirect_branch` flag (`option
@@ -1771,6 +1780,19 @@ fn decompile_func_full_with_objects_inner(
         }
         _ => None,
     };
+    // (kuna `swifttypes`) The register-pinned parameters the analysis tier
+    // declared for this function, behind the console's own `map param`s.
+    let mapped_params: Vec<(int4, String, crate::fspec::ParameterPieces)> =
+        match arch.loader_param_locks.get(&funcaddr) {
+            Some(locks) if pending_proto.is_none() => locks
+                .iter()
+                .filter(|(i, _, _)| !mapped_params.iter().any(|(j, _, _)| j == i))
+                .cloned()
+                .chain(mapped_params.iter().cloned())
+                .collect(),
+            _ => mapped_params.to_vec(),
+        };
+    let mapped_params = mapped_params.as_slice();
     let mut attempt = |prefollowed: Option<Funcdata>,
                        unguarded: bool,
                        condstmts_seed: &std::collections::BTreeSet<Address>,

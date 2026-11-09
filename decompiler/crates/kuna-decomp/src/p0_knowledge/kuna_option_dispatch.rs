@@ -109,6 +109,9 @@ kuna_options! { self, p1;
         Ok(msg)
     },
     "addcarrychain" => on_off!(add_carry_chain, "Carry-chain wide-add recovery"),
+    "aggregatefields" => on_off!(aggregate_fields, "Whole-aggregate field recovery"),
+    "stubtailcall" => on_off!(stub_tail_call, "Loader-proven stub tail calls"),
+    "gotimportproto" => on_off!(got_import_proto, "GOT import type-only prototypes"),
     "ovlesssimplify" => on_off!(ov_less_simplify, "OV-flag signed-compare simplification"),
     "booleanmask" => on_off!(fold_boolean_mask, "Boolean sign-mask folding"),
     "globalarrayanchor" => on_off!(global_array_anchor, "Global array anchor preservation"),
@@ -161,6 +164,7 @@ kuna_options! { self, p1;
     "flagcompare" => on_off!(fold_flag_compare, "Flag-modelled comparison folding"),
     "v850indirectbranch" => on_off!(v850_indirect_branch, "V850 indirect-branch reclassification"),
     "fastfailnoreturn" => on_off!(fastfail_noreturn, "Windows int 0x29 (__fastfail) no-return"),
+    "ptrauthtrap" => on_off!(ptrauth_trap, "arm64e pointer-auth failure-check removal"),
     "int3pad" => {
         let (mode, msg) = crate::kuna_int3pad::OptionInt3Pad.apply(p1)?;
         self.int3_pad = mode;
@@ -250,6 +254,7 @@ kuna_options! { self, p1;
     "noreturnretuse" => on_off!(noreturn_ret_use, "No-return call argument use in return trials"),
     "zeroidiomuse" => on_off!(zero_idiom_use, "Self-cancelling zeroing-idiom use in input trials"),
     "exclusivearguse" => on_off!(exclusive_arg_use, "Mutually-exclusive-path dereference in input trials"),
+    "exclusivecallret" => on_off!(exclusive_call_ret, "Mutually-exclusive call and return uses in narrow scalar trials"),
     "stackaddrargtrial" => on_off!(stack_addr_arg_trial, "Stack-address input trials"),
     "callretpair" => on_off!(call_ret_pair, "Two-register CALL output completion"),
     "multiregargs" => on_off!(multi_reg_args, "Complete ABI register argument partitions"),
@@ -399,6 +404,24 @@ kuna_options! { self, p1;
     "haltloopguard" => on_off!(halt_loop_guard, "Global stores live in an exitless loop"),
     "truncptrflow" => on_off!(trunc_ptr_flow, "Truncated-space pointer flow"),
     "deadwaves" => on_off!(pool_dead_waves, "Rule-pool dead-removal waves"),
+    "deadcascade" => {
+        let field = p1.trim();
+        let (val, msg) = match field {
+            "off" => (None, "Dead-op removal takes one link of a dead chain per pass".to_string()),
+            "on" => (Some(0), "Dead-op removal takes a dead chain of joins and guards out at once".to_string()),
+            _ => {
+                let n = field
+                    .parse::<u32>()
+                    .ok()
+                    .filter(|_| !field.is_empty() && field.bytes().all(|b| b.is_ascii_digit()))
+                    .ok_or_else(|| KunaError::parse("Must specify off, on or a decimal pass count"))?;
+                (Some(n), format!("Dead-op removal takes a dead chain of joins and guards out at once once a pool run has made {n} passes"))
+            }
+        };
+        self.dead_cascade = val;
+        Ok(msg)
+    },
+    "copywaves" => on_off!(pool_copy_waves, "Rule-pool copy-propagation waves"),
     "noreturn_externmatch" => on_off!(noreturn_extern_match, "Name-matched extern no-return"),
     "loweredswitch" => {
         let (val, msg) = crate::kuna_loweredswitch::OptionLowerSwitch.apply(p1)?;
@@ -924,9 +947,14 @@ kuna_options! { self, p1;
     "slotptr" => on_off!(slot_ptr, "frame-slot pointer typing"),
     "reglocals" => on_off!(reg_locals, "register-local reporting"),
     "slotreport" => on_off!(slot_report, "frame-slot local reporting"),
-    "callmechanisms" => on_off!(call_mechanism_effects, "compiler prototype call mechanisms"),
+    "callmechanisms" => {
+        let (mode, msg) = crate::kuna_callmechanisms::OptionCallMechanisms.apply(p1)?;
+        self.call_mechanism_mode = mode;
+        Ok(msg)
+    },
     "slotsplit" => on_off!(slot_split, "frame-row splitting at declarations"),
     "voidtailreturn" => on_off!(voidtailreturn, "void tail-return elision"),
+    "importdata" => on_off!(import_data, "import-slot data-read rendering"),
     "castimplied" => on_off!(cast_implied, "C-implied cast elision"),
     "castsign" => on_off!(cast_sign, "signed declarations for signed-only locals"),
     "castternary" => on_off!(cast_ternary, "conditional-arm cast elision"),
@@ -991,6 +1019,7 @@ kuna_options! { self, p1;
     "paramrefdecl" => on_off!(param_ref_decl, "address-taken parameter re-declaration guard"),
     "noreturn_known" => on_off!(analysis_noreturn_known, "No-return-known analysis pass"),
     "peimportcall" => on_off!(analysis_peimportcall, "PE/Mach-O import-slot call binding"),
+    "authptrcall" => on_off!(analysis_authptrcall, "arm64e __auth_ptr call binding"),
     "libproto" => on_off!(analysis_libproto, "Library-prototype analysis pass"),
     "libcsigs" => on_off!(analysis_libcsigs, "Measured libc signature extension"),
     "libgccsigs" => on_off!(analysis_libgccsigs, "libgcc __divdi3 DI-mode contract"),
@@ -1095,6 +1124,9 @@ kuna_options! { self, p1;
     "eh_frame_full" => {
         on_off!(analysis_eh_frame_full, ".eh_frame LSDA landing-pad discovery")
     },
+    "unwindstarts" => {
+        on_off!(analysis_unwindstarts, "Mach-O __unwind_info function-start discovery")
+    },
     "coldentry" => {
         on_off!(analysis_coldentry, "Multi-entry .cold fragment entry discovery")
     },
@@ -1136,6 +1168,9 @@ kuna_options! { self, p1;
     "arm_markers" => on_off!(analysis_arm_markers, "ARM/Thumb decode-mode marker pass"),
     "armfuncmode" => on_off!(analysis_armfuncmode, "A32 mode at even ARM function symbols"),
     "armwalkmode" => on_off!(analysis_armwalkmode, "ARM decode mode carried along the Listing walk"),
+    "armpltslot" => on_off!(analysis_armpltslot, "ARM PLT stub slot reference"),
+    "armcondskip" => on_off!(analysis_armcondskip, "ARM condition skips filed as no jump"),
+    "armderef" => on_off!(analysis_armderef, "ARM accesses through a register holding a datum's address"),
     "entrythumbflow" => {
         on_off!(analysis_entrythumbflow, "Entry-reachable Thumb context walk")
     },
@@ -1156,6 +1191,15 @@ kuna_options! { self, p1;
             if val { "on" } else { "off" }
         ))
     },
+    "ppcapu" => {
+        let val = on_or_off(p1)?;
+        self.analysis_ppcapu = val;
+        crate::kuna_ppcapu::set_ppcapu_env(val);
+        Ok(format!(
+            "PowerPC APU-note language selection turned {}",
+            if val { "on" } else { "off" }
+        ))
+    },
     "ifuncfpret" => {
         let val = on_or_off(p1)?;
         self.analysis_ifuncfpret = val;
@@ -1173,6 +1217,11 @@ kuna_options! { self, p1;
             "relocatable-object analysis rebase turned {}",
             if val { "on" } else { "off" }
         ))
+    },
+    "kernelcache" => {
+        let (choice, msg) = crate::kuna_kernelcache::parse_kernelcache(p1)?;
+        crate::kuna_kernelcache::set_kernelcache_env(&choice);
+        Ok(msg)
     },
     "dynrelocs" => {
         let val = on_or_off(p1)?;
@@ -1384,6 +1433,19 @@ kuna_options! { self, p1;
         on_off!(analysis_gonoreturn, "Go pclntab no-return list pass")
     },
     "objc" => on_off!(analysis_objc, "Mach-O Objective-C metadata recovery pass"),
+    "objcrefconst" => on_off!(analysis_objcrefconst, "Objective-C reference-slot folding"),
+    "swiftmetadata" => on_off!(analysis_swiftmetadata, "Swift runtime-metadata recovery pass"),
+    "cfstrings" => {
+        let (pass, annotate) = match p1 {
+            "annotate" => (true, true),
+            other => (on_or_off(other)?, false),
+        };
+        self.analysis_cfstrings = pass;
+        self.cfstrings_annotate = annotate;
+        let state = if annotate { "on, annotated" } else if pass { "on" } else { "off" };
+        Ok(format!("Mach-O __cfstring constant-string recovery pass turned {state}"))
+    },
+    "swifttypes" => on_off!(analysis_swifttypes, "Swift type layouts from static metadata"),
     "pdb" => on_off!(analysis_pdb, "PE PDB metadata recovery pass"),
     "relocobjects" => {
         let val = on_or_off(p1)?;
