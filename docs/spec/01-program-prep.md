@@ -1066,10 +1066,95 @@ the section-flag translation, import resolution (§1.3), and extra constant rang
   A bind's ordinal also names the symbol it binds
   (`decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (bind_name)`),
   which is what lets a `__objc_classrefs` slot bound to `_OBJC_CLASS_$_UIView`
-  be named without an address. The resolver also records which segments the
+  be named without an address. The bind also keeps its addend: the import
+  record's (`DYLD_CHAINED_IMPORT_ADDEND*`) plus the entry's own (eight bits in
+  `PTR_64`, a signed 19 bits in a plain arm64e bind; an authenticated bind spends
+  those bits on its signing context and has none). A C++ RTTI record points at
+  `vtable for __si_class_type_info + 16` this way, so a slot whose addend is not
+  zero holds an address inside the import, not the import itself. An image that
+  predates chained fixups keeps its
+  binds as the `LC_DYLD_INFO` opcode program instead, and the slot itself holds
+  zero in the file;
+  `decompiler/crates/kuna-analysis/src/loader/format/macho/dyldinfo.rs (resolve_dyld_info_binds)`
+  replays that program (segment+offset, symbol, bind, advance; weak binds
+  included, lazy and arm64e threaded binds not) to the same `slot → import name`
+  answer. The resolver also records which segments the
   linker flagged `SG_READ_ONLY`, the Mach-O statement that dyld maps the segment
   read-only once its fixups are in (`__DATA_CONST`); `dynrelocs` (§1.3) reads
   it as the `PT_GNU_RELRO` of a Mach-O.
+- **Apple kernelcaches** (kuna, `kernelcache`, default `auto`, env-bridged) —
+  an iOS kernelcache ships as an IMG4 or bare IM4P DER container around an
+  LZFSE or `complzss` payload, and decodes to an `MH_FILESET` kernel
+  collection: one Mach-O header per `LC_FILESET_ENTRY` (the kernel and every
+  kext), all sharing one file, one `__LINKEDIT` and one
+  `LC_DYLD_CHAINED_FIXUPS` table. Before the fat peel, both readers above run
+  `decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache.rs (peel)`. It
+  walks the DER only as deep as the IM4P (type, description, payload, an
+  optional KBAG, an optional compression record with the decoded size), refuses
+  a payload that carries a KBAG because it is encrypted, and decodes the
+  payload by its magic: LZFSE (`bvx2` FSE blocks, `bvxn` LZVN blocks, `bvx-`
+  stored blocks; v1 `bvx1` headers are refused) or `complzss` (Okumura LZSS,
+  checked against the header's size and Adler-32). A decoded size different
+  from the IM4P's record is an error, not a truncation. The record also bounds
+  the decode: output stops, with an error, as soon as it would pass the
+  declared size. Whatever the record says, output also stops at 64 times the
+  payload (at least 16 MiB) and never past 1 GiB, so a small payload cannot
+  claim a gigabyte. An FSE bit stream may preload bytes from
+  before its payload, as the reference encoder's does, but consuming them is
+  a truncation error rather than a read of zeros. Symbols a block claims beyond
+  its raw size (a valid block exceeds it only by padding literals and literal-only
+  triples, at most 50 per block in two real kernelcache streams) are charged
+  to the input's length, so all-header blocks that decode to nothing stop
+  quickly. Then, for an
+  `MH_FILESET`, every rebase of the collection's fixup table is written into
+  its slot — the kernel formats `DYLD_CHAINED_PTR_64_KERNEL_CACHE`,
+  `ARM64E_KERNEL`, `ARM64E_FIRMWARE` and `X86_64_KERNEL_CACHE` are decoded in the same
+  `chained.rs` as the userland ones, targets are offsets from the collection
+  base, and pointer-authentication bits are dropped. The kernel-cache formats
+  name the collection a target lies in by its `cacheLevel`, xnu's index of the
+  boot (0), System/pageable (1) and Auxiliary (3) collections
+  (`pexpert/gen/kcformat.c`). Only targets at the collection's own level can be
+  rebased from this file's base. Neither the header nor the chains state that
+  level (xnu learns it from whoever loads the collection), so it is read from
+  the collections the `__PRELINK_INFO` plist links: no `_BootKCID` is the boot
+  collection (0), `_PageableKCID` an Auxiliary one (3), and `_BootKCID` alone is
+  a System collection or an Auxiliary one built without a System collection,
+  told apart by whichever of levels 1 and 3 its chains name (neither can point
+  into the other's level). With no plist, or chains naming both, the level is
+  unknown and no kernel-collection target is written; targets at other levels
+  are never written
+  (`decompiler/crates/kuna-analysis/src/loader/format/macho/chained.rs (resolve_kernel_cache_levels)`)
+  — and one entry is cut out as a thin Mach-O by copying
+  its header and load commands to file offset 0. Nothing else moves: every
+  entry's file offsets are already absolute in the collection, so its
+  segments, symbol table and indirect-symbol table read correctly in place. The
+  copy is refused if any of the entry's file-backed segments starts inside the
+  header it would overwrite. `auto` takes the `MH_EXECUTE` entry (the kernel);
+  any other value names an entry by its bundle id, exactly or by a unique
+  case-insensitive dotted suffix (`IOSurface`), a miss lists the
+  candidates, and `list` stops the load with every entry id. A kext calls into the kernel and into the kexts it depends on
+  with a direct `bl` that the collection's builder resolved, so the only record
+  of the callee's name is the kext's undefined `nlist`; when the chosen entry is
+  not the kernel, each undefined symbol that another entry exports from an
+  instruction-bearing section is rewritten to `N_ABS | N_EXT` at that address,
+  the kernel's definition winning over a kext's and an ambiguity between kexts
+  left unbound. Each distinct entry header is read once, however many entries
+  name its offset; a segment's sections are read only as far as its own
+  `cmdsize` holds them; and because every count and offset comes from the file,
+  the walk stops at a work budget proportional to the collection's size (4
+  units per byte of commands, sections and name bytes visited, at least one
+  million), and the undefined names copied never exceed the file
+  (`decompiler/crates/kuna-analysis/src/loader/kuna_kernelcache/fileset.rs (bind_to_collection)`),
+  and the Mach-O import walk names each such symbol of an `MH_KEXT_BUNDLE` as
+  an external function
+  (`decompiler/crates/kuna-analysis/src/loader/macho_stubs.rs (push_kext_bound_imports)`).
+  `off` passes the bytes through untouched: an IMG4 is then an unrecognized
+  format, and a bare `MH_FILESET` loads as one image with no symbol table. The
+  load prints one `[kuna]` note naming the container, codec, chosen entry and
+  how many pointers and symbols were bound. Measured on an iOS 16.4.1 A13
+  kernelcache (21 MB IMG4, 72 MB decoded, 233 entries, 445,860 fixups), the
+  peel costs about 0.15 s per read and `kuna functions` on the kernel takes
+  3.7 s and 429 MB.
 
 An explicit target changes only language selection: the parsed container still
 owns section mapping, image base, symbols, and imports. Container header class is
@@ -1923,6 +2008,29 @@ funcsym stream:
   the valued rebases and binds, as before. The list is read whatever the
   `dynrelocs` gate says, so a reader compares the loaded bytes with the file's
   to learn what was applied. Any other image lists none, under coverage `none`.
+- **ELF GOT data imports** (kuna, `elfgotimports`, committed under `importdata`,
+  default off; `decompiler/crates/kuna-analysis/src/loader/kuna_elfgotimports.rs`):
+  the complement of the `dynrelocs` walk above. A `GLOB_DAT` slot whose symbol is *undefined*
+  is skipped there because its value lives in another object, and the PLT/import
+  naming covers a *call* to it. A `-fPIC` *data* read is not a call: it loads the
+  slot (the import's address) and then loads through it, and with nothing naming
+  the slot that printed as `*dat_<slot>` — or, for a stdio stream `libctypes`
+  types, as `*stdout_ptr`. `resolve` lists every such slot with its symbol, over
+  the same relocation triple (x86-64, AArch64, i386, ARM). `ElfFormat::import_slots`
+  reports them, so a slot is a pointer word and never a function body. The pass
+  names each one for its import (a symbol-table `FunctionSymbol`, as the format's
+  own import names are, but not a function-inventory entry, since the slot is not a
+  function; the name goes through the `symbolnamechars` sanitizer like every name
+  the loader mints) and paints it `externref`, so `PrintC::op_load`
+  renders the read as the import (`importdata`, chapter [09](09-emission.md)):
+  `return imported_counter;`, `return environ;`, `stdout`. Painting the slot also
+  lets `ActionDeindirect` bind a call through it (`(*dat_e9f30)()` becomes
+  `__cxa_finalize()`), the binding `peimportcall` gives a PE or Mach-O slot. A slot
+  whose symbol the image defines is never taken. `dynrelocs` already fills it in and
+  folds it to the object (`exported_value`, `&exported_value`), and `externref` would
+  stop that fold. The same holds for a local GOT entry (`RELATIVE` to an in-image
+  object) inside RELRO, which the fold above already renders as the object. A
+  local entry outside RELRO stays a dereference for the reason given above.
 - **In-code literal pools** (kuna, `litpoolconst`, default-on, DIV-136,
   `decompiler/crates/kuna-decomp/src/p1_partition/kuna_litpoolconst.rs`): the
   third user of the same "constant by construction, not by policy" exception, and
@@ -2191,6 +2299,20 @@ unaffected either way.
 The `externref` mark also protects the slot until that resolution: P3 read-only
 folding cannot replace it with an on-disk thunk/name RVA, even if a hostile or
 single-section PE mapped the IAT executable and non-writable.
+
+An arm64e Mach-O has one import table the indirect-symbol walk cannot see.
+`__auth_got` backs the `__auth_stubs` and is an indirect-symbol section like
+`__got`, so `peimportcall` covers it. `__auth_ptr` holds the signed pointers
+code loads itself, for instance clang's `adrp; ldr x16; blraaz x16` call of
+`___chkstk_darwin`. It is a plain `S_REGULAR` section with no indirect-symbol
+entries; only its `LC_DYLD_CHAINED_FIXUPS` bind says which import a slot
+holds. `decompiler/crates/kuna-analysis/src/loader/kuna_authptrcall.rs (AuthPtrCallPass)`
+(`authptrcall`, Mach-O only, default on) gives each `__auth_ptr` bind slot a
+`FunctionSymbol` named after its import, with one leading `_` stripped as the
+indirect-symbol walk does, and reports the slot as an `externref` range. The
+commit and `ActionDeindirect` then treat the slot exactly like a `__got` slot.
+A bind with a nonzero addend points inside the import rather than at it, so it
+is skipped. Off, such a call renders `(*dat_<slot>)(...)` as before.
 
 Two arch-marker passes paint **decode context** rather than names, because a wrong
 decode mode is unrecoverable downstream. `decompiler/crates/kuna-analysis/src/loader/arm_markers.rs
@@ -3765,33 +3887,83 @@ moves.
   member is brought to `msvc_demangler`'s (`dtor` is `destructor`) so a member
   reads the same whichever crate demangled it.
 
-  **(kuna, docs/multilang.md) Swift names demangle through a ported, bounded
-  name-only subset** (`decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_swift.rs
-  (demangle_swift_name)`), because no crate exists at the maturity of the three
-  above: the Vector35 `swift-demangler` builds the real C++ demangler through
-  cmake (a native-toolchain dependency this workspace does not carry, floor
-  rustc above this repo's), and the pure-Rust alternatives are unvetted 0.x
-  crates — for symbol RENAMING a wrong answer is strictly worse than none. The
-  subset parses context chains (`module.Type.member`, `V`/`C`/`O` nominal
-  kinds, the stdlib `s` contraction), functions with argument labels rendered
-  Swift-style (`Swift.print(_:separator:terminator:)`), property accessors
-  (`.getter`/`.setter`), `init`/`deinit`, and the common global markers
-  (`type metadata`, nominal descriptor, metadata accessor, full metadata,
-  metaclass, value witness table) as dotted suffixes; everything else —
-  punycode identifiers, witnesses/thunks, specializations, generic machinery —
-  **passes through unchanged** (parse-or-passthrough: the label-less function
-  arm additionally refuses any signature carrying digits, since a digit there
-  could open an un-labeled custom parameter type whose path components are
-  indistinguishable from labels). The arm is shape-gated on
-  `sourcelang::is_swift_mangled` — prefixes no other scheme owns — and
-  option-gated by `swiftdemangle` (default on) through the `KUNA_SWIFTDEMANGLE`
-  loadtime env bridge, the `rexthunk` pattern, because names are demangled
-  inside `load file` upstream of every option line. The test corpus is
-  hand-derived from the mangling grammar (each case cites its production), so
-  no third-party fixture text is vendored; the end-to-end gate synthesizes an
-  ELF whose symbol table carries the mangled names, since no Swift toolchain
-  exists on this host or CI — a real-swiftc fixture is the Swift pack's own
-  follow-up.
+  **(kuna, docs/multilang.md) Swift names demangle through a pure-Rust
+  demangler written for kuna** (`decompiler/crates/kuna-analysis/src/analyzers/demangle/kuna_swift.rs
+  (demangle_swift_name)`, with the parser in `kuna_swift/parse.rs`, the
+  `_Tt` runtime-name parser in `kuna_swift/oldparse.rs`, the full-form
+  printer in `kuna_swift/print.rs` and the name-only printer in
+  `kuna_swift/name.rs`). Every Swift demangler crate (`swift-demangler`,
+  `symbolic-demangle`, `macho-demangle`, `razgad`, `swift-demangle`) builds
+  Apple's C++ demangler, a build-time C++ toolchain `kuna-wasm` cannot carry,
+  so kuna owns the port: the stable `$s`/`$S` grammar of
+  `swift/docs/ABI/Mangling.rst` as the postfix stack machine Apple's reference
+  implementation uses (each operator pops its operands from a node stack and
+  pushes one node; substitutions `A…` and the stdlib shortcuts `S…` re-reference
+  earlier nodes; word substitutions `0…` and punycode `00…` identifiers decode),
+  plus the Swift 3 `_Tt` type mangling the Objective-C runtime still uses for
+  Swift class and protocol names (`_TtC6Sample3Foo`, nested `_TtCC…`, private
+  `P33_<hash>`, generic `_TtGC…_`, protocol `_TtP…_`). The parser covers
+  entities (functions with labels, variables and every accessor, subscripts,
+  constructors and destructors, closures, default arguments, initializers),
+  contexts (modules, nominal types, extensions, private and local names), the
+  type grammar (bound generics with sugar, tuples, function types with their
+  effects, metatypes, existentials, generic parameters and dependent members,
+  generic signatures with requirements, builtins, SIL impl function types),
+  the runtime artifacts (type metadata and its accessors and caches, nominal
+  and protocol descriptors, conformance descriptors, witness tables and
+  witnesses, value witnesses, field offsets, enum cases, opaque type
+  descriptors, reflection descriptors), and the function attributes
+  (dispatch thunks, method descriptors, merged functions, `@objc` thunks,
+  partial-apply forwarders, outlined copies, async function pointers and
+  resume functions, generic and function-signature specializations,
+  reabstraction thunks, key path thunks, once-functions). Out of coverage
+  (the symbol stays mangled): the autodiff family (`TJ…`), bridged outlines
+  (`Te`), macro entities (`fm`/`fM…`), Embedded Swift symbols (`$e`),
+  coroutine continuation prototypes (`TC`) and anonymous contexts (`XZ`).
+  The full-form printer (`demangle_raw`) renders the tree the way
+  `swift-demangle` from Swift 6.3 does, and is verified byte for byte against
+  it on the reference's own `manglings.txt`, on the Swift stdlib, Foundation
+  and app symbol tables, and on randomly mutated symbols (where both demangle,
+  they agree; where `swift-demangle` refuses, so does kuna). Swift 6.4 renamed
+  the two experimental coroutine accessors to `yielding_borrow` and
+  `yielding_mutate`; this printer keeps the 6.3 spellings `read2` and
+  `modify2`. The one deliberate difference: a constructor carrying a file
+  discriminator without a name prints `Foo.(in _HASH).init()` where
+  `swift-demangle` prints its parameter type as the name. The name-only printer (`demangle_name`, what the loader installs)
+  is a projection of the same tree: space-free Swift reference syntax for
+  members (`Sample.Foo.init(x:y:)`, `Foo.bar(_:)`, `Foo.baz()`, `Foo.x.getter`,
+  `Foo.subscript(_:).getter`, `Foo.__allocating_init(x:)` on a class), dotted
+  tags for runtime artifacts (`Foo.type_metadata`, `.nominal_type_descriptor`,
+  `.dispatch_thunk`, `.method_descriptor`, `.merged`, `.objc`, `.closure#1`,
+  `.outlined_copy`, `.generic_specialization<Swift.Int>`,
+  `.function_signature_specialization`, `.partial_apply`), and `<Type:Protocol>`
+  for conformances (`<Sample.Foo:Swift.Hashable>.hash(into:)` is the protocol
+  witness, `<…>.protocol_witness_table` and `<…>.protocol_conformance_descriptor`
+  the tables). Private discriminators, local-name counters, generic
+  signatures, extension modules and parameter types are dropped from the name;
+  where a name is meaningless without types (conformances, specializations,
+  reabstraction thunks, key path helpers) a compact spelling appears
+  (`[Swift.String:Any]`, `(Swift.Int)->Swift.Bool`, `A?`). The contract is
+  parse-or-passthrough: an unknown operator, a malformed count, a stack that
+  does not reduce, or a node kind without a rendering fails the whole name and
+  the symbol keeps its mangled spelling — a wrong path is never printed. The
+  Objective-C metadata pass (`analyzers/objc/mod.rs`) renders a class whose
+  `class_ro_t.name` is a `_Tt` name through the same demangler, so a Swift
+  class's method labels read `-[Sample.Foo viewDidLoad]` while the
+  `_OBJC_CLASS_$_…` data symbol keeps the linker's spelling. The arm is
+  shape-gated on `sourcelang::is_swift_mangled` — prefixes no other scheme
+  owns — and option-gated by `swiftdemangle` (default on) through the
+  `KUNA_SWIFTDEMANGLE` loadtime env bridge, the `rexthunk` pattern, because
+  names are demangled inside `load file` upstream of every option line. On a large arm64 iOS app (314,038 functions, 7,382 of them under Swift symbols) the
+  option takes every Swift symbol from mangled to demangled where the earlier
+  name-only subset reached 26%, at no measurable cost (demangling the whole
+  symbol table takes under 10 ms). The unit-test corpus is real symbols
+  pinned with the `swift-demangle` output; the stage test
+  `tests/stages/kuna-swiftdemangle.xml` loads `macho_swift_names_arm64`, a
+  clang-built arm64 Mach-O whose root class carries the runtime name
+  `_TtC4main7Greeter` through `objc_runtime_name` and whose exported function
+  carries the symbol `_$s4main10countWords2ofS2i_tF` through an `asm` label,
+  and proves both spellings off and on.
 
   **(kuna, DIV-83) Which crate is asked first is decided by a marker, not by
   which one answers.** Rust's *legacy* scheme reuses the Itanium `_ZN…E`
@@ -4349,8 +4521,9 @@ every other binary's pass list is byte-identical to before the pass existed):
     `superRef_<Class>`: a rebase slot's class is read off the `class_t` it points
     at, a chained **bind** slot's from the import it names with `_OBJC_CLASS_$_`
     stripped (§1.2), so `classRef_UIView` is named although no address exists for
-    it. A classic `LC_DYLD_INFO` image stores a bind slot as zero and leaves it
-    unnamed (its bind opcodes are not parsed);
+    it. A classic `LC_DYLD_INFO` image stores a bind slot as zero; its name comes
+    from the replayed bind program (§1.2,
+    `decompiler/crates/kuna-analysis/src/loader/format/macho/dyldinfo.rs`);
   - each `__objc_stubs` entry is the function `objc_msgSend$<sel>`, the name the
     linker gives the symbol it synthesized the stub for. The entry is found by
     its own first two instructions (arm64 `adrp x1; ldr x1, [x1, #off]`, x86-64
@@ -4382,9 +4555,284 @@ every other binary's pass list is byte-identical to before the pass existed):
   (`objc_msgSend(obj, selRef_init)`), the shape to read when the slot itself is
   the question. The fold is what the chained-fixup unpacking in §1.3 exists for
   here: a chained slot holds its packed chain word until `dynrelocs` unpacks it,
-  so on a chained image the pass reports no constant slot while `dynrelocs` is
-  off (the names stay). Like every analysis gate, `objcrefconst` is read at the
+  so on a chained image the pass reports no constant reference slot while
+  `dynrelocs` is off (the names stay; the ivar offset variables are plain words,
+  not fixups, and keep folding). Like every analysis gate, `objcrefconst` is read at the
   `read symbols` commit; flipping it afterwards does not re-paint.
+- **Swift metadata** (`swiftmetadata`, Mach-O and ELF, Swift images only,
+  default-off but ON in the `aggressive` preset, which `auto` selects for any
+  binary under 500 KiB; `decompiler/crates/kuna-analysis/src/analyzers/swift/mod.rs`, the
+  record layouts in `decompiler/crates/kuna-analysis/src/analyzers/swift/descriptors.rs`):
+  a stripped Swift binary keeps its reflection sections, and they name much of
+  its code. The pass reads `__swift5_types` / `swift5_type_metadata` (the nominal
+  type context descriptors: kind, parent chain, name, metadata accessor, field
+  descriptor, and for a class the trailing vtable and override table),
+  `__swift5_protos` (protocol descriptors with their requirement rows),
+  `__swift5_proto` (conformance descriptors: protocol, conforming type, witness
+  table pattern, resilient witnesses) and `__swift5_fieldmd` (field descriptors),
+  per the ABI's `Metadata.h`. Everything there is a 32-bit self-relative pointer,
+  so no fixup resolution is needed; an *indirectable* pointer (low bit set)
+  names a pointer-sized slot, which is a rebase (resolved through the
+  chained-fixup overlay, §1.2) or a bind to another image — and the overlay
+  records each bind slot's import name (`ChainedFixups::binds`), which is
+  how a conformance to `Swift.Hashable` or an override of a UIKit initializer
+  learns the other image's descriptor name. Names follow the demangler's
+  name-only conventions so they read like symbol-table names and agree with the
+  real symbol where one survives (the fixture's unstripped build is the oracle):
+  `Module.Type.type_metadata_accessor`; `Module.Class.vtable#3.getter` for a
+  vtable slot's implementation by position and kind (a slot carries no selector;
+  the optimizer leaves a removed method's slot null, which is skipped);
+  `Module.Sub.init(coder:rootView:)` for an override whose overridden method
+  descriptor is an import (`…Tq`), the real member name; `Module.Sub.vtable#3.init`
+  for an override of a local base; `<Module.Type:Swift.Hashable>.hash(into:)`
+  for a resilient witness whose requirement descriptor is an import,
+  `<T:P>.requirement#2` for a local protocol's witness (the witness-table words,
+  read through the chained-fixup overlay on a Mach-O and the `R_*_RELATIVE`
+  addends on an ELF), `Module.P.requirement#2.default` for a default
+  implementation; and the records: `….nominal_type_descriptor`,
+  `….protocol_descriptor`, `….module_descriptor`,
+  `<T:P>.protocol_conformance_descriptor`, `<T:P>.protocol_witness_table`,
+  `….reflection_field_descriptor`. A type path follows the parent chain
+  (`Module.Outer.Inner`; an anonymous context is transparent, an extension
+  context demangles its extended type, a parent in another image is named
+  through its module-descriptor import). Only a code address is ever named as a
+  function (a base-protocol or associated-type witness row points at data), and
+  function names use the FID-precedent placeholder gate. Every record's claim
+  on a function is collected before any name is given, because the linker
+  folds functions with identical bodies (identical code folding) and one
+  address is then the target of records of unrelated types — on a large
+  third-party iOS app 2,350 of the 57,147 claimed functions, 2,037 of them
+  claimed by more than one type. Such a function is never named after one of
+  its claimants: when all claims come from one type it is named after the
+  first member (sorted) with the count of members it serves
+  (`<T:P>.requirement#0.merged#2`); when they are witnesses of one protocol
+  member from different types it is named after the member alone
+  (`<*:Swift.RawRepresentable>.init(rawValue:)`); any other mix (different
+  types' vtable slots, different members) keeps the engine placeholder. A
+  name already given to another function (the same member's second folded
+  body; a static and an instance requirement spelled alike; two Clang types
+  of one name) gets `.2`, `.3`, … in address order, so every name resolves
+  to one function. On that app (314,038 functions, 304,309 of them
+  `sub_<addr>`) the pass names 57,147 stripped functions — 14,615 metadata
+  accessors, 15,204 vtable slots, 27,322
+  witnesses, 6 overrides — every one at an address function discovery already
+  found, in about 0.3 s and 135 MB over the baseline decompile. The work is
+  bounded by the image: a conformance descriptor several section entries name
+  is read once, every record row (a descriptor, a vtable, override,
+  requirement or witness row, a witness-table word) is charged against one row
+  per four bytes of the image, which a real image never exceeds since each row
+  occupies at least that much of it, and the names built (type paths included)
+  stop at 16 MiB plus the image's length, so repeated or overlapping records
+  in a crafted file cannot multiply into millions of names. The pass is
+  registered only for `Compiler::Swift` (§1.3's detector) in Mach-O or ELF, so
+  every other image's pass set is unchanged; the stage test
+  `tests/stages/kuna-swiftmetadata.xml` runs the fully stripped swiftc-built
+  `swift_metadata_elf` off and on.
+- **Core Foundation constant strings** (`cfstrings`, Mach-O-only, default-on;
+  `decompiler/crates/kuna-analysis/src/analyzers/cfstring/mod.rs`): a `CFSTR("x")`
+  compiles to a four-word `CFString` struct in `__cfstring` (`isa`, `flags`, a
+  `char *` into `__cstring`/`__ustring`, and a character `length`). Code references
+  the struct address, not the characters, so the constant-string route — which
+  reads the bytes *at* the referenced address — sees the struct and prints
+  `dat_<addr>`. The pass reads each entry, resolves its `char *` through the
+  chained-fixup overlay (§1.2) on an arm64(e) image or as a raw word on a classic
+  `LC_DYLD_INFO` image, and decodes the string (8-bit when the `flags` unicode bit
+  `0x10` is clear, UTF-16 otherwise). The walk stops at the end of the file, not at
+  the section header's size, and the string bytes it reads over all entries are
+  capped at the file's length: an entry is 32 bytes, but every entry may name the
+  same 64 KiB run, and each fact owns a copy of its string (as does the
+  `StringManager` seed), so an uncapped crafted section would grow memory about
+  4096-fold. A real image's strings are distinct bytes of the file and never reach
+  the cap. The walk also stops after a fixed budget of section-span checks, because
+  each read scans the image's section spans and a crafted file can size both the
+  entry count and the section count. An 8-bit string that is not UTF-8, invalid
+  UTF-16, and a string holding a NUL (a trailing one included) are skipped, since
+  the C literal would stop at that NUL and silently drop the rest. The commit seam then types the entry an
+  opaque `struct __CFString` spanning the entry's own four words (never the
+  string's length, which would overrun the next entry and hide it) and seeds the `StringManager` at the
+  entry address with the resolved bytes, so a reference renders the string
+  across the one indirection the printer cannot follow on its own. The entries are
+  marked read-only (a CFString constant is immutable), which the route requires on
+  the historical writable `__DATA,__cfstring` layout (`__DATA_CONST` is already
+  read-only). The commit also records each seeded entry address
+  (`Architecture::cfstring_entries`), and the C printer wraps a literal found at one
+  of them as `CFSTR("...")`
+  (`decompiler/crates/kuna-decomp/src/p9_emit/kuna_cfstr.rs (wrap)`): the value is
+  the entry, a `CFStringRef`, not the characters, so
+  `NSLog(CFSTR("Reachability Flag Status: …"))` is what was written. The printer
+  reads an entry's seeded string through a `char` element whatever the
+  reference's type (`cfstring_char` in
+  `decompiler/crates/kuna-decomp/src/p9_emit/printc.rs`), at both the constant
+  arm and the global-symbol arm, so the entry's own type is free to say what the
+  value is: the commit declares `struct __CFString` at the entry size and a
+  pointer to it named `CFStringRef`
+  (`decompiler/crates/kuna-decomp/src/p9_emit/kuna_cfstr.rs (declare_types)`),
+  reusing a `CFStringRef` and `__CFString` the type factory already holds (an
+  opaque one is completed to the entry size), and registers that pointer as the
+  one the factory returns for any later pointer to the struct
+  (`TypeFactory::kuna_prefer_named_pointer`). Type inference therefore types a
+  reference to an entry `CFStringRef`, and the type propagates to the returns,
+  parameters and locals that carry it: a getter is
+  `CFStringRef get_greeting(void) { return CFSTR("cfstring hello"); }`. When an
+  existing `__CFString` has another size, or an existing `CFStringRef` is not a
+  pointer to it, the entry falls back to a `char[N]` and the reference to
+  `char *`. The Rust and Go back-ends keep the plain literal, with the pointer to
+  the struct as its type. `cfstrings annotate` runs the same pass and
+  also follows each `CFSTR` with `/* cfstring@0x<entry> */`, the address a
+  disassembler or hex view shows for the entry, which the literal otherwise
+  replaces. The pass is on by default: it runs only on a Mach-O and only on the
+  real-binary path, so the XML datatest corpus never reaches it, and on an 80 MB
+  third-party arm64 iOS app one decompile is within run-to-run noise of `off`. `off`
+  renders each reference as the entry itself: its symbol (`&_kGreeting`) where the
+  image names it, its address on a stripped image.
+- **Swift type layouts** (`swifttypes`, the type-layout arm of the pass above,
+  default-on and inert unless `swiftmetadata` is on, which the `aggressive`
+  preset does and `auto` selects for any binary under 500 KiB;
+  `decompiler/crates/kuna-analysis/src/analyzers/swift/kuna_swifttypes.rs`): a
+  non-generic type whose metadata needs no runtime initialization (the
+  descriptor's `MetadataInitialization` is none: no resilient superclass, no
+  foreign or singleton initialization) has that metadata laid out statically,
+  and its accessor is the one-line function that returns the address — `adrp
+  x0, …; add x0, x0, …; mov x1, #0; ret` on arm64, `lea rax, [rip + …]; xor
+  edx, edx; ret` on x86-64, a class with Objective-C heritage tail-calling the
+  runtime with the same address — which the pass decodes and checks: the
+  metadata's descriptor word must point back at the descriptor (through the
+  chained-fixup overlay on a Mach-O; through the `R_*_RELATIVE` addends on an
+  ELF, which the pass now also feeds the reader, so an ELF's local witness
+  tables are named too). From a struct's metadata: its size and alignment (the
+  value witness table before the address point, or the builtin table an import
+  names — `$sBi64_WV` is 8 bytes, `$sytWV` empty) and its field offset vector
+  (32-bit entries at the descriptor's offset); from a class's: the instance
+  size and alignment and the pointer-sized field offset vector (an
+  Objective-C-heritage class's static offsets are the compile-time layout, the
+  same values its `__objc_ivar` offset variables hold). From the reflection
+  field descriptor, which the first arm already parsed: each stored property's
+  name and mangled type, whose symbolic references (`\x01` a direct, `\x02` an
+  indirect context descriptor reference, with a 4-byte payload) the demangler
+  resolves through a hook (`demangle_swift_type`, §1.3) that the pass answers
+  from its descriptor table or the import an indirect slot binds. The result
+  is one kuna struct per type under its dotted name — `metafix.Point { long x;
+  long y; }`, a class as its object layout with a local superclass embedded as
+  `super` at 0 and otherwise the `isa` word (and a Swift-native root's
+  reference counts) — with field types mapped from the Swift type: the sized
+  integers, `Double`/`Float`/`Bool`, `Swift.String` as its two words, a class
+  reference as a pointer to that class's struct (a shell for one without a
+  static layout, so the name is still right), a nested struct inline, a
+  collection as its storage word under the instantiation's name, a closure as
+  its two words; an optional keeps its payload's type when nil is the zero
+  word (a reference, a string, a collection, a closure). Any other type — an
+  enum, an imported value type (`Foundation.Date`), a generic instantiation
+  without a known layout, a tuple, an existential — is `undefined<n>` over the
+  bytes up to the next field, so the layout is always right and the names are
+  always real; only the field's own type is withheld. A layout is refused
+  whole when the field count disagrees with the descriptor, an offset
+  overlaps, a type exceeds its slot, or the type's dotted path is one two
+  descriptors share (private types of the same name), so nothing is ever
+  read through the wrong name. Layouts built inside other layouts (a nested
+  struct's, a superclass's) nest at most 32 deep, as a context's parent chain
+  does, and so do the optionals around a field's type; a type reached deeper
+  keeps its bytes untyped. What then binds: the metadata records as typed
+  data (`….type_metadata` as `swift.type_metadata`, `….class_metadata`,
+  `….value_witness_table`); the accessor prototypes
+  (`swift.type_metadata *Module.Type.type_metadata_accessor(long request)`, so
+  `return &Module.Type.type_metadata;`); and the `self` of every class vtable
+  getter and of every local protocol's witness getter (the `IsInstance` flag
+  read, so a static property's metatype `self` is left alone; a class's witness
+  takes the address of the reference, `Class **`, except under a class-bound
+  protocol, which is passed the reference itself; a getter whose body the
+  linker folded with another type's, or with a member that is not a getter,
+  gets no `self` at all — `Namer::ambiguous_self`). Swift passes
+  `self` in the `swiftself` register (x20 on arm64, r13 on x86-64), which no
+  calling-convention model describes and which a locked prototype cannot name
+  without also fixing the arity; a getter's arity is known, so the pass pins
+  the parameter on the function — the analysis-tier form of the console's
+  `map param` (`AnalysisOutput::swift_types.param_locks` →
+  `Architecture::loader_param_locks` → the decompile drive's `mapped_params`),
+  the rest of the signature recovered as usual — and a witness getter also
+  names its two leading arguments, the `Self` metadata and the witness table.
+  On a large third-party iOS app the pass locates 12,809 static metadata records (4,790
+  structs, 4,811 enums, 3,208 classes; the 859 classes and 351 structs whose
+  accessors look up a runtime cache are skipped), lays out 4,585 structs and
+  3,205 classes with 30,997 fields (22,794 typed), and pins the `self` of 5,739
+  vtable getters and 2,821 witness getters, for about 0.1 s and 3 MB over the
+  naming arm. The stage test `tests/stages/kuna-swifttypes.xml` runs the
+  stripped swiftc-built `swift_types_elf` with the arm off and on.
+
+  The class walk reaches only what `__objc_classlist` reaches. Three more
+  metadata tables fill in the rest (kuna; Ghidra's `ObjectiveC2_ClassAnalyzer`
+  reads the same three):
+
+  - **Categories**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objccats.rs (categories)`):
+    `__objc_catlist` and `__objc_nlcatlist` point at `category_t` records whose
+    class is usually in another image, so their IMPs were the bulk of the
+    `sub_<addr>` left on an ObjC app (77 of 1,892 on a 1.9 MB iOS app). The
+    class is read off the `class_t` a rebase slot points at or off the bind name
+    (`_OBJC_CLASS_$_UIView` → `UIView`), and the two method lists go through the
+    same rename as a class's own: `-[UIView(Layout) setLeft:]`,
+    `+[NSMutableDictionary(JSON) dictionaryWithJSON:]`. A category whose class
+    slot resolves to nothing is labelled `-[(Category) sel]` rather than guessed.
+    Protocol and property lists are not read; nothing in the C would show them.
+  - **Protocols**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcprotos.rs (protocols)`):
+    each `__objc_protolist` entry is a `protocol_t` named `_OBJC_PROTOCOL_$_<P>`,
+    and its four method lists (required/optional × instance/class) are
+    declarations with no IMP — which `method_list_t` readers now keep (`imp ==
+    0`) because the declaration carries the one thing a sent-only selector lacks:
+    its **type encoding**. `UITableViewDelegate` redeclared in the image spells
+    the signature of every `tableView:didSelectRowAtIndexPath:` send, so those
+    encodings feed the `objc_msgSend$<sel>` stub prototypes above (that app: 13 more
+    stubs typed, the fixture's `objc_msgSend$wave(self)` from `v16@0:8`). A
+    `__objc_protorefs` slot is `protoRef_<P>` and folds like the other refs. A
+    class's own conformance list is not read: it names nothing the C would show.
+  - **Instance layouts**
+    (`decompiler/crates/kuna-analysis/src/analyzers/objc/kuna_objcivars.rs (Structs::build)`,
+    option **`objcivars`**, kuna, default-on, inert unless `objc` is on, as `objc`
+    is on any Mach-O image under 500 KiB):
+    `class_ro_t.ivars` names every ivar with its type encoding, its size and a
+    pointer to its *offset variable* in `__objc_ivar` — the word a compiled method
+    loads and adds to `self` (`ldrsw x8, [x8, #off]; ldr d0, [x19, x8]`), because
+    under the non-fragile ABI the runtime may slide an offset when a superclass
+    from another image grows. The offset variable was already labelled, but as a
+    1-byte symbol a 4-byte load never matched, so 505 ivar accesses on that app read
+    `*(long *)((long)self + dat_1001aea74)`; it is now the 4-byte data object
+    `<Class>::<ivar>`. Statically the word holds the compile-time layout, so the
+    pass builds `struct <Class>` with each ivar at that offset (type from the
+    encoding — `@"NSString"` is an opaque `NSString *`, `#` an `objc_class *`,
+    a non-decoding encoding an `undefined<size>` — a local superclass embedded as
+    `super` at 0 so `self->super.count` keeps its name, an imported one left as
+    an anonymous prefix; `instanceSize` is the struct size), superclass first so
+    a child can embed its parent. Under `objcivars` the commit types `self` as
+    `<Class> *` in the class's and its categories' instance methods (the encoding
+    still decodes `@`; the typed `self` rides a separate fact so the gate decides
+    at the commit) and reports the offset variables constant through the same
+    `dynrelocs` fold path as the refs, so `*(double *)((long)self + Foo::ratio)`
+    renders `self->ratio` and `objc_storeStrong((long)self + Foo::_name, x)`
+    renders `objc_storeStrong(&self->_name, x)` (that app: 5,207 field accesses, 0
+    anonymous offset loads; an 84 MB Swift + ObjC app's Swift classes expose
+    their stored properties the same way). The struct takes the class's runtime
+    name, so a Swift class whose labels read `-[main.Greeter greet:]` under
+    `swiftdemangle` has `self` typed `_TtC4main7Greeter *`, a name C accepts.
+    A class that got no
+    layout — one of another image behind a category, or one with no field of
+    its own — still types `self` as a pointer to its declared record, so the
+    receiver is a `<Class> *` even when it is opaque. Off (the option is read
+    at load as `KUNA_OBJCIVARS` for the structs and at the commit for `self`
+    and the fold, so it is set before the `load file` it applies to), no class
+    struct is interned, `self` stays `id`, the offset variable keeps its name
+    and the load stays a load — the shape to read when a superclass from
+    another image may have grown since the link. A class whose name already
+    denotes a complete struct (DWARF) is that struct. Class (`+`) methods keep
+    `objc_object *self`. The number of classes given a layout is bounded
+    (32,768): every type the factory interns costs a linear name scan.
+    Properties are not read: a property is a method pair plus an ivar, all
+    already named.
+
+  Decoding every method's encoding asks the type factory for `objc_object *`
+  once per argument, and the factory finds a type by name with a linear scan of
+  every type it holds; with thousands of class structs interned that scan is no
+  longer cheap, so the decoder caches the named opaque pointer types it hands out
+  (`decompiler/crates/kuna-analysis/src/analyzers/objc/encoding.rs (TypeCtx)`).
 - **PDB** (`pdb`, PE-only, default-on;
   `decompiler/crates/kuna-analysis/src/analyzers/pdb/mod.rs`): Windows' debug info
   lives in a separate `.pdb` the PE only fingerprints, so the pass reads the
