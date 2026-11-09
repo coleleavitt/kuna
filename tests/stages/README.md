@@ -146,6 +146,7 @@ writeup, not here.
 | `kuna-swiftdemangle.xml` | Swift name demangling | P1 environment-binding (the loader's symbol-name demangle seam + the ObjC pass's class-name rendering) | `option swiftdemangle on\|off` |
 | `kuna-swiftmetadata.xml` | Authored Swift runtime-metadata recovery | P1 external-refinement (the `swift5_*` reflection-section walk names accessors, vtable slots, witnesses and descriptors) | `option swiftmetadata on\|off` |
 | `kuna-swifttypes.xml` | Authored Swift type layouts | P1 external-refinement (struct and class layouts from static type metadata; the `self` of getters pinned to the `swiftself` register) | `option swifttypes on\|off` |
+| `kuna-swifticf.xml` | Authored Swift names on folded code | P1 external-refinement (a function several metadata records claim is named after what they agree on, or not at all, and takes no type's `self`) | `option swiftmetadata on\|off` |
 | `kuna-thunkentry.xml` | [Kuna #992](https://github.com/Noelo-Lab/kuna/issues/992) | P1 code/data partition (the target of a walk entry that is one direct `jmp` becomes a function; MSVC `/INCREMENTAL` thunk table) | `option thunkentry on\|off` |
 | `kuna-unwindstarts.xml` | Measured: a 249 MB third-party iOS app with no `LC_FUNCTION_STARTS` yields 23 real `__text` functions of the 204,800 its `__unwind_info` records | P1 code/data partition (a stripped Mach-O's `__TEXT,__unwind_info` second-level pages seed the function inventory) | `option unwindstarts on\|off` |
 | `kuna-aifbracket.xml` | [Kuna #299](https://github.com/Noelo-Lab/kuna/issues/299) | P1 code/data partition (an AIF gap candidate whose own flow rejoins the known function around it is refused without boundary evidence) | `option aifbracket on\|off` |
@@ -413,6 +414,11 @@ callers against boundary values and check that each helper is called once.
 `ghangr-go-store-value.xml` checks Go integer destination conversions for fields,
 plain/indexed pointers and a side-effectful call, with all integer widths and
 complete native bodies covered by the CLI integration fixture.
+`kuna-kernelcache.xml` loads a synthetic arm64 kernel collection three ways: the
+bare MH_FILESET with `kernelcache off` (one image, no symbols), its kext out of an
+IMG4(IM4P(LZFSE)) wrapper, and its kernel out of a bare IM4P(complzss). The
+fixtures and their generator live in
+`decompiler/crates/kuna-analysis/tests/fixtures/kernelcache/`.
 
 `ghangr-go-pointer-arithmetic-32.xml` and `ghangr-go-pointer-arithmetic-64.xml`
 check live pointer bases through constant, negative and signed dynamic byte
