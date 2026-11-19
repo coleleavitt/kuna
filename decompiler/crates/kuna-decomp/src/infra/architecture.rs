@@ -1795,6 +1795,11 @@ pub struct Architecture {
     /// (kuna) Gate the UEFI module markup pass (`uefi`); default on. PE-only,
     /// and inert unless the image's Subsystem is an EFI one.
     pub analysis_uefi: bool,
+    /// (kuna `esprom`) Whose mask-ROM names and memory map apply; default
+    /// `auto`, the chip of [`Self::esp_image_chip`].
+    pub esprom: crate::kuna_esprom::EspRom,
+    /// (kuna `esprom`) The chip the loaded Espressif application image names.
+    pub esp_image_chip: Option<crate::kuna_esprom::EspChip>,
     /// (kuna, NOVEL) Gate the Itanium (GCC/Clang) RTTI + vtable recovery pass
     /// (`itaniumrtti`); default **off**. Ghidra has no Itanium RTTI analyzer at all
     /// — its `RttiAnalyzer` is Microsoft-only and its GCC class recovery is
@@ -2611,6 +2616,8 @@ impl Architecture {
             analysis_flirt: false,
             analysis_rtti: false,
             analysis_uefi: false,
+            esprom: crate::kuna_esprom::EspRom::Auto,
+            esp_image_chip: None,
             analysis_itaniumrtti: false,
             analysis_aif: crate::kuna_aif::AifMode::Off,
             analysis_aifpoolslide: true,
@@ -2956,6 +2963,7 @@ impl Architecture {
         self.analysis_flirt = false;
         self.analysis_rtti = true; // MSVC RTTI / vftable recovery (PE-only pass)
         self.analysis_uefi = true; // UEFI module markup (EFI-subsystem PE only)
+        self.esprom = crate::kuna_esprom::EspRom::Auto; // Espressif mask-ROM names + memory map (ESP images only)
         self.analysis_itaniumrtti = true; // (kuna, NOVEL) Itanium RTTI / vtable recovery (ELF-only pass)
         self.analysis_aif = crate::kuna_aif::AifMode::Off; // Aggressive Instruction Finder gap-walk default-off; `aggressive` sets `strict`
         // (kuna, GH-299) AIF bracketed-candidate reject -- default-ON; inert without `aif`.

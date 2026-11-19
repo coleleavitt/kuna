@@ -56,13 +56,13 @@ fn surface_count_is_101() {
 }
 
 #[test]
-fn settable_count_is_223() {
-    assert_eq!(kuna_num_settables(), 223);
-    assert_eq!(SETTABLE_TABLE.len(), 223);
+fn settable_count_is_224() {
+    assert_eq!(kuna_num_settables(), 224);
+    assert_eq!(SETTABLE_TABLE.len(), 224);
 }
 
 #[test]
-fn tier_counts_are_45_core_121_transform_57_analysis() {
+fn tier_counts_are_45_core_121_transform_58_analysis() {
     let mut core = 0;
     let mut transform = 0;
     let mut analysis = 0;
@@ -74,7 +74,7 @@ fn tier_counts_are_45_core_121_transform_57_analysis() {
             other => panic!("invalid tier {other:?} on {}", s.option),
         }
     }
-    assert_eq!((core, transform, analysis), (45, 121, 57));
+    assert_eq!((core, transform, analysis), (45, 121, 58));
 }
 
 #[test]
@@ -384,6 +384,9 @@ fn option_values_live_value_present_for_76() {
         // (kuna) UEFI module markup -- a PE-only analysis-pass gate with no
         // `live_field`, read console-side via kuna_live_value like `rtti`. Default-ON.
         "uefi",
+        // (kuna) Espressif mask-ROM names and memory map -- applied at the
+        // analysis commit, read console-side via kuna_live_value. Default `auto`.
+        "esprom",
         // (kuna) ELF libc-start `main` naming + prototype -- the ELF counterpart of
         // `machomain` above and the same seam: an analysis-tier gate with no
         // codegen live reader, read console-side via kuna_live_value. Default-ON.
@@ -1111,7 +1114,8 @@ fn emit_catalog_json_static_form_brackets_and_commas() {
     // +1 for `blobs`; its P1 row sits after `strings`.
     // +1 for `repstring`; its P3 row sits after `strlenscan`.
     // +1 for `uefi`; its P1 row sits after `rtti`.
-    assert_eq!(json.matches("},\n").count(), 222);
+    // +1 for `esprom`; its P1 row sits after `uefi`.
+    assert_eq!(json.matches("},\n").count(), 223);
 }
 
 #[test]

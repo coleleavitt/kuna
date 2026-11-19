@@ -2240,7 +2240,8 @@ mod tests {
         // and kuna-reentereddispatch / a re-entered dispatch keeps every step's store
         // and kuna-dispatch-values / dispatcher return values survive narrowing and copies
         // and kuna-uefi / an EFI-subsystem PE gets the UEFI entry prototype, table types and GUID names
-        assert_eq!(count, 803, "corpus file count drifted");
+        // and kuna-esprom / an Espressif application image gets its chip's mask-ROM names and memory map
+        assert_eq!(count, 804, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
