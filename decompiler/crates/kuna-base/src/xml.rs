@@ -2243,7 +2243,8 @@ mod tests {
         // and ghangr-go-aarch64-stack-stride / adjacent eight-byte spills keep their declared inputs
         // and ghangr-go-mcall-resumption / a scheduler switch preserves its caller's continuation
         // and kuna-uefi / an EFI-subsystem PE gets the UEFI entry prototype, table types and GUID names
-        assert_eq!(count, 825, "corpus file count drifted");
+        // and kuna-uefiproto / UEFI protocol interfaces are typed from their GUIDs in DXE, PEI and SMM modules
+        assert_eq!(count, 826, "corpus file count drifted");
     }
 
     /// ~20 representative SLEIGH spec files across varied processors
