@@ -455,3 +455,9 @@ the complete emitted functions with Go pointer checks and full-array canaries.
 with FDE ownership disabled it remains a call; with ownership enabled the
 complete body returns `a0 * 3 + 7`. The fixture generator is
 `decompiler/crates/kuna-cli/tests/fixtures/elf_unwind_fixture.rs`.
+
+`kuna-cil.xml` loads the committed managed .NET assembly `cil_hello.dll`
+(Kuna #1633): with `cil off` the PE's one function is the `_CorExeMain` stub;
+by default its methods are named from the metadata and the local function
+decompiles to the loop that sums its array. The CLI companion checks the
+inventory with each method's own size, the listing and both native views.

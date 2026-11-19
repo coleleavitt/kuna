@@ -55,6 +55,8 @@ pub struct LoadOptions {
     pub kernelcache: KernelcacheChoice,
     /// `goabi`: select the golang compiler spec for a Go image.
     pub goabi: bool,
+    /// `cil`: load a managed .NET assembly from its CIL method bodies.
+    pub cil: bool,
     /// `symbolnamechars`: how symbol-name characters are sanitized.
     pub symbolnamechars: NameChars,
     /// `libctypes`: the named libc aggregate types.
@@ -100,6 +102,7 @@ impl Default for LoadOptions {
             ppcapu: false,
             kernelcache: KernelcacheChoice::default(),
             goabi: true,
+            cil: true,
             symbolnamechars: NameChars::default(),
             libctypes: LibcTypesLayout::Opaque,
             calltargettype: true,
@@ -131,6 +134,7 @@ impl LoadOptions {
             ppcapu: env::ppcapu(),
             kernelcache: env::kernelcache(),
             goabi: env::goabi(),
+            cil: env::cil(),
             symbolnamechars: env::symbolnamechars(),
             libctypes: env::libctypes(),
             calltargettype: env::calltargettype(),
@@ -181,6 +185,7 @@ impl LoadOptions {
             "ppcapu" => kuna_ppcapu::set_ppcapu_env(self.ppcapu),
             "kernelcache" => kuna_kernelcache::set_kernelcache_env(&self.kernelcache),
             "goabi" => kuna_goabi::set_goabi_env(self.goabi),
+            "cil" => kuna_cil::set_cil_env(self.cil),
             "symbolnamechars" => {
                 kuna_symbolnamechars::set_symbolnamechars_env(self.symbolnamechars)
             }
@@ -312,6 +317,10 @@ pub mod env {
 
     pub fn goabi() -> bool {
         env_toggle(crate::kuna_goabi::GOABI_ENV, true)
+    }
+
+    pub fn cil() -> bool {
+        env_toggle(crate::kuna_cil::CIL_ENV, true)
     }
 
     pub fn symbolnamechars() -> NameChars {
@@ -486,6 +495,7 @@ mod tests {
             objcsdk: Some(PathBuf::from("/sdk")),
             dyldimage: Some("libfoo.dylib".into()),
             dyldcrossrefs: false,
+            cil: false,
             ..LoadOptions::default()
         };
         let _scope = options.enter();
@@ -508,5 +518,6 @@ mod tests {
         assert_eq!(crate::kuna_objcsdk::sdk_path(), Some(PathBuf::from("/sdk")));
         assert_eq!(crate::kuna_dyldcache::selected_image().as_deref(), Some("libfoo.dylib"));
         assert!(!crate::kuna_dyldcache::dyldcrossrefs_enabled());
+        assert!(!crate::kuna_cil::cil_enabled());
     }
 }
