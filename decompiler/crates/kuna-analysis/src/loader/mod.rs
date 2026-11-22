@@ -90,6 +90,7 @@ pub mod kuna_dataptrs;
 // function it defines.
 pub(crate) mod kuna_pltlocal;
 pub mod kuna_elfgotimports;
+pub mod kuna_machodataslots;
 // (kuna) `msvcfpconst`: recover an MSVC `__real@` floating-point constant COMDAT
 // from its mangled symbol name -- materialise the undefined half's bytes at its
 // synthetic extern slot, and mark both halves foldable.
@@ -99,6 +100,8 @@ pub mod format;
 // typed import-pointer slots + upstream's strictly PE-only no-return API names.
 pub mod kuna_peimportcall;
 pub mod kuna_authptrcall;
+// (kuna) `stubbinds`: a stripped stub is named from the chained bind on its slot.
+pub mod kuna_stubbinds;
 // (kuna) `rexthunk`: an x86-64 `REX FF 25` tail jump is not an import thunk.
 pub(crate) mod kuna_rexthunk;
 // (kuna) `peordinal`: name a PE import-by-ordinal from a built-in export table.
@@ -118,6 +121,8 @@ pub mod mips_markers;
 pub mod kuna_mipsentry;
 pub(crate) mod kuna_mipsabi;
 pub mod kuna_mipsocteon;
+// (kuna) RISC-V Zcmp/Zcmt language selection from `Tag_RISCV_arch`.
+pub mod kuna_riscvzc;
 // (kuna) Go toolchain version off the build-info blob (goreg shell layouts).
 pub mod gobuildinfo;
 pub mod noreturn;
